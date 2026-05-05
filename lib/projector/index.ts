@@ -22,6 +22,8 @@ import {
   workflowBags,
   readStationLive,
   readBagState,
+  readDailyThroughput,
+  stations,
   qrCards,
 } from "@/lib/db/schema";
 
@@ -46,6 +48,19 @@ const STAGE_FOR_EVENT: Record<string, string> = {
   BOTTLE_CAP_SEAL_COMPLETE: "SEALED",
   BOTTLE_STICKER_COMPLETE: "PACKAGED",
   BAG_FINALIZED: "FINALIZED",
+};
+
+/** Which read_daily_throughput counter to increment for each event.
+ *  CARD_ASSIGNED is intentionally skipped — it's not a finishing
+ *  signal, and counting it here would double-count every bag. */
+const THROUGHPUT_COLUMN: Record<string, string> = {
+  BLISTER_COMPLETE: "bags_blistered",
+  BOTTLE_HANDPACK_COMPLETE: "bags_blistered",
+  SEALING_COMPLETE: "bags_sealed",
+  BOTTLE_CAP_SEAL_COMPLETE: "bags_sealed",
+  PACKAGING_SNAPSHOT: "bags_packaged",
+  BOTTLE_STICKER_COMPLETE: "bags_packaged",
+  BAG_FINALIZED: "bags_finalized",
 };
 
 /** Insert a workflow_event AND update the live read models in one
@@ -133,6 +148,36 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       .update(qrCards)
       .set({ status: "IDLE", assignedWorkflowBagId: null })
       .where(eq(qrCards.assignedWorkflowBagId, ev.workflowBagId));
+  }
+
+  // 4. read_daily_throughput — increment the matching bag-stage counter
+  //    for the day this event landed, keyed by (day, product, machine).
+  //    Product is pulled from workflow_bags; machine from the station's
+  //    machine_id. We only project rows where both are known: nullable
+  //    keys break Postgres' UNIQUE-with-NULL semantics (each NULL is
+  //    distinct), and a polluted "unknown" bucket would mislead the
+  //    floor manager more than skipping early-stage events helps. The
+  //    bag picks up its productId on the first stage event anyway.
+  const counterCol = THROUGHPUT_COLUMN[ev.eventType];
+  if (counterCol && ev.stationId) {
+    const [bagRow] = await tx
+      .select({ productId: workflowBags.productId })
+      .from(workflowBags)
+      .where(eq(workflowBags.id, ev.workflowBagId));
+    const [stationRow] = await tx
+      .select({ machineId: stations.machineId })
+      .from(stations)
+      .where(eq(stations.id, ev.stationId));
+    if (bagRow?.productId && stationRow?.machineId) {
+      const day = occurredAt.toISOString().slice(0, 10);
+      await tx.execute(sql`
+        INSERT INTO read_daily_throughput (day, product_id, machine_id, ${sql.raw(counterCol)}, updated_at)
+        VALUES (${day}, ${bagRow.productId}, ${stationRow.machineId}, 1, ${occurredAt})
+        ON CONFLICT (day, product_id, machine_id)
+        DO UPDATE SET ${sql.raw(counterCol)} = read_daily_throughput.${sql.raw(counterCol)} + 1,
+                      updated_at = ${occurredAt}
+      `);
+    }
   }
 
   // 4. pg_notify on a single channel — the SSE relay LISTENs on this

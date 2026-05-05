@@ -10,6 +10,7 @@ import {
   Activity,
   PackageCheck,
   Sliders,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
       { href: "/inbound", label: "POs & receiving", icon: Truck },
       { href: "/batches", label: "Batches", icon: ShieldCheck },
       { href: "/finished-lots", label: "Finished lots", icon: PackageCheck },
+      { href: "/reports", label: "Reports", icon: BarChart3 },
     ],
   },
   {
