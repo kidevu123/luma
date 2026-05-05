@@ -44,4 +44,4 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 
 EXPOSE 3000 9464
-CMD ["sh", "-c", "node ./node_modules/.bin/tsx ./scripts/migrate.ts && node ./server.js"]
+CMD ["sh", "-c", "node ./node_modules/.bin/tsx ./scripts/migrate.ts && node ./node_modules/.bin/tsx ./scripts/seed.ts && node ./server.js"]
