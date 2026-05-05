@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { signIn } from "@/lib/auth";
 
 const schema = z.object({
-  email: z.string().email().max(254),
+  // Accept anything with an "@" — Zod's `.email()` rejects single-
+  // segment hosts like "admin@luma" which seeded users were using.
+  email: z.string().min(3).max(254).regex(/^.+@.+$/, "Email must contain @"),
   password: z.string().min(1).max(200),
 });
 
@@ -17,7 +19,9 @@ export async function loginAction(
     password: formData.get("password"),
   });
   if (!parsed.success) {
-    return { error: "Invalid email or password." };
+    // Surface the actual validator complaint so misleading "invalid
+    // password" never hides a missing-@ or empty-field issue.
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const result = await signIn(parsed.data.email, parsed.data.password);
   if ("error" in result) return result;
