@@ -134,6 +134,21 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       .set({ status: "IDLE", assignedWorkflowBagId: null })
       .where(eq(qrCards.assignedWorkflowBagId, ev.workflowBagId));
   }
+
+  // 4. pg_notify on a single channel — the SSE relay LISTENs on this
+  //    channel and pushes a tiny JSON envelope to every connected
+  //    client. Payload is intentionally small: clients re-fetch the
+  //    affected rows from the read models. Postgres NOTIFY has an 8KB
+  //    payload limit, so we never embed the full event here.
+  const notifyPayload = {
+    eventType: ev.eventType,
+    workflowBagId: ev.workflowBagId,
+    stationId: ev.stationId ?? null,
+    occurredAt: occurredAt.toISOString(),
+  };
+  await tx.execute(
+    sql`SELECT pg_notify('luma_floor', ${JSON.stringify(notifyPayload)})`,
+  );
 }
 
 const STAGE_RANK: Record<string, number> = {

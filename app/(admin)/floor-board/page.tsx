@@ -19,6 +19,7 @@ import {
 import { requireSession } from "@/lib/auth-guards";
 import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { LiveRefresh } from "./live-refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -78,11 +79,14 @@ export default async function FloorBoardPage() {
     <div className="space-y-5">
       <PageHeader
         title="Live floor"
-        description="Bags currently in production. Backed by synchronous read models — never lags the source of truth."
+        description="Bags currently in production. Backed by synchronous read models + pg_notify SSE — updates in milliseconds."
         actions={
-          <StatusPill kind="ok">
-            <Activity className="h-3 w-3" /> {rows.length} active
-          </StatusPill>
+          <div className="flex items-center gap-3">
+            <LiveRefresh />
+            <StatusPill kind="ok">
+              <Activity className="h-3 w-3" /> {rows.length} active
+            </StatusPill>
+          </div>
         }
       />
 
@@ -93,7 +97,7 @@ export default async function FloorBoardPage() {
           value={`${busyStations.length}/${liveStations.length}`}
         />
         <MetaTile label="Idle cards" value={(idleCards[0]?.n ?? 0).toString()} />
-        <MetaTile label="Refresh" value="10s" />
+        <MetaTile label="Refresh" value="live" />
       </div>
 
       {liveStations.length > 0 && (
@@ -202,8 +206,9 @@ export default async function FloorBoardPage() {
         </Card>
       )}
 
-      {/* Auto-refresh — drop to 10s now that queries are read-model-cheap. */}
-      <meta httpEquiv="refresh" content="10" />
+      {/* Live updates ride pg_notify → SSE (see <LiveRefresh />). The
+          meta-refresh fallback is gone; if SSE drops, the client
+          polls every 30s on its own. */}
     </div>
   );
 }
