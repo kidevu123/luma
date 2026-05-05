@@ -1,6 +1,12 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { products, productAllowedTablets, tabletTypes } from "@/lib/db/schema";
+import {
+  products,
+  productAllowedTablets,
+  productPackagingSpecs,
+  packagingMaterials,
+  tabletTypes,
+} from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { compact } from "@/lib/db/compact";
 import type { CurrentUser } from "@/lib/auth";
@@ -93,5 +99,157 @@ export async function updateProduct(
       tx,
     );
     return row;
+  });
+}
+
+/** Get a product with both allowed-tablets and packaging-spec rows so
+ *  the BOM editor can render in one fetch. */
+export async function getProductWithBom(id: string) {
+  const [product] = await db.select().from(products).where(eq(products.id, id));
+  if (!product) return null;
+  const [allowed, specs] = await Promise.all([
+    db
+      .select({
+        tabletTypeId: productAllowedTablets.tabletTypeId,
+        isPrimary: productAllowedTablets.isPrimary,
+        tabletName: tabletTypes.name,
+      })
+      .from(productAllowedTablets)
+      .innerJoin(tabletTypes, eq(productAllowedTablets.tabletTypeId, tabletTypes.id))
+      .where(eq(productAllowedTablets.productId, id))
+      .orderBy(asc(tabletTypes.name)),
+    db
+      .select({
+        packagingMaterialId: productPackagingSpecs.packagingMaterialId,
+        qtyPerUnit: productPackagingSpecs.qtyPerUnit,
+        perScope: productPackagingSpecs.perScope,
+        notes: productPackagingSpecs.notes,
+        materialSku: packagingMaterials.sku,
+        materialName: packagingMaterials.name,
+        materialKind: packagingMaterials.kind,
+        materialUom: packagingMaterials.uom,
+      })
+      .from(productPackagingSpecs)
+      .innerJoin(
+        packagingMaterials,
+        eq(productPackagingSpecs.packagingMaterialId, packagingMaterials.id),
+      )
+      .where(eq(productPackagingSpecs.productId, id))
+      .orderBy(asc(packagingMaterials.name)),
+  ]);
+  return { ...product, allowed, specs };
+}
+
+export async function setAllowedTablet(
+  args: { productId: string; tabletTypeId: string; enabled: boolean; isPrimary?: boolean },
+  actor: CurrentUser,
+) {
+  return db.transaction(async (tx) => {
+    if (args.enabled) {
+      // If marking primary, demote any existing primary first.
+      if (args.isPrimary) {
+        await tx
+          .update(productAllowedTablets)
+          .set({ isPrimary: false })
+          .where(eq(productAllowedTablets.productId, args.productId));
+      }
+      await tx
+        .insert(productAllowedTablets)
+        .values({
+          productId: args.productId,
+          tabletTypeId: args.tabletTypeId,
+          isPrimary: args.isPrimary ?? false,
+        })
+        .onConflictDoUpdate({
+          target: [productAllowedTablets.productId, productAllowedTablets.tabletTypeId],
+          set: { isPrimary: args.isPrimary ?? false },
+        });
+    } else {
+      await tx
+        .delete(productAllowedTablets)
+        .where(
+          and(
+            eq(productAllowedTablets.productId, args.productId),
+            eq(productAllowedTablets.tabletTypeId, args.tabletTypeId),
+          ),
+        );
+    }
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: args.enabled ? "product.allowed.add" : "product.allowed.remove",
+        targetType: "Product",
+        targetId: args.productId,
+        after: { tabletTypeId: args.tabletTypeId, isPrimary: !!args.isPrimary },
+      },
+      tx,
+    );
+  });
+}
+
+export type PackagingSpecInput = {
+  productId: string;
+  packagingMaterialId: string;
+  qtyPerUnit: number;
+  perScope: "UNIT" | "DISPLAY" | "CASE";
+  notes?: string | null;
+};
+
+export async function upsertPackagingSpec(input: PackagingSpecInput, actor: CurrentUser) {
+  return db.transaction(async (tx) => {
+    await tx
+      .insert(productPackagingSpecs)
+      .values(compact(input))
+      .onConflictDoUpdate({
+        target: [
+          productPackagingSpecs.productId,
+          productPackagingSpecs.packagingMaterialId,
+          productPackagingSpecs.perScope,
+        ],
+        set: {
+          qtyPerUnit: input.qtyPerUnit,
+          notes: input.notes ?? null,
+        },
+      });
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "product.spec.upsert",
+        targetType: "Product",
+        targetId: input.productId,
+        after: input,
+      },
+      tx,
+    );
+  });
+}
+
+export async function deletePackagingSpec(
+  args: { productId: string; packagingMaterialId: string; perScope: string },
+  actor: CurrentUser,
+) {
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(productPackagingSpecs)
+      .where(
+        and(
+          eq(productPackagingSpecs.productId, args.productId),
+          eq(productPackagingSpecs.packagingMaterialId, args.packagingMaterialId),
+          eq(productPackagingSpecs.perScope, args.perScope),
+        ),
+      );
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "product.spec.remove",
+        targetType: "Product",
+        targetId: args.productId,
+        after: args,
+      },
+      tx,
+    );
   });
 }

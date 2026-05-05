@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Plus, Boxes } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
 import { listProducts } from "@/lib/db/queries/products";
@@ -44,7 +45,11 @@ export default async function ProductsPage() {
             {rows.map((r) => (
               <TR key={r.id}>
                 <TD className="font-mono text-xs">{r.sku}</TD>
-                <TD className="font-medium">{r.name}</TD>
+                <TD className="font-medium">
+                  <Link href={`/products/${r.id}`} className="hover:underline">
+                    {r.name}
+                  </Link>
+                </TD>
                 <TD>
                   <StatusPill kind={r.kind === "VARIETY" ? "info" : "neutral"}>
                     {r.kind}

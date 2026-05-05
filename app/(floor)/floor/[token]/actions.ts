@@ -8,13 +8,15 @@ import {
   qrCards,
   stations,
   workflowBags,
-  workflowEvents,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
+import { projectEvent } from "@/lib/projector";
 
 // Floor JSON paths are anonymous (no Authentik). Authorization is via
 // the station's scan_token in the URL. Card scan creates a workflow
-// bag + CARD_ASSIGNED event in one transaction.
+// bag + CARD_ASSIGNED event in one transaction. Every workflow_event
+// goes through projectEvent() so read_station_live + read_bag_state
+// are correct the moment the action returns.
 
 const scanSchema = z.object({
   stationId: z.string().uuid(),
@@ -52,10 +54,10 @@ export async function scanCardAction(
         .update(qrCards)
         .set({ status: "ASSIGNED", assignedWorkflowBagId: bag.id })
         .where(eq(qrCards.id, cardId));
-      await tx.insert(workflowEvents).values({
+      await projectEvent(tx, {
         workflowBagId: bag.id,
-        eventType: "CARD_ASSIGNED",
         stationId: station.id,
+        eventType: "CARD_ASSIGNED",
         payload: { qr_card_id: cardId, station_kind: station.kind },
       });
       await writeAudit(
@@ -75,6 +77,7 @@ export async function scanCardAction(
   }
 
   revalidatePath(`/floor`);
+  revalidatePath(`/floor-board`);
   return { ok: true };
 }
 
@@ -105,16 +108,19 @@ export async function fireStageEventAction(
   const { workflowBagId, stationId, eventType, countTotal } = parsed.data;
 
   try {
-    await db.insert(workflowEvents).values({
-      workflowBagId,
-      stationId,
-      eventType,
-      payload: countTotal ? { count_total: countTotal } : {},
+    await db.transaction(async (tx) => {
+      await projectEvent(tx, {
+        workflowBagId,
+        stationId,
+        eventType,
+        payload: countTotal ? { count_total: countTotal } : {},
+      });
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Event failed." };
   }
   revalidatePath(`/floor`);
+  revalidatePath(`/floor-board`);
   return { ok: true };
 }
 
@@ -125,26 +131,22 @@ export async function finalizeBagAction(
   if (!z.string().uuid().safeParse(workflowBagId).success) return { error: "Invalid bag." };
   try {
     await db.transaction(async (tx) => {
-      // Append BAG_FINALIZED — the partial unique index enforces
-      // at-most-once finalization.
-      await tx.insert(workflowEvents).values({
+      // projectEvent will:
+      //   - insert workflow_events row (partial unique index enforces
+      //     at-most-once-finalize)
+      //   - update read_bag_state to FINALIZED
+      //   - clear read_station_live for this bag
+      //   - set workflow_bags.finalized_at
+      //   - release qr_cards back to IDLE
+      await projectEvent(tx, {
         workflowBagId,
         eventType: "BAG_FINALIZED",
-        payload: {},
       });
-      await tx
-        .update(workflowBags)
-        .set({ finalizedAt: new Date() })
-        .where(eq(workflowBags.id, workflowBagId));
-      // Release any cards that were assigned to this bag.
-      await tx
-        .update(qrCards)
-        .set({ status: "IDLE", assignedWorkflowBagId: null })
-        .where(eq(qrCards.assignedWorkflowBagId, workflowBagId));
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Finalize failed." };
   }
   revalidatePath(`/floor`);
+  revalidatePath(`/floor-board`);
   return { ok: true };
 }
