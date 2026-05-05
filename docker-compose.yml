@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: luma
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-luma}
+      POSTGRES_DB: luma
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U luma -d luma"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [internal]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_GIT_SHA: ${BUILD_GIT_SHA:-dev}
+        BUILD_GIT_BRANCH: ${BUILD_GIT_BRANCH:-main}
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://luma:${POSTGRES_PASSWORD:-luma}@db:5432/luma
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set in .env}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-luma}
+      OTEL_DEPLOYMENT_ENVIRONMENT: ${OTEL_DEPLOYMENT_ENVIRONMENT:-production}
+      OTEL_PROMETHEUS_PORT: "9464"
+      OTEL_PROMETHEUS_HOST: "0.0.0.0"
+      ZOHO_INTEGRATION_URL: ${ZOHO_INTEGRATION_URL:-http://192.168.1.190:9503}
+      AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER:-}
+      AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      STORAGE_ROOT: /data
+      NODE_ENV: production
+    volumes:
+      - ./data:/data
+    ports:
+      - "${APP_PORT:-3000}:3000"
+      - "${OTEL_PROM_HOST_PORT:-9464}:9464"
+    healthcheck:
+      test:
+        ["CMD", "node", "-e",
+         "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+    networks: [internal, egress]
+
+volumes:
+  pgdata:
+
+networks:
+  internal: { driver: bridge }
+  egress: { driver: bridge }
