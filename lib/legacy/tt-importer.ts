@@ -832,69 +832,142 @@ export async function runImport(args: {
     },
   );
 
-  // 16. warehouse_submissions (stash)
-  await phase<TtWarehouseSubmission>(
-    "warehouse_submissions",
-    selectAll<TtWarehouseSubmission>(ttDb, "SELECT * FROM warehouse_submissions"),
-    async (r) => {
-      if (lookup(idMap, "warehouse_submissions", r.id)) return { inserted: false };
-      const bagUuid = lookup(idMap, "bags", typeof r.bag_id === "number" ? r.bag_id : null);
-      const [out] = await db
-        .insert(legacyWarehouseSubmissions)
-        .values({
-          ttId: r.id,
-          payload: r as Record<string, unknown>,
-          submissionType: r.submission_type,
-          ...(bagUuid ? { bagId: bagUuid } : {}),
-          employeeName: r.employee_name,
-          createdAt: toDate(r.created_at),
-        })
-        .onConflictDoNothing({ target: legacyWarehouseSubmissions.ttId })
-        .returning({ id: legacyWarehouseSubmissions.id });
-      if (!out) {
-        const [existing] = await db
-          .select({ id: legacyWarehouseSubmissions.id })
-          .from(legacyWarehouseSubmissions)
-          .where(eq(legacyWarehouseSubmissions.ttId, r.id));
-        if (existing) {
-          idMap.set(`warehouse_submissions:${r.id}`, existing.id);
-          await recordMap("warehouse_submissions", r.id, "legacy_warehouse_submissions", existing.id);
+  // 16. warehouse_submissions (stash, bulk)
+  // Wide table, ~1700 rows in seed. Per-row insert + per-row id_map
+  // record was burning 3,500+ round-trips, blowing past the action
+  // timeout. Switch to chunked bulk INSERT … RETURNING with a single
+  // bulk id_map upsert per chunk → ~10 round-trips total.
+  {
+    const rows = selectAll<TtWarehouseSubmission>(
+      ttDb,
+      "SELECT * FROM warehouse_submissions",
+    );
+    const unmapped = rows.filter(
+      (r) => !lookup(idMap, "warehouse_submissions", r.id),
+    );
+    const CHUNK = 200;
+    for (let i = 0; i < unmapped.length; i += CHUNK) {
+      const slice = unmapped.slice(i, i + CHUNK);
+      try {
+        const values = slice.map((r) => {
+          const bagUuid = lookup(
+            idMap,
+            "bags",
+            typeof r.bag_id === "number" ? r.bag_id : null,
+          );
+          return {
+            ttId: r.id,
+            payload: r as Record<string, unknown>,
+            submissionType: r.submission_type,
+            ...(bagUuid ? { bagId: bagUuid } : {}),
+            employeeName: r.employee_name,
+            createdAt: toDate(r.created_at),
+          };
+        });
+        const out = await db
+          .insert(legacyWarehouseSubmissions)
+          .values(values)
+          .onConflictDoNothing({ target: legacyWarehouseSubmissions.ttId })
+          .returning({
+            id: legacyWarehouseSubmissions.id,
+            ttId: legacyWarehouseSubmissions.ttId,
+          });
+        // Bulk id_map record.
+        if (out.length > 0) {
+          await db
+            .insert(legacyTtIdMap)
+            .values(
+              out.map((o) => ({
+                ttTable: "warehouse_submissions",
+                ttId: o.ttId,
+                lumaTable: "legacy_warehouse_submissions",
+                lumaId: o.id,
+              })),
+            )
+            .onConflictDoNothing();
+          for (const o of out) {
+            idMap.set(`warehouse_submissions:${o.ttId}`, o.id);
+          }
+          inserted.warehouse_submissions += out.length;
         }
-        return { inserted: false };
+        const insertedTtIds = new Set(out.map((o) => o.ttId));
+        skipped.warehouse_submissions += slice.length - insertedTtIds.size;
+      } catch (err) {
+        for (const r of slice) {
+          errors.push({
+            phase: "warehouse_submissions",
+            ttId: r.id,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
-      idMap.set(`warehouse_submissions:${r.id}`, out.id);
-      await recordMap("warehouse_submissions", r.id, "legacy_warehouse_submissions", out.id);
-      return { inserted: true };
-    },
-  );
+    }
+  }
 
-  // 17. machine_counts (stash)
-  await phase<TtMachineCount>(
-    "machine_counts",
-    selectAll<TtMachineCount>(ttDb, "SELECT * FROM machine_counts"),
-    async (r) => {
-      if (lookup(idMap, "machine_counts", r.id)) return { inserted: false };
-      const tabletUuid = lookup(idMap, "tablet_types", r.tablet_type_id);
-      const machineUuid = lookup(idMap, "machines", r.machine_id);
-      const [out] = await db
-        .insert(legacyMachineCounts)
-        .values({
-          ttId: r.id,
-          payload: r as Record<string, unknown>,
-          ...(tabletUuid ? { tabletTypeId: tabletUuid } : {}),
-          ...(machineUuid ? { machineId: machineUuid } : {}),
-          employeeName: r.employee_name,
-          countDate: r.count_date,
-          createdAt: toDate(r.created_at),
-        })
-        .onConflictDoNothing({ target: legacyMachineCounts.ttId })
-        .returning({ id: legacyMachineCounts.id });
-      if (!out) return { inserted: false };
-      idMap.set(`machine_counts:${r.id}`, out.id);
-      await recordMap("machine_counts", r.id, "legacy_machine_counts", out.id);
-      return { inserted: true };
-    },
-  );
+  // 17. machine_counts (stash, bulk) — same batching pattern as #16.
+  {
+    const rows = selectAll<TtMachineCount>(
+      ttDb,
+      "SELECT * FROM machine_counts",
+    );
+    const unmapped = rows.filter(
+      (r) => !lookup(idMap, "machine_counts", r.id),
+    );
+    const CHUNK = 200;
+    for (let i = 0; i < unmapped.length; i += CHUNK) {
+      const slice = unmapped.slice(i, i + CHUNK);
+      try {
+        const values = slice.map((r) => {
+          const tabletUuid = lookup(idMap, "tablet_types", r.tablet_type_id);
+          const machineUuid = lookup(idMap, "machines", r.machine_id);
+          return {
+            ttId: r.id,
+            payload: r as Record<string, unknown>,
+            ...(tabletUuid ? { tabletTypeId: tabletUuid } : {}),
+            ...(machineUuid ? { machineId: machineUuid } : {}),
+            employeeName: r.employee_name,
+            countDate: r.count_date,
+            createdAt: toDate(r.created_at),
+          };
+        });
+        const out = await db
+          .insert(legacyMachineCounts)
+          .values(values)
+          .onConflictDoNothing({ target: legacyMachineCounts.ttId })
+          .returning({
+            id: legacyMachineCounts.id,
+            ttId: legacyMachineCounts.ttId,
+          });
+        if (out.length > 0) {
+          await db
+            .insert(legacyTtIdMap)
+            .values(
+              out.map((o) => ({
+                ttTable: "machine_counts",
+                ttId: o.ttId,
+                lumaTable: "legacy_machine_counts",
+                lumaId: o.id,
+              })),
+            )
+            .onConflictDoNothing();
+          for (const o of out) {
+            idMap.set(`machine_counts:${o.ttId}`, o.id);
+          }
+          inserted.machine_counts += out.length;
+        }
+        const insertedTtIds = new Set(out.map((o) => o.ttId));
+        skipped.machine_counts += slice.length - insertedTtIds.size;
+      } catch (err) {
+        for (const r of slice) {
+          errors.push({
+            phase: "machine_counts",
+            ttId: r.id,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+  }
 
   // 18. submission_bag_deductions (stash)
   await phase<TtSubmissionBagDeduction>(
