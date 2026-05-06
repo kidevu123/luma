@@ -54,6 +54,14 @@ import { requireSession } from "@/lib/auth-guards";
 import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { LiveRefresh } from "./live-refresh";
+import { KpiStrip } from "./_components/kpi-strip";
+import {
+  getCycleStats,
+  getHourlyPace,
+  getStationIdleNow,
+  getIdleCards,
+  getMaterialRunwayDays,
+} from "./_loaders";
 
 export const dynamic = "force-dynamic";
 
@@ -651,6 +659,12 @@ export default async function FloorBoardPage() {
     bottleneck,
     dataHygiene,
     heartbeat,
+    // KPI strip extras
+    cycleStats,
+    hourlyPace,
+    stationIdle,
+    idleCardsKpi,
+    materialRunwayDays,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -671,6 +685,11 @@ export default async function FloorBoardPage() {
     trace("getBottleneckOfHour", getBottleneckOfHour),
     trace("getDataHygiene", getDataHygiene),
     trace("getFloorHeartbeat", getFloorHeartbeat),
+    trace("getCycleStats", getCycleStats),
+    trace("getHourlyPace", getHourlyPace),
+    trace("getStationIdleNow", getStationIdleNow),
+    trace("getIdleCards", getIdleCards),
+    trace("getMaterialRunwayDays", getMaterialRunwayDays),
   ]);
 
   const allStations = [
@@ -746,85 +765,63 @@ export default async function FloorBoardPage() {
         </div>
       )}
 
-      {/* Act-Now strip — exception-first tiles per metrics-strategy §13.2.
-          The lead glances here for "what needs me right now," not for
-          throughput (that's on the TV). Tone:
-            - red    = action needed now
+      {/* Dense 12-tile KPI strip. Replaces the old 6-tile grid. Each
+          tile is a small card with a number + label + 1-line context.
+          Color-coded for at-a-glance triage:
+            - red    = act now (forgotten bags, slow p90, low runway)
             - amber  = watch
-            - ok     = clear */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <Tile
-          icon={Hourglass}
-          label="Forgotten bags"
-          value={forgottenBags.length.toLocaleString()}
-          hint={
-            forgottenBags.length === 0
-              ? "no paused bags > 30m"
-              : "paused > 30 min — investigate below"
-          }
-          tone={forgottenBags.length > 0 ? "danger" : "ok"}
-        />
-        <Tile
-          icon={Hourglass}
-          label="Aged unfinalized"
-          value={agedUnfinalized.count.toLocaleString()}
-          hint={
-            agedUnfinalized.count === 0
-              ? "all bags fresh"
-              : `${agedUnfinalized.unitsTied.toLocaleString()} units tied up · click for list`
-          }
-          tone={agedUnfinalized.count > 0 ? "warn" : "ok"}
-        />
-        <Tile
-          icon={Activity}
-          label="Bottleneck (1h)"
-          value={
-            bottleneck.stage
-              ? bottleneckLabel(bottleneck.stage)
-              : "—"
-          }
-          hint={
-            bottleneck.stage
-              ? `~${Math.round(bottleneck.avgSeconds / 60)}m avg · ${bottleneck.events} events`
-              : "no recent activity"
-          }
-          tone={bottleneck.stage ? "warn" : "neutral"}
-        />
-        <Tile
-          icon={Wrench}
-          label="Card lane balance"
-          value={
-            laneImbalance.cardLane.ratio === null
-              ? "—"
-              : laneImbalance.cardLane.ratio.toFixed(2) + "×"
-          }
-          hint={
-            laneImbalance.cardLane.ratio === null
-              ? "no card flow last 24h"
-              : `${laneImbalance.cardLane.blistered} blistered → ${laneImbalance.cardLane.packaged} packaged`
-          }
-          tone={
-            laneImbalance.cardLane.ratio === null
-              ? "neutral"
-              : laneImbalance.cardLane.ratio > 1.3 ||
-                  laneImbalance.cardLane.ratio < 0.77
-                ? "warn"
-                : "ok"
-          }
-        />
-        <Tile
-          icon={PackageCheck}
-          label="Finalized today"
-          value={todayTotals.finalized.toLocaleString()}
-          hint={`${totalActive} in flight · ${todayTotals.packaged} packaged`}
-          tone="ok"
-        />
-        <Tile
-          icon={Pill}
-          label="Bags in stock"
-          value={totalAvailableBags.toLocaleString()}
-          hint={`${bagInventory.length} types · ${idleCardsRow[0]?.n ?? 0} idle cards`}
-        />
+            - ok     = clear
+            - neutral = no signal yet
+          OEE proxy is "—" until product nameplate / shift-hours are
+          configured (Phase-2). Material runway is "—" until packaging
+          burn data lands. Both fail-soft to neutral tiles. */}
+      <KpiStrip
+        finalizedToday={todayTotals.finalized}
+        totalActive={totalActive}
+        cycle={cycleStats}
+        hourlyPace={hourlyPace}
+        stationIdle={stationIdle}
+        idleCards={idleCardsKpi}
+        bagsAvailable={totalAvailableBags}
+        bagTypes={bagInventory.length}
+        forgottenBags={forgottenBags.length}
+        agedCount={agedUnfinalized.count}
+        agedDaysOldMax={agedUnfinalized.oldest[0]?.daysOld ?? null}
+        materialRunwayDays={materialRunwayDays}
+        oeeProxy={null}
+      />
+
+      {/* Lane-balance + bottleneck fallback chip — kept inline so the
+          act-now signal still surfaces above the alerts panel without
+          eating a KPI tile slot. */}
+      <div className="flex flex-wrap gap-2 text-xs">
+        {bottleneck.stage && bottleneck.events > 0 && (
+          <StatusPill kind="warn">
+            <Activity className="h-3 w-3" />
+            Bottleneck: {bottleneckLabel(bottleneck.stage)} ·{" "}
+            ~{Math.round(bottleneck.avgSeconds / 60)}m avg · {bottleneck.events} events
+          </StatusPill>
+        )}
+        {laneImbalance.cardLane.ratio !== null &&
+          (laneImbalance.cardLane.ratio > 1.3 ||
+            laneImbalance.cardLane.ratio < 0.77) && (
+            <StatusPill kind="warn">
+              <Wrench className="h-3 w-3" />
+              Card lane {laneImbalance.cardLane.ratio.toFixed(2)}× ·{" "}
+              {laneImbalance.cardLane.blistered} blistered →{" "}
+              {laneImbalance.cardLane.packaged} packaged
+            </StatusPill>
+          )}
+        {laneImbalance.bottleLane.ratio !== null &&
+          (laneImbalance.bottleLane.ratio > 1.3 ||
+            laneImbalance.bottleLane.ratio < 0.77) && (
+            <StatusPill kind="warn">
+              <Wrench className="h-3 w-3" />
+              Bottle lane {laneImbalance.bottleLane.ratio.toFixed(2)}× ·{" "}
+              {laneImbalance.bottleLane.handpacked} handpacked →{" "}
+              {laneImbalance.bottleLane.packaged} stickered
+            </StatusPill>
+          )}
       </div>
 
       {/* Forgotten bags panel — clickable list of bags paused > 30 min.
