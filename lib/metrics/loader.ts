@@ -35,6 +35,15 @@ export const LANE_LABEL: Record<Lane, string> = {
 };
 
 export async function loadMetrics(lane: Lane, days: number) {
+  try {
+    return await loadMetricsInner(lane, days);
+  } catch (err) {
+    console.error(`[metrics-loader] lane=${lane} days=${days} failed:`, err);
+    throw err;
+  }
+}
+
+async function loadMetricsInner(lane: Lane, days: number) {
   const since = new Date();
   since.setUTCDate(since.getUTCDate() - days);
   const sinceStr = since.toISOString().slice(0, 10);
@@ -51,10 +60,18 @@ export async function loadMetrics(lane: Lane, days: number) {
   if (lane !== "all") {
     const kinds = LANE_MACHINE_KINDS[lane];
     if (kinds.length > 0) {
+      // Use IN with explicit values rather than ANY(::enum[]) — the
+      // array+cast pattern is brittle when postgres-js serializes a
+      // JS array against a custom enum type.
       const machineRows = await db
         .select({ id: machines.id, kind: machines.kind })
         .from(machines)
-        .where(sql`${machines.kind} = ANY(${kinds}::machine_kind[])`);
+        .where(
+          sql`${machines.kind}::text IN (${sql.join(
+            kinds.map((k) => sql`${k}`),
+            sql`, `,
+          )})`,
+        );
       machineIdsForLane = new Set(machineRows.map((m) => m.id));
     }
   }
@@ -107,7 +124,10 @@ export async function loadMetrics(lane: Lane, days: number) {
       ${
         lane === "all"
           ? sql``
-          : sql`AND machine_kind = ANY(${LANE_MACHINE_KINDS[lane]}::machine_kind[])`
+          : sql`AND machine_kind::text IN (${sql.join(
+              LANE_MACHINE_KINDS[lane].map((k) => sql`${k}`),
+              sql`, `,
+            )})`
       }
     GROUP BY reason
     ORDER BY total_seconds DESC
