@@ -60,6 +60,10 @@ import { LifelineGrid } from "./_components/lifeline-cards";
 import { StationGrid } from "./_components/station-grid";
 import { AlertsFeed } from "./_components/alerts-feed";
 import {
+  FlavorBreakdownCard,
+  PauseReasonDonut,
+} from "./_components/breakdown-row";
+import {
   getCycleStats,
   getHourlyPace,
   getStationIdleNow,
@@ -69,6 +73,8 @@ import {
   getStationStatusGrid,
   getLaneImbalanceChip,
   getDamageCluster,
+  getFlavorBreakdownToday,
+  getPauseReasons7d,
 } from "./_loaders";
 
 export const dynamic = "force-dynamic";
@@ -677,6 +683,8 @@ export default async function FloorBoardPage() {
     stationStatusGrid,
     laneImbalanceChip,
     damageCluster,
+    flavorBreakdown,
+    pauseReasons,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -706,6 +714,8 @@ export default async function FloorBoardPage() {
     trace("getStationStatusGrid", getStationStatusGrid),
     trace("getLaneImbalanceChip", getLaneImbalanceChip),
     trace("getDamageCluster", getDamageCluster),
+    trace("getFlavorBreakdownToday", getFlavorBreakdownToday),
+    trace("getPauseReasons7d", getPauseReasons7d),
   ]);
 
   const allStations = [
@@ -1030,6 +1040,15 @@ export default async function FloorBoardPage() {
           <LifelineGrid machines={machineLifelines} />
         </CardContent>
       </Card>
+
+      {/* Flavor mix today + pause-reason donut last 7d. Two compact
+          analytic cards side-by-side on lg+. Both fail-soft to a
+          short empty-state when nothing's been recorded. */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <FlavorBreakdownCard rows={flavorBreakdown} />
+        <PauseReasonDonut rows={pauseReasons} />
+      </div>
+
       {machineGrid.orphanStations.length > 0 && (
         <Card>
           <CardHeader>
