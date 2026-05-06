@@ -77,6 +77,23 @@ export function StageActionButtons({
   const [pauseOpen, setPauseOpen] = React.useState(false);
   const [packagingOpen, setPackagingOpen] = React.useState(false);
 
+  // Operator code persists per-station for the browser session so an
+  // operator only types it once a shift. Cleared with sessionStorage
+  // when the tab closes.
+  const opStorageKey = `luma.op.${stationId}`;
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.sessionStorage.getItem(opStorageKey);
+    if (saved) setOperatorCode(saved);
+  }, [opStorageKey]);
+  function updateOperatorCode(v: string) {
+    setOperatorCode(v);
+    if (typeof window !== "undefined") {
+      if (v) window.sessionStorage.setItem(opStorageKey, v);
+      else window.sessionStorage.removeItem(opStorageKey);
+    }
+  }
+
   if (!workflowBagId) return null;
   const stages = STAGE_BY_KIND[stationKind] ?? [];
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
@@ -175,19 +192,23 @@ export function StageActionButtons({
         <input
           type="text"
           inputMode="numeric"
+          pattern="[0-9]{4}"
           value={operatorCode}
-          onChange={(e) => setOperatorCode(e.target.value)}
-          placeholder="Operator code"
-          maxLength={20}
-          className="h-12 px-3 rounded-lg bg-surface border border-border text-base"
+          onChange={(e) => updateOperatorCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          placeholder="Op # (4 digits)"
+          maxLength={4}
+          aria-label="Operator code"
+          title="4-digit operator badge — saved for this shift on this device"
+          className="h-12 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
         />
         <input
           type="number"
           inputMode="numeric"
+          min={0}
           value={count}
           onChange={(e) => setCount(e.target.value)}
           placeholder="Count"
-          className="h-12 px-3 rounded-lg bg-surface border border-border text-base"
+          className="h-12 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
         />
       </div>
 

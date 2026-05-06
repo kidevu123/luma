@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { ArrowRight, Boxes, ShieldCheck, PackageCheck, Activity } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import {
@@ -67,13 +68,10 @@ export default async function DashboardPage() {
   const c = await counts();
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-text-muted">
-          Single pane on production state. Numbers update on every page load.
-          Read-model wiring lands when the projector ships in Phase 4.
-        </p>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        description="Single pane on production state. Numbers update on every page load."
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         <Tile

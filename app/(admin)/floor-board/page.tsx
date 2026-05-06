@@ -28,6 +28,7 @@ import {
   CircleSlash,
   Pill,
   FlaskConical,
+  PauseCircle,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { eq, isNull, isNotNull, desc, sql, and, gte } from "drizzle-orm";
@@ -251,9 +252,12 @@ async function getAvgCycleMinutes(): Promise<number | null> {
 }
 
 /** Bags currently running > 60 minutes — surface as alerts so the
- *  supervisor can investigate stalls. Plus open batch holds. */
+ *  supervisor can investigate stalls. Plus open batch holds and any
+ *  bag that's been paused longer than 30 minutes (likely forgotten
+ *  by the operator at shift end). */
 async function getAlerts() {
   const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
   const stalled = await db
     .select({
       bagId: workflowBags.id,
@@ -268,9 +272,33 @@ async function getAlerts() {
       and(
         isNull(workflowBags.finalizedAt),
         sql`${workflowBags.startedAt} < ${sixtyMinAgo}`,
+        // Don't double-count paused bags as "stalled" — they get
+        // their own entry below.
+        sql`COALESCE(${readBagState.isPaused}, false) = false`,
       ),
     )
     .orderBy(workflowBags.startedAt)
+    .limit(20);
+
+  const stuckPaused = await db
+    .select({
+      bagId: workflowBags.id,
+      pausedAt: readBagState.pausedAt,
+      productName: products.name,
+      stage: readBagState.stage,
+    })
+    .from(readBagState)
+    .innerJoin(workflowBags, eq(workflowBags.id, readBagState.workflowBagId))
+    .leftJoin(products, eq(workflowBags.productId, products.id))
+    .where(
+      and(
+        eq(readBagState.isPaused, true),
+        isNotNull(readBagState.pausedAt),
+        sql`${readBagState.pausedAt} < ${thirtyMinAgo}`,
+        isNull(workflowBags.finalizedAt),
+      ),
+    )
+    .orderBy(readBagState.pausedAt)
     .limit(20);
 
   const holds = await db
@@ -284,7 +312,7 @@ async function getAlerts() {
     .orderBy(desc(batchHolds.openedAt))
     .limit(20);
 
-  return { stalled, holds };
+  return { stalled, stuckPaused, holds };
 }
 
 async function getBagInventory() {
@@ -462,6 +490,18 @@ export default async function FloorBoardPage() {
             stage: s.stage,
             startedAt: s.startedAt as unknown as Date,
           }))}
+          stuckPaused={alerts.stuckPaused.flatMap((s) =>
+            s.pausedAt
+              ? [
+                  {
+                    bagId: s.bagId,
+                    productName: s.productName,
+                    stage: s.stage,
+                    pausedAt: s.pausedAt as unknown as Date,
+                  },
+                ]
+              : [],
+          )}
           holds={alerts.holds.map((h) => ({
             holdId: h.hold.id,
             batchNumber: h.batch?.batchNumber ?? "—",
@@ -735,6 +775,7 @@ function FlowLane({
 
 function AlertsPanel({
   stalled,
+  stuckPaused,
   holds,
 }: {
   stalled: Array<{
@@ -743,6 +784,12 @@ function AlertsPanel({
     stage: string | null;
     startedAt: Date;
   }>;
+  stuckPaused: Array<{
+    bagId: string;
+    productName: string | null;
+    stage: string | null;
+    pausedAt: Date;
+  }>;
   holds: Array<{
     holdId: string;
     batchNumber: string;
@@ -750,7 +797,7 @@ function AlertsPanel({
     openedAt: Date;
   }>;
 }) {
-  const total = stalled.length + holds.length;
+  const total = stalled.length + stuckPaused.length + holds.length;
   return (
     <Card className={total > 0 ? "border-amber-200" : ""}>
       <CardHeader>
@@ -786,6 +833,27 @@ function AlertsPanel({
                     <p className="text-[11px] text-text-muted">
                       {s.productName ?? "no product"} · running for{" "}
                       <span className="font-semibold">{fmtElapsed(elapsed)}</span>
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+            {stuckPaused.map((s) => {
+              const elapsed = Date.now() - s.pausedAt.getTime();
+              return (
+                <li
+                  key={`paused-${s.bagId}`}
+                  className="px-4 py-2.5 flex items-start gap-2"
+                >
+                  <PauseCircle className="h-3.5 w-3.5 mt-0.5 text-amber-700 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium">
+                      Bag {s.bagId.slice(0, 8)} paused at {s.stage ?? "STARTED"}
+                    </p>
+                    <p className="text-[11px] text-text-muted">
+                      {s.productName ?? "no product"} · paused for{" "}
+                      <span className="font-semibold">{fmtElapsed(elapsed)}</span>{" "}
+                      — likely forgotten
                     </p>
                   </div>
                 </li>

@@ -16,10 +16,15 @@ export function CreateCardForm() {
       action={async (fd) => {
         setPending(true);
         setError(null);
-        const r = await createQrCardAction(fd);
-        setPending(false);
-        if (r?.error) setError(r.error);
-        else formRef.current?.reset();
+        try {
+          const r = await createQrCardAction(fd);
+          if (r?.error) setError(r.error);
+          else formRef.current?.reset();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Failed to add card.");
+        } finally {
+          setPending(false);
+        }
       }}
       className="flex items-end gap-2 flex-wrap"
     >
@@ -49,18 +54,32 @@ export function RetireButton({
   disabled?: boolean;
 }) {
   const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   return (
     <Button
       size="sm"
       variant="ghost"
       type="button"
       disabled={pending || disabled}
-      title={disabled ? "Card is mid-bag — finalize first" : "Retire this card"}
+      title={
+        error
+          ? error
+          : disabled
+            ? "Card is mid-bag — finalize first"
+            : "Retire this card"
+      }
       onClick={async () => {
         if (!confirm("Retire this card? It can't accept new scans after.")) return;
         setPending(true);
-        await retireQrCardAction(id);
-        setPending(false);
+        setError(null);
+        try {
+          const r = await retireQrCardAction(id);
+          if (r && "error" in r && r.error) setError(r.error);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Retire failed.");
+        } finally {
+          setPending(false);
+        }
       }}
     >
       <Archive className="h-3.5 w-3.5" /> {pending ? "…" : "Retire"}

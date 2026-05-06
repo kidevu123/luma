@@ -81,7 +81,7 @@ export function BomEditor({
           </div>
           {tablets.length === 0 ? (
             <p className="text-xs text-text-muted">
-              No tablet types yet. Create them under Master data → Tablet types.
+              No tablet types yet. Create them under Settings → Tablet types.
             </p>
           ) : (
             <ul className="grid sm:grid-cols-2 gap-1.5">

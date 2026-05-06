@@ -51,10 +51,17 @@ export function CreateBatchDialog({
               action={async (form) => {
                 setPending(true);
                 setError(null);
-                const r = await createBatchAction(form);
-                setPending(false);
-                if (r?.error) setError(r.error);
-                else setOpen(false);
+                try {
+                  const r = await createBatchAction(form);
+                  if (r?.error) setError(r.error);
+                  else setOpen(false);
+                } catch (err) {
+                  setError(
+                    err instanceof Error ? err.message : "Save failed.",
+                  );
+                } finally {
+                  setPending(false);
+                }
               }}
               className="p-5 space-y-4"
             >

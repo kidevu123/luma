@@ -34,15 +34,22 @@ const MACHINE_KINDS = [
 export function CreateMachineForm() {
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
+  const formRef = React.useRef<HTMLFormElement>(null);
   return (
     <form
+      ref={formRef}
       action={async (form) => {
         setPending(true);
         setError(null);
-        const r = await createMachineAction(form);
-        setPending(false);
-        if (r?.error) setError(r.error);
-        else (form as unknown as HTMLFormElement)?.reset?.();
+        try {
+          const r = await createMachineAction(form);
+          if (r?.error) setError(r.error);
+          else formRef.current?.reset();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Save failed.");
+        } finally {
+          setPending(false);
+        }
       }}
       className="border border-dashed border-border rounded-lg p-3 space-y-2.5"
     >
@@ -84,15 +91,22 @@ export function CreateMachineForm() {
 export function CreateStationForm({ machines }: { machines: Machine[] }) {
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
+  const formRef = React.useRef<HTMLFormElement>(null);
   return (
     <form
+      ref={formRef}
       action={async (form) => {
         setPending(true);
         setError(null);
-        const r = await createStationAction(form);
-        setPending(false);
-        if (r?.error) setError(r.error);
-        else (form as unknown as HTMLFormElement)?.reset?.();
+        try {
+          const r = await createStationAction(form);
+          if (r?.error) setError(r.error);
+          else formRef.current?.reset();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Save failed.");
+        } finally {
+          setPending(false);
+        }
       }}
       className="border border-dashed border-border rounded-lg p-3 space-y-2.5"
     >
@@ -141,11 +155,17 @@ export function CreateStationForm({ machines }: { machines: Machine[] }) {
 export function RotateTokenButton({ stationId }: { stationId: string }) {
   const [pending, setPending] = React.useState(false);
   const [recent, setRecent] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
   return (
     <div className="inline-flex items-center gap-2">
       {recent && (
         <span className="font-mono text-[11px] text-emerald-700">
           {recent.slice(0, 16)}…
+        </span>
+      )}
+      {error && (
+        <span className="text-[11px] text-red-700" title={error}>
+          {error.length > 28 ? error.slice(0, 26) + "…" : error}
         </span>
       )}
       <Button
@@ -155,9 +175,16 @@ export function RotateTokenButton({ stationId }: { stationId: string }) {
         disabled={pending}
         onClick={async () => {
           setPending(true);
-          const r = await rotateTokenAction(stationId);
-          setPending(false);
-          if (r?.token) setRecent(r.token);
+          setError(null);
+          try {
+            const r = await rotateTokenAction(stationId);
+            if (r?.token) setRecent(r.token);
+            else if (r && "error" in r && r.error) setError(r.error);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Rotate failed.");
+          } finally {
+            setPending(false);
+          }
         }}
       >
         <RefreshCw className="h-3.5 w-3.5" />

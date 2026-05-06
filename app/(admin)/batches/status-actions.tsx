@@ -14,14 +14,22 @@ export function StatusActions({
 }) {
   const [open, setOpen] = React.useState(false);
   const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const [holdOpen, setHoldOpen] = React.useState(false);
   const [holdReason, setHoldReason] = React.useState("");
 
   async function call(next: string) {
     setPending(true);
-    await setStatusAction(batchId, next);
-    setPending(false);
-    setOpen(false);
+    setError(null);
+    try {
+      const r = await setStatusAction(batchId, next);
+      if (r && "error" in r && r.error) setError(r.error);
+      else setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Status change failed.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -40,6 +48,14 @@ export function StatusActions({
         <Button size="sm" variant="ghost" disabled={pending} onClick={() => setOpen(!open)}>
           More <ChevronDown className="h-3 w-3" />
         </Button>
+      )}
+      {error && (
+        <span
+          className="ml-1 text-[11px] font-medium text-red-700"
+          title={error}
+        >
+          {error.length > 28 ? error.slice(0, 26) + "…" : error}
+        </span>
       )}
       {open && (
         <div
@@ -109,10 +125,22 @@ export function StatusActions({
                 disabled={pending || !holdReason.trim()}
                 onClick={async () => {
                   setPending(true);
-                  await openHoldAction(batchId, holdReason);
-                  setPending(false);
-                  setHoldOpen(false);
-                  setHoldReason("");
+                  setError(null);
+                  try {
+                    const r = await openHoldAction(batchId, holdReason);
+                    if (r && "error" in r && r.error) {
+                      setError(r.error);
+                      return;
+                    }
+                    setHoldOpen(false);
+                    setHoldReason("");
+                  } catch (err) {
+                    setError(
+                      err instanceof Error ? err.message : "Hold failed.",
+                    );
+                  } finally {
+                    setPending(false);
+                  }
                 }}
               >
                 {pending ? "Saving…" : "Place on hold"}
