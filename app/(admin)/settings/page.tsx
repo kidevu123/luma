@@ -164,6 +164,15 @@ export default async function SettingsPage() {
               Connect Zoho to push finished lots out as purchase receives.
               Owner-only.
             </p>
+            <Button asChild variant="secondary" size="sm" className="w-full justify-start">
+              <Link href="/settings/legacy-import">
+                <Plug className="h-3.5 w-3.5" /> Legacy import (PythonAnywhere)
+              </Link>
+            </Button>
+            <p className="text-[11px] text-text-muted leading-relaxed">
+              Pull the legacy DB dump + Zoho config from PythonAnywhere on a
+              schedule. Token-auth, no SSH key. Owner-only.
+            </p>
           </CardContent>
         </Card>
 

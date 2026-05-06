@@ -779,6 +779,100 @@ export const zohoPushes = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Context 5b — Legacy import (PythonAnywhere fetcher)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// One-row config per company holding the PA username + API token + a list
+// of files we pull on a schedule (DB dumps, Zoho config exports, etc).
+// Each fetched file gets dropped into /data/legacy-imports/ with a
+// timestamped basename and a row in legacy_import_runs for audit.
+
+export const legacyImportConfig = pgTable(
+  "legacy_import_config",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** PythonAnywhere username (e.g. "sahilk1"). Drives the API host
+     *  https://www.pythonanywhere.com/api/v0/user/<username>/files/path. */
+    paUsername: text("pa_username").notNull(),
+    /** PA API token. Plaintext at rest, like zoho_credentials —
+     *  protected by Postgres ACLs + audit log. Masked in UI. */
+    paApiToken: text("pa_api_token").notNull(),
+    /** Whether the scheduled fetcher should run. Manual "Fetch now"
+     *  works even when this is off. */
+    isActive: boolean("is_active").notNull().default(true),
+    lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    lastSyncOk: boolean("last_sync_ok"),
+    lastSyncError: text("last_sync_error"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedById: uuid("updated_by_id").references(() => users.id),
+  },
+  (t) => [uniqueIndex("legacy_import_config_company_unique").on(t.companyId)],
+);
+
+export const legacyImportPaths = pgTable(
+  "legacy_import_paths",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    configId: uuid("config_id")
+      .notNull()
+      .references(() => legacyImportConfig.id, { onDelete: "cascade" }),
+    /** Absolute remote path on PA, e.g. /home/sahilk1/dumps/tt-latest.sql.gz */
+    remotePath: text("remote_path").notNull(),
+    /** Human-readable label shown in the UI. */
+    label: text("label").notNull(),
+    /** What this file is for. Drives downstream importers. */
+    kind: text("kind", {
+      enum: ["DB_DUMP", "ZOHO_CONFIG", "OTHER"],
+    })
+      .notNull()
+      .default("OTHER"),
+    enabled: boolean("enabled").notNull().default(true),
+    /** Last-fetch metadata. */
+    lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }),
+    lastBytes: integer("last_bytes"),
+    lastStatusCode: integer("last_status_code"),
+    lastError: text("last_error"),
+    /** Where the most recent successful download landed locally. */
+    lastLocalPath: text("last_local_path"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("legacy_import_paths_remote_unique").on(t.configId, t.remotePath),
+    index("legacy_import_paths_enabled_idx").on(t.configId, t.enabled),
+  ],
+);
+
+export const legacyImportRuns = pgTable(
+  "legacy_import_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    configId: uuid("config_id")
+      .notNull()
+      .references(() => legacyImportConfig.id, { onDelete: "cascade" }),
+    triggeredBy: text("triggered_by", {
+      enum: ["MANUAL", "SCHEDULED"],
+    }).notNull(),
+    triggeredById: uuid("triggered_by_id").references(() => users.id),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    ok: boolean("ok"),
+    filesAttempted: integer("files_attempted").notNull().default(0),
+    filesSucceeded: integer("files_succeeded").notNull().default(0),
+    summary: text("summary"),
+  },
+  (t) => [index("legacy_import_runs_started_idx").on(t.startedAt)],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Context 6 — Read models (denormalized projections, refreshed by pg-boss
 //                          jobs that listen to workflow_events.pg_notify)
 // ─────────────────────────────────────────────────────────────────────────────

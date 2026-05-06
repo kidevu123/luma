@@ -9,3 +9,7 @@ out
 data/
 dist/
 tsconfig.tsbuildinfo
+
+# Local-only scratch areas (legacy-app survey, ad-hoc probes, etc.)
+recon/
+scratch/
