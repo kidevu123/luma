@@ -273,12 +273,18 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       .where(eq(stations.id, ev.stationId));
     if (bagRow?.productId && stationRow?.machineId) {
       const day = occurredAt.toISOString().slice(0, 10);
+      const occurredAtIso = occurredAt.toISOString();
+      // postgres-js's Bind step rejects bare JS Date instances — pin
+      // the timestamp through ::timestamptz so the driver only sees a
+      // string at parameter time. Same Bind crash class that hit
+      // floor-board / metrics earlier; fixing here pre-empts the next
+      // BAG_FINALIZED action throw post-legacy-import.
       await tx.execute(sql`
         INSERT INTO read_daily_throughput (day, product_id, machine_id, ${sql.raw(counterCol)}, updated_at)
-        VALUES (${day}, ${bagRow.productId}, ${stationRow.machineId}, 1, ${occurredAt})
+        VALUES (${day}, ${bagRow.productId}, ${stationRow.machineId}, 1, ${occurredAtIso}::timestamptz)
         ON CONFLICT (day, product_id, machine_id)
         DO UPDATE SET ${sql.raw(counterCol)} = read_daily_throughput.${sql.raw(counterCol)} + 1,
-                      updated_at = ${occurredAt}
+                      updated_at = ${occurredAtIso}::timestamptz
       `);
     }
   }
@@ -548,16 +554,20 @@ async function projectMetricsForFinalizedBag(
   // Per-(day, operator) rollup for the leaderboard.
   if (operatorCodes.length > 0) {
     const day = finalizedAt.toISOString().slice(0, 10);
+    const finalizedAtIso = finalizedAt.toISOString();
     for (const code of operatorCodes) {
+      // ::timestamptz cast forces postgres-js to bind the parameter
+      // as text — passing a bare Date instance triggers the
+      // 'Received an instance of Date' Bind crash.
       await tx.execute(sql`
         INSERT INTO read_operator_daily (day, operator_code, bags_finalized, active_seconds_total, damage_count_total, updated_at)
-        VALUES (${day}, ${code}, 1, ${activeSeconds}, ${damagedPackaging + rippedCards}, ${finalizedAt})
+        VALUES (${day}, ${code}, 1, ${activeSeconds}, ${damagedPackaging + rippedCards}, ${finalizedAtIso}::timestamptz)
         ON CONFLICT (day, operator_code)
         DO UPDATE SET
           bags_finalized = read_operator_daily.bags_finalized + 1,
           active_seconds_total = read_operator_daily.active_seconds_total + ${activeSeconds},
           damage_count_total = read_operator_daily.damage_count_total + ${damagedPackaging + rippedCards},
-          updated_at = ${finalizedAt}
+          updated_at = ${finalizedAtIso}::timestamptz
       `);
     }
   }
