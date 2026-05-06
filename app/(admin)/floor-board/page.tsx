@@ -31,7 +31,7 @@ import {
   PauseCircle,
 } from "lucide-react";
 import { db } from "@/lib/db";
-import { eq, isNull, isNotNull, desc, sql, and, gte } from "drizzle-orm";
+import { eq, isNull, isNotNull, desc, sql, and, gte, lt } from "drizzle-orm";
 import {
   workflowBags,
   workflowEvents,
@@ -271,7 +271,7 @@ async function getAlerts() {
     .where(
       and(
         isNull(workflowBags.finalizedAt),
-        sql`${workflowBags.startedAt} < ${sixtyMinAgo}`,
+        lt(workflowBags.startedAt, sixtyMinAgo),
         // Don't double-count paused bags as "stalled" — they get
         // their own entry below.
         sql`COALESCE(${readBagState.isPaused}, false) = false`,
@@ -294,7 +294,7 @@ async function getAlerts() {
       and(
         eq(readBagState.isPaused, true),
         isNotNull(readBagState.pausedAt),
-        sql`${readBagState.pausedAt} < ${thirtyMinAgo}`,
+        lt(readBagState.pausedAt, thirtyMinAgo),
         isNull(workflowBags.finalizedAt),
       ),
     )
