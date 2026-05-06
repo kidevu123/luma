@@ -349,6 +349,14 @@ function machineKindLabel(k: string): string {
 
 export default async function FloorBoardPage() {
   await requireSession();
+  const trace = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (err) {
+      console.error(`[floor-board] ${label} failed:`, err);
+      throw err;
+    }
+  };
   const [
     activeBags,
     machineGrid,
@@ -359,17 +367,19 @@ export default async function FloorBoardPage() {
     bagInventory,
     idleCardsRow,
   ] = await Promise.all([
-    getActiveBags(),
-    getMachineGrid(),
-    getStageCounts(),
-    getTodayTotals(),
-    getAvgCycleMinutes(),
-    getAlerts(),
-    getBagInventory(),
-    db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(qrCards)
-      .where(eq(qrCards.status, "IDLE")),
+    trace("getActiveBags", getActiveBags),
+    trace("getMachineGrid", getMachineGrid),
+    trace("getStageCounts", getStageCounts),
+    trace("getTodayTotals", getTodayTotals),
+    trace("getAvgCycleMinutes", getAvgCycleMinutes),
+    trace("getAlerts", getAlerts),
+    trace("getBagInventory", getBagInventory),
+    trace("idleCards", () =>
+      db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(qrCards)
+        .where(eq(qrCards.status, "IDLE")),
+    ),
   ]);
 
   const allStations = [
