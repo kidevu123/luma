@@ -9,6 +9,7 @@ import {
   Trash2,
   Plug,
   Download,
+  Database,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -19,6 +20,8 @@ import {
   togglePathEnabledAction,
   removePathAction,
   fetchNowAction,
+  runImportAction,
+  previewImportAction,
 } from "./actions";
 
 export function CredentialsForm({
@@ -324,6 +327,243 @@ export function FetchNowButton() {
         >
           {result.text}
         </span>
+      )}
+    </div>
+  );
+}
+
+type PreviewState = {
+  sourceFile: string;
+  legacyCounts: Record<string, number>;
+  alreadyMapped: Record<string, number>;
+  wouldInsert: Record<string, number>;
+};
+
+type ApplyResultState = {
+  ok: boolean;
+  text: string;
+  details: string[];
+};
+
+/** Two-step: Preview (read-only count) → Apply (with typed confirm).
+ *  Apply is disabled until a Preview has been run successfully, and
+ *  requires the operator to type "APPLY" before the action fires. */
+export function RunImportButton() {
+  const [previewPending, setPreviewPending] = React.useState(false);
+  const [applyPending, setApplyPending] = React.useState(false);
+  const [preview, setPreview] = React.useState<PreviewState | null>(null);
+  const [previewError, setPreviewError] = React.useState<string | null>(null);
+  const [confirmText, setConfirmText] = React.useState("");
+  const [applyResult, setApplyResult] = React.useState<ApplyResultState | null>(null);
+
+  const totalWouldInsert = preview
+    ? Object.values(preview.wouldInsert).reduce((s, n) => s + n, 0)
+    : 0;
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border/70 bg-surface-2/40 p-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+          TabletTracker → Luma import
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={previewPending || applyPending}
+          onClick={async () => {
+            setPreviewPending(true);
+            setPreviewError(null);
+            setApplyResult(null);
+            try {
+              const r = await previewImportAction();
+              if (r && "error" in r && r.error) {
+                setPreviewError(r.error);
+                setPreview(null);
+              } else if (r && "ok" in r) {
+                setPreview({
+                  sourceFile: r.sourceFile ?? "",
+                  legacyCounts: r.legacyCounts ?? {},
+                  alreadyMapped: r.alreadyMapped ?? {},
+                  wouldInsert: r.wouldInsert ?? {},
+                });
+              }
+            } catch (err) {
+              setPreviewError(
+                err instanceof Error ? err.message : "Preview failed.",
+              );
+            } finally {
+              setPreviewPending(false);
+            }
+          }}
+        >
+          <Database className="h-3.5 w-3.5" />{" "}
+          {previewPending ? "Reading…" : "Preview import"}
+        </Button>
+      </div>
+
+      {previewError && (
+        <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1.5">
+          {previewError}
+        </p>
+      )}
+
+      {preview && (
+        <div className="space-y-3">
+          <div className="text-xs text-text-muted">
+            Source: <span className="font-mono">{preview.sourceFile}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs tabular-nums">
+              <thead className="text-text-subtle">
+                <tr>
+                  <th className="text-left font-medium pb-1">Legacy table</th>
+                  <th className="text-right font-medium pb-1">Total rows</th>
+                  <th className="text-right font-medium pb-1">Already mapped</th>
+                  <th className="text-right font-medium pb-1">Would insert</th>
+                </tr>
+              </thead>
+              <tbody className="font-mono">
+                {Object.keys(preview.wouldInsert)
+                  .sort()
+                  .map((t) => {
+                    const total = preview.legacyCounts[t] ?? 0;
+                    const mapped = preview.alreadyMapped[t] ?? 0;
+                    const ins = preview.wouldInsert[t] ?? 0;
+                    return (
+                      <tr key={t} className="border-t border-border/40">
+                        <td className="py-1 pr-2">{t}</td>
+                        <td className="py-1 px-2 text-right">{total}</td>
+                        <td className="py-1 px-2 text-right text-text-subtle">
+                          {mapped}
+                        </td>
+                        <td
+                          className={
+                            "py-1 pl-2 text-right " +
+                            (ins > 0 ? "text-emerald-700 font-semibold" : "text-text-subtle")
+                          }
+                        >
+                          {ins}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+              <tfoot className="text-text-muted">
+                <tr className="border-t border-border/60">
+                  <td className="py-1 pr-2 font-semibold">Total</td>
+                  <td className="py-1 px-2 text-right">
+                    {Object.values(preview.legacyCounts).reduce((s, n) => s + n, 0)}
+                  </td>
+                  <td className="py-1 px-2 text-right">
+                    {Object.values(preview.alreadyMapped).reduce((s, n) => s + n, 0)}
+                  </td>
+                  <td className="py-1 pl-2 text-right text-emerald-800 font-semibold">
+                    {totalWouldInsert}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {totalWouldInsert > 0 ? (
+            <div className="border-t border-border/60 pt-3 space-y-2">
+              <p className="text-xs text-text-muted leading-relaxed">
+                Apply mints {totalWouldInsert} new rows in Luma. A pre-import
+                <strong> snapshot</strong> is taken first so the operation is
+                fully reversible from{" "}
+                <span className="font-mono">/settings/danger-zone</span>. To
+                proceed, type <span className="font-mono font-semibold">APPLY</span> below.
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Input
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder="type APPLY to confirm"
+                  className="max-w-[220px]"
+                  disabled={applyPending}
+                />
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  disabled={applyPending || confirmText !== "APPLY"}
+                  onClick={async () => {
+                    setApplyPending(true);
+                    setApplyResult(null);
+                    try {
+                      const r = await runImportAction();
+                      if (r && "error" in r && r.error) {
+                        setApplyResult({
+                          ok: false,
+                          text: r.error,
+                          details: [],
+                        });
+                      } else if (r && "ok" in r) {
+                        const inserted = r.inserted ?? {};
+                        const lines = Object.entries(inserted)
+                          .filter(([, n]) => (n as number) > 0)
+                          .map(([k, n]) => `${k}: ${n}`);
+                        setApplyResult({
+                          ok: r.ok,
+                          text: `${r.ok ? "Imported" : "Imported with errors"} in ${
+                            r.durationMs ?? 0
+                          }ms · snapshot ${r.snapshot ?? "skipped"}${
+                            r.errorCount ? ` · ${r.errorCount} errors` : ""
+                          }`,
+                          details:
+                            lines.length > 0
+                              ? lines
+                              : ["nothing new — already mapped"],
+                        });
+                        setConfirmText("");
+                      }
+                    } catch (err) {
+                      setApplyResult({
+                        ok: false,
+                        text: err instanceof Error ? err.message : "Apply failed.",
+                        details: [],
+                      });
+                    } finally {
+                      setApplyPending(false);
+                    }
+                  }}
+                >
+                  <Database className="h-3.5 w-3.5" />{" "}
+                  {applyPending
+                    ? "Importing…"
+                    : `Apply (${totalWouldInsert} rows)`}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5">
+              Nothing to insert — every legacy row is already mapped.
+            </p>
+          )}
+        </div>
+      )}
+
+      {applyResult && (
+        <div
+          className={
+            "text-xs rounded-md px-3 py-2 border " +
+            (applyResult.ok
+              ? "text-emerald-800 bg-emerald-50 border-emerald-200"
+              : "text-red-800 bg-red-50 border-red-200")
+          }
+        >
+          <div className="font-medium">{applyResult.text}</div>
+          {applyResult.details.length > 0 && (
+            <ul className="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-x-3 text-text-muted">
+              {applyResult.details.map((d) => (
+                <li key={d} className="font-mono text-[11px] tabular-nums">
+                  {d}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   );

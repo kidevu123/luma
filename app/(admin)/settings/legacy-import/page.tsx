@@ -28,6 +28,7 @@ import {
   CredentialsForm,
   FetchNowButton,
   PathRowActions,
+  RunImportButton,
 } from "./forms";
 
 export const dynamic = "force-dynamic";
@@ -182,8 +183,9 @@ export default async function LegacyImportSettingsPage() {
                   </tbody>
                 </DataTable>
               )}
-              <div className="pt-2 border-t border-border/60">
+              <div className="pt-2 border-t border-border/60 space-y-4">
                 <FetchNowButton />
+                <RunImportButton />
               </div>
             </>
           )}

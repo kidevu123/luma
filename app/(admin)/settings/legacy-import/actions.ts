@@ -13,6 +13,8 @@ import {
 import { writeAudit } from "@/lib/db/audit";
 import { paWhoAmI } from "@/lib/legacy/pa-client";
 import { runFetch } from "@/lib/legacy/fetcher";
+import { runImport, previewImport } from "@/lib/legacy/tt-importer";
+import { createSnapshot } from "@/lib/admin/snapshots";
 
 async function getCompanyId(): Promise<string> {
   const [c] = await db.select({ id: companies.id }).from(companies).limit(1);
@@ -231,5 +233,54 @@ export async function fetchNowAction() {
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Fetch failed." };
+  }
+}
+
+/** Read the latest fetched .db.gz and report how many of each table
+ *  would be inserted vs are already mapped. No DB writes. Owner-only. */
+export async function previewImportAction() {
+  await requireOwner();
+  try {
+    const r = await previewImport({});
+    return {
+      ok: true as const,
+      sourceFile: r.sourceFile,
+      legacyCounts: r.legacyCounts,
+      alreadyMapped: r.alreadyMapped,
+      wouldInsert: r.wouldInsert,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Preview failed." };
+  }
+}
+
+/** Run the SQLite-→-Postgres importer against the most recently
+ *  fetched .db.gz. Takes a Luma snapshot first so a bad result is
+ *  fully reversible. Owner-only. */
+export async function runImportAction(args?: { skipSnapshot?: boolean }) {
+  const actor = await requireOwner();
+  try {
+    const snapshotResult = args?.skipSnapshot
+      ? null
+      : await createSnapshot(actor, "pre-tt-import");
+    const result = await runImport({ actor });
+    revalidatePath("/settings/legacy-import");
+    revalidatePath("/floor-board");
+    revalidatePath("/dashboard");
+    revalidatePath("/inbound");
+    revalidatePath("/batches");
+    return {
+      ok: result.ok,
+      sourceFile: result.sourceFile,
+      legacyCounts: result.legacyCounts,
+      inserted: result.inserted,
+      skipped: result.skipped,
+      errorCount: result.errors.length,
+      firstErrors: result.errors.slice(0, 5),
+      durationMs: result.durationMs,
+      snapshot: snapshotResult?.filename ?? null,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Import failed." };
   }
 }

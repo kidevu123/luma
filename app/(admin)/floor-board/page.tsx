@@ -348,21 +348,6 @@ function machineKindLabel(k: string): string {
 // ─── page ─────────────────────────────────────────────────────────────────
 
 export default async function FloorBoardPage() {
-  try {
-    return await renderFloorBoard();
-  } catch (err) {
-    console.error("[floor-board] FATAL:", err);
-    return (
-      <pre className="m-6 p-4 rounded bg-red-50 border border-red-200 text-xs text-red-900 whitespace-pre-wrap">
-        {`floor-board render failed
-${err instanceof Error ? err.message : String(err)}
-${err instanceof Error && err.stack ? err.stack : ""}`}
-      </pre>
-    );
-  }
-}
-
-async function renderFloorBoard() {
   await requireSession();
   const trace = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
     try {

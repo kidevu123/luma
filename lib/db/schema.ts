@@ -19,6 +19,7 @@ import {
   bigint,
   boolean,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -870,6 +871,172 @@ export const legacyImportRuns = pgTable(
     summary: text("summary"),
   },
   (t) => [index("legacy_import_runs_started_idx").on(t.startedAt)],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Context 5c — Legacy TabletTracker import support
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Two roles:
+//   1. legacyTtIdMap — translates TT integer auto-increment PKs to
+//      Luma UUIDs. Re-running the importer is idempotent because we
+//      check this table before inserting.
+//   2. legacy_* stash tables — preserve TT rows we don't yet have a
+//      clean Luma target for (warehouse_submissions, machine_counts,
+//      etc.) so historical reporting works and a Phase 2 synthesizer
+//      can convert them into Luma workflow_events later.
+
+export const legacyTtIdMap = pgTable(
+  "legacy_tt_id_map",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ttTable: text("tt_table").notNull(),
+    ttId: integer("tt_id").notNull(),
+    lumaTable: text("luma_table").notNull(),
+    lumaId: uuid("luma_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("legacy_tt_id_map_source_unique").on(t.ttTable, t.ttId),
+    index("legacy_tt_id_map_luma_idx").on(t.lumaTable, t.lumaId),
+  ],
+);
+
+export const legacyWarehouseSubmissions = pgTable(
+  "legacy_warehouse_submissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ttId: integer("tt_id").notNull().unique(),
+    payload: jsonb("payload").notNull(),
+    submissionType: text("submission_type"),
+    bagId: uuid("bag_id").references(() => inventoryBags.id),
+    workflowBagId: uuid("workflow_bag_id").references(() => workflowBags.id),
+    employeeName: text("employee_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("legacy_ws_bag_idx").on(t.bagId),
+    index("legacy_ws_wfb_idx").on(t.workflowBagId),
+    index("legacy_ws_type_idx").on(t.submissionType),
+  ],
+);
+
+export const legacyMachineCounts = pgTable(
+  "legacy_machine_counts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ttId: integer("tt_id").notNull().unique(),
+    payload: jsonb("payload").notNull(),
+    tabletTypeId: uuid("tablet_type_id").references(() => tabletTypes.id),
+    machineId: uuid("machine_id").references(() => machines.id),
+    employeeName: text("employee_name"),
+    countDate: date("count_date"),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("legacy_mc_tt_idx").on(t.tabletTypeId),
+    index("legacy_mc_machine_idx").on(t.machineId),
+    index("legacy_mc_date_idx").on(t.countDate),
+  ],
+);
+
+export const legacySubmissionBagDeductions = pgTable(
+  "legacy_submission_bag_deductions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ttId: integer("tt_id").notNull().unique(),
+    legacySubmissionId: uuid("legacy_submission_id")
+      .notNull()
+      .references(() => legacyWarehouseSubmissions.id, {
+        onDelete: "cascade",
+      }),
+    bagId: uuid("bag_id").references(() => inventoryBags.id),
+    tabletsDeducted: integer("tablets_deducted").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("legacy_sbd_submission_idx").on(t.legacySubmissionId),
+    index("legacy_sbd_bag_idx").on(t.bagId),
+  ],
+);
+
+export const legacyBlisterRolls = pgTable(
+  "legacy_blister_rolls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ttId: integer("tt_id").notNull().unique(),
+    machineId: uuid("machine_id").references(() => machines.id),
+    materialType: text("material_type").notNull(),
+    rollCode: text("roll_code").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    startPressCount: doublePrecision("start_press_count").notNull().default(0),
+    endPressCount: doublePrecision("end_press_count"),
+    blistersPerPress: integer("blisters_per_press").notNull().default(1),
+    totalBlisters: doublePrecision("total_blisters"),
+    status: text("status").notNull().default("active"),
+  },
+  (t) => [
+    index("legacy_blister_rolls_machine_idx").on(t.machineId),
+    index("legacy_blister_rolls_status_idx").on(t.status),
+  ],
+);
+
+export const legacyCompressors = pgTable(
+  "legacy_compressors",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ttId: integer("tt_id").notNull().unique(),
+    compressorName: text("compressor_name").notNull(),
+    status: text("status").notNull().default("working"),
+    machineId: uuid("machine_id").references(() => machines.id),
+    notes: text("notes"),
+    isActive: boolean("is_active").notNull().default(true),
+    cost: doublePrecision("cost"),
+    tankSize: text("tank_size"),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (t) => [index("legacy_compressors_machine_idx").on(t.machineId)],
+);
+
+export const legacyPoDamageCloseout = pgTable(
+  "legacy_po_damage_closeout",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ttId: integer("tt_id").notNull().unique(),
+    poId: uuid("po_id").references(() => purchaseOrders.id),
+    poLineId: uuid("po_line_id").references(() => poLines.id),
+    inventoryItemId: text("inventory_item_id"),
+    damageWeightKg: doublePrecision("damage_weight_kg"),
+    estimatedDamagedTablets: integer("estimated_damaged_tablets"),
+    gramsPerTablet: doublePrecision("grams_per_tablet"),
+    weightMissing: boolean("weight_missing").notNull().default(false),
+    weightSource: text("weight_source"),
+    updatedBy: text("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("legacy_po_damage_po_idx").on(t.poId)],
+);
+
+export const legacyAppSettings = pgTable(
+  "legacy_app_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ttId: integer("tt_id").notNull().unique(),
+    settingKey: text("setting_key").notNull(),
+    settingValue: text("setting_value").notNull(),
+    description: text("description"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("legacy_app_settings_key_unique").on(t.settingKey)],
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
