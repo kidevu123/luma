@@ -8,6 +8,7 @@ import {
   Sliders,
   ExternalLink,
   Activity,
+  Plug,
   Wallet as IconWallet,
   Sliders as SettingsIcon,
 } from "lucide-react";
@@ -86,6 +87,25 @@ export default async function SettingsPage() {
                 <ExternalLink className="h-3.5 w-3.5" /> Health check
               </Link>
             </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Plug className="h-4 w-4 text-text-subtle" /> Integrations
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <Button asChild variant="secondary" size="sm" className="w-full justify-start">
+              <Link href="/settings/zoho">
+                <Plug className="h-3.5 w-3.5" /> Zoho Inventory
+              </Link>
+            </Button>
+            <p className="text-[11px] text-text-muted leading-relaxed">
+              Connect Zoho to push finished lots out as purchase receives.
+              Owner-only.
+            </p>
           </CardContent>
         </Card>
 

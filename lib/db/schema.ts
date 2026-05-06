@@ -704,6 +704,33 @@ export const workflowEvents = pgTable(
 // Context 5 — Output (Zoho push, ship/release tracking)
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const zohoCredentials = pgTable(
+  "zoho_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id").notNull(),
+    clientId: text("client_id").notNull(),
+    clientSecret: text("client_secret").notNull(),
+    refreshToken: text("refresh_token").notNull(),
+    accessToken: text("access_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    /** us | eu | in | au | jp — picks the API host. */
+    dataCenter: text("data_center").notNull().default("us"),
+    warehouseId: text("warehouse_id"),
+    isActive: boolean("is_active").notNull().default(true),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedById: uuid("updated_by_id").references(() => users.id),
+  },
+  (t) => [
+    uniqueIndex("zoho_credentials_company_unique").on(t.companyId),
+  ],
+);
+
 export const zohoPushes = pgTable(
   "zoho_pushes",
   {
