@@ -84,6 +84,11 @@ const BOTTLE_LANE = [
 
 // ─── data loaders ─────────────────────────────────────────────────────────
 
+/** Active bags for the live floor's cards list. Bounded to 200 —
+ *  legacy import seeded ~5,300 unfinalized workflow_bags from old TT
+ *  data and rendering them all is slow and useless on a live floor.
+ *  The 200 cap shows the most recent activity; older legacy bags
+ *  are still in the DB for reporting/audit. */
 async function getActiveBags() {
   return db
     .select({
@@ -98,7 +103,8 @@ async function getActiveBags() {
     .leftJoin(products, eq(workflowBags.productId, products.id))
     .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
     .where(isNull(workflowBags.finalizedAt))
-    .orderBy(desc(workflowBags.startedAt));
+    .orderBy(desc(workflowBags.startedAt))
+    .limit(200);
 }
 
 async function getMachineGrid() {

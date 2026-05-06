@@ -2,18 +2,22 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 import { requireOwner } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import {
   legacyImportConfig,
   legacyImportPaths,
   companies,
+  qrCards,
+  workflowBags,
+  legacyTtIdMap,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { paWhoAmI } from "@/lib/legacy/pa-client";
 import { runFetch } from "@/lib/legacy/fetcher";
 import { runImport, previewImport } from "@/lib/legacy/tt-importer";
+import { synthesizeReadModelsFromEvents } from "@/lib/legacy/read-model-synthesizer";
 import { createSnapshot } from "@/lib/admin/snapshots";
 
 async function getCompanyId(): Promise<string> {
@@ -282,5 +286,89 @@ export async function runImportAction(args?: { skipSnapshot?: boolean }) {
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Import failed." };
+  }
+}
+
+/** Release every QR card whose ASSIGNED workflowBag was imported
+ *  from legacy and will never see a BAG_FINALIZED event. Without this
+ *  the cards appear permanently in-use. We move them back to IDLE
+ *  (un-pin from any workflow bag) so the floor can scan them again.
+ *  Owner-only. Audited per card. */
+export async function releaseOrphanedLegacyCardsAction() {
+  const actor = await requireOwner();
+  try {
+    // Find every workflow_bag that came from the legacy import (its
+    // id is in legacy_tt_id_map under tt_table='qr_cards' or
+    // 'workflow_bags') AND has no finalized_at AND no events past
+    // CARD_ASSIGNED in the last 30 days. These are "abandoned"
+    // legacy sessions.
+    const candidates = await db
+      .select({
+        cardId: qrCards.id,
+        workflowBagId: qrCards.assignedWorkflowBagId,
+      })
+      .from(qrCards)
+      .innerJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
+      .innerJoin(
+        legacyTtIdMap,
+        and(
+          eq(legacyTtIdMap.lumaTable, "workflow_bags"),
+          eq(legacyTtIdMap.lumaId, workflowBags.id),
+        ),
+      )
+      .where(
+        and(
+          eq(qrCards.status, "ASSIGNED"),
+          isNull(workflowBags.finalizedAt),
+        ),
+      );
+    if (candidates.length === 0) {
+      return { ok: true as const, released: 0 };
+    }
+    const ids = candidates.map((c) => c.cardId);
+    await db
+      .update(qrCards)
+      .set({ status: "IDLE", assignedWorkflowBagId: null })
+      .where(inArray(qrCards.id, ids));
+    await writeAudit({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action: "legacy_import.release_orphan_cards",
+      targetType: "QrCard",
+      targetId: `bulk:${ids.length}`,
+      after: { releasedCardIds: ids },
+    });
+    revalidatePath("/qr-cards");
+    revalidatePath("/floor-board");
+    return { ok: true as const, released: ids.length };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Release failed." };
+  }
+}
+
+/** Rebuild Luma's rollup tables (read_bag_state, read_bag_metrics,
+ *  read_daily_throughput, read_operator_daily) from workflow_events.
+ *  The importer runs this automatically as its last step; this
+ *  action lets an operator re-run it on demand if rollups drift or
+ *  a new aggregation rule ships. Owner-only. */
+export async function synthesizeReadModelsAction() {
+  const actor = await requireOwner();
+  try {
+    const r = await synthesizeReadModelsFromEvents();
+    revalidatePath("/floor-board");
+    revalidatePath("/dashboard");
+    revalidatePath("/metrics");
+    revalidatePath("/reports");
+    void actor;
+    return {
+      ok: true as const,
+      bagStateRows: r.bagStateRows,
+      bagMetricsRows: r.bagMetricsRows,
+      dailyThroughputRows: r.dailyThroughputRows,
+      operatorDailyRows: r.operatorDailyRows,
+      durationMs: r.durationMs,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Synthesis failed." };
   }
 }

@@ -36,6 +36,7 @@ import {
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
+import { synthesizeReadModelsFromEvents } from "./read-model-synthesizer";
 import {
   openTtDb,
   selectAll,
@@ -1116,6 +1117,24 @@ export async function runImport(args: {
 
   ttDb.close();
 
+  // Synthesize read models from the events we just imported. The
+  // importer inserts workflow_events directly without going through
+  // projectEvent(), so the rollups (read_bag_state / read_bag_metrics
+  // / read_daily_throughput / read_operator_daily) are still empty
+  // for legacy data. This rebuilds them from scratch via SQL.
+  let synthesis: Awaited<ReturnType<typeof synthesizeReadModelsFromEvents>> | null = null;
+  try {
+    synthesis = await synthesizeReadModelsFromEvents();
+  } catch (err) {
+    errors.push({
+      phase: "tablet_types", // pseudo — there isn't a "synthesis" phase enum
+      ttId: null,
+      message:
+        "Read-model synthesis failed: " +
+        (err instanceof Error ? err.message : String(err)),
+    });
+  }
+
   await writeAudit({
     actorId: args.actor.id,
     actorRole: args.actor.role,
@@ -1128,6 +1147,7 @@ export async function runImport(args: {
       inserted,
       skipped,
       errorCount: errors.length,
+      synthesis,
     },
   });
 

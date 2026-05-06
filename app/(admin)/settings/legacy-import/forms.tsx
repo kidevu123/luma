@@ -10,6 +10,8 @@ import {
   Plug,
   Download,
   Database,
+  Recycle,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -22,6 +24,8 @@ import {
   fetchNowAction,
   runImportAction,
   previewImportAction,
+  synthesizeReadModelsAction,
+  releaseOrphanedLegacyCardsAction,
 } from "./actions";
 
 export function CredentialsForm({
@@ -565,6 +569,111 @@ export function RunImportButton() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Post-import maintenance: rebuild rollups + release orphaned cards.
+ *  Both ops are idempotent and safe to re-run; both are owner-only. */
+export function PostImportMaintenance() {
+  const [synthPending, setSynthPending] = React.useState(false);
+  const [synthResult, setSynthResult] = React.useState<string | null>(null);
+  const [synthErr, setSynthErr] = React.useState<string | null>(null);
+  const [releasePending, setReleasePending] = React.useState(false);
+  const [releaseResult, setReleaseResult] = React.useState<string | null>(null);
+  const [releaseErr, setReleaseErr] = React.useState<string | null>(null);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border/70 bg-surface-2/40 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+        Post-import maintenance
+      </div>
+
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="space-y-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={synthPending}
+            onClick={async () => {
+              setSynthPending(true);
+              setSynthResult(null);
+              setSynthErr(null);
+              try {
+                const r = await synthesizeReadModelsAction();
+                if (r && "error" in r && r.error) setSynthErr(r.error);
+                else if (r && "ok" in r) {
+                  setSynthResult(
+                    `bag_state ${r.bagStateRows ?? 0} · bag_metrics ${r.bagMetricsRows ?? 0} · daily_throughput ${r.dailyThroughputRows ?? 0} · operator_daily ${r.operatorDailyRows ?? 0} · ${r.durationMs ?? 0}ms`,
+                  );
+                }
+              } catch (err) {
+                setSynthErr(err instanceof Error ? err.message : "Synthesis failed.");
+              } finally {
+                setSynthPending(false);
+              }
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />{" "}
+            {synthPending ? "Rebuilding…" : "Rebuild read models"}
+          </Button>
+          <p className="text-[11px] text-text-muted max-w-[280px] leading-snug">
+            Aggregates workflow_events into the rollup tables. Auto-runs after
+            every import; rerun if metrics look stale.
+          </p>
+          {synthResult && (
+            <p className="text-[11px] text-emerald-700 font-mono">{synthResult}</p>
+          )}
+          {synthErr && (
+            <p className="text-[11px] text-red-700">{synthErr}</p>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={releasePending}
+            onClick={async () => {
+              if (
+                !confirm(
+                  "Release every QR card pinned to an unfinalized legacy workflow_bag?\n\nThe cards return to IDLE so the floor can scan them again. The legacy workflow_bag rows stay in the DB.",
+                )
+              )
+                return;
+              setReleasePending(true);
+              setReleaseResult(null);
+              setReleaseErr(null);
+              try {
+                const r = await releaseOrphanedLegacyCardsAction();
+                if (r && "error" in r && r.error) setReleaseErr(r.error);
+                else if (r && "ok" in r) {
+                  setReleaseResult(`Released ${r.released ?? 0} card(s).`);
+                }
+              } catch (err) {
+                setReleaseErr(err instanceof Error ? err.message : "Release failed.");
+              } finally {
+                setReleasePending(false);
+              }
+            }}
+          >
+            <Recycle className="h-3.5 w-3.5" />{" "}
+            {releasePending ? "Releasing…" : "Release orphan QR cards"}
+          </Button>
+          <p className="text-[11px] text-text-muted max-w-[280px] leading-snug">
+            Legacy bags never get a BAG_FINALIZED — without this, ASSIGNED
+            cards would stay pinned forever.
+          </p>
+          {releaseResult && (
+            <p className="text-[11px] text-emerald-700">{releaseResult}</p>
+          )}
+          {releaseErr && (
+            <p className="text-[11px] text-red-700">{releaseErr}</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
