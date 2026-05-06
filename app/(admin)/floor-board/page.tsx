@@ -66,6 +66,10 @@ import {
 import { OperatorOnShiftCard } from "./_components/operator-shift";
 import { BottleneckCostCard } from "./_components/bottleneck-cost";
 import {
+  TopInFlightTable,
+  BagInventoryStrip,
+} from "./_components/in-flight-table";
+import {
   getCycleStats,
   getHourlyPace,
   getStationIdleNow,
@@ -79,6 +83,7 @@ import {
   getPauseReasons7d,
   getOperatorsOnShift24h,
   getPauseCostToday,
+  getTopInFlightBags,
 } from "./_loaders";
 
 export const dynamic = "force-dynamic";
@@ -691,6 +696,7 @@ export default async function FloorBoardPage() {
     pauseReasons,
     operatorShift,
     pauseCost,
+    topInFlight,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -724,6 +730,7 @@ export default async function FloorBoardPage() {
     trace("getPauseReasons7d", getPauseReasons7d),
     trace("getOperatorsOnShift24h", getOperatorsOnShift24h),
     trace("getPauseCostToday", getPauseCostToday),
+    trace("getTopInFlightBags", getTopInFlightBags),
   ]);
 
   const allStations = [
@@ -1094,115 +1101,14 @@ export default async function FloorBoardPage() {
         </Card>
       )}
 
-      {/* Bottom data tables */}
-      <div className="grid lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Bag inventory in stock</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {bagInventory.length === 0 ? (
-              <p className="text-sm text-text-muted px-4 py-3">
-                No raw inventory yet. Receive a shipment from /inbound.
-              </p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-surface-2/40 text-[10px] uppercase tracking-wider text-text-subtle">
-                  <tr>
-                    <th className="text-left px-4 py-2 font-medium">Tablet</th>
-                    <th className="text-left px-4 py-2 font-medium">SKU</th>
-                    <th className="text-right px-4 py-2 font-medium">Available</th>
-                    <th className="text-right px-4 py-2 font-medium">In use</th>
-                    <th className="text-right px-4 py-2 font-medium">Emptied</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {bagInventory.map((r, i) => (
-                    <tr key={i}>
-                      <td className="px-4 py-2 font-medium">
-                        {r.tabletName ?? "—"}
-                      </td>
-                      <td className="px-4 py-2 font-mono text-xs text-text-muted">
-                        {r.tabletSku ?? "—"}
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums font-semibold">
-                        {r.available.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-text-muted">
-                        {r.inUse.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-text-subtle">
-                        {r.emptied.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </CardContent>
-        </Card>
+      {/* Compact bag inventory strip — single row of mini-cards
+          (one per tablet type, available count prominent) instead of
+          a full table. The detail breakdown lives on /admin/inventory. */}
+      <BagInventoryStrip rows={bagInventory} />
 
-        {/* Active bags drill-down */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Active bags</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {activeBags.length === 0 ? (
-              <div className="px-4 py-8">
-                <EmptyState
-                  icon={Hourglass}
-                  title="No bags running"
-                  description="Open /floor/<station-token> on a tablet to start scanning."
-                />
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-surface-2/40 text-[10px] uppercase tracking-wider text-text-subtle">
-                  <tr>
-                    <th className="text-left px-4 py-2 font-medium">Bag</th>
-                    <th className="text-left px-4 py-2 font-medium">Product</th>
-                    <th className="text-left px-4 py-2 font-medium">Stage</th>
-                    <th className="text-left px-4 py-2 font-medium">Elapsed</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {activeBags.map((r) => {
-                    const startedMs =
-                      (r.startedAt as unknown as Date)?.getTime?.() ?? 0;
-                    const elapsedMs = startedMs ? Date.now() - startedMs : 0;
-                    return (
-                      <tr key={r.bagId}>
-                        <td className="px-4 py-2 font-mono text-xs">
-                          {r.bagId.slice(0, 8)}
-                        </td>
-                        <td className="px-4 py-2">
-                          {r.product?.name ?? (
-                            <span className="text-text-subtle">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2">
-                          <StatusPill
-                            kind={STAGE_KIND[r.stage ?? "STARTED"] ?? "neutral"}
-                          >
-                            {r.stage ?? "STARTED"}
-                          </StatusPill>
-                          {r.isOnHold && (
-                            <StatusPill kind="warn">on hold</StatusPill>
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-text-muted text-xs tabular-nums">
-                          {fmtElapsed(elapsedMs)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      {/* Top in-flight bags — longest-elapsed-first. Click → bag
+          detail. Bounded to 14d to skip legacy ghost bags. */}
+      <TopInFlightTable rows={topInFlight} />
     </div>
   );
 }
