@@ -60,10 +60,12 @@ export function Sidebar() {
   return (
     <aside className="hidden lg:flex w-60 shrink-0 flex-col bg-surface border-r border-border/70 sticky top-0 h-dvh">
       <div className="px-5 pt-5 pb-4 border-b border-border/60">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-text-subtle">
-          Operations
-        </p>
-        <p className="text-xl font-semibold tracking-tight">Luma</p>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/luma-logo.png"
+          alt="Luma"
+          className="h-9 w-auto block"
+        />
       </div>
       <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
         {SECTIONS.map((sec) => (

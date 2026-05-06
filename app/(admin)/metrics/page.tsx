@@ -17,7 +17,8 @@
 //   9. Material burn — top consumed materials
 
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Download, TrendingUp, ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { db } from "@/lib/db";
 import { sql, gte, eq } from "drizzle-orm";
 import {
@@ -459,23 +460,60 @@ export default async function MetricsPage({
         title="Metrics"
         description={`Last ${days} days · ${totalBags} finalized bags · ${totalUnits.toLocaleString()} units yielded`}
         actions={
-          <div className="flex items-center gap-1">
-            {[7, 30, 90, 365].map((n) => (
-              <Link
-                key={n}
-                href={`/metrics?days=${n}`}
-                className={`text-xs px-2 py-1 rounded-md ${
-                  n === days
-                    ? "bg-brand-700 text-white font-semibold"
-                    : "text-text-muted hover:bg-surface-2"
-                }`}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              {[7, 30, 90, 365].map((n) => (
+                <Link
+                  key={n}
+                  href={`/metrics?days=${n}`}
+                  className={`text-xs px-2 py-1 rounded-md ${
+                    n === days
+                      ? "bg-brand-700 text-white font-semibold"
+                      : "text-text-muted hover:bg-surface-2"
+                  }`}
+                >
+                  {n}d
+                </Link>
+              ))}
+            </div>
+            <Button asChild size="sm" variant="secondary">
+              <a
+                href={`/api/metrics/export?set=bags&days=${days}`}
+                target="_blank"
+                rel="noopener"
               >
-                {n}d
+                <Download className="h-3.5 w-3.5" /> CSV
+              </a>
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/metrics/forecast">
+                <TrendingUp className="h-3.5 w-3.5" /> Forecast
               </Link>
-            ))}
+            </Button>
           </div>
         }
       />
+
+      {/* Quick-jump tiles into per-station deep dives */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {[
+          { lane: "blister", label: "Blister station" },
+          { lane: "card", label: "Card flow" },
+          { lane: "bottle", label: "Bottle flow" },
+          { lane: "packaging", label: "Packaging" },
+        ].map((l) => (
+          <Link
+            key={l.lane}
+            href={`/metrics/${l.lane}?days=${days}`}
+            className="group flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-surface px-3 py-2 hover:border-brand-300 hover:shadow-sm transition-all"
+          >
+            <span className="text-sm font-medium tracking-tight">
+              {l.label}
+            </span>
+            <ArrowRight className="h-3.5 w-3.5 text-text-subtle group-hover:text-brand-700" />
+          </Link>
+        ))}
+      </div>
 
       {/* Top stat strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
