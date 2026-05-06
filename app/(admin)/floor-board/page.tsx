@@ -63,6 +63,8 @@ import {
   FlavorBreakdownCard,
   PauseReasonDonut,
 } from "./_components/breakdown-row";
+import { OperatorOnShiftCard } from "./_components/operator-shift";
+import { BottleneckCostCard } from "./_components/bottleneck-cost";
 import {
   getCycleStats,
   getHourlyPace,
@@ -75,6 +77,8 @@ import {
   getDamageCluster,
   getFlavorBreakdownToday,
   getPauseReasons7d,
+  getOperatorsOnShift24h,
+  getPauseCostToday,
 } from "./_loaders";
 
 export const dynamic = "force-dynamic";
@@ -685,6 +689,8 @@ export default async function FloorBoardPage() {
     damageCluster,
     flavorBreakdown,
     pauseReasons,
+    operatorShift,
+    pauseCost,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -716,6 +722,8 @@ export default async function FloorBoardPage() {
     trace("getDamageCluster", getDamageCluster),
     trace("getFlavorBreakdownToday", getFlavorBreakdownToday),
     trace("getPauseReasons7d", getPauseReasons7d),
+    trace("getOperatorsOnShift24h", getOperatorsOnShift24h),
+    trace("getPauseCostToday", getPauseCostToday),
   ]);
 
   const allStations = [
@@ -1002,6 +1010,12 @@ export default async function FloorBoardPage() {
         />
       </div>
 
+      {/* Bottleneck arrow + cost-of-pause callout. Single big card —
+          left half shows the production flow with the slowest stage
+          chip drawn red, right half shows today's $-cost of pauses
+          using a default $25/hr labor rate. */}
+      <BottleneckCostCard bottleneck={bottleneck} pause={pauseCost} />
+
       {/* Station status grid — one chip per active station, sorted
           worst-status-first so an operator can scan left-to-right
           and spot trouble. Compact 5-col grid on xl. Status dot
@@ -1041,12 +1055,16 @@ export default async function FloorBoardPage() {
         </CardContent>
       </Card>
 
-      {/* Flavor mix today + pause-reason donut last 7d. Two compact
-          analytic cards side-by-side on lg+. Both fail-soft to a
-          short empty-state when nothing's been recorded. */}
-      <div className="grid lg:grid-cols-2 gap-4">
+      {/* Flavor mix today + pause-reason donut last 7d + operators
+          on shift. Three compact analytic cards on lg+. All fail-soft
+          to a short empty-state when nothing's been recorded. */}
+      <div className="grid lg:grid-cols-3 gap-4">
         <FlavorBreakdownCard rows={flavorBreakdown} />
         <PauseReasonDonut rows={pauseReasons} />
+        <OperatorOnShiftCard
+          rows={operatorShift.rows}
+          hasOperatorPayload={operatorShift.hasOperatorPayload}
+        />
       </div>
 
       {machineGrid.orphanStations.length > 0 && (
