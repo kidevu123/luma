@@ -28,6 +28,14 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# postgresql-client + gzip → pg_dump for the admin "Take snapshot"
+# action. The compose stack's db service exposes 5432 over the
+# internal Docker network; pg_dump connects via DATABASE_URL.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      postgresql-client \
+      gzip \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG BUILD_GIT_SHA=dev
 ARG BUILD_GIT_BRANCH=unknown
 ARG BUILD_AT=unknown

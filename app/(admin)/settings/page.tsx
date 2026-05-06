@@ -167,6 +167,25 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card className="border-red-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-700">
+              <Plug className="h-4 w-4" /> Danger zone
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <Button asChild variant="secondary" size="sm" className="w-full justify-start">
+              <Link href="/settings/danger-zone">
+                Database snapshots + reset
+              </Link>
+            </Button>
+            <p className="text-[11px] text-text-muted leading-relaxed">
+              Take a pg_dump snapshot, download it, or wipe production
+              data with a typed-phrase confirmation. Owner-only.
+            </p>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
