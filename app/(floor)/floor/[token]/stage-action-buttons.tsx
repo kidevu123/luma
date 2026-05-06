@@ -18,6 +18,29 @@ import {
   packagingCompleteAction,
 } from "./actions";
 
+// crypto.randomUUID() is only available in secure contexts (HTTPS or
+// localhost). Floor PWA runs over plain HTTP on the LAN, so we fall
+// back to crypto.getRandomValues() which is universally available.
+function newClientEventId(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // fall through
+    }
+  }
+  // RFC 4122 v4 from 16 random bytes.
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  b[6] = ((b[6] ?? 0) & 0x0f) | 0x40;
+  b[8] = ((b[8] ?? 0) & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0"));
+  return `${h[0]}${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}-${h[6]}${h[7]}-${h[8]}${h[9]}-${h[10]}${h[11]}${h[12]}${h[13]}${h[14]}${h[15]}`;
+}
+
 const STAGE_BY_KIND: Record<string, { label: string; eventType: string }[]> = {
   BLISTER: [{ label: "Blister complete", eventType: "BLISTER_COMPLETE" }],
   SEALING: [{ label: "Sealing complete", eventType: "SEALING_COMPLETE" }],
@@ -58,11 +81,17 @@ export function StageActionButtons({
   const stages = STAGE_BY_KIND[stationKind] ?? [];
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
 
-  function baseFd(): FormData {
+  function baseFd(opts: { withClientEventId?: boolean } = {}): FormData {
     const fd = new FormData();
     fd.set("token", token);
     if (workflowBagId) fd.set("workflowBagId", workflowBagId);
     fd.set("stationId", stationId);
+    // Per-click idempotency key — server's partial unique index
+    // turns retries into no-ops. Operator-handoff is exempt (a
+    // re-fire with the same operator code is harmless).
+    if (opts.withClientEventId !== false) {
+      fd.set("clientEventId", newClientEventId());
+    }
     return fd;
   }
 
@@ -70,18 +99,23 @@ export function StageActionButtons({
     if (!workflowBagId) return;
     setPending(eventType);
     setError(null);
-    const fd = baseFd();
-    fd.set("eventType", eventType);
-    if (count) fd.set("countTotal", count);
-    if (operatorCode) {
-      const op = baseFd();
-      op.set("operatorCode", operatorCode);
-      await setOperatorAction(op);
+    try {
+      const fd = baseFd();
+      fd.set("eventType", eventType);
+      if (count) fd.set("countTotal", count);
+      if (operatorCode) {
+        // OPERATOR_CHANGE doesn't get an idempotency key — re-firing
+        // it with the same code is a no-op already.
+        const op = baseFd({ withClientEventId: false });
+        op.set("operatorCode", operatorCode);
+        await setOperatorAction(op);
+      }
+      const r = await fireStageEventAction(fd);
+      setCount("");
+      if (r?.error) setError(r.error);
+    } finally {
+      setPending(null);
     }
-    const r = await fireStageEventAction(fd);
-    setPending(null);
-    setCount("");
-    if (r?.error) setError(r.error);
   }
 
   async function finalize() {
@@ -90,33 +124,42 @@ export function StageActionButtons({
       return;
     setPending("finalize");
     setError(null);
-    const r = await finalizeBagAction(baseFd());
-    setPending(null);
-    if (r?.error) setError(r.error);
+    try {
+      const r = await finalizeBagAction(baseFd());
+      if (r?.error) setError(r.error);
+    } finally {
+      setPending(null);
+    }
   }
 
   async function pause() {
     if (!workflowBagId) return;
     setPending("pause");
     setError(null);
-    const fd = baseFd();
-    fd.set("reason", pauseReason);
-    if (operatorCode) fd.set("operatorCode", operatorCode);
-    const r = await pauseBagAction(fd);
-    setPending(null);
-    setPauseOpen(false);
-    if (r?.error) setError(r.error);
+    try {
+      const fd = baseFd();
+      fd.set("reason", pauseReason);
+      if (operatorCode) fd.set("operatorCode", operatorCode);
+      const r = await pauseBagAction(fd);
+      setPauseOpen(false);
+      if (r?.error) setError(r.error);
+    } finally {
+      setPending(null);
+    }
   }
 
   async function resume() {
     if (!workflowBagId) return;
     setPending("resume");
     setError(null);
-    const fd = baseFd();
-    if (operatorCode) fd.set("operatorCode", operatorCode);
-    const r = await resumeBagAction(fd);
-    setPending(null);
-    if (r?.error) setError(r.error);
+    try {
+      const fd = baseFd();
+      if (operatorCode) fd.set("operatorCode", operatorCode);
+      const r = await resumeBagAction(fd);
+      if (r?.error) setError(r.error);
+    } finally {
+      setPending(null);
+    }
   }
 
   return (
@@ -325,23 +368,27 @@ function PackagingCompleteForm({
           disabled={pending}
           onClick={async () => {
             setPending(true);
-            const fd = new FormData();
-            fd.set("token", token);
-            fd.set("workflowBagId", workflowBagId);
-            fd.set("stationId", stationId);
-            fd.set("masterCases", masterCases || "0");
-            fd.set("displaysMade", displaysMade || "0");
-            fd.set("looseCards", looseCards || "0");
-            fd.set("damagedPackaging", damagedPackaging || "0");
-            fd.set("rippedCards", rippedCards || "0");
-            if (operatorCode) fd.set("operatorCode", operatorCode);
-            const r = await packagingCompleteAction(fd);
-            setPending(false);
-            if (r?.error) {
-              onError(r.error);
-              onClose(false);
-            } else {
-              onClose(true);
+            try {
+              const fd = new FormData();
+              fd.set("token", token);
+              fd.set("workflowBagId", workflowBagId);
+              fd.set("stationId", stationId);
+              fd.set("masterCases", masterCases || "0");
+              fd.set("displaysMade", displaysMade || "0");
+              fd.set("looseCards", looseCards || "0");
+              fd.set("damagedPackaging", damagedPackaging || "0");
+              fd.set("rippedCards", rippedCards || "0");
+              if (operatorCode) fd.set("operatorCode", operatorCode);
+              fd.set("clientEventId", newClientEventId());
+              const r = await packagingCompleteAction(fd);
+              if (r?.error) {
+                onError(r.error);
+                onClose(false);
+              } else {
+                onClose(true);
+              }
+            } finally {
+              setPending(false);
             }
           }}
           className="h-12 rounded-xl bg-emerald-700 text-white text-sm font-semibold disabled:opacity-60"

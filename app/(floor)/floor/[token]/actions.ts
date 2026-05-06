@@ -51,6 +51,23 @@ async function authStation(
   return station;
 }
 
+// UUID v4-ish pattern for the floor-side idempotency token. Optional
+// on the action (legacy clients won't send it), but when present we
+// pass it through to projectEvent so a network retry hits the partial
+// unique index instead of double-firing the stage.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const clientEventIdField = z
+  .string()
+  .regex(UUID_RE, "Invalid client event id.")
+  .optional();
+
+function pickClientEventId(formData: FormData): string | undefined {
+  const raw = formData.get("clientEventId");
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  return UUID_RE.test(raw) ? raw : undefined;
+}
+
 // Allowed event types per station kind. SEALING can't fire blister,
 // PACKAGING can't fire bottle stages, etc. COMBINED is permissive
 // (still card flow only).
@@ -152,6 +169,7 @@ const eventSchema = z.object({
     "BOTTLE_STICKER_COMPLETE",
   ]),
   countTotal: z.coerce.number().int().min(0).max(100000).optional(),
+  clientEventId: clientEventIdField,
 });
 
 export async function fireStageEventAction(
@@ -163,9 +181,11 @@ export async function fireStageEventAction(
     stationId: formData.get("stationId"),
     eventType: formData.get("eventType"),
     countTotal: formData.get("countTotal") || 0,
+    clientEventId: pickClientEventId(formData),
   });
   if (!parsed.success) return { error: "Invalid input." };
-  const { token, workflowBagId, stationId, eventType, countTotal } = parsed.data;
+  const { token, workflowBagId, stationId, eventType, countTotal, clientEventId } =
+    parsed.data;
 
   try {
     const station = await authStation(token, stationId);
@@ -194,6 +214,7 @@ export async function fireStageEventAction(
         stationId,
         eventType,
         payload: countTotal ? { count_total: countTotal } : {},
+        ...(clientEventId ? { clientEventId } : {}),
       });
     });
   } catch (err) {
@@ -213,6 +234,7 @@ const pauseSchema = z.object({
   reason: z.enum(["pvc_swap", "shift_end", "machine_jam", "qa_check", "other"]),
   operatorCode: z.string().max(40).optional(),
   notes: z.string().max(400).optional(),
+  clientEventId: clientEventIdField,
 });
 
 export async function pauseBagAction(
@@ -225,6 +247,7 @@ export async function pauseBagAction(
     reason: formData.get("reason") || "other",
     operatorCode: formData.get("operatorCode") || undefined,
     notes: formData.get("notes") || undefined,
+    clientEventId: pickClientEventId(formData),
   });
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -251,6 +274,9 @@ export async function pauseBagAction(
             : {}),
           ...(parsed.data.notes ? { notes: parsed.data.notes } : {}),
         },
+        ...(parsed.data.clientEventId
+          ? { clientEventId: parsed.data.clientEventId }
+          : {}),
       });
     });
   } catch (err) {
@@ -266,6 +292,7 @@ const resumeSchema = z.object({
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
   operatorCode: z.string().max(40).optional(),
+  clientEventId: clientEventIdField,
 });
 
 export async function resumeBagAction(
@@ -276,6 +303,7 @@ export async function resumeBagAction(
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
     operatorCode: formData.get("operatorCode") || undefined,
+    clientEventId: pickClientEventId(formData),
   });
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -295,6 +323,9 @@ export async function resumeBagAction(
         payload: parsed.data.operatorCode
           ? { operator_code: parsed.data.operatorCode }
           : {},
+        ...(parsed.data.clientEventId
+          ? { clientEventId: parsed.data.clientEventId }
+          : {}),
       });
     });
   } catch (err) {
@@ -460,6 +491,7 @@ const packagingCompleteSchema = z.object({
   damagedPackaging: z.coerce.number().int().min(0).max(100000),
   rippedCards: z.coerce.number().int().min(0).max(100000),
   operatorCode: z.string().max(40).optional(),
+  clientEventId: clientEventIdField,
 });
 
 export async function packagingCompleteAction(
@@ -475,6 +507,7 @@ export async function packagingCompleteAction(
     damagedPackaging: formData.get("damagedPackaging") || 0,
     rippedCards: formData.get("rippedCards") || 0,
     operatorCode: formData.get("operatorCode") || undefined,
+    clientEventId: pickClientEventId(formData),
   });
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -511,6 +544,9 @@ export async function packagingCompleteAction(
             ? { operator_code: parsed.data.operatorCode }
             : {}),
         },
+        ...(parsed.data.clientEventId
+          ? { clientEventId: parsed.data.clientEventId }
+          : {}),
       });
     });
   } catch (err) {
@@ -527,6 +563,7 @@ const finalizeSchema = z.object({
   token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
+  clientEventId: clientEventIdField,
 });
 
 export async function finalizeBagAction(
@@ -536,6 +573,7 @@ export async function finalizeBagAction(
     token: formData.get("token"),
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
+    clientEventId: pickClientEventId(formData),
   });
   if (!parsed.success) return { error: "Invalid input." };
   try {
@@ -551,6 +589,9 @@ export async function finalizeBagAction(
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
         eventType: "BAG_FINALIZED",
+        ...(parsed.data.clientEventId
+          ? { clientEventId: parsed.data.clientEventId }
+          : {}),
       });
     });
   } catch (err) {

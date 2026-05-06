@@ -41,6 +41,11 @@ type EventInput = {
   eventType: WorkflowEventType;
   payload?: Record<string, unknown>;
   occurredAt?: Date;
+  /** Floor-side idempotency key. If a duplicate insert hits the
+   *  partial unique (workflow_bag_id, event_type, client_event_id)
+   *  index we swallow the conflict — the action becomes a no-op
+   *  on retry instead of double-firing the stage. */
+  clientEventId?: string | null;
 };
 
 const STAGE_FOR_EVENT: Record<string, string> = {
@@ -74,13 +79,25 @@ const THROUGHPUT_COLUMN: Record<string, string> = {
  *  directly from a route. */
 export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
   const occurredAt = ev.occurredAt ?? new Date();
-  await tx.insert(workflowEvents).values({
-    workflowBagId: ev.workflowBagId,
-    stationId: ev.stationId ?? null,
-    eventType: ev.eventType,
-    payload: ev.payload ?? {},
-    occurredAt,
-  });
+
+  // Idempotency: if the floor sent a clientEventId, the partial
+  // unique index (workflow_bag_id, event_type, client_event_id)
+  // catches retries. onConflictDoNothing → empty RETURNING means
+  // a previous attempt already landed; bail before touching read
+  // models so we don't double-count throughput / station_live.
+  const inserted = await tx
+    .insert(workflowEvents)
+    .values({
+      workflowBagId: ev.workflowBagId,
+      stationId: ev.stationId ?? null,
+      eventType: ev.eventType,
+      payload: ev.payload ?? {},
+      occurredAt,
+      clientEventId: ev.clientEventId ?? null,
+    })
+    .onConflictDoNothing()
+    .returning({ id: workflowEvents.id });
+  if (inserted.length === 0) return;
 
   // 1. read_station_live — only meaningful when the event has a station
   //    AND the bag isn't being finalized (finalize releases the station).
@@ -118,17 +135,51 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
 
   // 2. read_bag_state — track per-bag stage progression. Forward-only:
   //    the projector ranks stages and refuses to downgrade if a stale
-  //    event lands after a later one. We use a small CASE to compare
-  //    incoming-rank to stored-rank in SQL (keeps the upsert atomic).
+  //    event lands after a later one. Also denormalize productId /
+  //    productName / inventoryBagBatchId / receiptNumber off the
+  //    bag's workflowBags row so every consumer of read_bag_state
+  //    has display-ready columns without an extra join.
   const stage = STAGE_FOR_EVENT[ev.eventType];
   if (stage) {
     const isFinalized = ev.eventType === "BAG_FINALIZED";
     const newRank = stageRank(stage);
+    // Pull denormalized columns once. workflowBags.productId might
+    // be null on the very first stage event but will be set by a
+    // PRODUCT_MAPPED event downstream — the upsert COALESCEs so we
+    // don't clobber a previously-set value with null.
+    const [bagRow] = await tx
+      .select({
+        productId: workflowBags.productId,
+        receiptNumber: workflowBags.receiptNumber,
+        inventoryBagId: workflowBags.inventoryBagId,
+      })
+      .from(workflowBags)
+      .where(eq(workflowBags.id, ev.workflowBagId));
+    let productName: string | null = null;
+    let inventoryBagBatchId: string | null = null;
+    if (bagRow?.productId) {
+      const [p] = await tx
+        .select({ name: products.name })
+        .from(products)
+        .where(eq(products.id, bagRow.productId));
+      productName = p?.name ?? null;
+    }
+    if (bagRow?.inventoryBagId) {
+      const [b] = await tx
+        .select({ batchId: inventoryBags.batchId })
+        .from(inventoryBags)
+        .where(eq(inventoryBags.id, bagRow.inventoryBagId));
+      inventoryBagBatchId = b?.batchId ?? null;
+    }
     await tx
       .insert(readBagState)
       .values({
         workflowBagId: ev.workflowBagId,
         stage,
+        productId: bagRow?.productId ?? null,
+        productName,
+        inventoryBagBatchId,
+        receiptNumber: bagRow?.receiptNumber ?? null,
         isFinalized,
         lastEventAt: occurredAt,
         updatedAt: occurredAt,
@@ -137,6 +188,13 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
         target: readBagState.workflowBagId,
         set: {
           stage: sql`CASE WHEN ${newRank} >= ${storedRankSql()} THEN ${stage} ELSE read_bag_state.stage END`,
+          // COALESCE keeps the first non-null value — late-arriving
+          // PRODUCT_MAPPED won't wipe earlier-set columns; first
+          // PRODUCT_MAPPED also fills any prior null.
+          productId: sql`COALESCE(read_bag_state.product_id, ${bagRow?.productId ?? null})`,
+          productName: sql`COALESCE(read_bag_state.product_name, ${productName})`,
+          inventoryBagBatchId: sql`COALESCE(read_bag_state.inventory_bag_batch_id, ${inventoryBagBatchId})`,
+          receiptNumber: sql`COALESCE(read_bag_state.receipt_number, ${bagRow?.receiptNumber ?? null})`,
           isFinalized: sql`read_bag_state.is_finalized OR ${isFinalized}`,
           lastEventAt: occurredAt,
           updatedAt: occurredAt,
@@ -335,7 +393,17 @@ async function projectMetricsForFinalizedBag(
     }
   }
   function gap(toKey: string): number | null {
-    const idx = stageBoundaries.findIndex((b) => b.key === toKey);
+    // findLastIndex — if the same _COMPLETE event fires twice
+    // (operator correction), use the most recent occurrence so the
+    // gap reflects the actual time spent at this stage including
+    // any rework loop.
+    let idx = -1;
+    for (let i = stageBoundaries.length - 1; i >= 0; i--) {
+      if (stageBoundaries[i]?.key === toKey) {
+        idx = i;
+        break;
+      }
+    }
     if (idx <= 0) return null;
     const prev = stageBoundaries[idx - 1];
     const cur = stageBoundaries[idx];

@@ -698,6 +698,10 @@ export const workflowEvents = pgTable(
     /** Floor-side correlation only. Not identity, not authorization. */
     deviceId: text("device_id"),
     pageSessionId: text("page_session_id"),
+    /** Idempotency key sent by the floor PWA — UUID per click. The
+     *  partial unique index below makes a retried action a no-op
+     *  instead of a double-fire. */
+    clientEventId: text("client_event_id"),
   },
   (t) => [
     index("workflow_events_bag_idx").on(t.workflowBagId),
@@ -712,6 +716,11 @@ export const workflowEvents = pgTable(
     uniqueIndex("workflow_events_finalized_unique")
       .on(t.workflowBagId)
       .where(sql`event_type = 'BAG_FINALIZED'`),
+    // Idempotency: same (bag, event_type, client_event_id) tuple
+    // can only land once. Lets retried floor events no-op cleanly.
+    uniqueIndex("workflow_events_client_event_unique")
+      .on(t.workflowBagId, t.eventType, t.clientEventId)
+      .where(sql`client_event_id IS NOT NULL`),
   ],
 );
 
