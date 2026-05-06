@@ -32,6 +32,7 @@ import {
   PauseCircle,
   ShieldCheck,
   Zap,
+  Layers,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { eq, isNull, isNotNull, desc, sql, and, gte, lt } from "drizzle-orm";
@@ -56,6 +57,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { LiveRefresh } from "./live-refresh";
 import { KpiStrip } from "./_components/kpi-strip";
 import { LifelineGrid } from "./_components/lifeline-cards";
+import { StationGrid } from "./_components/station-grid";
 import {
   getCycleStats,
   getHourlyPace,
@@ -63,6 +65,7 @@ import {
   getIdleCards,
   getMaterialRunwayDays,
   getMachineLifelines,
+  getStationStatusGrid,
 } from "./_loaders";
 
 export const dynamic = "force-dynamic";
@@ -668,6 +671,7 @@ export default async function FloorBoardPage() {
     idleCardsKpi,
     materialRunwayDays,
     machineLifelines,
+    stationStatusGrid,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -694,6 +698,7 @@ export default async function FloorBoardPage() {
     trace("getIdleCards", getIdleCards),
     trace("getMaterialRunwayDays", getMaterialRunwayDays),
     trace("getMachineLifelines", getMachineLifelines),
+    trace("getStationStatusGrid", getStationStatusGrid),
   ]);
 
   const allStations = [
@@ -958,6 +963,25 @@ export default async function FloorBoardPage() {
           }))}
         />
       </div>
+
+      {/* Station status grid — one chip per active station, sorted
+          worst-status-first so an operator can scan left-to-right
+          and spot trouble. Compact 5-col grid on xl. Status dot
+          colour tracks "scanned in last X minutes." */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-brand-700" />
+            Station status
+            <span className="ml-auto text-[11px] font-normal text-text-muted tabular-nums">
+              {stationStatusGrid.length} active · sorted worst-first
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <StationGrid stations={stationStatusGrid} />
+        </CardContent>
+      </Card>
 
       {/* Per-machine "lifeline" cards. One rich card per machine — the
           ops-tv parity centerpiece. Status band, current bag, last
