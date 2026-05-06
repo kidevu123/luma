@@ -5,6 +5,7 @@ import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { CreateMachineForm, CreateStationForm, RotateTokenButton } from "./forms";
+import { CopyFloorUrl } from "./copy-floor-url";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +42,9 @@ export default async function MachinesPage() {
               <tbody>
                 {machines.length === 0 ? (
                   <TR>
-                    <TD className="text-text-subtle text-center py-6">
+                    <TD className="text-text-subtle text-center py-6" colSpan={4}>
                       No machines yet — add one to start scanning.
                     </TD>
-                    <TD />
-                    <TD />
-                    <TD />
                   </TR>
                 ) : (
                   machines.map((m) => (
@@ -74,40 +72,44 @@ export default async function MachinesPage() {
             <Sliders className="h-4 w-4 text-text-subtle" aria-hidden />
           </CardHeader>
           <CardContent className="space-y-4">
-            <DataTable>
-              <THead>
-                <TR>
-                  <TH>Label</TH>
-                  <TH>Kind</TH>
-                  <TH>Machine</TH>
-                  <TH>Token</TH>
-                  <TH className="text-right">Action</TH>
-                </TR>
-              </THead>
-              <tbody>
-                {stationRows.length === 0 ? (
-                  <TR>
-                    <TD className="text-text-subtle text-center py-6" colSpan={5}>
-                      No stations yet.
-                    </TD>
-                  </TR>
-                ) : (
-                  stationRows.map(({ station, machineName }) => (
-                    <TR key={station.id}>
-                      <TD className="font-medium">{station.label}</TD>
-                      <TD className="text-xs text-text-muted">{station.kind}</TD>
-                      <TD className="text-xs text-text-muted">{machineName ?? "—"}</TD>
-                      <TD className="font-mono text-[11px] text-text-muted truncate max-w-[140px]">
-                        {station.scanToken}
-                      </TD>
-                      <TD className="text-right">
-                        <RotateTokenButton stationId={station.id} />
-                      </TD>
-                    </TR>
-                  ))
-                )}
-              </tbody>
-            </DataTable>
+            {stationRows.length === 0 ? (
+              <p className="text-sm text-text-muted">
+                No stations yet. Add one below — it'll get a unique scan
+                URL you can open on a tablet.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {stationRows.map(({ station, machineName }) => (
+                  <li
+                    key={station.id}
+                    className="rounded-lg border border-border/70 bg-surface p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{station.label}</p>
+                        <p className="text-[11px] text-text-subtle">
+                          {station.kind}
+                          {machineName ? ` · ${machineName}` : ""}
+                        </p>
+                      </div>
+                      <RotateTokenButton stationId={station.id} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-text-subtle mb-1">
+                        Floor URL
+                      </p>
+                      <CopyFloorUrl token={station.scanToken} />
+                      <p className="text-[10px] text-text-subtle mt-1.5 leading-relaxed">
+                        Open this URL on the tablet at the station. The
+                        scan token is the auth — anyone with the URL can
+                        record events at that station, so rotate it if
+                        a tablet walks off.
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
             <CreateStationForm machines={machines} />
           </CardContent>
         </Card>
