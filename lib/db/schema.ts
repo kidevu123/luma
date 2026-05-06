@@ -165,6 +165,34 @@ export const workflowEventTypeEnum = pgEnum("workflow_event_type", [
   "BAG_FINALIZED",
   // Token rotation audit
   "STATION_SCAN_TOKEN_ROTATED",
+  // ─── Phase A additions (production-intelligence rebuild) ───
+  // Machine downtime — first-class, separate from BAG_PAUSED which
+  // tracks bag-level operational pauses (PVC swap, shift end, jam).
+  "DOWNTIME_STARTED",
+  "DOWNTIME_ENDED",
+  // Material swap mid-run (PVC roll, foil change, etc.). Distinct
+  // from MATERIAL_CONSUMED which is a tally projection.
+  "MATERIAL_CHANGED",
+  // QA holds at the bag level — complement BATCH_HELD which is
+  // batch-wide. Per-bag holds let a single contaminated/suspect bag
+  // be parked without quarantining its whole batch.
+  "QA_HOLD_STARTED",
+  "QA_HOLD_RELEASED",
+  // Rework lifecycle. REWORK_SENT marks units returning to a prior
+  // station; REWORK_RECEIVED marks the receiving station accepting
+  // them. Cycle-time math must subtract rework time to avoid penalty.
+  "REWORK_SENT",
+  "REWORK_RECEIVED",
+  // Hard scrap — distinct from rework. Removes units from yield.
+  "SCRAP_RECORDED",
+  // Packaging-material movements — issued from store to line, then
+  // returned (typical end-of-run leftovers). Lets material burn
+  // reconcile against actual issuance.
+  "PACKAGING_MATERIAL_ISSUED",
+  "PACKAGING_MATERIAL_RETURNED",
+  // Finished goods release — fires when a finishedLot moves from
+  // PENDING_QC → RELEASED. Decouples QC release from BAG_FINALIZED.
+  "FINISHED_GOODS_RELEASED",
 ]);
 
 export const finishedLotStatusEnum = pgEnum("finished_lot_status", [
@@ -1040,6 +1068,192 @@ export const legacyAppSettings = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Context 5b — Standards / config (Phase A of production-intelligence rebuild)
+//
+// Without these tables, true OEE / on-time completion / labor cost are
+// impossible to compute. The metric layer refuses to display those KPIs
+// until the relevant standards row exists. Each table is empty by default;
+// the user fills them in via the Standards Admin UI (Phase D).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Shift definitions — drive Availability denominator for OEE.
+ *
+ * Multiple calendars supported (e.g. weekday-shift vs weekend-shift).
+ * `effectiveFrom` lets calendars version without losing history.
+ * `plannedBreakMinutes` is what's subtracted from the shift duration
+ * to get planned production time.
+ *
+ * Empty by default. Until at least one calendar row matches a given
+ * date+station, OEE Availability is "Insufficient data". */
+export const productionCalendars = pgTable(
+  "production_calendars",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** Inclusive start of validity. */
+    effectiveFrom: date("effective_from").notNull(),
+    /** Exclusive end. NULL = open-ended. */
+    effectiveTo: date("effective_to"),
+    /** "08:00" 24-hour. Local time per company.timezone. */
+    shiftStart: text("shift_start").notNull(),
+    /** "17:00" 24-hour. May cross midnight (e.g. "22:00"→"06:00"); the
+     *  metric layer interprets shift_end <= shift_start as next-day. */
+    shiftEnd: text("shift_end").notNull(),
+    plannedBreakMinutes: integer("planned_break_minutes").notNull().default(0),
+    /** Day-of-week mask. Bit 0 = Sunday … bit 6 = Saturday. 0b1111100 (124) = Mon–Fri. */
+    daysOfWeekMask: integer("days_of_week_mask").notNull().default(127),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("production_calendars_effective_idx").on(t.effectiveFrom, t.effectiveTo),
+  ],
+);
+
+/** Per-(station, product) ideal cycle and target rate. Drives the
+ *  Performance factor in OEE and the "is this run slow?" detection.
+ *
+ *  - `idealCycleSeconds`: ideal time per UNIT of `outputUnit`. NULL
+ *    = no standard known; performance unmeasurable.
+ *  - `targetUnitsPerHour`: alternate way to express the same thing
+ *    (some teams prefer rate). Either field can be NULL; metric
+ *    layer prefers idealCycleSeconds when both present.
+ *  - `expectedYieldPct`: 0–100; sets the Quality benchmark.
+ *  - `outputUnit`: which unit type the standard applies to —
+ *    "BAG", "DISPLAY", "CASE", "TABLET", "BOTTLE". Different
+ *    stations measure differently; explicit unit avoids confusion.
+ *  - `effectiveFrom`/`effectiveTo`: versioned, like calendars.
+ *
+ *  Either station_id or machine_id is required (XOR). station-level
+ *  standards are most specific (a sealing line on heat-sealer-2);
+ *  machine-level fallback covers anything-on-DPP115. */
+export const stationStandards = pgTable(
+  "station_standards",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stationId: uuid("station_id").references(() => stations.id, {
+      onDelete: "cascade",
+    }),
+    machineId: uuid("machine_id").references(() => machines.id, {
+      onDelete: "cascade",
+    }),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    idealCycleSeconds: numeric("ideal_cycle_seconds", { precision: 10, scale: 3 }),
+    targetUnitsPerHour: numeric("target_units_per_hour", { precision: 10, scale: 3 }),
+    expectedYieldPct: numeric("expected_yield_pct", { precision: 5, scale: 2 }),
+    outputUnit: text("output_unit").notNull(),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Cannot have both station and machine set, must have at least
+    // one. Enforced via the metric-layer write-path; the constraint
+    // here documents the intent for SQL readers.
+    index("station_standards_lookup_idx").on(t.stationId, t.productId, t.effectiveFrom),
+    index("station_standards_machine_lookup_idx").on(t.machineId, t.productId, t.effectiveFrom),
+    index("station_standards_active_idx").on(t.isActive),
+  ],
+);
+
+/** Hourly rate per role. Burden multiplier (e.g. 1.30 for benefits +
+ *  payroll taxes) is separate from the base rate so the burdened
+ *  rate can be recomputed without rewriting history. Empty by
+ *  default; labor cost shows "No labor rate configured" until at
+ *  least one effective row exists for the role at the given date. */
+export const laborRates = pgTable(
+  "labor_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Free-text role tag — matches the operator's role on the
+     *  floor (e.g. "BLISTER_OPERATOR", "PACKAGING", "SEALING"). */
+    role: text("role").notNull(),
+    /** Cents per hour. Integer (per design rule #2: no floats). */
+    hourlyRateCents: integer("hourly_rate_cents").notNull(),
+    /** 1.000 = no burden. 1.300 = 30% burden. precision 5 scale 3
+     *  covers 0.000–99.999. */
+    burdenMultiplier: numeric("burden_multiplier", { precision: 5, scale: 3 })
+      .notNull()
+      .default("1.000"),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("labor_rates_role_effective_idx").on(t.role, t.effectiveFrom),
+  ],
+);
+
+/** Order/batch due dates for on-time completion tracking. Without
+ *  due targets, the metric layer refuses to compute schedule gap or
+ *  on-time-completion KPIs. */
+export const dueTargets = pgTable(
+  "due_targets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Loose link — could be a PO, a sales-order ID from Zoho, or
+     *  an internal batch number. Free text so we don't constrain
+     *  what the user wants to track. */
+    referenceKind: text("reference_kind").notNull(),
+    referenceId: text("reference_id").notNull(),
+    /** What we're trying to deliver. NULL productId = "any product
+     *  to satisfy the order quantity". */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    targetQuantity: integer("target_quantity").notNull(),
+    /** Same lexicon as stationStandards.outputUnit. */
+    targetUnit: text("target_unit").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    /** 1 = top priority. Higher = lower urgency. */
+    priority: integer("priority").notNull().default(50),
+    /** Filled when satisfied. NULL while open. */
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("due_targets_reference_unique").on(t.referenceKind, t.referenceId, t.productId),
+    index("due_targets_due_at_idx").on(t.dueAt),
+    index("due_targets_open_idx").on(t.completedAt),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Context 6 — Read models (denormalized projections, refreshed by pg-boss
 //                          jobs that listen to workflow_events.pg_notify)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1221,6 +1435,123 @@ export const readMaterialBurn = pgTable(
       t.day,
       t.packagingMaterialId,
     ),
+  ],
+);
+
+// ─── Phase A read-models (production-intelligence rebuild) ──────────────────
+// Note on bag genealogy: the user's spec mentions read_bag_genealogy. We are
+// intentionally NOT materialising it. workflow_events is already an append-
+// only chronological event stream keyed on workflow_bag_id; selecting
+// `where workflow_bag_id = $1 order by occurred_at, id` returns the exact
+// genealogy with all metadata (station, machine, operator, payload) preserved.
+// A materialised view would just be a duplicate index. Genealogy reads in the
+// metric layer go straight at the event log, with sub-millisecond performance
+// from the existing workflow_events_bag_idx index.
+
+/** Live per-stage queue snapshot — drives bottleneck detection and the
+ *  "oldest waiting bag" KPI. One row per stage. Updated by the projector
+ *  on every stage event. Empty when no bags exist in flight. */
+export const readQueueState = pgTable(
+  "read_queue_state",
+  {
+    /** "BLISTER_QUEUE" | "POST_BLISTER_STAGING" | "SEALING_QUEUE" |
+     *  "POST_SEAL_STAGING" | "PACKAGING_QUEUE" | "BOTTLE_FILL_QUEUE" |
+     *  "BOTTLE_STICKER_QUEUE" | "BOTTLE_INDUCTION_QUEUE" |
+     *  "FINISHED_GOODS_QUEUE". Stage keys are stable string IDs the UI
+     *  maps to localized labels. */
+    stageKey: text("stage_key").primaryKey(),
+    /** Count of bags currently in this queue/stage. */
+    wip: integer("wip").notNull().default(0),
+    /** Age in seconds of the oldest bag in this queue. NULL when empty. */
+    oldestAgeSeconds: integer("oldest_age_seconds"),
+    /** Mean queue age across bags in this stage. NULL when empty. */
+    avgAgeSeconds: integer("avg_age_seconds"),
+    /** 90th-percentile queue age. NULL when fewer than 5 bags. */
+    p90AgeSeconds: integer("p90_age_seconds"),
+    /** Bags in this queue older than the configured queue-aging
+     *  threshold (default: 4 hours). */
+    bagsOverThreshold: integer("bags_over_threshold").notNull().default(0),
+    /** "EMPTY" | "FLOWING" | "AGING" | "STALLED" — high-level
+     *  status tag the floor board renders as a colored chip. */
+    queueStatus: text("queue_status").notNull().default("EMPTY"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+
+/** Per-(day, sku) rollup — drives flavor / SKU analytics. Separates
+ *  unit types so display vs case vs tablet aren't ever conflated. */
+export const readSkuDaily = pgTable(
+  "read_sku_daily",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    day: date("day").notNull(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Denormalized for fast leaderboard rendering. */
+    productSku: text("product_sku").notNull(),
+    productKind: text("product_kind").notNull(),
+    /** Tablets pulled from inventoryBags toward this SKU's bags today. */
+    tabletsConsumed: integer("tablets_consumed").notNull().default(0),
+    bagsCompleted: integer("bags_completed").notNull().default(0),
+    displaysCompleted: integer("displays_completed").notNull().default(0),
+    casesCompleted: integer("cases_completed").notNull().default(0),
+    bottlesCompleted: integer("bottles_completed").notNull().default(0),
+    looseCards: integer("loose_cards").notNull().default(0),
+    looseDisplays: integer("loose_displays").notNull().default(0),
+    damages: integer("damages").notNull().default(0),
+    rework: integer("rework").notNull().default(0),
+    scrap: integer("scrap").notNull().default(0),
+    /** Average per-bag lead time in seconds across bags finalised today. */
+    avgLeadTimeSeconds: integer("avg_lead_time_seconds"),
+    /** Average active runtime per bag in seconds across bags finalised today. */
+    avgCycleSeconds: integer("avg_cycle_seconds"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("read_sku_daily_day_product_unique").on(t.day, t.productId),
+    index("read_sku_daily_day_idx").on(t.day),
+  ],
+);
+
+/** Per-bag pill-count reconciliation. Fills out as the bag progresses;
+ *  finalised when BAG_FINALIZED fires. Variance is `received - (consumed
+ *  + scrap + remaining)`; an estimated flag warns the UI when one of
+ *  the components had to be inferred. */
+export const readMaterialReconciliation = pgTable(
+  "read_material_reconciliation",
+  {
+    workflowBagId: uuid("workflow_bag_id")
+      .primaryKey()
+      .references(() => workflowBags.id, { onDelete: "cascade" }),
+    receivedQty: integer("received_qty"),
+    consumedQty: integer("consumed_qty"),
+    finishedQty: integer("finished_qty"),
+    scrapQty: integer("scrap_qty"),
+    remainingQty: integer("remaining_qty"),
+    /** received - consumed - scrap - remaining. Signed: negative
+     *  means more output than input (suggests counter error / typo). */
+    varianceQty: integer("variance_qty"),
+    /** Expressed as percent of receivedQty, signed. Stored numeric to
+     *  preserve precision on small bags. */
+    variancePct: numeric("variance_pct", { precision: 7, scale: 3 }),
+    /** TRUE when at least one component (consumed/scrap/remaining) was
+     *  estimated rather than directly recorded. UI must label estimated. */
+    isEstimated: boolean("is_estimated").notNull().default(false),
+    /** What inputs were missing, comma-separated tags: "consumed",
+     *  "remaining", "scrap" — for the UI to label gaps explicitly. */
+    missingInputs: text("missing_inputs"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("read_material_recon_variance_idx").on(t.varianceQty),
+    index("read_material_recon_estimated_idx").on(t.isEstimated),
   ],
 );
 
