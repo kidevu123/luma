@@ -55,12 +55,14 @@ import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { LiveRefresh } from "./live-refresh";
 import { KpiStrip } from "./_components/kpi-strip";
+import { LifelineGrid } from "./_components/lifeline-cards";
 import {
   getCycleStats,
   getHourlyPace,
   getStationIdleNow,
   getIdleCards,
   getMaterialRunwayDays,
+  getMachineLifelines,
 } from "./_loaders";
 
 export const dynamic = "force-dynamic";
@@ -665,6 +667,7 @@ export default async function FloorBoardPage() {
     stationIdle,
     idleCardsKpi,
     materialRunwayDays,
+    machineLifelines,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -690,6 +693,7 @@ export default async function FloorBoardPage() {
     trace("getStationIdleNow", getStationIdleNow),
     trace("getIdleCards", getIdleCards),
     trace("getMaterialRunwayDays", getMaterialRunwayDays),
+    trace("getMachineLifelines", getMachineLifelines),
   ]);
 
   const allStations = [
@@ -955,23 +959,25 @@ export default async function FloorBoardPage() {
         />
       </div>
 
-      {/* Machine cards grouped by lane */}
-      {blisterMachines.length > 0 && (
-        <MachineSection
-          title="Blister / Card machines"
-          accent="text-brand-700"
-          machines={blisterMachines}
-          bagDetailById={machineGrid.bagDetailById}
-        />
-      )}
-      {bottleMachines.length > 0 && (
-        <MachineSection
-          title="Bottle flow machines"
-          accent="text-emerald-700"
-          machines={bottleMachines}
-          bagDetailById={machineGrid.bagDetailById}
-        />
-      )}
+      {/* Per-machine "lifeline" cards. One rich card per machine — the
+          ops-tv parity centerpiece. Status band, current bag, last
+          scan, today, cycle vs product 7d-avg, compressors, 24h
+          sparkline. Sorted by name — running/idle/down all in one grid
+          since the band makes status legible at a glance. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-brand-700" />
+            Machine lifelines
+            <span className="ml-auto text-[11px] font-normal text-text-muted tabular-nums">
+              {machineLifelines.length} active · 24h heartbeat
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <LifelineGrid machines={machineLifelines} />
+        </CardContent>
+      </Card>
       {machineGrid.orphanStations.length > 0 && (
         <Card>
           <CardHeader>
