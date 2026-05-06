@@ -58,6 +58,7 @@ import { LiveRefresh } from "./live-refresh";
 import { KpiStrip } from "./_components/kpi-strip";
 import { LifelineGrid } from "./_components/lifeline-cards";
 import { StationGrid } from "./_components/station-grid";
+import { AlertsFeed } from "./_components/alerts-feed";
 import {
   getCycleStats,
   getHourlyPace,
@@ -66,6 +67,8 @@ import {
   getMaterialRunwayDays,
   getMachineLifelines,
   getStationStatusGrid,
+  getLaneImbalanceChip,
+  getDamageCluster,
 } from "./_loaders";
 
 export const dynamic = "force-dynamic";
@@ -672,6 +675,8 @@ export default async function FloorBoardPage() {
     materialRunwayDays,
     machineLifelines,
     stationStatusGrid,
+    laneImbalanceChip,
+    damageCluster,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -699,6 +704,8 @@ export default async function FloorBoardPage() {
     trace("getMaterialRunwayDays", getMaterialRunwayDays),
     trace("getMachineLifelines", getMachineLifelines),
     trace("getStationStatusGrid", getStationStatusGrid),
+    trace("getLaneImbalanceChip", getLaneImbalanceChip),
+    trace("getDamageCluster", getDamageCluster),
   ]);
 
   const allStations = [
@@ -914,7 +921,10 @@ export default async function FloorBoardPage() {
         </Card>
       )}
 
-      {/* Flow lanes + alerts. Two-thirds / one-third split on lg+ */}
+      {/* Flow lanes + rich alerts feed. 2/3 + 1/3 on lg+. The alerts
+          feed combines forgotten bags, stalled bags, stuck-paused,
+          batch holds, lane imbalance and damage clusters into a single
+          chronologically-sorted action list with click-through CTAs. */}
       <div className="grid lg:grid-cols-[2fr_1fr] gap-4">
         <div className="space-y-3">
           <FlowLane
@@ -936,7 +946,14 @@ export default async function FloorBoardPage() {
             machinesByStage={bottleMachines}
           />
         </div>
-        <AlertsPanel
+        <AlertsFeed
+          forgotten={forgottenBags.map((f) => ({
+            bagId: f.bagId,
+            pausedAt: f.pausedAt,
+            productName: f.productName,
+            receiptNumber: f.receiptNumber,
+            stage: f.stage,
+          }))}
           stalled={alerts.stalled.map((s) => ({
             bagId: s.bagId,
             productName: s.productName,
@@ -961,6 +978,17 @@ export default async function FloorBoardPage() {
             reason: h.hold.reason,
             openedAt: h.hold.openedAt as unknown as Date,
           }))}
+          laneImbalanceSide={laneImbalanceChip.imbalanceSide}
+          laneImbalanceDetail={
+            laneImbalanceChip.imbalanceSide === "card" &&
+            laneImbalanceChip.card !== null
+              ? `${laneImbalanceChip.card.toFixed(2)}× blister/packaged (24h)`
+              : laneImbalanceChip.imbalanceSide === "bottle" &&
+                  laneImbalanceChip.bottle !== null
+                ? `${laneImbalanceChip.bottle.toFixed(2)}× handpack/sticker (24h)`
+                : null
+          }
+          damageCluster={damageCluster}
         />
       </div>
 
