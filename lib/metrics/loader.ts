@@ -95,7 +95,7 @@ export async function loadMetrics(lane: Lane, days: number) {
       LEFT JOIN stations s ON s.id = p.station_id
       LEFT JOIN machines m ON m.id = s.machine_id
       WHERE p.event_type = 'BAG_PAUSED'
-        AND p.occurred_at >= ${since}
+        AND p.occurred_at >= ${since.toISOString()}::timestamptz
     )
     SELECT
       reason,

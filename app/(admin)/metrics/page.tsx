@@ -138,7 +138,7 @@ async function getDowntimeByReason(days: number) {
         ) AS resumed_at
       FROM workflow_events p
       WHERE p.event_type = 'BAG_PAUSED'
-        AND p.occurred_at >= ${since}
+        AND p.occurred_at >= ${since.toISOString()}::timestamptz
     )
     SELECT
       reason,
@@ -173,7 +173,7 @@ async function getMachineDowntime(days: number) {
       JOIN stations s ON s.id = p.station_id
       JOIN machines m ON m.id = s.machine_id
       WHERE p.event_type = 'BAG_PAUSED'
-        AND p.occurred_at >= ${since}
+        AND p.occurred_at >= ${since.toISOString()}::timestamptz
         AND s.machine_id IS NOT NULL
     )
     SELECT
@@ -203,7 +203,7 @@ async function getStationActivity(days: number) {
       events: sql<number>`(
         SELECT COUNT(*)::int FROM workflow_events we
         WHERE we.station_id = ${stations.id}
-          AND we.occurred_at >= ${since}
+          AND we.occurred_at >= ${since.toISOString()}::timestamptz
       )`,
       lastActivity: sql<string | null>`(
         SELECT MAX(we.occurred_at) FROM workflow_events we
