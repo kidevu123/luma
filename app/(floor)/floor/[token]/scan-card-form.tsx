@@ -1,16 +1,20 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { ScanLine } from "lucide-react";
 import { scanCardAction } from "./actions";
 
 export function ScanCardForm({
+  token,
   stationId,
   idleCards,
 }: {
+  token: string;
   stationId: string;
   idleCards: { id: string; label: string; scanToken: string }[];
 }) {
+  const router = useRouter();
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -19,12 +23,17 @@ export function ScanCardForm({
       action={async (form) => {
         setPending(true);
         setError(null);
-        const r = await scanCardAction(form);
-        setPending(false);
-        if (r?.error) setError(r.error);
+        try {
+          const r = await scanCardAction(form);
+          if (r?.error) setError(r.error);
+          else router.refresh();
+        } finally {
+          setPending(false);
+        }
       }}
       className="space-y-3"
     >
+      <input type="hidden" name="token" value={token} />
       <input type="hidden" name="stationId" value={stationId} />
       <select
         name="cardId"

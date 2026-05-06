@@ -32,11 +32,13 @@ const STAGE_BY_KIND: Record<string, { label: string; eventType: string }[]> = {
 };
 
 export function StageActionButtons({
+  token,
   stationId,
   stationKind,
   workflowBagId,
   isPaused = false,
 }: {
+  token: string;
   stationId: string;
   stationKind: string;
   workflowBagId: string | null;
@@ -56,21 +58,23 @@ export function StageActionButtons({
   const stages = STAGE_BY_KIND[stationKind] ?? [];
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
 
+  function baseFd(): FormData {
+    const fd = new FormData();
+    fd.set("token", token);
+    if (workflowBagId) fd.set("workflowBagId", workflowBagId);
+    fd.set("stationId", stationId);
+    return fd;
+  }
+
   async function fire(eventType: string) {
     if (!workflowBagId) return;
     setPending(eventType);
     setError(null);
-    const fd = new FormData();
-    fd.set("workflowBagId", workflowBagId);
-    fd.set("stationId", stationId);
+    const fd = baseFd();
     fd.set("eventType", eventType);
     if (count) fd.set("countTotal", count);
     if (operatorCode) {
-      // Stamp operator on the event payload via OPERATOR_CHANGE
-      // first so this turn's operator is captured in read_bag_state.
-      const op = new FormData();
-      op.set("workflowBagId", workflowBagId);
-      op.set("stationId", stationId);
+      const op = baseFd();
       op.set("operatorCode", operatorCode);
       await setOperatorAction(op);
     }
@@ -82,11 +86,11 @@ export function StageActionButtons({
 
   async function finalize() {
     if (!workflowBagId) return;
+    if (!confirm("Finalize this bag? The card returns to the IDLE pool."))
+      return;
     setPending("finalize");
     setError(null);
-    const fd = new FormData();
-    fd.set("workflowBagId", workflowBagId);
-    const r = await finalizeBagAction(fd);
+    const r = await finalizeBagAction(baseFd());
     setPending(null);
     if (r?.error) setError(r.error);
   }
@@ -95,9 +99,7 @@ export function StageActionButtons({
     if (!workflowBagId) return;
     setPending("pause");
     setError(null);
-    const fd = new FormData();
-    fd.set("workflowBagId", workflowBagId);
-    fd.set("stationId", stationId);
+    const fd = baseFd();
     fd.set("reason", pauseReason);
     if (operatorCode) fd.set("operatorCode", operatorCode);
     const r = await pauseBagAction(fd);
@@ -110,9 +112,7 @@ export function StageActionButtons({
     if (!workflowBagId) return;
     setPending("resume");
     setError(null);
-    const fd = new FormData();
-    fd.set("workflowBagId", workflowBagId);
-    fd.set("stationId", stationId);
+    const fd = baseFd();
     if (operatorCode) fd.set("operatorCode", operatorCode);
     const r = await resumeBagAction(fd);
     setPending(null);
@@ -253,6 +253,7 @@ export function StageActionButtons({
       {/* Packaging-complete rich form */}
       {packagingOpen && (
         <PackagingCompleteForm
+          token={token}
           workflowBagId={workflowBagId}
           stationId={stationId}
           operatorCode={operatorCode}
@@ -268,12 +269,14 @@ export function StageActionButtons({
 }
 
 function PackagingCompleteForm({
+  token,
   workflowBagId,
   stationId,
   operatorCode,
   onClose,
   onError,
 }: {
+  token: string;
   workflowBagId: string;
   stationId: string;
   operatorCode: string;
@@ -323,6 +326,7 @@ function PackagingCompleteForm({
           onClick={async () => {
             setPending(true);
             const fd = new FormData();
+            fd.set("token", token);
             fd.set("workflowBagId", workflowBagId);
             fd.set("stationId", stationId);
             fd.set("masterCases", masterCases || "0");

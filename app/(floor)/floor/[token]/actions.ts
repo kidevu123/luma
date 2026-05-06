@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   qrCards,
@@ -10,17 +10,69 @@ import {
   workflowBags,
   inventoryBags,
   batches,
+  readBagState,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
 
-// Floor JSON paths are anonymous (no Authentik). Authorization is via
-// the station's scan_token in the URL. Card scan creates a workflow
-// bag + CARD_ASSIGNED event in one transaction. Every workflow_event
-// goes through projectEvent() so read_station_live + read_bag_state
-// are correct the moment the action returns.
+// Floor PWA actions are anonymous (no admin login). Authorization is
+// the station's scan_token, which lives in the URL. Every action MUST
+// take the token, look up the station, and then refuse if the
+// stationId in the form doesn't match the URL's station — otherwise
+// any anonymous client could POST events to any station by hand.
+
+type StationRow = typeof stations.$inferSelect;
+
+/** Resolve and lock a station by its URL scan token. Returns null
+ *  if no match — caller should reject the request. */
+async function resolveStation(token: string): Promise<StationRow | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
+    return null;
+  }
+  const [row] = await db
+    .select()
+    .from(stations)
+    .where(eq(stations.scanToken, token));
+  return row ?? null;
+}
+
+/** Compose the per-action wrapper: validate token + stationId
+ *  matches, return the resolved station so the action can use it. */
+async function authStation(
+  token: string,
+  stationIdFromForm: string,
+): Promise<StationRow> {
+  const station = await resolveStation(token);
+  if (!station) throw new Error("Invalid station token.");
+  if (station.id !== stationIdFromForm) {
+    // Token doesn't own the station the form is targeting — block.
+    throw new Error("Station mismatch.");
+  }
+  return station;
+}
+
+// Allowed event types per station kind. SEALING can't fire blister,
+// PACKAGING can't fire bottle stages, etc. COMBINED is permissive
+// (still card flow only).
+const ALLOWED_EVENTS_BY_KIND: Record<string, string[]> = {
+  BLISTER: ["BLISTER_COMPLETE"],
+  SEALING: ["SEALING_COMPLETE"],
+  PACKAGING: ["PACKAGING_SNAPSHOT", "PACKAGING_COMPLETE"],
+  BOTTLE_HANDPACK: ["BOTTLE_HANDPACK_COMPLETE"],
+  BOTTLE_CAP_SEAL: ["BOTTLE_CAP_SEAL_COMPLETE"],
+  BOTTLE_STICKER: ["BOTTLE_STICKER_COMPLETE"],
+  COMBINED: [
+    "BLISTER_COMPLETE",
+    "SEALING_COMPLETE",
+    "PACKAGING_SNAPSHOT",
+    "PACKAGING_COMPLETE",
+  ],
+};
+
+// ── scan card ──────────────────────────────────────────────────────────────
 
 const scanSchema = z.object({
+  token: z.string(),
   stationId: z.string().uuid(),
   cardId: z.string().uuid(),
 });
@@ -29,28 +81,30 @@ export async function scanCardAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: true } | void> {
   const parsed = scanSchema.safeParse({
+    token: formData.get("token"),
     stationId: formData.get("stationId"),
     cardId: formData.get("cardId"),
   });
   if (!parsed.success) return { error: "Invalid input." };
-  const { stationId, cardId } = parsed.data;
+  const { token, stationId, cardId } = parsed.data;
 
   try {
+    const station = await authStation(token, stationId);
     await db.transaction(async (tx) => {
-      const [station] = await tx
+      // FOR UPDATE prevents the IDLE→ASSIGNED race where two
+      // concurrent scanners both pass the IDLE check.
+      await tx.execute(
+        sql`SELECT 1 FROM qr_cards WHERE id = ${cardId} FOR UPDATE`,
+      );
+      const [card] = await tx
         .select()
-        .from(stations)
-        .where(eq(stations.id, stationId));
-      if (!station) throw new Error("Station not found.");
-      const [card] = await tx.select().from(qrCards).where(eq(qrCards.id, cardId));
+        .from(qrCards)
+        .where(eq(qrCards.id, cardId));
       if (!card) throw new Error("Card not found.");
       if (card.status !== "IDLE") {
         throw new Error(`Card already ${card.status.toLowerCase()}.`);
       }
-      const [bag] = await tx
-        .insert(workflowBags)
-        .values({})
-        .returning();
+      const [bag] = await tx.insert(workflowBags).values({}).returning();
       if (!bag) throw new Error("Could not create workflow bag.");
       await tx
         .update(qrCards)
@@ -78,12 +132,15 @@ export async function scanCardAction(
     return { error: err instanceof Error ? err.message : "Scan failed." };
   }
 
-  revalidatePath(`/floor`);
+  revalidatePath(`/floor/${token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
 }
 
+// ── stage events ───────────────────────────────────────────────────────────
+
 const eventSchema = z.object({
+  token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
   eventType: z.enum([
@@ -101,15 +158,36 @@ export async function fireStageEventAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: true } | void> {
   const parsed = eventSchema.safeParse({
+    token: formData.get("token"),
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
     eventType: formData.get("eventType"),
     countTotal: formData.get("countTotal") || 0,
   });
   if (!parsed.success) return { error: "Invalid input." };
-  const { workflowBagId, stationId, eventType, countTotal } = parsed.data;
+  const { token, workflowBagId, stationId, eventType, countTotal } = parsed.data;
 
   try {
+    const station = await authStation(token, stationId);
+    // Wrong-stage guard: each station kind maps to a fixed set of
+    // allowed events. Stops a SEALING station from firing
+    // BLISTER_COMPLETE if someone hand-crafts FormData.
+    const allowed = ALLOWED_EVENTS_BY_KIND[station.kind] ?? [];
+    if (!allowed.includes(eventType)) {
+      return {
+        error: `Station kind ${station.kind} can't fire ${eventType}.`,
+      };
+    }
+    // Refuse if the bag is currently paused — operator must Resume
+    // first. Stops phantom completes on a paused bag.
+    const [state] = await db
+      .select({ isPaused: readBagState.isPaused, isFinalized: readBagState.isFinalized })
+      .from(readBagState)
+      .where(eq(readBagState.workflowBagId, workflowBagId));
+    if (state?.isFinalized) return { error: "Bag is already finalized." };
+    if (state?.isPaused)
+      return { error: "Bag is paused — resume it before firing stage events." };
+
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
         workflowBagId,
@@ -121,18 +199,15 @@ export async function fireStageEventAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Event failed." };
   }
-  revalidatePath(`/floor`);
+  revalidatePath(`/floor/${token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
 }
 
-// ── Pause / Resume ─────────────────────────────────────────────────────────
-//
-// Real workflow nuance: PVC roll runs out, shift ends, operator
-// gets pulled away. The bag stays "claimed" by the station but
-// time stops counting toward cycle. Resume picks it back up.
+// ── pause / resume ─────────────────────────────────────────────────────────
 
 const pauseSchema = z.object({
+  token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
   reason: z.enum(["pvc_swap", "shift_end", "machine_jam", "qa_check", "other"]),
@@ -144,6 +219,7 @@ export async function pauseBagAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: true } | void> {
   const parsed = pauseSchema.safeParse({
+    token: formData.get("token"),
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
     reason: formData.get("reason") || "other",
@@ -153,6 +229,16 @@ export async function pauseBagAction(
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   try {
+    await authStation(parsed.data.token, parsed.data.stationId);
+    // Refuse double-pause — second BAG_PAUSED corrupts the
+    // pause-time accumulation in the projector.
+    const [state] = await db
+      .select({ isPaused: readBagState.isPaused, isFinalized: readBagState.isFinalized })
+      .from(readBagState)
+      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
+    if (state?.isFinalized) return { error: "Bag is already finalized." };
+    if (state?.isPaused) return { error: "Bag is already paused." };
+
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
@@ -170,12 +256,13 @@ export async function pauseBagAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Pause failed." };
   }
-  revalidatePath(`/floor`);
+  revalidatePath(`/floor/${parsed.data.token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
 }
 
 const resumeSchema = z.object({
+  token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
   operatorCode: z.string().max(40).optional(),
@@ -185,6 +272,7 @@ export async function resumeBagAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: true } | void> {
   const parsed = resumeSchema.safeParse({
+    token: formData.get("token"),
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
     operatorCode: formData.get("operatorCode") || undefined,
@@ -192,6 +280,13 @@ export async function resumeBagAction(
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   try {
+    await authStation(parsed.data.token, parsed.data.stationId);
+    const [state] = await db
+      .select({ isPaused: readBagState.isPaused })
+      .from(readBagState)
+      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
+    if (!state?.isPaused) return { error: "Bag isn't paused." };
+
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
@@ -205,14 +300,15 @@ export async function resumeBagAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Resume failed." };
   }
-  revalidatePath(`/floor`);
+  revalidatePath(`/floor/${parsed.data.token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
 }
 
-// ── Operator handoff ───────────────────────────────────────────────────────
+// ── operator handoff ───────────────────────────────────────────────────────
 
 const operatorSchema = z.object({
+  token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
   operatorCode: z.string().min(1).max(40),
@@ -222,6 +318,7 @@ export async function setOperatorAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: true } | void> {
   const parsed = operatorSchema.safeParse({
+    token: formData.get("token"),
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
     operatorCode: formData.get("operatorCode"),
@@ -229,6 +326,7 @@ export async function setOperatorAction(
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   try {
+    await authStation(parsed.data.token, parsed.data.stationId);
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
@@ -240,19 +338,14 @@ export async function setOperatorAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Failed." };
   }
-  revalidatePath(`/floor`);
-  revalidatePath(`/floor-board`);
+  revalidatePath(`/floor/${parsed.data.token}`);
   return { ok: true };
 }
 
-// ── Vendor barcode verification (optional pre-claim check) ────────────────
-//
-// Operator types or scans the manufacturer's existing barcode/lot.
-// We look it up against inventory_bags and confirm the underlying
-// batch is RELEASED. Gates a wrong-batch claim from making it past
-// blister.
+// ── vendor barcode verify (read-only lookup) ──────────────────────────────
 
 const verifySchema = z.object({
+  token: z.string(),
   vendorBarcode: z.string().min(1).max(120),
 });
 
@@ -264,21 +357,26 @@ export async function verifyVendorBarcodeAction(
       inventoryBagId: string;
       tabletName?: string;
       batchNumber?: string;
-      batchStatus: "RELEASED" | "QUARANTINE" | "ON_HOLD" | "RECALLED" | "EXPIRED" | "DEPLETED";
+      batchStatus:
+        | "RELEASED"
+        | "QUARANTINE"
+        | "ON_HOLD"
+        | "RECALLED"
+        | "EXPIRED"
+        | "DEPLETED";
       blocked: boolean;
       reason?: string;
     }
   | { error: string }
 > {
   const parsed = verifySchema.safeParse({
+    token: formData.get("token"),
     vendorBarcode: formData.get("vendorBarcode"),
   });
-  if (!parsed.success) return { error: "Invalid barcode." };
+  if (!parsed.success) return { error: "Invalid input." };
+  const station = await resolveStation(parsed.data.token);
+  if (!station) return { error: "Invalid station." };
   const code = parsed.data.vendorBarcode.trim();
-  // Try per-bag barcode first (set if receiving-side captures
-  // unique barcodes), otherwise fall back to matching the lot
-  // number on the batch — works out of the box because vendor lot
-  // numbers are already captured per receive box.
   let hit = (
     await db
       .select({
@@ -291,9 +389,6 @@ export async function verifyVendorBarcodeAction(
       .limit(1)
   )[0];
   if (!hit) {
-    // Lot-number fallback. Multiple bags may share a lot, so we
-    // grab the first AVAILABLE one and surface batch info — a
-    // good-enough verification that the batch is RELEASED.
     const lotMatch = await db
       .select({
         inventoryBagId: inventoryBags.id,
@@ -353,9 +448,10 @@ export async function verifyVendorBarcodeAction(
   };
 }
 
-// ── Packaging complete (rich payload) ──────────────────────────────────────
+// ── packaging close-out ────────────────────────────────────────────────────
 
 const packagingCompleteSchema = z.object({
+  token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
   masterCases: z.coerce.number().int().min(0).max(100000),
@@ -370,6 +466,7 @@ export async function packagingCompleteAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: true } | void> {
   const parsed = packagingCompleteSchema.safeParse({
+    token: formData.get("token"),
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
     masterCases: formData.get("masterCases") || 0,
@@ -382,6 +479,23 @@ export async function packagingCompleteAction(
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   try {
+    const station = await authStation(parsed.data.token, parsed.data.stationId);
+    if (station.kind !== "PACKAGING" && station.kind !== "COMBINED") {
+      return {
+        error: `Station kind ${station.kind} can't fire PACKAGING_COMPLETE.`,
+      };
+    }
+    // Reject all-zeros — operator probably tapped Save by accident.
+    if (
+      parsed.data.masterCases +
+        parsed.data.displaysMade +
+        parsed.data.looseCards +
+        parsed.data.damagedPackaging +
+        parsed.data.rippedCards ===
+      0
+    ) {
+      return { error: "Enter at least one count before saving." };
+    }
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
@@ -402,34 +516,47 @@ export async function packagingCompleteAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Failed." };
   }
-  revalidatePath(`/floor`);
+  revalidatePath(`/floor/${parsed.data.token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
 }
 
+// ── finalize ───────────────────────────────────────────────────────────────
+
+const finalizeSchema = z.object({
+  token: z.string(),
+  workflowBagId: z.string().uuid(),
+  stationId: z.string().uuid(),
+});
+
 export async function finalizeBagAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: true } | void> {
-  const workflowBagId = String(formData.get("workflowBagId") ?? "");
-  if (!z.string().uuid().safeParse(workflowBagId).success) return { error: "Invalid bag." };
+  const parsed = finalizeSchema.safeParse({
+    token: formData.get("token"),
+    workflowBagId: formData.get("workflowBagId"),
+    stationId: formData.get("stationId"),
+  });
+  if (!parsed.success) return { error: "Invalid input." };
   try {
+    await authStation(parsed.data.token, parsed.data.stationId);
+    const [state] = await db
+      .select({ isFinalized: readBagState.isFinalized })
+      .from(readBagState)
+      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
+    if (state?.isFinalized) return { error: "Bag is already finalized." };
+
     await db.transaction(async (tx) => {
-      // projectEvent will:
-      //   - insert workflow_events row (partial unique index enforces
-      //     at-most-once-finalize)
-      //   - update read_bag_state to FINALIZED
-      //   - clear read_station_live for this bag
-      //   - set workflow_bags.finalized_at
-      //   - release qr_cards back to IDLE
       await projectEvent(tx, {
-        workflowBagId,
+        workflowBagId: parsed.data.workflowBagId,
+        stationId: parsed.data.stationId,
         eventType: "BAG_FINALIZED",
       });
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Finalize failed." };
   }
-  revalidatePath(`/floor`);
+  revalidatePath(`/floor/${parsed.data.token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
 }

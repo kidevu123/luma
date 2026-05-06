@@ -3,9 +3,9 @@
 // is the station's scan_token (cryptographic identifier; rotated
 // from /machines admin).
 //
-// Workflow streamlined: ONE big card with the current bag (if any),
-// and ONE primary action button per stage (BLISTER_COMPLETE,
-// SEALING_COMPLETE, etc.). No menus. No nested forms.
+// Each station only sees the bag CURRENTLY at this station — driven
+// by read_station_live.currentWorkflowBagId. No cross-station
+// leak.
 
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
@@ -15,6 +15,7 @@ import {
   qrCards,
   workflowBags,
   readBagState,
+  readStationLive,
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
@@ -36,22 +37,27 @@ export default async function FloorStationPage({
     .where(eq(stations.scanToken, token));
   if (!station) notFound();
 
-  // Find any cards currently assigned to a workflow bag at this station's
-  // kind so the operator sees what's "at the press" right now.
+  // The bag at THIS station (and only this one) lives in
+  // read_station_live.currentWorkflowBagId. Joining qr_cards back
+  // gives us the card label + scan token for display.
+  const [currentAtStation] = await db
+    .select({
+      bag: workflowBags,
+      card: qrCards,
+      state: readBagState,
+    })
+    .from(readStationLive)
+    .innerJoin(workflowBags, eq(readStationLive.currentWorkflowBagId, workflowBags.id))
+    .leftJoin(qrCards, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
+    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .where(eq(readStationLive.stationId, station.station.id));
+
+  // Idle cards available to scan, sorted by label so the dropdown
+  // is predictable. Eventually replace with a scan-only input.
   const idleCards = await db
     .select()
     .from(qrCards)
     .where(eq(qrCards.status, "IDLE"));
-  const assignedCards = await db
-    .select({
-      card: qrCards,
-      bag: workflowBags,
-      state: readBagState,
-    })
-    .from(qrCards)
-    .leftJoin(workflowBags, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
-    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
-    .where(eq(qrCards.status, "ASSIGNED"));
 
   return (
     <main className="min-h-dvh bg-page p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
@@ -75,39 +81,50 @@ export default async function FloorStationPage({
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-subtle">
           Current bag
         </p>
-        {assignedCards.length === 0 ? (
+        {!currentAtStation ? (
           <div className="py-3">
             <p className="text-sm text-text-muted mb-3">
               No bag at this station. Scan a card to begin.
             </p>
             <ScanCardForm
+              token={token}
               stationId={station.station.id}
-              idleCards={idleCards.map((c) => ({ id: c.id, label: c.label, scanToken: c.scanToken }))}
+              idleCards={idleCards.map((c) => ({
+                id: c.id,
+                label: c.label,
+                scanToken: c.scanToken,
+              }))}
             />
           </div>
         ) : (
           <div className="space-y-3">
-            {assignedCards.slice(0, 1).map(({ card, bag }) => (
-              <div key={card.id} className="rounded-xl border border-border/70 bg-surface-2/40 p-4">
-                <div className="flex items-baseline justify-between mb-2">
-                  <p className="text-base font-semibold tracking-tight">{card.label}</p>
-                  <span className="font-mono text-[11px] text-text-subtle">
-                    {card.scanToken}
-                  </span>
-                </div>
-                <p className="text-xs text-text-muted">
-                  Workflow bag #{bag?.id?.slice(0, 8) ?? "—"} · started{" "}
-                  {bag?.startedAt
-                    ? new Date(bag.startedAt as unknown as string).toLocaleTimeString()
-                    : "—"}
+            <div className="rounded-xl border border-border/70 bg-surface-2/40 p-4">
+              <div className="flex items-baseline justify-between mb-2">
+                <p className="text-base font-semibold tracking-tight">
+                  {currentAtStation.card?.label ?? "—"}
                 </p>
+                <span className="font-mono text-[11px] text-text-subtle">
+                  {currentAtStation.bag.id.slice(0, 8)}
+                </span>
               </div>
-            ))}
+              <p className="text-xs text-text-muted">
+                Started{" "}
+                {currentAtStation.bag.startedAt
+                  ? new Date(
+                      currentAtStation.bag.startedAt as unknown as string,
+                    ).toLocaleTimeString()
+                  : "—"}
+                {currentAtStation.state?.currentOperatorCode
+                  ? ` · operator ${currentAtStation.state.currentOperatorCode}`
+                  : ""}
+              </p>
+            </div>
             <StageActionButtons
+              token={token}
               stationId={station.station.id}
               stationKind={station.station.kind}
-              workflowBagId={assignedCards[0]?.bag?.id ?? null}
-              isPaused={assignedCards[0]?.state?.isPaused ?? false}
+              workflowBagId={currentAtStation.bag.id}
+              isPaused={currentAtStation.state?.isPaused ?? false}
             />
           </div>
         )}

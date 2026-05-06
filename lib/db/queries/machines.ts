@@ -43,7 +43,11 @@ export async function rotateStationToken(id: string, actor: CurrentUser) {
   return db.transaction(async (tx) => {
     const [before] = await tx.select().from(stations).where(eq(stations.id, id));
     if (!before) throw new Error("rotateStationToken: not found");
-    const fresh = `${before.kind.toLowerCase()}-${Math.random().toString(36).slice(2, 10)}`;
+    // crypto.randomUUID gives a 122-bit random token — replaces the
+    // Math.random()-based legacy format which was ~41 bits + a
+    // predictable kind prefix. A scraper enumerating /floor/<token>
+    // could find live stations against the old format.
+    const fresh = crypto.randomUUID();
     const [row] = await tx
       .update(stations)
       .set({ scanToken: fresh })
@@ -75,7 +79,7 @@ export async function createStation(
   actor: CurrentUser,
 ) {
   return db.transaction(async (tx) => {
-    const scanToken = `${input.kind.toLowerCase()}-${Math.random().toString(36).slice(2, 10)}`;
+    const scanToken = crypto.randomUUID();
     const [row] = await tx
       .insert(stations)
       .values(compact({ ...input, scanToken }))

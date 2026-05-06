@@ -122,7 +122,10 @@ export default async function BatchesPage({
             rows.map((b) => (
               <TR key={b.id}>
                 <TD className="font-mono text-xs">
-                  <Link href={`/batches/${b.id}`} className="hover:underline">
+                  <Link
+                    href={`/batches?focus=${b.id}`}
+                    className="hover:underline"
+                  >
                     {b.batchNumber}
                   </Link>
                 </TD>

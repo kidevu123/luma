@@ -29,6 +29,13 @@
       "when": 1778300000000,
       "tag": "0003_metrics_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778400000000,
+      "tag": "0004_rotate_station_tokens",
+      "breakpoints": true
     }
   ]
 }
