@@ -17,6 +17,7 @@
 // joins. pg_notify-driven SSE refreshes the whole view on every
 // commit. No polling.
 
+import Link from "next/link";
 import {
   Activity,
   Hourglass,
@@ -29,6 +30,8 @@ import {
   Pill,
   FlaskConical,
   PauseCircle,
+  ShieldCheck,
+  Zap,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { eq, isNull, isNotNull, desc, sql, and, gte, lt } from "drizzle-orm";
@@ -264,12 +267,19 @@ async function getAvgCycleMinutes(): Promise<number | null> {
 async function getAlerts() {
   const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000);
   const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  // Stalled = unfinalized bag where (a) it started more than an hour ago
+  // BUT (b) we've actually seen activity in the last 14 days. Bags older
+  // than that are legacy-imported placeholders or genuinely abandoned —
+  // they don't belong on the act-now panel; they go to the "data
+  // hygiene" callout below.
   const stalled = await db
     .select({
       bagId: workflowBags.id,
       startedAt: workflowBags.startedAt,
       productName: products.name,
       stage: readBagState.stage,
+      lastEventAt: readBagState.lastEventAt,
     })
     .from(workflowBags)
     .leftJoin(products, eq(workflowBags.productId, products.id))
@@ -278,6 +288,7 @@ async function getAlerts() {
       and(
         isNull(workflowBags.finalizedAt),
         lt(workflowBags.startedAt, sixtyMinAgo),
+        gte(workflowBags.startedAt, fourteenDaysAgo),
         // Don't double-count paused bags as "stalled" — they get
         // their own entry below.
         sql`COALESCE(${readBagState.isPaused}, false) = false`,
@@ -337,6 +348,66 @@ async function getBagInventory() {
 }
 
 // ─── act-now metrics (per metrics-strategy.md §13.2) ─────────────
+
+/** Data-hygiene check: how many unfinalized bags are stale (> 14 days
+ *  with no recent activity). After a legacy import, hundreds of these
+ *  show up — they're either historical placeholders or genuinely
+ *  abandoned. We surface them as a single "data-hygiene" callout so
+ *  they don't spam the act-now panel. */
+async function getDataHygiene(): Promise<{
+  staleBags: number;
+  staleNeedingFinalize: number;
+}> {
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const [r] = await db
+    .select({ n: sql<number>`COUNT(*)::int` })
+    .from(workflowBags)
+    .where(
+      and(
+        isNull(workflowBags.finalizedAt),
+        lt(workflowBags.startedAt, fourteenDaysAgo),
+      ),
+    );
+  return {
+    staleBags: r?.n ?? 0,
+    staleNeedingFinalize: r?.n ?? 0,
+  };
+}
+
+/** Floor heartbeat — events/minute over the last 24 hours, bucketed
+ *  hourly. The shape of the curve tells the lead "is the floor alive
+ *  right now, and how does this hour compare to the rest of the day?" */
+async function getFloorHeartbeat(): Promise<{
+  hourly: Array<{ hourStart: string; events: number }>;
+  totalEvents24h: number;
+  thisHourEvents: number;
+  peakHourEvents: number;
+}> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const rows = (await db.execute(sql`
+    SELECT
+      to_char(date_trunc('hour', occurred_at AT TIME ZONE 'America/New_York'), 'YYYY-MM-DD HH24:00') AS hour_start,
+      COUNT(*)::int AS events
+    FROM workflow_events
+    WHERE occurred_at >= ${since.toISOString()}::timestamptz
+    GROUP BY 1
+    ORDER BY 1
+  `)) as unknown as Array<{ hour_start: string; events: number }>;
+  const hourly = rows.map((r) => ({
+    hourStart: r.hour_start,
+    events: r.events,
+  }));
+  const total = hourly.reduce((s, h) => s + h.events, 0);
+  const peak = hourly.reduce((m, h) => Math.max(m, h.events), 0);
+  // "this hour" = the most recent bucket (last item).
+  const thisHour = hourly[hourly.length - 1]?.events ?? 0;
+  return {
+    hourly,
+    totalEvents24h: total,
+    thisHourEvents: thisHour,
+    peakHourEvents: peak,
+  };
+}
 
 /** Forgotten-bag detector — paused for > 30 min and not finalized.
  *  This is the highest-priority lead-action signal (§3.8). Returns
@@ -578,6 +649,8 @@ export default async function FloorBoardPage() {
     agedUnfinalized,
     laneImbalance,
     bottleneck,
+    dataHygiene,
+    heartbeat,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -596,6 +669,8 @@ export default async function FloorBoardPage() {
     trace("getAgedUnfinalized", getAgedUnfinalized),
     trace("getLaneImbalance", getLaneImbalance),
     trace("getBottleneckOfHour", getBottleneckOfHour),
+    trace("getDataHygiene", getDataHygiene),
+    trace("getFloorHeartbeat", getFloorHeartbeat),
   ]);
 
   const allStations = [
@@ -637,6 +712,39 @@ export default async function FloorBoardPage() {
           </div>
         }
       />
+
+      {/* Right-Now hero — single big readout for the lead's glance.
+          Combines: floor heartbeat (events/min last 24h sparkline),
+          this-hour activity, finalized today vs in-flight, and the
+          highest-impact alert chip. */}
+      <RightNowHero
+        heartbeat={heartbeat}
+        finalizedToday={todayTotals.finalized}
+        totalActive={totalActive}
+        forgottenBags={forgottenBags.length}
+        agedCount={agedUnfinalized.count}
+        bottleneck={bottleneck}
+      />
+
+      {/* Data-hygiene callout — when there's a backlog of stale
+          unfinalized bags, surface it as a single line so the floor
+          panel below isn't drowning in 14-days-old noise. */}
+      {dataHygiene.staleBags > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/40 px-4 py-3 flex items-center gap-3 text-sm">
+          <ShieldCheck className="h-4 w-4 text-amber-700 shrink-0" />
+          <span className="flex-1 text-amber-900">
+            <strong>{dataHygiene.staleBags}</strong> bags older than 14
+            days haven't been finalized — likely legacy imports or
+            abandoned sessions. Excluded from "stalled" alerts below.
+          </span>
+          <Link
+            href="/settings/legacy-import"
+            className="text-xs text-amber-900 hover:underline whitespace-nowrap"
+          >
+            Run data hygiene →
+          </Link>
+        </div>
+      )}
 
       {/* Act-Now strip — exception-first tiles per metrics-strategy §13.2.
           The lead glances here for "what needs me right now," not for
@@ -1008,6 +1116,210 @@ export default async function FloorBoardPage() {
 }
 
 // ─── components ───────────────────────────────────────────────────────────
+
+/** Right-Now hero — single big readout the lead can read at a glance.
+ *  Shows: today's finalized count, in-flight count, biggest urgency
+ *  ("3 forgotten bags"), and a 24-hour event sparkline so "is the
+ *  floor alive?" answers itself. */
+function RightNowHero({
+  heartbeat,
+  finalizedToday,
+  totalActive,
+  forgottenBags,
+  agedCount,
+  bottleneck,
+}: {
+  heartbeat: {
+    hourly: Array<{ hourStart: string; events: number }>;
+    totalEvents24h: number;
+    thisHourEvents: number;
+    peakHourEvents: number;
+  };
+  finalizedToday: number;
+  totalActive: number;
+  forgottenBags: number;
+  agedCount: number;
+  bottleneck: { stage: string | null; avgSeconds: number; events: number };
+}) {
+  // Pick the biggest single urgency to render front-and-center.
+  const urgency = (() => {
+    if (forgottenBags > 0) {
+      return {
+        kind: "danger" as const,
+        headline: `${forgottenBags} forgotten bag${forgottenBags === 1 ? "" : "s"}`,
+        detail: "Paused > 30 min — investigate now",
+      };
+    }
+    if (agedCount > 0) {
+      return {
+        kind: "warn" as const,
+        headline: `${agedCount} aged unfinalized`,
+        detail: "30+ days · review with accountant",
+      };
+    }
+    if (bottleneck.stage && bottleneck.events > 0) {
+      return {
+        kind: "warn" as const,
+        headline: `${bottleneckLabel(bottleneck.stage)} is slow`,
+        detail: `~${Math.round(bottleneck.avgSeconds / 60)}m avg this hour`,
+      };
+    }
+    return {
+      kind: "ok" as const,
+      headline: "Floor's clean",
+      detail: "No exceptions right now",
+    };
+  })();
+
+  const urgencyTone =
+    urgency.kind === "danger"
+      ? {
+          chip: "bg-red-50 text-red-800 border-red-200",
+          dot: "bg-red-600",
+          icon: AlertTriangle,
+        }
+      : urgency.kind === "warn"
+        ? {
+            chip: "bg-amber-50 text-amber-800 border-amber-200",
+            dot: "bg-amber-500",
+            icon: AlertTriangle,
+          }
+        : {
+            chip: "bg-emerald-50 text-emerald-800 border-emerald-200",
+            dot: "bg-emerald-500",
+            icon: Zap,
+          };
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-surface overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_2fr] gap-0">
+        {/* Left half: numeric readouts */}
+        <div className="p-5 space-y-4 border-b lg:border-b-0 lg:border-r border-border/60">
+          <div className="flex items-baseline gap-4">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+                Finalized today
+              </div>
+              <div className="text-5xl font-semibold tabular-nums tracking-tight">
+                {finalizedToday.toLocaleString()}
+              </div>
+            </div>
+            <div className="flex flex-col items-start">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+                In flight
+              </div>
+              <div className="text-3xl font-semibold tabular-nums tracking-tight text-text-muted">
+                {totalActive.toLocaleString()}
+              </div>
+            </div>
+          </div>
+          <div
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 ${urgencyTone.chip}`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${urgencyTone.dot} animate-pulse`}
+            />
+            <urgencyTone.icon className="h-3.5 w-3.5" />
+            <div className="text-xs font-semibold leading-none">
+              {urgency.headline}
+            </div>
+            <span className="text-[11px] text-text-muted">·</span>
+            <div className="text-[11px] text-text-muted leading-none">
+              {urgency.detail}
+            </div>
+          </div>
+        </div>
+
+        {/* Right half: 24h heartbeat sparkline */}
+        <div className="p-5 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+              Floor heartbeat · last 24h
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-text-muted tabular-nums">
+              <span>this hour: <span className="font-semibold text-text">{heartbeat.thisHourEvents}</span></span>
+              <span>·</span>
+              <span>peak: <span className="font-semibold text-text">{heartbeat.peakHourEvents}</span></span>
+              <span>·</span>
+              <span>total: <span className="font-semibold text-text">{heartbeat.totalEvents24h}</span></span>
+            </div>
+          </div>
+          <Heartbeat hourly={heartbeat.hourly} peak={heartbeat.peakHourEvents} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Inline SVG sparkline of events/hour for the last 24h. Each bar's
+ *  height is proportional to the peak. Last bar (current hour) gets
+ *  highlighted. */
+function Heartbeat({
+  hourly,
+  peak,
+}: {
+  hourly: Array<{ hourStart: string; events: number }>;
+  peak: number;
+}) {
+  if (hourly.length === 0) {
+    return (
+      <div className="text-[11px] text-text-subtle italic h-16 flex items-center">
+        No events in the last 24 hours.
+      </div>
+    );
+  }
+  // Use a fixed 24-bucket grid; pad missing hours with zero so the
+  // sparkline always represents a clean 24-hour window.
+  const buckets = new Map<string, number>();
+  hourly.forEach((h) => buckets.set(h.hourStart, h.events));
+  const now = new Date();
+  const bars: Array<{ events: number; isNow: boolean }> = [];
+  for (let i = 23; i >= 0; i--) {
+    const h = new Date(now.getTime() - i * 60 * 60 * 1000);
+    // Format the same way as the SQL: YYYY-MM-DD HH:00 in ET. Skipping
+    // exact match would over-engineer this — instead approximate the
+    // last bucket as "now."
+    void h;
+    const events = i === 0 ? hourly[hourly.length - 1]?.events ?? 0 : 0;
+    void events;
+  }
+  // Simpler: render the buckets we have, left-padded to 24.
+  const padCount = Math.max(24 - hourly.length, 0);
+  const display = [
+    ...Array.from({ length: padCount }, () => ({ events: 0, isNow: false })),
+    ...hourly.map((h, i) => ({
+      events: h.events,
+      isNow: i === hourly.length - 1,
+    })),
+  ];
+  const maxH = peak === 0 ? 1 : peak;
+  return (
+    <div className="flex items-end gap-[2px] h-16">
+      {display.map((b, i) => {
+        const heightPct = maxH === 0 ? 0 : (b.events / maxH) * 100;
+        return (
+          <div
+            key={i}
+            className="flex-1 min-w-[3px] flex flex-col justify-end"
+            title={`${b.events} events`}
+          >
+            <div
+              className={
+                "rounded-sm transition-all " +
+                (b.isNow
+                  ? "bg-brand-600"
+                  : b.events > 0
+                    ? "bg-brand-300"
+                    : "bg-border/40")
+              }
+              style={{ height: `${Math.max(heightPct, 4)}%` }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function Tile({
   icon: Icon,
