@@ -336,6 +336,195 @@ async function getBagInventory() {
     .orderBy(sql`COUNT(*) FILTER (WHERE ${inventoryBags.status} = 'AVAILABLE') DESC`);
 }
 
+// ─── act-now metrics (per metrics-strategy.md §13.2) ─────────────
+
+/** Forgotten-bag detector — paused for > 30 min and not finalized.
+ *  This is the highest-priority lead-action signal (§3.8). Returns
+ *  the freshest 20 with product + receipt for the panel. */
+async function getForgottenBags(): Promise<
+  Array<{
+    bagId: string;
+    pausedAt: Date;
+    productName: string | null;
+    receiptNumber: string | null;
+    stage: string | null;
+  }>
+> {
+  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+  const rows = await db
+    .select({
+      bagId: workflowBags.id,
+      pausedAt: readBagState.pausedAt,
+      productName: products.name,
+      receiptNumber: workflowBags.receiptNumber,
+      stage: readBagState.stage,
+    })
+    .from(readBagState)
+    .innerJoin(workflowBags, eq(workflowBags.id, readBagState.workflowBagId))
+    .leftJoin(products, eq(workflowBags.productId, products.id))
+    .where(
+      and(
+        eq(readBagState.isPaused, true),
+        isNotNull(readBagState.pausedAt),
+        lt(readBagState.pausedAt, thirtyMinAgo),
+        isNull(workflowBags.finalizedAt),
+      ),
+    )
+    .orderBy(readBagState.pausedAt)
+    .limit(20);
+  return rows.flatMap((r) =>
+    r.pausedAt
+      ? [
+          {
+            bagId: r.bagId,
+            pausedAt: r.pausedAt as unknown as Date,
+            productName: r.productName,
+            receiptNumber: r.receiptNumber,
+            stage: r.stage,
+          },
+        ]
+      : [],
+  );
+}
+
+/** Aged unfinalized inventory — bags with started_at older than 30
+ *  days and no finalized_at (§7.5). Owner-actionable urgency: those
+ *  bags are sitting on cash. Returns count + units (bag.pillCount sum)
+ *  + the top 5 oldest for the drill-down. */
+async function getAgedUnfinalized(): Promise<{
+  count: number;
+  unitsTied: number;
+  oldest: Array<{
+    bagId: string;
+    daysOld: number;
+    productName: string | null;
+    receiptNumber: string | null;
+  }>;
+}> {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const [agg] = await db
+    .select({
+      count: sql<number>`COUNT(*)::int`,
+      unitsTied: sql<number>`COALESCE(SUM(${inventoryBags.pillCount}), 0)::int`,
+    })
+    .from(workflowBags)
+    .leftJoin(inventoryBags, eq(workflowBags.inventoryBagId, inventoryBags.id))
+    .where(
+      and(
+        isNull(workflowBags.finalizedAt),
+        lt(workflowBags.startedAt, thirtyDaysAgo),
+      ),
+    );
+  const oldestRows = await db
+    .select({
+      bagId: workflowBags.id,
+      startedAt: workflowBags.startedAt,
+      productName: products.name,
+      receiptNumber: workflowBags.receiptNumber,
+    })
+    .from(workflowBags)
+    .leftJoin(products, eq(workflowBags.productId, products.id))
+    .where(
+      and(
+        isNull(workflowBags.finalizedAt),
+        lt(workflowBags.startedAt, thirtyDaysAgo),
+      ),
+    )
+    .orderBy(workflowBags.startedAt)
+    .limit(5);
+  const now = Date.now();
+  return {
+    count: agg?.count ?? 0,
+    unitsTied: agg?.unitsTied ?? 0,
+    oldest: oldestRows.map((r) => ({
+      bagId: r.bagId,
+      daysOld: Math.floor(
+        (now - (r.startedAt as unknown as Date).getTime()) /
+          (24 * 60 * 60 * 1000),
+      ),
+      productName: r.productName,
+      receiptNumber: r.receiptNumber,
+    })),
+  };
+}
+
+/** Lane-imbalance ratio — last 24h `bags_blistered / bags_packaged`
+ *  per lane (§1.29). Ratio > 1.3 = blistering ahead, < 0.77 =
+ *  packaging ahead. Returns ratio per lane + the actionable verdict. */
+async function getLaneImbalance(): Promise<{
+  cardLane: { blistered: number; packaged: number; ratio: number | null };
+  bottleLane: { handpacked: number; packaged: number; ratio: number | null };
+}> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [counts] = await db
+    .select({
+      cardBlistered: sql<number>`COUNT(*) FILTER (WHERE event_type::text = 'BLISTER_COMPLETE')::int`,
+      cardPackaged: sql<number>`COUNT(*) FILTER (WHERE event_type::text IN ('PACKAGING_SNAPSHOT','PACKAGING_COMPLETE'))::int`,
+      bottleHandpacked: sql<number>`COUNT(*) FILTER (WHERE event_type::text = 'BOTTLE_HANDPACK_COMPLETE')::int`,
+      bottlePackaged: sql<number>`COUNT(*) FILTER (WHERE event_type::text = 'BOTTLE_STICKER_COMPLETE')::int`,
+    })
+    .from(workflowEvents)
+    .where(gte(workflowEvents.occurredAt, since));
+  const card = {
+    blistered: counts?.cardBlistered ?? 0,
+    packaged: counts?.cardPackaged ?? 0,
+    ratio:
+      (counts?.cardPackaged ?? 0) > 0
+        ? (counts?.cardBlistered ?? 0) / (counts?.cardPackaged ?? 1)
+        : null,
+  };
+  const bottle = {
+    handpacked: counts?.bottleHandpacked ?? 0,
+    packaged: counts?.bottlePackaged ?? 0,
+    ratio:
+      (counts?.bottlePackaged ?? 0) > 0
+        ? (counts?.bottleHandpacked ?? 0) / (counts?.bottlePackaged ?? 1)
+        : null,
+  };
+  return { cardLane: card, bottleLane: bottle };
+}
+
+/** Bottleneck-of-the-hour — across the last 60 min of stage events,
+ *  which stage type accumulated the most cycle time (§1.16). Crude:
+ *  takes the avg gap between events of each stage in the last hour
+ *  and ranks them. Returns the slowest one. */
+async function getBottleneckOfHour(): Promise<{
+  stage: string | null;
+  avgSeconds: number;
+  events: number;
+}> {
+  const sinceIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const rows = (await db.execute(sql`
+    WITH e AS (
+      SELECT
+        we.event_type::text AS stage_event,
+        we.occurred_at,
+        LAG(we.occurred_at) OVER (
+          PARTITION BY we.workflow_bag_id, we.event_type ORDER BY we.occurred_at
+        ) AS prev_at
+      FROM workflow_events we
+      WHERE we.occurred_at >= ${sinceIso}::timestamptz
+        AND we.event_type::text IN (
+          'BLISTER_COMPLETE','SEALING_COMPLETE',
+          'PACKAGING_SNAPSHOT','PACKAGING_COMPLETE',
+          'BOTTLE_HANDPACK_COMPLETE','BOTTLE_CAP_SEAL_COMPLETE',
+          'BOTTLE_STICKER_COMPLETE'
+        )
+    )
+    SELECT
+      stage_event,
+      COUNT(*)::int AS events,
+      COALESCE(AVG(EXTRACT(EPOCH FROM (occurred_at - prev_at))) FILTER (WHERE prev_at IS NOT NULL), 0)::int AS avg_sec
+    FROM e
+    GROUP BY stage_event
+    ORDER BY avg_sec DESC
+    LIMIT 1
+  `)) as unknown as Array<{ stage_event: string; events: number; avg_sec: number }>;
+  const r = rows[0];
+  if (!r) return { stage: null, avgSeconds: 0, events: 0 };
+  return { stage: r.stage_event, avgSeconds: r.avg_sec, events: r.events };
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────
 
 function fmtElapsed(ms: number): string {
@@ -349,6 +538,19 @@ function fmtElapsed(ms: number): string {
 
 function machineKindLabel(k: string): string {
   return k.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function bottleneckLabel(eventType: string): string {
+  switch (eventType) {
+    case "BLISTER_COMPLETE": return "Blister";
+    case "SEALING_COMPLETE": return "Sealing";
+    case "PACKAGING_SNAPSHOT":
+    case "PACKAGING_COMPLETE": return "Packaging";
+    case "BOTTLE_HANDPACK_COMPLETE": return "Bottle handpack";
+    case "BOTTLE_CAP_SEAL_COMPLETE": return "Bottle cap seal";
+    case "BOTTLE_STICKER_COMPLETE": return "Bottle sticker";
+    default: return eventType;
+  }
 }
 
 // ─── page ─────────────────────────────────────────────────────────────────
@@ -372,6 +574,10 @@ export default async function FloorBoardPage() {
     alerts,
     bagInventory,
     idleCardsRow,
+    forgottenBags,
+    agedUnfinalized,
+    laneImbalance,
+    bottleneck,
   ] = await Promise.all([
     trace("getActiveBags", getActiveBags),
     trace("getMachineGrid", getMachineGrid),
@@ -386,6 +592,10 @@ export default async function FloorBoardPage() {
         .from(qrCards)
         .where(eq(qrCards.status, "IDLE")),
     ),
+    trace("getForgottenBags", getForgottenBags),
+    trace("getAgedUnfinalized", getAgedUnfinalized),
+    trace("getLaneImbalance", getLaneImbalance),
+    trace("getBottleneckOfHour", getBottleneckOfHour),
   ]);
 
   const allStations = [
@@ -428,54 +638,167 @@ export default async function FloorBoardPage() {
         }
       />
 
-      {/* Top stat strip — six tiles. */}
+      {/* Act-Now strip — exception-first tiles per metrics-strategy §13.2.
+          The lead glances here for "what needs me right now," not for
+          throughput (that's on the TV). Tone:
+            - red    = action needed now
+            - amber  = watch
+            - ok     = clear */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <Tile
+          icon={Hourglass}
+          label="Forgotten bags"
+          value={forgottenBags.length.toLocaleString()}
+          hint={
+            forgottenBags.length === 0
+              ? "no paused bags > 30m"
+              : "paused > 30 min — investigate below"
+          }
+          tone={forgottenBags.length > 0 ? "danger" : "ok"}
+        />
+        <Tile
+          icon={Hourglass}
+          label="Aged unfinalized"
+          value={agedUnfinalized.count.toLocaleString()}
+          hint={
+            agedUnfinalized.count === 0
+              ? "all bags fresh"
+              : `${agedUnfinalized.unitsTied.toLocaleString()} units tied up · click for list`
+          }
+          tone={agedUnfinalized.count > 0 ? "warn" : "ok"}
+        />
+        <Tile
+          icon={Activity}
+          label="Bottleneck (1h)"
+          value={
+            bottleneck.stage
+              ? bottleneckLabel(bottleneck.stage)
+              : "—"
+          }
+          hint={
+            bottleneck.stage
+              ? `~${Math.round(bottleneck.avgSeconds / 60)}m avg · ${bottleneck.events} events`
+              : "no recent activity"
+          }
+          tone={bottleneck.stage ? "warn" : "neutral"}
+        />
+        <Tile
+          icon={Wrench}
+          label="Card lane balance"
+          value={
+            laneImbalance.cardLane.ratio === null
+              ? "—"
+              : laneImbalance.cardLane.ratio.toFixed(2) + "×"
+          }
+          hint={
+            laneImbalance.cardLane.ratio === null
+              ? "no card flow last 24h"
+              : `${laneImbalance.cardLane.blistered} blistered → ${laneImbalance.cardLane.packaged} packaged`
+          }
+          tone={
+            laneImbalance.cardLane.ratio === null
+              ? "neutral"
+              : laneImbalance.cardLane.ratio > 1.3 ||
+                  laneImbalance.cardLane.ratio < 0.77
+                ? "warn"
+                : "ok"
+          }
+        />
         <Tile
           icon={PackageCheck}
           label="Finalized today"
           value={todayTotals.finalized.toLocaleString()}
-          hint={`${todayTotals.packaged} packaged earlier`}
+          hint={`${totalActive} in flight · ${todayTotals.packaged} packaged`}
           tone="ok"
-        />
-        <Tile
-          icon={Boxes}
-          label="In flight"
-          value={totalActive.toString()}
-          hint={`${stageCounts.PACKAGED ?? 0} packaged · ${(stageCounts.STARTED ?? 0) + (stageCounts.BLISTERED ?? 0) + (stageCounts.SEALED ?? 0)} pre-pack`}
-        />
-        <Tile
-          icon={Clock}
-          label="Avg cycle (7d)"
-          value={avgCycleMin === null ? "—" : `${avgCycleMin.toFixed(0)}m`}
-          hint={
-            avgCycleMin === null
-              ? "no completions yet"
-              : `over ${todayTotals.finalized + 0} bags`
-          }
-        />
-        <Tile
-          icon={Wrench}
-          label="Stations busy"
-          value={`${busyStations}/${allStations.length}`}
-          hint={
-            allStations.length === 0
-              ? "no stations yet"
-              : `${allStations.length - busyStations} idle`
-          }
-        />
-        <Tile
-          icon={Activity}
-          label="Idle cards"
-          value={(idleCardsRow[0]?.n ?? 0).toLocaleString()}
-          hint="ready to scan"
         />
         <Tile
           icon={Pill}
           label="Bags in stock"
           value={totalAvailableBags.toLocaleString()}
-          hint={`${bagInventory.length} tablet types`}
+          hint={`${bagInventory.length} types · ${idleCardsRow[0]?.n ?? 0} idle cards`}
         />
       </div>
+
+      {/* Forgotten bags panel — clickable list of bags paused > 30 min.
+          Most actionable signal a lead can have. */}
+      {forgottenBags.length > 0 && (
+        <Card className="border-red-200 bg-red-50/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-900">
+              <Hourglass className="h-4 w-4 text-red-700" />
+              {forgottenBags.length} bag{forgottenBags.length === 1 ? "" : "s"}{" "}
+              paused &gt; 30 min — investigate
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <ul className="divide-y divide-red-200/70">
+              {forgottenBags.slice(0, 10).map((b) => {
+                const mins = Math.floor(
+                  (Date.now() - b.pausedAt.getTime()) / 60_000,
+                );
+                return (
+                  <li
+                    key={b.bagId}
+                    className="px-4 py-2.5 flex items-start gap-3 text-sm"
+                  >
+                    <Hourglass className="h-3.5 w-3.5 mt-0.5 text-red-700 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-text">
+                        {b.productName ?? "(no product)"} ·{" "}
+                        <span className="text-text-muted">
+                          {b.receiptNumber ?? b.bagId.slice(0, 8)}
+                        </span>{" "}
+                        — {b.stage ?? "STARTED"}
+                      </div>
+                      <div className="text-[11px] text-text-muted">
+                        Paused for{" "}
+                        <span className="font-semibold text-red-700">
+                          {fmtElapsed(mins * 60_000)}
+                        </span>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Aged unfinalized drill-down — list 5 oldest bags. */}
+      {agedUnfinalized.count > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Hourglass className="h-4 w-4 text-amber-700" />
+              {agedUnfinalized.count} bag{agedUnfinalized.count === 1 ? "" : "s"}{" "}
+              unfinalized over 30 days · {agedUnfinalized.unitsTied.toLocaleString()} units
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-text-muted px-4 pb-3 pt-0">
+            <ul className="space-y-1">
+              {agedUnfinalized.oldest.map((b) => (
+                <li key={b.bagId} className="flex items-baseline gap-2">
+                  <span className="font-mono text-[11px] text-text-subtle tabular-nums w-12">
+                    {b.daysOld}d
+                  </span>
+                  <span className="font-medium text-text">
+                    {b.productName ?? "(no product)"}
+                  </span>
+                  <span className="text-text-subtle">
+                    · {b.receiptNumber ?? b.bagId.slice(0, 8)}
+                  </span>
+                </li>
+              ))}
+              {agedUnfinalized.count > agedUnfinalized.oldest.length && (
+                <li className="text-text-subtle italic">
+                  …and {agedUnfinalized.count - agedUnfinalized.oldest.length} older
+                </li>
+              )}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Flow lanes + alerts. Two-thirds / one-third split on lg+ */}
       <div className="grid lg:grid-cols-[2fr_1fr] gap-4">
@@ -697,31 +1020,31 @@ function Tile({
   label: string;
   value: string;
   hint?: string;
-  tone?: "default" | "ok";
+  tone?: "default" | "ok" | "warn" | "danger" | "neutral";
 }) {
+  const palette = (() => {
+    switch (tone) {
+      case "ok":      return { bg: "bg-emerald-50", ring: "ring-emerald-100", icon: "text-emerald-700", value: "text-emerald-700", border: "border-border/70" };
+      case "warn":    return { bg: "bg-amber-50",   ring: "ring-amber-200",   icon: "text-amber-700",   value: "text-amber-800",   border: "border-amber-200" };
+      case "danger":  return { bg: "bg-red-50",     ring: "ring-red-200",     icon: "text-red-700",     value: "text-red-800",     border: "border-red-200" };
+      case "neutral": return { bg: "bg-surface-2",  ring: "ring-border/60",   icon: "text-text-muted",  value: "text-text-muted",  border: "border-border/70" };
+      default:        return { bg: "bg-brand-50",   ring: "ring-brand-100",   icon: "text-brand-700",   value: "",                 border: "border-border/70" };
+    }
+  })();
   return (
-    <div className="rounded-xl border border-border/70 bg-surface p-3">
+    <div className={`rounded-xl border bg-surface p-3 ${palette.border}`}>
       <div className="flex items-center justify-between mb-1.5">
         <div className="text-[10px] uppercase tracking-wider text-text-subtle font-semibold">
           {label}
         </div>
         <div
-          className={`h-7 w-7 rounded-md flex items-center justify-center ring-1 ring-inset ${
-            tone === "ok"
-              ? "bg-emerald-50 ring-emerald-100"
-              : "bg-brand-50 ring-brand-100"
-          }`}
+          className={`h-7 w-7 rounded-md flex items-center justify-center ring-1 ring-inset ${palette.bg} ${palette.ring}`}
         >
-          <Icon
-            className={`h-3.5 w-3.5 ${tone === "ok" ? "text-emerald-700" : "text-brand-700"}`}
-            aria-hidden
-          />
+          <Icon className={`h-3.5 w-3.5 ${palette.icon}`} aria-hidden />
         </div>
       </div>
       <div
-        className={`text-2xl font-semibold tabular-nums tracking-tight ${
-          tone === "ok" ? "text-emerald-700" : ""
-        }`}
+        className={`text-2xl font-semibold tabular-nums tracking-tight ${palette.value}`}
       >
         {value}
       </div>

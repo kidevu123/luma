@@ -33,10 +33,43 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
   // event; product/batch/receipt denormalized from joins.
   await db.execute(sql`DELETE FROM read_bag_state`);
   const bagStateRes = await db.execute(sql`
+    WITH last_pause AS (
+      -- Most recent BAG_PAUSED per bag.
+      SELECT DISTINCT ON (workflow_bag_id)
+        workflow_bag_id,
+        occurred_at AS paused_at
+      FROM workflow_events
+      WHERE event_type::text = 'BAG_PAUSED'
+      ORDER BY workflow_bag_id, occurred_at DESC, id DESC
+    ),
+    last_resume AS (
+      -- Most recent BAG_RESUMED per bag.
+      SELECT DISTINCT ON (workflow_bag_id)
+        workflow_bag_id,
+        occurred_at AS resumed_at
+      FROM workflow_events
+      WHERE event_type::text = 'BAG_RESUMED'
+      ORDER BY workflow_bag_id, occurred_at DESC, id DESC
+    ),
+    paused_total AS (
+      -- Total closed pause seconds per bag.
+      SELECT p.workflow_bag_id, COALESCE(SUM(EXTRACT(EPOCH FROM (r.occurred_at - p.occurred_at)))::int, 0) AS sec
+      FROM workflow_events p
+      JOIN LATERAL (
+        SELECT MIN(r2.occurred_at) AS occurred_at
+        FROM workflow_events r2
+        WHERE r2.workflow_bag_id = p.workflow_bag_id
+          AND r2.event_type::text = 'BAG_RESUMED'
+          AND r2.occurred_at > p.occurred_at
+      ) r ON r.occurred_at IS NOT NULL
+      WHERE p.event_type::text = 'BAG_PAUSED'
+      GROUP BY p.workflow_bag_id
+    )
     INSERT INTO read_bag_state (
       workflow_bag_id, stage, product_id, product_name,
       inventory_bag_batch_id, receipt_number,
-      is_finalized, last_event_at, updated_at
+      is_finalized, is_paused, paused_at, paused_seconds_accum,
+      last_event_at, updated_at
     )
     SELECT
       wb.id,
@@ -69,6 +102,21 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
       ib.batch_id AS inventory_bag_batch_id,
       wb.receipt_number,
       wb.finalized_at IS NOT NULL AS is_finalized,
+      -- is_paused: true when last BAG_PAUSED is more recent than last
+      -- BAG_RESUMED AND the bag isn't finalized.
+      (
+        wb.finalized_at IS NULL
+        AND lp.paused_at IS NOT NULL
+        AND (lr.resumed_at IS NULL OR lp.paused_at > lr.resumed_at)
+      ) AS is_paused,
+      CASE
+        WHEN wb.finalized_at IS NULL
+          AND lp.paused_at IS NOT NULL
+          AND (lr.resumed_at IS NULL OR lp.paused_at > lr.resumed_at)
+        THEN lp.paused_at
+        ELSE NULL
+      END AS paused_at,
+      COALESCE(pt.sec, 0) AS paused_seconds_accum,
       COALESCE(
         (SELECT MAX(occurred_at) FROM workflow_events WHERE workflow_bag_id = wb.id),
         wb.started_at
@@ -77,6 +125,9 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
     FROM workflow_bags wb
     LEFT JOIN products p ON p.id = wb.product_id
     LEFT JOIN inventory_bags ib ON ib.id = wb.inventory_bag_id
+    LEFT JOIN last_pause lp ON lp.workflow_bag_id = wb.id
+    LEFT JOIN last_resume lr ON lr.workflow_bag_id = wb.id
+    LEFT JOIN paused_total pt ON pt.workflow_bag_id = wb.id
   `);
 
   // ── 2. read_bag_metrics ─────────────────────────────────────────
