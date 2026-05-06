@@ -12,6 +12,7 @@ import {
   Database,
   Recycle,
   RotateCcw,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -25,6 +26,7 @@ import {
   runImportAction,
   previewImportAction,
   synthesizeReadModelsAction,
+  synthesizeSubmissionsAction,
   releaseOrphanedLegacyCardsAction,
 } from "./actions";
 
@@ -674,6 +676,131 @@ export function PostImportMaintenance() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+type SynthApplyState = {
+  ok: boolean;
+  text: string;
+  details: string[];
+};
+
+/** Phase-2: walk the two stash tables (legacy_warehouse_submissions +
+ *  legacy_machine_counts) and mint synthetic workflow_events so the
+ *  rollups light up for the 7 months of historical data. Owner-only,
+ *  takes a snapshot first, gated by typed "APPLY" confirmation just
+ *  like RunImportButton. */
+export function SynthesizeSubmissionsButton() {
+  const [pending, setPending] = React.useState(false);
+  const [confirmText, setConfirmText] = React.useState("");
+  const [result, setResult] = React.useState<SynthApplyState | null>(null);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border/70 bg-surface-2/40 p-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+          Phase 2 — synthesize legacy events
+        </div>
+      </div>
+      <p className="text-xs text-text-muted leading-relaxed">
+        Walks <span className="font-mono">legacy_warehouse_submissions</span>{" "}
+        and <span className="font-mono">legacy_machine_counts</span>, mints
+        synthetic <span className="font-mono">workflow_events</span> rows of
+        the closest-match type, attaches each to a real or placeholder
+        workflow_bag, then rebuilds the rollup tables. A pre-synthesis{" "}
+        <strong>snapshot</strong> is taken first; revert from{" "}
+        <span className="font-mono">/settings/danger-zone</span> if anything
+        looks off. Type{" "}
+        <span className="font-mono font-semibold">APPLY</span> below to
+        confirm.
+      </p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <Input
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          placeholder="type APPLY to confirm"
+          className="max-w-[220px]"
+          disabled={pending}
+        />
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          disabled={pending || confirmText !== "APPLY"}
+          onClick={async () => {
+            setPending(true);
+            setResult(null);
+            try {
+              const r = await synthesizeSubmissionsAction();
+              if (r && "error" in r && r.error) {
+                setResult({ ok: false, text: r.error, details: [] });
+              } else if (r && "ok" in r) {
+                const details: string[] = [
+                  `events inserted: ${r.eventsInserted ?? 0}`,
+                  `from machine_counts: ${r.machineCountsSynthesized ?? 0}`,
+                  `from warehouse_submissions: ${
+                    r.warehouseSubmissionsSynthesized ?? 0
+                  }`,
+                  `placeholder bags: ${r.placeholderBagsCreated ?? 0}`,
+                ];
+                if (r.readModels) {
+                  details.push(
+                    `bag_state ${r.readModels.bagStateRows ?? 0}`,
+                    `bag_metrics ${r.readModels.bagMetricsRows ?? 0}`,
+                    `daily_throughput ${
+                      r.readModels.dailyThroughputRows ?? 0
+                    }`,
+                    `operator_daily ${r.readModels.operatorDailyRows ?? 0}`,
+                  );
+                }
+                setResult({
+                  ok: r.ok,
+                  text: `${r.ok ? "Synthesized" : "Synthesized with errors"} in ${
+                    r.durationMs ?? 0
+                  }ms · snapshot ${r.snapshot ?? "skipped"}${
+                    r.errorCount ? ` · ${r.errorCount} errors` : ""
+                  }`,
+                  details,
+                });
+                setConfirmText("");
+              }
+            } catch (err) {
+              setResult({
+                ok: false,
+                text: err instanceof Error ? err.message : "Synthesis failed.",
+                details: [],
+              });
+            } finally {
+              setPending(false);
+            }
+          }}
+        >
+          <Layers className="h-3.5 w-3.5" />{" "}
+          {pending ? "Synthesizing…" : "Synthesize legacy events"}
+        </Button>
+      </div>
+      {result && (
+        <div
+          className={
+            "text-xs rounded-md px-3 py-2 border " +
+            (result.ok
+              ? "text-emerald-800 bg-emerald-50 border-emerald-200"
+              : "text-red-800 bg-red-50 border-red-200")
+          }
+        >
+          <div className="font-medium">{result.text}</div>
+          {result.details.length > 0 && (
+            <ul className="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-x-3 text-text-muted">
+              {result.details.map((d) => (
+                <li key={d} className="font-mono text-[11px] tabular-nums">
+                  {d}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

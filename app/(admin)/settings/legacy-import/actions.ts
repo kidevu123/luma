@@ -18,6 +18,7 @@ import { paWhoAmI } from "@/lib/legacy/pa-client";
 import { runFetch } from "@/lib/legacy/fetcher";
 import { runImport, previewImport } from "@/lib/legacy/tt-importer";
 import { synthesizeReadModelsFromEvents } from "@/lib/legacy/read-model-synthesizer";
+import { runSubmissionSynthesizer } from "@/lib/legacy/submission-synthesizer";
 import { createSnapshot } from "@/lib/admin/snapshots";
 
 async function getCompanyId(): Promise<string> {
@@ -343,6 +344,38 @@ export async function releaseOrphanedLegacyCardsAction() {
     return { ok: true as const, released: ids.length };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Release failed." };
+  }
+}
+
+/** Phase-2 legacy synthesizer — walks legacy_machine_counts +
+ *  legacy_warehouse_submissions, mints synthetic workflow_events of
+ *  the closest-match type, and rebuilds the rollups. Owner-only;
+ *  takes a Luma snapshot first so the operation is fully reversible
+ *  via /settings/danger-zone if anything looks off. */
+export async function synthesizeSubmissionsAction() {
+  const actor = await requireOwner();
+  try {
+    const snapshot = await createSnapshot(actor, "pre-tt-synthesize");
+    const r = await runSubmissionSynthesizer({ actor });
+    revalidatePath("/settings/legacy-import");
+    revalidatePath("/floor-board");
+    revalidatePath("/dashboard");
+    revalidatePath("/metrics");
+    revalidatePath("/reports");
+    return {
+      ok: r.ok,
+      machineCountsSynthesized: r.machineCountsSynthesized,
+      warehouseSubmissionsSynthesized: r.warehouseSubmissionsSynthesized,
+      placeholderBagsCreated: r.placeholderBagsCreated,
+      eventsInserted: r.eventsInserted,
+      errorCount: r.errors.length,
+      firstErrors: r.errors.slice(0, 5),
+      durationMs: r.durationMs,
+      readModels: r.readModels,
+      snapshot: snapshot.filename,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Synthesis failed." };
   }
 }
 
