@@ -9,7 +9,13 @@
 
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { stations, machines, qrCards, workflowBags } from "@/lib/db/schema";
+import {
+  stations,
+  machines,
+  qrCards,
+  workflowBags,
+  readBagState,
+} from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
@@ -37,9 +43,14 @@ export default async function FloorStationPage({
     .from(qrCards)
     .where(eq(qrCards.status, "IDLE"));
   const assignedCards = await db
-    .select({ card: qrCards, bag: workflowBags })
+    .select({
+      card: qrCards,
+      bag: workflowBags,
+      state: readBagState,
+    })
     .from(qrCards)
     .leftJoin(workflowBags, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
+    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
     .where(eq(qrCards.status, "ASSIGNED"));
 
   return (
@@ -96,6 +107,7 @@ export default async function FloorStationPage({
               stationId={station.station.id}
               stationKind={station.station.kind}
               workflowBagId={assignedCards[0]?.bag?.id ?? null}
+              isPaused={assignedCards[0]?.state?.isPaused ?? false}
             />
           </div>
         )}
