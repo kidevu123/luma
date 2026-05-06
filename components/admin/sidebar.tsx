@@ -13,6 +13,7 @@ import {
   BarChart3,
   QrCode,
   Search,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
       { href: "/qr-cards", label: "QR cards", icon: QrCode },
       { href: "/recall", label: "Recall lookup", icon: Search },
       { href: "/reports", label: "Reports", icon: BarChart3 },
+      { href: "/metrics", label: "Metrics", icon: TrendingUp },
     ],
   },
   {
