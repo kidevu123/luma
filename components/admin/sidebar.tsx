@@ -11,6 +11,8 @@ import {
   PackageCheck,
   Sliders,
   BarChart3,
+  QrCode,
+  Search,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,6 +42,8 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
       { href: "/inbound", label: "POs & receiving", icon: Truck },
       { href: "/batches", label: "Batches", icon: ShieldCheck },
       { href: "/finished-lots", label: "Finished lots", icon: PackageCheck },
+      { href: "/qr-cards", label: "QR cards", icon: QrCode },
+      { href: "/recall", label: "Recall lookup", icon: Search },
       { href: "/reports", label: "Reports", icon: BarChart3 },
     ],
   },

@@ -12,7 +12,13 @@
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
-import { readDailyThroughput, products, machines } from "@/lib/db/schema";
+import {
+  readDailyThroughput,
+  readMaterialBurn,
+  products,
+  machines,
+  packagingMaterials,
+} from "@/lib/db/schema";
 import { PageHeader, EmptyState } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
@@ -58,6 +64,34 @@ async function topProducts(days: number) {
     .limit(10);
 }
 
+async function topMaterials(days: number) {
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - days);
+  const sinceStr = since.toISOString().slice(0, 10);
+  return db
+    .select({
+      packagingMaterialId: readMaterialBurn.packagingMaterialId,
+      materialName: packagingMaterials.name,
+      materialSku: packagingMaterials.sku,
+      uom: packagingMaterials.uom,
+      consumed: sql<number>`COALESCE(SUM(${readMaterialBurn.qtyConsumed}),0)::int`,
+    })
+    .from(readMaterialBurn)
+    .leftJoin(
+      packagingMaterials,
+      sql`${readMaterialBurn.packagingMaterialId} = ${packagingMaterials.id}`,
+    )
+    .where(sql`${readMaterialBurn.day} >= ${sinceStr}`)
+    .groupBy(
+      readMaterialBurn.packagingMaterialId,
+      packagingMaterials.name,
+      packagingMaterials.sku,
+      packagingMaterials.uom,
+    )
+    .orderBy(sql`SUM(${readMaterialBurn.qtyConsumed}) DESC`)
+    .limit(10);
+}
+
 async function topMachines(days: number) {
   const since = new Date();
   since.setUTCDate(since.getUTCDate() - days);
@@ -78,10 +112,11 @@ async function topMachines(days: number) {
 
 export default async function ReportsPage() {
   await requireSession();
-  const [days14, products30, machines30] = await Promise.all([
+  const [days14, products30, machines30, materials30] = await Promise.all([
     dailyTotals(14),
     topProducts(30),
     topMachines(30),
+    topMaterials(30),
   ]);
 
   const empty = days14.length === 0;
@@ -223,6 +258,47 @@ export default async function ReportsPage() {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Material burn (30 days)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {materials30.length === 0 ? (
+                <p className="text-sm text-text-muted">
+                  No data yet. Material burn populates from product BOM × units
+                  produced when a finished lot is issued.
+                </p>
+              ) : (
+                <DataTable>
+                  <THead>
+                    <TR>
+                      <TH>Material</TH>
+                      <TH>SKU</TH>
+                      <TH>UoM</TH>
+                      <TH className="text-right">Consumed</TH>
+                    </TR>
+                  </THead>
+                  <tbody>
+                    {materials30.map((m) => (
+                      <TR key={m.packagingMaterialId ?? "_"}>
+                        <TD className="font-medium">{m.materialName ?? "—"}</TD>
+                        <TD className="font-mono text-xs text-text-muted">
+                          {m.materialSku ?? "—"}
+                        </TD>
+                        <TD className="text-text-muted text-xs">
+                          {m.uom ?? "—"}
+                        </TD>
+                        <TD className="text-right tabular-nums font-semibold">
+                          {m.consumed.toLocaleString()}
+                        </TD>
+                      </TR>
+                    ))}
+                  </tbody>
+                </DataTable>
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
     </div>
