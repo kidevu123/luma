@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { requireSession } from "@/lib/auth-guards";
 import { Sidebar } from "@/components/admin/sidebar";
 import { Topbar } from "@/components/admin/topbar";
+import { AdminFooter } from "@/components/admin/footer";
 
 export default async function AdminLayout({
   children,
@@ -17,6 +18,7 @@ export default async function AdminLayout({
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-screen-2xl w-full mx-auto">
           {children}
         </main>
+        <AdminFooter />
       </div>
     </div>
   );

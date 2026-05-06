@@ -15,6 +15,20 @@
       "when": 1778100000000,
       "tag": "0001_zoho_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0002_workflow_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778300000000,
+      "tag": "0003_metrics_schema",
+      "breakpoints": true
     }
   ]
 }

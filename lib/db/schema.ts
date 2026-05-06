@@ -22,6 +22,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -134,14 +135,22 @@ export const workflowEventTypeEnum = pgEnum("workflow_event_type", [
   "STATION_RESUMED",
   "OPERATOR_CHANGE",
   "PRODUCT_MAPPED",
+  // Vendor barcode verification at run-start
+  "BAG_VERIFIED",
   // Production stages
   "BLISTER_COMPLETE",
   "SEALING_COMPLETE",
   "PACKAGING_SNAPSHOT",
+  "PACKAGING_COMPLETE",
   "PACKAGING_TAKEN_FOR_ORDER",
+  "PACKAGING_DAMAGE_RETURN",
   "BOTTLE_HANDPACK_COMPLETE",
   "BOTTLE_CAP_SEAL_COMPLETE",
   "BOTTLE_STICKER_COMPLETE",
+  // Pause / resume — workflow nuance, supports PVC swap, shift end,
+  // machine jam, etc. Cycle-time math subtracts paused duration.
+  "BAG_PAUSED",
+  "BAG_RESUMED",
   // Variety pack lineage
   "VARIETY_SOURCES_ASSIGNED",
   // Batch traceability
@@ -422,6 +431,12 @@ export const inventoryBags = pgTable(
      *  or printed count). */
     pillCount: integer("pill_count"),
     weightGrams: integer("weight_grams"),
+    /** Manufacturer's existing barcode/lot number on the bag's
+     *  printed sticker. Captured at receive time so an operator at
+     *  the blister machine can scan the same barcode and the
+     *  system verifies which inventory bag they're working — no
+     *  new label printing required. */
+    vendorBarcode: text("vendor_barcode"),
     status: inventoryBagStatusEnum("status").notNull().default("AVAILABLE"),
     /** Reserved for bottle production (kept out of card-flow picking). */
     reservedForBottles: boolean("reserved_for_bottles").notNull().default(false),
@@ -789,6 +804,16 @@ export const readBagState = pgTable(
     receiptNumber: text("receipt_number"),
     isFinalized: boolean("is_finalized").notNull().default(false),
     isOnHold: boolean("is_on_hold").notNull().default(false),
+    /** Pause/resume state. While paused, cycle-time math should
+     *  treat (now - paused_at) as time NOT counted. On resume the
+     *  delta gets added to paused_seconds_accum. */
+    isPaused: boolean("is_paused").notNull().default(false),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    pausedSecondsAccum: integer("paused_seconds_accum").notNull().default(0),
+    /** Most-recent operator code (4-digit or scanned employee QR).
+     *  Optional — system works fine without it; populating
+     *  unlocks per-employee performance metrics. */
+    currentOperatorCode: text("current_operator_code"),
     lastEventAt: timestamp("last_event_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
@@ -797,6 +822,7 @@ export const readBagState = pgTable(
   (t) => [
     index("read_bag_state_stage_idx").on(t.stage),
     index("read_bag_state_finalized_idx").on(t.isFinalized),
+    index("read_bag_state_paused_idx").on(t.isPaused),
   ],
 );
 
@@ -826,6 +852,83 @@ export const readDailyThroughput = pgTable(
       t.machineId,
     ),
     index("read_daily_throughput_day_idx").on(t.day),
+  ],
+);
+
+/** Per-finalized-bag metrics snapshot. Computed by the projector at
+ *  BAG_FINALIZED time by walking the bag's workflow_events, so the
+ *  reports / analytics page never has to aggregate over the raw
+ *  event stream. Every per-bag stat the system can produce lives
+ *  here. */
+export const readBagMetrics = pgTable(
+  "read_bag_metrics",
+  {
+    workflowBagId: uuid("workflow_bag_id")
+      .primaryKey()
+      .references(() => workflowBags.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }).notNull(),
+    totalSeconds: integer("total_seconds").notNull(),
+    pausedSeconds: integer("paused_seconds").notNull().default(0),
+    activeSeconds: integer("active_seconds").notNull(),
+    blisterSeconds: integer("blister_seconds"),
+    sealingSeconds: integer("sealing_seconds"),
+    packagingSeconds: integer("packaging_seconds"),
+    bottleHandpackSeconds: integer("bottle_handpack_seconds"),
+    bottleCapSealSeconds: integer("bottle_cap_seal_seconds"),
+    bottleStickerSeconds: integer("bottle_sticker_seconds"),
+    /** Time bag spent between BLISTER_COMPLETE and the next stage's
+     *  BAG_CLAIMED. Cards: blister → sealing handoff. Bottles: handpack → sticker. */
+    staging1Seconds: integer("staging_1_seconds"),
+    staging2Seconds: integer("staging_2_seconds"),
+    masterCases: integer("master_cases").notNull().default(0),
+    displaysMade: integer("displays_made").notNull().default(0),
+    looseCards: integer("loose_cards").notNull().default(0),
+    damagedPackaging: integer("damaged_packaging").notNull().default(0),
+    rippedCards: integer("ripped_cards").notNull().default(0),
+    inputPillCount: integer("input_pill_count"),
+    unitsYielded: integer("units_yielded").notNull().default(0),
+    /** Yield = unitsYielded / inputPillCount, expressed as %. Null
+     *  when input wasn't recorded. */
+    yieldPct: numeric("yield_pct", { precision: 6, scale: 3 }),
+    operatorCodes: text("operator_codes")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    machineIds: uuid("machine_ids")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::uuid[]`),
+  },
+  (t) => [
+    index("read_bag_metrics_finalized_idx").on(t.finalizedAt),
+    index("read_bag_metrics_product_idx").on(t.productId),
+  ],
+);
+
+/** Per-(day, operator) rollup — drives the operator leaderboard
+ *  and per-employee productivity stats. Updated at BAG_FINALIZED
+ *  time alongside read_bag_metrics. */
+export const readOperatorDaily = pgTable(
+  "read_operator_daily",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    day: date("day").notNull(),
+    operatorCode: text("operator_code").notNull(),
+    bagsFinalized: integer("bags_finalized").notNull().default(0),
+    activeSecondsTotal: integer("active_seconds_total").notNull().default(0),
+    damageCountTotal: integer("damage_count_total").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("read_operator_daily_day_operator_unique").on(
+      t.day,
+      t.operatorCode,
+    ),
+    index("read_operator_daily_day_idx").on(t.day),
   ],
 );
 

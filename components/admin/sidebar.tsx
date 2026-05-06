@@ -19,21 +19,16 @@ import { cn } from "@/lib/utils";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
+// Master-data items (products / tablet-types / machines / packaging)
+// were promoted into Settings — config of any kind belongs there.
+// Sidebar stays focused on day-to-day operations + a single
+// Settings entry that fans out to everything configurable.
 const SECTIONS: { heading: string; items: NavItem[] }[] = [
   {
     heading: "Overview",
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/floor-board", label: "Live floor", icon: Activity },
-    ],
-  },
-  {
-    heading: "Master data",
-    items: [
-      { href: "/products", label: "Products", icon: Boxes },
-      { href: "/tablet-types", label: "Tablet types", icon: Boxes },
-      { href: "/machines", label: "Machines & stations", icon: Sliders },
-      { href: "/packaging", label: "Packaging materials", icon: PackageCheck },
     ],
   },
   {

@@ -15,16 +15,20 @@
 // the only place that's allowed to insert into workflow_events going
 // forward.
 
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and, asc } from "drizzle-orm";
 import type { db as Db } from "@/lib/db";
 import {
   workflowEvents,
   workflowBags,
   readStationLive,
   readBagState,
+  readBagMetrics,
   readDailyThroughput,
+  readOperatorDaily,
   stations,
   qrCards,
+  inventoryBags,
+  products,
 } from "@/lib/db/schema";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
@@ -44,21 +48,23 @@ const STAGE_FOR_EVENT: Record<string, string> = {
   BLISTER_COMPLETE: "BLISTERED",
   SEALING_COMPLETE: "SEALED",
   PACKAGING_SNAPSHOT: "PACKAGED",
-  BOTTLE_HANDPACK_COMPLETE: "BLISTERED", // bottle-line analog of "first transform done"
+  PACKAGING_COMPLETE: "PACKAGED", // rich-payload variant of SNAPSHOT
+  BOTTLE_HANDPACK_COMPLETE: "BLISTERED",
   BOTTLE_CAP_SEAL_COMPLETE: "SEALED",
   BOTTLE_STICKER_COMPLETE: "PACKAGED",
   BAG_FINALIZED: "FINALIZED",
 };
 
 /** Which read_daily_throughput counter to increment for each event.
- *  CARD_ASSIGNED is intentionally skipped — it's not a finishing
- *  signal, and counting it here would double-count every bag. */
+ *  CARD_ASSIGNED is intentionally skipped. PACKAGING_COMPLETE counts
+ *  toward bags_packaged exactly like SNAPSHOT does. */
 const THROUGHPUT_COLUMN: Record<string, string> = {
   BLISTER_COMPLETE: "bags_blistered",
   BOTTLE_HANDPACK_COMPLETE: "bags_blistered",
   SEALING_COMPLETE: "bags_sealed",
   BOTTLE_CAP_SEAL_COMPLETE: "bags_sealed",
   PACKAGING_SNAPSHOT: "bags_packaged",
+  PACKAGING_COMPLETE: "bags_packaged",
   BOTTLE_STICKER_COMPLETE: "bags_packaged",
   BAG_FINALIZED: "bags_finalized",
 };
@@ -138,7 +144,45 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       });
   }
 
-  // 3. workflow_bags.finalizedAt + qr_cards release on BAG_FINALIZED.
+  // 2b. Pause / resume — flip is_paused on read_bag_state and
+  //     accumulate paused_seconds on resume. While paused, cycle-time
+  //     math should treat (now - paused_at) as time NOT counted.
+  if (ev.eventType === "BAG_PAUSED") {
+    await tx
+      .update(readBagState)
+      .set({ isPaused: true, pausedAt: occurredAt, updatedAt: occurredAt })
+      .where(eq(readBagState.workflowBagId, ev.workflowBagId));
+  } else if (ev.eventType === "BAG_RESUMED") {
+    const [bs] = await tx
+      .select({ pausedAt: readBagState.pausedAt, accum: readBagState.pausedSecondsAccum })
+      .from(readBagState)
+      .where(eq(readBagState.workflowBagId, ev.workflowBagId));
+    if (bs?.pausedAt) {
+      const delta = Math.floor(
+        (occurredAt.getTime() - new Date(bs.pausedAt as unknown as string).getTime()) / 1000,
+      );
+      await tx
+        .update(readBagState)
+        .set({
+          isPaused: false,
+          pausedAt: null,
+          pausedSecondsAccum: (bs.accum ?? 0) + Math.max(0, delta),
+          updatedAt: occurredAt,
+        })
+        .where(eq(readBagState.workflowBagId, ev.workflowBagId));
+    }
+  } else if (ev.eventType === "OPERATOR_CHANGE") {
+    const code = String(ev.payload?.operator_code ?? "").trim();
+    if (code) {
+      await tx
+        .update(readBagState)
+        .set({ currentOperatorCode: code, updatedAt: occurredAt })
+        .where(eq(readBagState.workflowBagId, ev.workflowBagId));
+    }
+  }
+
+  // 3. workflow_bags.finalizedAt + qr_cards release on BAG_FINALIZED +
+  //    snapshot read_bag_metrics + bump read_operator_daily.
   if (ev.eventType === "BAG_FINALIZED") {
     await tx
       .update(workflowBags)
@@ -148,6 +192,7 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       .update(qrCards)
       .set({ status: "IDLE", assignedWorkflowBagId: null })
       .where(eq(qrCards.assignedWorkflowBagId, ev.workflowBagId));
+    await projectMetricsForFinalizedBag(tx, ev.workflowBagId, occurredAt);
   }
 
   // 4. read_daily_throughput — increment the matching bag-stage counter
@@ -217,4 +262,235 @@ function storedRankSql() {
     WHEN 'FINALIZED' THEN 5
     ELSE 0
   END`;
+}
+
+/** Walk every workflow_event for a bag and snapshot a per-bag
+ *  metrics row. Called once at BAG_FINALIZED time so reports never
+ *  have to aggregate over the raw event stream.
+ *
+ *  Per-stage seconds are computed as gap-between-prior-complete-event
+ *  (started_at counts as the implicit "stage 0 complete"). Pause
+ *  duration is the sum of (RESUMED.occurredAt - PAUSED.occurredAt)
+ *  pairs. active_seconds = total - paused. Yield, when computable
+ *  from inputPillCount + product spec, lands as a percentage. */
+async function projectMetricsForFinalizedBag(
+  tx: Tx,
+  bagId: string,
+  finalizedAt: Date,
+): Promise<void> {
+  const [bag] = await tx.select().from(workflowBags).where(eq(workflowBags.id, bagId));
+  if (!bag) return;
+
+  const events = await tx
+    .select()
+    .from(workflowEvents)
+    .where(eq(workflowEvents.workflowBagId, bagId))
+    .orderBy(asc(workflowEvents.occurredAt));
+
+  const startedAt = bag.startedAt as unknown as Date;
+  const totalSeconds = Math.max(
+    0,
+    Math.floor((finalizedAt.getTime() - startedAt.getTime()) / 1000),
+  );
+
+  // Pause durations: walk PAUSED→RESUMED pairs in order.
+  let pausedSeconds = 0;
+  let pendingPausedAt: number | null = null;
+  for (const e of events) {
+    const t = (e.occurredAt as unknown as Date).getTime();
+    if (e.eventType === "BAG_PAUSED") pendingPausedAt = t;
+    else if (e.eventType === "BAG_RESUMED" && pendingPausedAt !== null) {
+      pausedSeconds += Math.max(0, Math.floor((t - pendingPausedAt) / 1000));
+      pendingPausedAt = null;
+    }
+  }
+  // If still paused at finalize (edge case), close the open pause.
+  if (pendingPausedAt !== null) {
+    pausedSeconds += Math.max(
+      0,
+      Math.floor((finalizedAt.getTime() - pendingPausedAt) / 1000),
+    );
+  }
+  const activeSeconds = Math.max(0, totalSeconds - pausedSeconds);
+
+  // Per-stage seconds = gap between this stage's _COMPLETE and the
+  // previous stage's _COMPLETE (or bag.startedAt for the first).
+  const stageBoundaries: Array<{ key: string; at: number }> = [
+    { key: "_start", at: startedAt.getTime() },
+  ];
+  for (const e of events) {
+    if (
+      e.eventType === "BLISTER_COMPLETE" ||
+      e.eventType === "SEALING_COMPLETE" ||
+      e.eventType === "PACKAGING_SNAPSHOT" ||
+      e.eventType === "PACKAGING_COMPLETE" ||
+      e.eventType === "BOTTLE_HANDPACK_COMPLETE" ||
+      e.eventType === "BOTTLE_CAP_SEAL_COMPLETE" ||
+      e.eventType === "BOTTLE_STICKER_COMPLETE"
+    ) {
+      stageBoundaries.push({
+        key: e.eventType,
+        at: (e.occurredAt as unknown as Date).getTime(),
+      });
+    }
+  }
+  function gap(toKey: string): number | null {
+    const idx = stageBoundaries.findIndex((b) => b.key === toKey);
+    if (idx <= 0) return null;
+    const prev = stageBoundaries[idx - 1];
+    const cur = stageBoundaries[idx];
+    if (!prev || !cur) return null;
+    return Math.max(0, Math.floor((cur.at - prev.at) / 1000));
+  }
+  const blisterSeconds = gap("BLISTER_COMPLETE");
+  const sealingSeconds = gap("SEALING_COMPLETE");
+  const packagingSeconds =
+    gap("PACKAGING_COMPLETE") ?? gap("PACKAGING_SNAPSHOT");
+  const bottleHandpackSeconds = gap("BOTTLE_HANDPACK_COMPLETE");
+  const bottleCapSealSeconds = gap("BOTTLE_CAP_SEAL_COMPLETE");
+  const bottleStickerSeconds = gap("BOTTLE_STICKER_COMPLETE");
+
+  // Pull packaging counts off the most recent PACKAGING_COMPLETE
+  // event's payload (if present); fall back to the legacy
+  // PACKAGING_SNAPSHOT.count_total when only that event fired.
+  let masterCases = 0,
+    displaysMade = 0,
+    looseCards = 0,
+    damagedPackaging = 0,
+    rippedCards = 0;
+  const packagingCompleteEv = [...events]
+    .reverse()
+    .find((e) => e.eventType === "PACKAGING_COMPLETE");
+  if (packagingCompleteEv) {
+    const p = (packagingCompleteEv.payload ?? {}) as Record<string, unknown>;
+    masterCases = Number(p.master_cases ?? 0) || 0;
+    displaysMade = Number(p.displays_made ?? 0) || 0;
+    looseCards = Number(p.loose_cards ?? 0) || 0;
+    damagedPackaging = Number(p.damaged_packaging ?? 0) || 0;
+    rippedCards = Number(p.ripped_cards ?? 0) || 0;
+  } else {
+    const snapshot = [...events]
+      .reverse()
+      .find((e) => e.eventType === "PACKAGING_SNAPSHOT");
+    if (snapshot) {
+      const p = (snapshot.payload ?? {}) as Record<string, unknown>;
+      looseCards = Number(p.count_total ?? 0) || 0;
+    }
+  }
+
+  // Resolve the product so we can derive units/yield. workflow_bags
+  // sets productId once per bag; any stage event can populate it
+  // (PRODUCT_MAPPED). The bag row above is the source of truth.
+  let unitsYielded = 0;
+  let yieldPctText: string | null = null;
+  let inputPillCount: number | null = null;
+  if (bag.productId) {
+    const [product] = await tx
+      .select({
+        unitsPerDisplay: products.unitsPerDisplay,
+        displaysPerCase: products.displaysPerCase,
+      })
+      .from(products)
+      .where(eq(products.id, bag.productId));
+    if (product?.unitsPerDisplay && product.displaysPerCase) {
+      const cardsPerCase = product.unitsPerDisplay * product.displaysPerCase;
+      unitsYielded =
+        masterCases * cardsPerCase +
+        displaysMade * product.unitsPerDisplay +
+        looseCards;
+    } else {
+      unitsYielded = looseCards;
+    }
+  }
+  if (bag.inventoryBagId) {
+    const [invBag] = await tx
+      .select({ pillCount: inventoryBags.pillCount })
+      .from(inventoryBags)
+      .where(eq(inventoryBags.id, bag.inventoryBagId));
+    if (invBag?.pillCount) {
+      inputPillCount = invBag.pillCount;
+      if (inputPillCount > 0) {
+        yieldPctText = ((unitsYielded / inputPillCount) * 100).toFixed(3);
+      }
+    }
+  }
+
+  // Operator codes seen + machines that touched this bag.
+  const operatorCodes = Array.from(
+    new Set(
+      events
+        .map((e) => {
+          const p = (e.payload ?? {}) as Record<string, unknown>;
+          const c = String(p.operator_code ?? "").trim();
+          return c;
+        })
+        .filter((c) => c !== ""),
+    ),
+  );
+  const stationIds = Array.from(
+    new Set(events.map((e) => e.stationId).filter((s): s is string => !!s)),
+  );
+  let machineIds: string[] = [];
+  if (stationIds.length > 0) {
+    const stationRows = await tx
+      .select({ machineId: stations.machineId })
+      .from(stations)
+      .where(sql`${stations.id} = ANY(${stationIds}::uuid[])`);
+    machineIds = Array.from(
+      new Set(
+        stationRows.map((r) => r.machineId).filter((m): m is string => !!m),
+      ),
+    );
+  }
+
+  // Idempotent upsert — finalize is at-most-once via the partial
+  // unique index on workflow_events, so this is the only chance we
+  // get to write metrics for a given bag.
+  await tx
+    .insert(readBagMetrics)
+    .values({
+      workflowBagId: bagId,
+      productId: bag.productId,
+      startedAt,
+      finalizedAt,
+      totalSeconds,
+      pausedSeconds,
+      activeSeconds,
+      blisterSeconds: blisterSeconds ?? null,
+      sealingSeconds: sealingSeconds ?? null,
+      packagingSeconds: packagingSeconds ?? null,
+      bottleHandpackSeconds: bottleHandpackSeconds ?? null,
+      bottleCapSealSeconds: bottleCapSealSeconds ?? null,
+      bottleStickerSeconds: bottleStickerSeconds ?? null,
+      staging1Seconds: null,
+      staging2Seconds: null,
+      masterCases,
+      displaysMade,
+      looseCards,
+      damagedPackaging,
+      rippedCards,
+      inputPillCount,
+      unitsYielded,
+      yieldPct: yieldPctText,
+      operatorCodes,
+      machineIds,
+    })
+    .onConflictDoNothing({ target: readBagMetrics.workflowBagId });
+
+  // Per-(day, operator) rollup for the leaderboard.
+  if (operatorCodes.length > 0) {
+    const day = finalizedAt.toISOString().slice(0, 10);
+    for (const code of operatorCodes) {
+      await tx.execute(sql`
+        INSERT INTO read_operator_daily (day, operator_code, bags_finalized, active_seconds_total, damage_count_total, updated_at)
+        VALUES (${day}, ${code}, 1, ${activeSeconds}, ${damagedPackaging + rippedCards}, ${finalizedAt})
+        ON CONFLICT (day, operator_code)
+        DO UPDATE SET
+          bags_finalized = read_operator_daily.bags_finalized + 1,
+          active_seconds_total = read_operator_daily.active_seconds_total + ${activeSeconds},
+          damage_count_total = read_operator_daily.damage_count_total + ${damagedPackaging + rippedCards},
+          updated_at = ${finalizedAt}
+      `);
+    }
+  }
 }
