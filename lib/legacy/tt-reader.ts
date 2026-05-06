@@ -7,32 +7,35 @@
 
 import { gunzipSync } from "node:zlib";
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 
 let SQL: SqlJsStatic | null = null;
 
-/** Resolve sql-wasm.wasm at runtime regardless of where the bundler
- *  put node_modules. Pre-loading the bytes via wasmBinary sidesteps
- *  Next standalone's pruned static-asset path. */
-async function readWasmBinary(): Promise<Uint8Array> {
-  // Node's createRequire works from this module's URL even when the
-  // surrounding code was bundled by Next.
-  const req = createRequire(import.meta.url);
-  const sqlJsPath = req.resolve("sql.js");
-  const distDir = dirname(sqlJsPath);
-  const wasmPath = join(distDir, "sql-wasm.wasm");
-  return readFile(wasmPath);
+/** Locate sql-wasm.wasm without relying on import.meta.url (which
+ *  Next.js bundles into a numeric module ID, breaking createRequire).
+ *  We try a few well-known paths in order — first hit wins. Covers
+ *  both Next dev (cwd = repo root) and Next standalone (cwd = /app). */
+function findWasmPath(): string {
+  const candidates = [
+    join(process.cwd(), "node_modules", "sql.js", "dist", "sql-wasm.wasm"),
+    "/app/node_modules/sql.js/dist/sql-wasm.wasm",
+    join(process.cwd(), ".next", "standalone", "node_modules", "sql.js", "dist", "sql-wasm.wasm"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error(
+    `sql-wasm.wasm not found. Tried: ${candidates.join(", ")}. ` +
+      "If running in a non-standard layout, ensure sql.js is installed " +
+      "and adjust findWasmPath() accordingly.",
+  );
 }
 
 async function loadSqlJs(): Promise<SqlJsStatic> {
   if (SQL) return SQL;
-  const wasmBinary = await readWasmBinary();
-  // Pre-loading the bytes is the most portable initialization —
-  // sql.js skips its own fetch path entirely. The slice() copies
-  // out of Node's pooled Buffer into a fresh ArrayBuffer, which is
-  // what initSqlJs's typings require.
+  const wasmBinary = await readFile(findWasmPath());
   const ab = wasmBinary.buffer.slice(
     wasmBinary.byteOffset,
     wasmBinary.byteOffset + wasmBinary.byteLength,
