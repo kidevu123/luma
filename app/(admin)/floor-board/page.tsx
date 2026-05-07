@@ -30,6 +30,11 @@ import {
   deriveDamageAndReworkMetrics,
   deriveBagGenealogy,
 } from "@/lib/production/metrics";
+import {
+  deriveWorkflowHealth,
+  deriveActivitySignals,
+  deriveBlockedMetrics,
+} from "@/lib/production/diagnostics";
 import { todayRange } from "@/lib/production/time";
 import { MetricCard } from "@/components/production/metric-card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
@@ -78,6 +83,9 @@ export default async function FloorBoardPage() {
     machinesList,
     recentActiveBag,
     reconAlerts,
+    health,
+    activity,
+    blocked,
   ] = await Promise.all([
     deriveDashboardMetrics(),
     deriveBottleneck(),
@@ -124,6 +132,9 @@ export default async function FloorBoardPage() {
       .leftJoin(products, eq(products.id, workflowBags.productId))
       .orderBy(desc(readMaterialReconciliation.updatedAt))
       .limit(50),
+    deriveWorkflowHealth(),
+    deriveActivitySignals(),
+    deriveBlockedMetrics(),
   ]);
 
   // Pull live machine snapshots in parallel — one round trip per
@@ -169,6 +180,201 @@ export default async function FloorBoardPage() {
           <LiveRefresh />
         </div>
       </header>
+
+      {/* WORKFLOW HEALTH — diagnostic strip. Surfaces the gap
+          between activity and finalization. Always visible. */}
+      <section aria-label="Workflow health">
+        <SectionHeader
+          title="Workflow health"
+          subtitle={
+            health.lastEventAt
+              ? `Last event ${new Date(health.lastEventAt).toISOString().replace("T", " ").slice(0, 19)} UTC`
+              : "No events recorded yet"
+          }
+        />
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <DiagTile label="Total events" value={health.totalEvents} accent="default" />
+          <DiagTile label="Total bags" value={health.totalBags} accent="default" />
+          <DiagTile label="Active" value={health.activeBags} accent="default" />
+          <DiagTile
+            label="Finalized"
+            value={health.finalizedBags}
+            accent={health.finalizedBags === 0 && health.totalBags > 0 ? "rose" : "default"}
+          />
+          <DiagTile
+            label="Missing finalize"
+            value={health.bagsMissingFinalization}
+            accent={health.bagsMissingFinalization > 0 ? "amber" : "default"}
+          />
+          <DiagTile
+            label="Completion rate"
+            value={
+              health.completionRatePct == null
+                ? "—"
+                : `${health.completionRatePct}%`
+            }
+            accent={
+              health.completionRatePct != null && health.completionRatePct < 50
+                ? "rose"
+                : "default"
+            }
+          />
+          <DiagTile
+            label="Operator capture"
+            value={
+              health.activeBags === 0
+                ? "—"
+                : `${health.operatorCodeCaptureCount} / ${health.activeBags}`
+            }
+            accent={
+              health.activeBags > 0 && health.operatorCodeCaptureCount === 0
+                ? "rose"
+                : "default"
+            }
+          />
+        </div>
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <DiagTile label="Stuck @ start" value={health.bagsStuckAtStart} accent="amber" />
+          <DiagTile label="Stuck @ blister" value={health.bagsStuckAtBlister} accent="amber" />
+          <DiagTile label="Stuck @ seal" value={health.bagsStuckAtSeal} accent="amber" />
+          <DiagTile label="Packaged, not finalized" value={health.bagsPackagedNotFinalized} accent="amber" />
+          <DiagTile label="Force releases" value={health.forceReleaseCount} />
+          <DiagTile label="Submission corrections" value={health.submissionCorrectionCount} />
+          <DiagTile label="Paused bags" value={health.pausedBags} />
+        </div>
+      </section>
+
+      {/* WHY ARE METRICS EMPTY? — only shows when activity exists
+          but no bags have finalized. This is a diagnostic, not a
+          status report. The wording is intentionally direct. */}
+      {health.totalEvents > 0 && health.finalizedBags === 0 && (
+        <section
+          aria-label="Why are metrics empty"
+          className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3"
+        >
+          <h2 className="text-[11px] uppercase tracking-[0.10em] text-amber-300 font-semibold">
+            Why are output metrics empty?
+          </h2>
+          <p className="mt-1.5 text-[13px] text-amber-100 leading-relaxed">
+            Production activity exists ({health.totalEvents} events across{" "}
+            {health.totalBags} bags), but <strong>no bags have reached BAG_FINALIZED</strong>.
+            Output metrics (good units, displays, cases, yield, OEE,
+            material reconciliation) are blocked until bags are finalized
+            on the floor or until legacy activity is mapped into canonical
+            completion states via the legacy synthesizer.
+          </p>
+          <p className="mt-1.5 text-[12px] text-amber-200/80">
+            Action: complete the full floor flow on the station —{" "}
+            <span className="font-mono">CARD_ASSIGNED → BLISTER_COMPLETE → SEALING_COMPLETE → PACKAGING_COMPLETE → BAG_FINALIZED</span>.
+            The Finalize button on the packaging station fires
+            BAG_FINALIZED, which writes read_bag_metrics and unlocks
+            every output KPI.
+          </p>
+        </section>
+      )}
+
+      {/* BLOCKED METRICS — list every blocked KPI, why, and what to do. */}
+      {blocked.length > 0 && (
+        <section aria-label="Blocked metrics">
+          <SectionHeader
+            title="Blocked metrics"
+            subtitle={`${blocked.length} KPI${blocked.length === 1 ? "" : "s"} cannot compute today`}
+          />
+          <div className="mt-2 grid grid-cols-1 lg:grid-cols-2 gap-2">
+            {blocked.map((b) => (
+              <div
+                key={b.metric}
+                className="rounded-md border border-slate-700/60 bg-slate-900/60 p-3 space-y-1.5"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-slate-100">{b.metric}</h3>
+                  <ConfidenceBadge confidence="MISSING" />
+                </div>
+                <p className="text-[12px] text-slate-400">{b.reason}</p>
+                <div className="text-[11px] text-slate-500">
+                  <strong className="text-slate-400">Missing:</strong>{" "}
+                  {b.missing.join(", ") || "—"}
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  <strong className="text-slate-400">Action:</strong> {b.action}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ACTIVITY SIGNALS — raw event counts. NEVER reported as
+          output / yield / OEE / good units. The label spells this
+          out. */}
+      <section aria-label="Activity signals">
+        <SectionHeader
+          title="Activity signals (last 30d)"
+          subtitle="Raw scan counts. Never output, yield, or OEE."
+        />
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+          <DiagTile label="Total events 30d" value={activity.totalEvents30d} accent="cyan" />
+          <DiagTile label="Card assigns" value={activity.cardAssigned30d} />
+          <DiagTile label="Blister scans" value={activity.blisterEvents30d} />
+          <DiagTile label="Sealing scans" value={activity.sealingEvents30d} />
+          <DiagTile
+            label="Packaging snapshots"
+            value={activity.packagingSnapshots30d}
+          />
+          <DiagTile
+            label="Packaging complete"
+            value={activity.packagingComplete30d}
+          />
+          <DiagTile label="Bag pauses" value={activity.bagPaused30d} />
+          <DiagTile label="Bag resumes" value={activity.bagResumed30d} />
+        </div>
+        {activity.bottleHandpack30d +
+          activity.bottleCapSeal30d +
+          activity.bottleSticker30d >
+          0 && (
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <DiagTile label="Bottle handpack" value={activity.bottleHandpack30d} />
+            <DiagTile label="Bottle cap/seal" value={activity.bottleCapSeal30d} />
+            <DiagTile label="Bottle sticker" value={activity.bottleSticker30d} />
+          </div>
+        )}
+        {activity.lastEventByStation.length > 0 && (
+          <div className="mt-2 rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
+            <table className="min-w-full text-[12px]">
+              <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+                <tr>
+                  <th className="text-left px-3 py-2">Station</th>
+                  <th className="text-left px-3 py-2">Machine</th>
+                  <th className="text-left px-3 py-2">Kind</th>
+                  <th className="text-right px-3 py-2">Events 30d</th>
+                  <th className="text-left px-3 py-2">Last activity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activity.lastEventByStation.slice(0, 10).map((s) => (
+                  <tr key={s.stationId} className="border-t border-slate-800">
+                    <td className="px-3 py-1.5 text-slate-200">
+                      {s.stationLabel ?? s.stationId.slice(0, 8) + "…"}
+                    </td>
+                    <td className="px-3 py-1.5 text-slate-300">
+                      {s.machineName ?? "—"}
+                    </td>
+                    <td className="px-3 py-1.5 text-slate-500 font-mono">
+                      {s.machineKind ?? "—"}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">
+                      {s.eventCount30d}
+                    </td>
+                    <td className="px-3 py-1.5 font-mono text-slate-500">
+                      {s.lastEventAt.toISOString().replace("T", " ").slice(0, 19)} UTC
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* KPI STRIP */}
       <section aria-label="KPI strip" className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
@@ -620,3 +826,42 @@ const FALLBACK: MetricResult = {
   missingInputs: ["metric_api"],
   label: "No data",
 };
+
+function DiagTile({
+  label,
+  value,
+  accent = "default",
+}: {
+  label: string;
+  value: number | string;
+  accent?: "default" | "amber" | "rose" | "cyan";
+}) {
+  const valueColor =
+    accent === "amber"
+      ? "text-amber-300"
+      : accent === "rose"
+        ? "text-rose-300"
+        : accent === "cyan"
+          ? "text-cyan-300"
+          : "text-slate-100";
+  const borderColor =
+    accent === "amber"
+      ? "border-amber-500/30"
+      : accent === "rose"
+        ? "border-rose-500/30"
+        : accent === "cyan"
+          ? "border-cyan-500/30"
+          : "border-slate-700/60";
+  return (
+    <div
+      className={`rounded-md border ${borderColor} bg-slate-900/60 px-3 py-2`}
+    >
+      <div className="text-[10px] uppercase tracking-[0.10em] text-slate-400 leading-tight truncate">
+        {label}
+      </div>
+      <div className={`mt-1 text-xl font-mono tabular-nums ${valueColor}`}>
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </div>
+    </div>
+  );
+}
