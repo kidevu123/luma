@@ -9,7 +9,6 @@
 // rejects duplicates. legacy_tt_id_map records every synthesized
 // row so a second run finds them and short-circuits.
 
-import "dotenv/config";
 import { runSubmissionSynthesizer } from "@/lib/legacy/submission-synthesizer";
 
 async function main() {
