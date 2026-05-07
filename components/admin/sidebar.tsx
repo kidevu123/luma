@@ -14,6 +14,9 @@ import {
   QrCode,
   Search,
   TrendingUp,
+  Gauge,
+  History,
+  Scale,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -42,6 +45,14 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
       { href: "/recall", label: "Recall lookup", icon: Search },
       { href: "/reports", label: "Reports", icon: BarChart3 },
       { href: "/metrics", label: "Metrics", icon: TrendingUp },
+    ],
+  },
+  {
+    heading: "Production intelligence",
+    items: [
+      { href: "/genealogy", label: "Bag genealogy", icon: History },
+      { href: "/material-reconciliation", label: "Material recon", icon: Scale },
+      { href: "/standards", label: "Standards & targets", icon: Gauge },
     ],
   },
   {

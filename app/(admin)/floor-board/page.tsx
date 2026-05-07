@@ -55,6 +55,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { LiveRefresh } from "./live-refresh";
+import { HonestKpiStrip } from "./_components/honest-kpi-strip";
 import { KpiStrip } from "./_components/kpi-strip";
 import { LifelineGrid } from "./_components/lifeline-cards";
 import { StationGrid } from "./_components/station-grid";
@@ -785,6 +786,12 @@ export default async function FloorBoardPage() {
         agedCount={agedUnfinalized.count}
         bottleneck={bottleneck}
       />
+
+      {/* Phase D — honest KPI strip wired through lib/production/metrics.ts.
+          Sits at the top so the canonical reading is what the user sees
+          first. The 12-tile legacy strip below remains until the rest of
+          the floor-board is wired through the metric API. */}
+      <HonestKpiStrip />
 
       {/* Data-hygiene callout — when there's a backlog of stale
           unfinalized bags, surface it as a single line so the floor
