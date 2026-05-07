@@ -312,11 +312,18 @@ const CHUNK = 200;
 
 /** Walk legacy_machine_counts + legacy_warehouse_submissions and
  *  insert synthetic workflow_events into Luma. Owner-only via the
- *  caller (server action takes a snapshot first). */
+ *  caller (server action takes a snapshot first).
+ *
+ *  Phase G: `dryRun` flag short-circuits every write. Classification
+ *  + bucket grouping still run, so the returned SynthesisOutput
+ *  reports exactly what WOULD be inserted. Useful as a preflight
+ *  before triggering the real run on a populated DB. */
 export async function runSubmissionSynthesizer(args: {
   actor: CurrentUser;
+  dryRun?: boolean;
 }): Promise<SynthesisOutput> {
   const start = Date.now();
+  const dryRun = !!args.dryRun;
 
   const errors: SynthesisOutput["errors"] = [];
   let eventsInserted = 0;
@@ -402,34 +409,43 @@ export async function runSubmissionSynthesizer(args: {
         `machine_counts_synth_bag:${tupleTtId}`,
       );
       if (!placeholderBagId) {
-        const startedAt = midnightEtFromCountDate(bucket.countDate);
-        const finalizedAt = endOfDayEtFromCountDate(bucket.countDate);
-        const [out] = await db
-          .insert(workflowBags)
-          .values({
-            startedAt,
-            finalizedAt,
-          })
-          .returning({ id: workflowBags.id });
-        if (!out) {
-          errors.push({
-            source: "machine_count",
-            ttId: bucket.rows[0]?.ttId ?? 0,
-            message: "placeholder workflow_bag insert returned no id",
-          });
-          continue;
+        if (dryRun) {
+          // Synthesize a deterministic placeholder UUID just for the
+          // in-memory bucket map; never written to the DB.
+          placeholderBagId = `00000000-0000-5000-8000-${tupleTtId
+            .toString(16)
+            .padStart(12, "0")}`;
+          placeholderBagsCreated++;
+        } else {
+          const startedAt = midnightEtFromCountDate(bucket.countDate);
+          const finalizedAt = endOfDayEtFromCountDate(bucket.countDate);
+          const [out] = await db
+            .insert(workflowBags)
+            .values({
+              startedAt,
+              finalizedAt,
+            })
+            .returning({ id: workflowBags.id });
+          if (!out) {
+            errors.push({
+              source: "machine_count",
+              ttId: bucket.rows[0]?.ttId ?? 0,
+              message: "placeholder workflow_bag insert returned no id",
+            });
+            continue;
+          }
+          placeholderBagId = out.id;
+          placeholderBagsCreated++;
+          await db
+            .insert(legacyTtIdMap)
+            .values({
+              ttTable: "machine_counts_synth_bag",
+              ttId: tupleTtId,
+              lumaTable: "workflow_bags",
+              lumaId: placeholderBagId,
+            })
+            .onConflictDoNothing();
         }
-        placeholderBagId = out.id;
-        placeholderBagsCreated++;
-        await db
-          .insert(legacyTtIdMap)
-          .values({
-            ttTable: "machine_counts_synth_bag",
-            ttId: tupleTtId,
-            lumaTable: "workflow_bags",
-            lumaId: placeholderBagId,
-          })
-          .onConflictDoNothing();
         idMap.set(`machine_counts_synth_bag:${tupleTtId}`, placeholderBagId);
       }
 
@@ -470,6 +486,11 @@ export async function runSubmissionSynthesizer(args: {
     for (let i = 0; i < synthRows.length; i += CHUNK) {
       const slice = synthRows.slice(i, i + CHUNK);
       try {
+        if (dryRun) {
+          eventsInserted += slice.length;
+          machineCountsSynthesized += slice.length;
+          continue;
+        }
         const values = slice.map((s) => ({
           workflowBagId: s.placeholderBagId,
           eventType: s.eventType as never,
@@ -571,33 +592,40 @@ export async function runSubmissionSynthesizer(args: {
             `machine_counts_synth_bag:${tupleTtId}`,
           );
           if (!placeholderBagId) {
-            const [out] = await db
-              .insert(workflowBags)
-              .values({
-                ...(r.bagId ? { inventoryBagId: r.bagId } : {}),
-                startedAt: midnightEtFromCountDate(dayIso),
-                finalizedAt: endOfDayEtFromCountDate(dayIso),
-              })
-              .returning({ id: workflowBags.id });
-            if (!out) {
-              errors.push({
-                source: "warehouse_submission",
-                ttId: r.ttId,
-                message: "placeholder workflow_bag insert returned no id",
-              });
-              continue;
+            if (dryRun) {
+              placeholderBagId = `00000000-0000-5000-8000-${tupleTtId
+                .toString(16)
+                .padStart(12, "0")}`;
+              placeholderBagsCreated++;
+            } else {
+              const [out] = await db
+                .insert(workflowBags)
+                .values({
+                  ...(r.bagId ? { inventoryBagId: r.bagId } : {}),
+                  startedAt: midnightEtFromCountDate(dayIso),
+                  finalizedAt: endOfDayEtFromCountDate(dayIso),
+                })
+                .returning({ id: workflowBags.id });
+              if (!out) {
+                errors.push({
+                  source: "warehouse_submission",
+                  ttId: r.ttId,
+                  message: "placeholder workflow_bag insert returned no id",
+                });
+                continue;
+              }
+              placeholderBagId = out.id;
+              placeholderBagsCreated++;
+              await db
+                .insert(legacyTtIdMap)
+                .values({
+                  ttTable: "machine_counts_synth_bag",
+                  ttId: tupleTtId,
+                  lumaTable: "workflow_bags",
+                  lumaId: placeholderBagId,
+                })
+                .onConflictDoNothing();
             }
-            placeholderBagId = out.id;
-            placeholderBagsCreated++;
-            await db
-              .insert(legacyTtIdMap)
-              .values({
-                ttTable: "machine_counts_synth_bag",
-                ttId: tupleTtId,
-                lumaTable: "workflow_bags",
-                lumaId: placeholderBagId,
-              })
-              .onConflictDoNothing();
             idMap.set(
               `machine_counts_synth_bag:${tupleTtId}`,
               placeholderBagId,
@@ -643,6 +671,11 @@ export async function runSubmissionSynthesizer(args: {
     for (let i = 0; i < synthRows.length; i += CHUNK) {
       const slice = synthRows.slice(i, i + CHUNK);
       try {
+        if (dryRun) {
+          eventsInserted += slice.length;
+          warehouseSubmissionsSynthesized += slice.length;
+          continue;
+        }
         const values = slice.map((s) => ({
           workflowBagId: s.workflowBagId,
           eventType: s.eventType as never,
@@ -690,16 +723,18 @@ export async function runSubmissionSynthesizer(args: {
   // Call the canonical backfill helper so every BAG_FINALIZED event
   // produces the side effects the projector would have produced
   // (workflow_bags.finalized_at + downstream read_bag_metrics).
-  try {
-    await replayFinalizedBags();
-  } catch (err) {
-    errors.push({
-      source: "machine_count",
-      ttId: 0,
-      message:
-        "BAG_FINALIZED backfill failed: " +
-        (err instanceof Error ? err.message : String(err)),
-    });
+  if (!dryRun) {
+    try {
+      await replayFinalizedBags();
+    } catch (err) {
+      errors.push({
+        source: "machine_count",
+        ttId: 0,
+        message:
+          "BAG_FINALIZED backfill failed: " +
+          (err instanceof Error ? err.message : String(err)),
+      });
+    }
   }
 
   // ── Rebuild rollups ──
@@ -711,49 +746,53 @@ export async function runSubmissionSynthesizer(args: {
   // matches what the synchronous projector would have produced for
   // live events.
   let readModels: SynthesisOutput["readModels"] = null;
-  try {
-    readModels = await synthesizeReadModelsFromEvents();
-  } catch (err) {
-    errors.push({
-      source: "machine_count",
-      ttId: 0,
-      message:
-        "Read-model synthesis failed: " +
-        (err instanceof Error ? err.message : String(err)),
-    });
-  }
-  try {
-    await db.transaction(async (tx) => {
-      await rebuildSkuDaily(tx);
-      await rebuildMaterialReconciliation(tx);
-      await rebuildStationQualityDaily(tx);
-      await rebuildQueueState(tx);
-    });
-  } catch (err) {
-    errors.push({
-      source: "machine_count",
-      ttId: 0,
-      message:
-        "Phase C read-model rebuild failed: " +
-        (err instanceof Error ? err.message : String(err)),
-    });
+  if (!dryRun) {
+    try {
+      readModels = await synthesizeReadModelsFromEvents();
+    } catch (err) {
+      errors.push({
+        source: "machine_count",
+        ttId: 0,
+        message:
+          "Read-model synthesis failed: " +
+          (err instanceof Error ? err.message : String(err)),
+      });
+    }
+    try {
+      await db.transaction(async (tx) => {
+        await rebuildSkuDaily(tx);
+        await rebuildMaterialReconciliation(tx);
+        await rebuildStationQualityDaily(tx);
+        await rebuildQueueState(tx);
+      });
+    } catch (err) {
+      errors.push({
+        source: "machine_count",
+        ttId: 0,
+        message:
+          "Phase C read-model rebuild failed: " +
+          (err instanceof Error ? err.message : String(err)),
+      });
+    }
   }
 
-  await writeAudit({
-    actorId: args.actor.id,
-    actorRole: args.actor.role,
-    action: "legacy_import.synthesize_submissions",
-    targetType: "LegacySynthesisRun",
-    targetId: null,
-    after: {
-      machineCountsSynthesized,
-      warehouseSubmissionsSynthesized,
-      placeholderBagsCreated,
-      eventsInserted,
-      errorCount: errors.length,
-      readModels,
-    },
-  });
+  if (!dryRun) {
+    await writeAudit({
+      actorId: args.actor.id,
+      actorRole: args.actor.role,
+      action: "legacy_import.synthesize_submissions",
+      targetType: "LegacySynthesisRun",
+      targetId: null,
+      after: {
+        machineCountsSynthesized,
+        warehouseSubmissionsSynthesized,
+        placeholderBagsCreated,
+        eventsInserted,
+        errorCount: errors.length,
+        readModels,
+      },
+    });
+  }
 
   return {
     ok: errors.length === 0,
