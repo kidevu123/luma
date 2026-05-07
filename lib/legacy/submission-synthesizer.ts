@@ -55,6 +55,11 @@ import {
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
 import { synthesizeReadModelsFromEvents } from "./read-model-synthesizer";
+import { replayFinalizedBags } from "./replay-finalized-bags";
+import { rebuildSkuDaily } from "@/lib/projector/sku-daily";
+import { rebuildMaterialReconciliation } from "@/lib/projector/material-reconciliation";
+import { rebuildStationQualityDaily } from "@/lib/projector/station-daily";
+import { rebuildQueueState } from "@/lib/projector/queue-state";
 
 /** Fixed UUID namespace for synthesizing deterministic client_event_id
  *  values from legacy tt_id integers. Generated once and frozen here
@@ -678,7 +683,33 @@ export async function runSubmissionSynthesizer(args: {
     }
   }
 
+  // ── Backfill workflow_bags.finalized_at ──
+  // The synthesizer creates placeholder bags with finalized_at set,
+  // but bags created via other paths (live floor, earlier importers)
+  // may have BAG_FINALIZED events without their finalized_at set.
+  // Call the canonical backfill helper so every BAG_FINALIZED event
+  // produces the side effects the projector would have produced
+  // (workflow_bags.finalized_at + downstream read_bag_metrics).
+  try {
+    await replayFinalizedBags();
+  } catch (err) {
+    errors.push({
+      source: "machine_count",
+      ttId: 0,
+      message:
+        "BAG_FINALIZED backfill failed: " +
+        (err instanceof Error ? err.message : String(err)),
+    });
+  }
+
   // ── Rebuild rollups ──
+  // synthesizeReadModelsFromEvents covers read_bag_state /
+  // read_bag_metrics / read_daily_throughput / read_operator_daily.
+  // The Phase C rebuilders cover read_sku_daily /
+  // read_material_reconciliation / read_station_quality_daily /
+  // read_queue_state. Run all of them so the post-synthesis state
+  // matches what the synchronous projector would have produced for
+  // live events.
   let readModels: SynthesisOutput["readModels"] = null;
   try {
     readModels = await synthesizeReadModelsFromEvents();
@@ -688,6 +719,22 @@ export async function runSubmissionSynthesizer(args: {
       ttId: 0,
       message:
         "Read-model synthesis failed: " +
+        (err instanceof Error ? err.message : String(err)),
+    });
+  }
+  try {
+    await db.transaction(async (tx) => {
+      await rebuildSkuDaily(tx);
+      await rebuildMaterialReconciliation(tx);
+      await rebuildStationQualityDaily(tx);
+      await rebuildQueueState(tx);
+    });
+  } catch (err) {
+    errors.push({
+      source: "machine_count",
+      ttId: 0,
+      message:
+        "Phase C read-model rebuild failed: " +
         (err instanceof Error ? err.message : String(err)),
     });
   }
