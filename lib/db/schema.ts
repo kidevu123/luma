@@ -1430,6 +1430,331 @@ export const dueTargets = pgTable(
   ],
 );
 
+// ─── Phase H.x0 — Route / Operation Compatibility Layer ──────────────────────
+// Lifts the implicit CARD vs BOTTLE routing into data so future products
+// can be configured without enum migrations. Existing enums and projector
+// stay unchanged; these tables are read-side until a follow-up phase
+// migrates the write side. See docs/PRODUCT_ONBOARDING_AND_EXTENSIBILITY.md.
+
+export const productionRoutes = pgTable(
+  "production_routes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("production_routes_code_unique").on(t.code)],
+);
+
+export const operationTypes = pgTable(
+  "operation_types",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    requiresTimer: boolean("requires_timer").notNull().default(false),
+    requiresCounter: boolean("requires_counter").notNull().default(false),
+    requiresMachine: boolean("requires_machine").notNull().default(false),
+    requiresMaterials: boolean("requires_materials").notNull().default(false),
+    /** Free-text output unit lexicon (cards, bottles, cases, lots, …).
+     *  Mirrors stationStandards.outputUnit / dueTargets.targetUnit. */
+    outputUnit: text("output_unit"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("operation_types_code_unique").on(t.code)],
+);
+
+export const routeOperations = pgTable(
+  "route_operations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    routeId: uuid("route_id")
+      .notNull()
+      .references(() => productionRoutes.id, { onDelete: "cascade" }),
+    operationTypeId: uuid("operation_type_id")
+      .notNull()
+      .references(() => operationTypes.id, { onDelete: "restrict" }),
+    sequence: integer("sequence").notNull(),
+    /** Stage the bag is in BEFORE this operation runs. Mirrors the
+     *  STAGE_KEYS literal in lib/production/types.ts. Stored as text
+     *  so a new stage doesn't need a TS literal change to be modeled. */
+    stageKey: text("stage_key").notNull(),
+    /** Stage the bag advances to once this operation completes. */
+    nextStageKey: text("next_stage_key"),
+    /** Where rework sends the bag. NULL means no rework path. */
+    reworkStageKey: text("rework_stage_key"),
+    /** Free-text. Today matches station_kind / machine_kind enum
+     *  values; future routes can introduce new kinds without an
+     *  enum migration. */
+    allowedStationKind: text("allowed_station_kind"),
+    allowedMachineKind: text("allowed_machine_kind"),
+    requiresScan: boolean("requires_scan").notNull().default(true),
+    requiresCounter: boolean("requires_counter").notNull().default(false),
+    requiresTimer: boolean("requires_timer").notNull().default(false),
+    outputUnit: text("output_unit"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("route_operations_seq_unique").on(t.routeId, t.sequence),
+    index("route_operations_route_idx").on(t.routeId, t.sequence),
+    index("route_operations_stage_idx").on(t.routeId, t.stageKey),
+    index("route_operations_operation_idx").on(t.operationTypeId),
+  ],
+);
+
+export const productRouteAssignments = pgTable(
+  "product_route_assignments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    routeId: uuid("route_id")
+      .notNull()
+      .references(() => productionRoutes.id, { onDelete: "restrict" }),
+    isDefault: boolean("is_default").notNull().default(true),
+    isActive: boolean("is_active").notNull().default(true),
+    effectiveFrom: date("effective_from").notNull().defaultNow(),
+    effectiveTo: date("effective_to"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("product_route_assignments_product_idx").on(t.productId, t.isActive),
+    index("product_route_assignments_route_idx").on(t.routeId),
+  ],
+);
+
+export const routeStationPermissions = pgTable(
+  "route_station_permissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    routeOperationId: uuid("route_operation_id")
+      .notNull()
+      .references(() => routeOperations.id, { onDelete: "cascade" }),
+    stationId: uuid("station_id").references(() => stations.id, {
+      onDelete: "cascade",
+    }),
+    machineId: uuid("machine_id").references(() => machines.id, {
+      onDelete: "cascade",
+    }),
+    stationKind: text("station_kind"),
+    machineKind: text("machine_kind"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("route_station_permissions_op_idx").on(t.routeOperationId, t.isActive)],
+);
+
+export const qualityChecks = pgTable(
+  "quality_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** Free-text dispatch hint: COUNT_VERIFY, SEAL_INSPECT,
+     *  LABEL_VERIFY, DAMAGE_CHECK, WEIGHT_CHECK, PHOTO,
+     *  SUPERVISOR_APPROVAL, etc. Foundational only — UI behavior
+     *  per check_type lands in a follow-up phase. */
+    checkType: text("check_type").notNull(),
+    isRequired: boolean("is_required").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("quality_checks_code_unique").on(t.code)],
+);
+
+export const routeQualityChecks = pgTable(
+  "route_quality_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    routeOperationId: uuid("route_operation_id")
+      .notNull()
+      .references(() => routeOperations.id, { onDelete: "cascade" }),
+    qualityCheckId: uuid("quality_check_id")
+      .notNull()
+      .references(() => qualityChecks.id, { onDelete: "restrict" }),
+    isRequired: boolean("is_required").notNull().default(false),
+    sequence: integer("sequence").notNull().default(1),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("route_quality_checks_unique").on(t.routeOperationId, t.qualityCheckId),
+    index("route_quality_checks_op_idx").on(t.routeOperationId, t.sequence),
+  ],
+);
+
+// ─── Phase H.x0.5 — Generic item identity + product structure + Zoho fdtn ──
+// `items` is a thin polymorphic registry over the three existing master
+// tables (tablet_types, packaging_materials, products). It exists so
+// `item_conversions` can express "1 X contains N Y" for any pair of
+// items regardless of source — the generic answer to questions today's
+// hardcoded products.tablets_per_unit / units_per_display etc. answer.
+// See docs/PRODUCT_STRUCTURE_AND_ZOHO_ITEMS.md.
+
+export const items = pgTable(
+  "items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemCode: text("item_code").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** RAW_MATERIAL | PACKAGING_MATERIAL | COMPONENT | INTERMEDIATE_GOOD
+     *  | FINISHED_GOOD | SELLABLE_SKU | SERVICE | OTHER. Free-text with
+     *  CHECK constraint at DB. */
+    itemCategory: text("item_category").notNull(),
+    defaultUnitOfMeasure: text("default_unit_of_measure").notNull(),
+    /** Polymorphic FK target. Source rows live in tablet_types,
+     *  packaging_materials, products, OR null (standalone virtual
+     *  intermediates like "blister card before sealing"). */
+    sourceKind: text("source_kind"),
+    sourceId: uuid("source_id"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("items_item_code_unique").on(t.itemCode),
+    uniqueIndex("items_source_unique").on(t.sourceKind, t.sourceId),
+    index("items_category_idx").on(t.itemCategory, t.isActive),
+    index("items_source_idx").on(t.sourceKind, t.sourceId),
+  ],
+);
+
+export const itemConversions = pgTable(
+  "item_conversions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    routeId: uuid("route_id").references(() => productionRoutes.id, {
+      onDelete: "set null",
+    }),
+    /** Direction: parent (output) contains child (input).
+     *  "1 blister card contains 20 tablets" stores card as parent. */
+    parentItemId: uuid("parent_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "restrict" }),
+    childItemId: uuid("child_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "restrict" }),
+    parentQuantity: numeric("parent_quantity", { precision: 20, scale: 6 }).notNull(),
+    parentUnitOfMeasure: text("parent_unit_of_measure").notNull(),
+    parentPackLevel: text("parent_pack_level").notNull(),
+    childQuantity: numeric("child_quantity", { precision: 20, scale: 6 }).notNull(),
+    childUnitOfMeasure: text("child_unit_of_measure").notNull(),
+    childPackLevel: text("child_pack_level").notNull(),
+    effectiveFrom: date("effective_from").notNull().defaultNow(),
+    effectiveTo: date("effective_to"),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("item_conversions_product_idx").on(t.productId, t.isActive),
+    index("item_conversions_route_idx").on(t.routeId),
+    index("item_conversions_parent_idx").on(t.parentItemId, t.isActive),
+    index("item_conversions_child_idx").on(t.childItemId, t.isActive),
+  ],
+);
+
+export const externalSystems = pgTable(
+  "external_systems",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("external_systems_code_unique").on(t.code)],
+);
+
+export const externalItemMappings = pgTable(
+  "external_item_mappings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    externalSystemId: uuid("external_system_id")
+      .notNull()
+      .references(() => externalSystems.id, { onDelete: "cascade" }),
+    externalItemId: text("external_item_id").notNull(),
+    externalItemCode: text("external_item_code"),
+    externalItemName: text("external_item_name"),
+    lumaItemId: uuid("luma_item_id").references(() => items.id, {
+      onDelete: "set null",
+    }),
+    lumaProductId: uuid("luma_product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    materialItemId: uuid("material_item_id").references(() => packagingMaterials.id, {
+      onDelete: "set null",
+    }),
+    /** Hint about how the upstream item should be classified. UNKNOWN
+     *  means undecided — production code that needs the mapping must
+     *  surface a "Mapping missing" missing-state. */
+    mappingType: text("mapping_type").notNull().default("UNKNOWN"),
+    isActive: boolean("is_active").notNull().default(true),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("external_item_mappings_unique").on(t.externalSystemId, t.externalItemId),
+    index("external_item_mappings_system_idx").on(t.externalSystemId, t.isActive),
+    index("external_item_mappings_luma_item_idx").on(t.lumaItemId),
+    index("external_item_mappings_product_idx").on(t.lumaProductId),
+  ],
+);
+
+export const externalInventorySnapshots = pgTable(
+  "external_inventory_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    externalSystemId: uuid("external_system_id")
+      .notNull()
+      .references(() => externalSystems.id, { onDelete: "cascade" }),
+    externalItemId: text("external_item_id").notNull(),
+    itemCode: text("item_code"),
+    itemName: text("item_name"),
+    quantityOnHand: numeric("quantity_on_hand", { precision: 20, scale: 6 }),
+    quantityAvailable: numeric("quantity_available", { precision: 20, scale: 6 }),
+    unitOfMeasure: text("unit_of_measure"),
+    warehouseName: text("warehouse_name"),
+    snapshotAt: timestamp("snapshot_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("external_inventory_snapshots_system_item_idx").on(
+      t.externalSystemId,
+      t.externalItemId,
+      t.snapshotAt,
+    ),
+    index("external_inventory_snapshots_at_idx").on(t.snapshotAt),
+  ],
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Context 6 — Read models (denormalized projections, refreshed by pg-boss
 //                          jobs that listen to workflow_events.pg_notify)
@@ -1974,3 +2299,15 @@ export type ReadBagState = typeof readBagState.$inferSelect;
 export type ReadDailyThroughput = typeof readDailyThroughput.$inferSelect;
 export type ReadMaterialBurn = typeof readMaterialBurn.$inferSelect;
 export type AuditLog = typeof auditLog.$inferSelect;
+export type Item = typeof items.$inferSelect;
+export type ItemConversion = typeof itemConversions.$inferSelect;
+export type ExternalSystem = typeof externalSystems.$inferSelect;
+export type ExternalItemMapping = typeof externalItemMappings.$inferSelect;
+export type ExternalInventorySnapshot = typeof externalInventorySnapshots.$inferSelect;
+export type ProductionRoute = typeof productionRoutes.$inferSelect;
+export type OperationType = typeof operationTypes.$inferSelect;
+export type RouteOperation = typeof routeOperations.$inferSelect;
+export type ProductRouteAssignment = typeof productRouteAssignments.$inferSelect;
+export type RouteStationPermission = typeof routeStationPermissions.$inferSelect;
+export type QualityCheck = typeof qualityChecks.$inferSelect;
+export type RouteQualityCheck = typeof routeQualityChecks.$inferSelect;

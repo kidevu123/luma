@@ -92,6 +92,20 @@
       "when": 1779200000000,
       "tag": "0012_material_inventory_phase_h",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779300000000,
+      "tag": "0013_route_operation_compat",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1779400000000,
+      "tag": "0014_generic_item_structure",
+      "breakpoints": true
     }
   ]
 }
