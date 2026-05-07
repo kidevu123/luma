@@ -714,6 +714,18 @@ export async function deriveQueueAging(
         r.oldestAgeSeconds != null
           ? ok(Math.round(r.oldestAgeSeconds / 60), "min")
           : zero("min", "Queue empty.");
+      out[`${r.stageKey}.avgAgeMinutes`] =
+        r.avgAgeSeconds != null
+          ? ok(Math.round(r.avgAgeSeconds / 60), "min")
+          : zero("min", "Queue empty.");
+      out[`${r.stageKey}.p90AgeMinutes`] =
+        r.p90AgeSeconds != null
+          ? ok(Math.round(r.p90AgeSeconds / 60), "min")
+          : zero("min", "Insufficient samples.");
+      out[`${r.stageKey}.bagsOverThreshold`] = ok(
+        r.bagsOverThreshold,
+        "bags",
+      );
       out[`${r.stageKey}.status`] = ok(r.queueStatus, null);
     }
     return out;
@@ -725,6 +737,15 @@ export async function deriveQueueAging(
     out[`${stageKey}.wip`] = sub.wip ?? zero("bags");
     out[`${stageKey}.oldestAgeMinutes`] =
       sub.oldestQueueAgeMinutes ?? zero("min");
+    out[`${stageKey}.avgAgeMinutes`] =
+      sub.avgQueueAgeMinutes ?? zero("min");
+    out[`${stageKey}.p90AgeMinutes`] = missing(
+      "min",
+      ["read_queue_state"],
+      "p90 not available in fallback",
+    );
+    out[`${stageKey}.bagsOverThreshold`] = zero("bags");
+    out[`${stageKey}.status`] = ok("FLOWING", null);
   }
   return out;
 }

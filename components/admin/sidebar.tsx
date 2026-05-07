@@ -17,6 +17,8 @@ import {
   Gauge,
   History,
   Scale,
+  Users,
+  Package,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -52,6 +54,8 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
     items: [
       { href: "/genealogy", label: "Bag genealogy", icon: History },
       { href: "/material-reconciliation", label: "Material recon", icon: Scale },
+      { href: "/operator-productivity", label: "Operator productivity", icon: Users },
+      { href: "/packaging-output", label: "Packaging output", icon: Package },
       { href: "/standards", label: "Standards & targets", icon: Gauge },
     ],
   },
