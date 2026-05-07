@@ -72,7 +72,10 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
   },
   {
     heading: "System",
-    items: [{ href: "/settings", label: "Settings", icon: Sliders }],
+    items: [
+      { href: "/workflow-validation", label: "Workflow validation", icon: ShieldCheck },
+      { href: "/settings", label: "Settings", icon: Sliders },
+    ],
   },
 ];
 
