@@ -49,6 +49,7 @@ import {
   legacyTtIdMap,
   legacyWarehouseSubmissions,
   machines,
+  users as usersSchema,
   workflowBags,
   workflowEvents,
 } from "@/lib/db/schema";
@@ -777,21 +778,42 @@ export async function runSubmissionSynthesizer(args: {
   }
 
   if (!dryRun) {
-    await writeAudit({
-      actorId: args.actor.id,
-      actorRole: args.actor.role,
-      action: "legacy_import.synthesize_submissions",
-      targetType: "LegacySynthesisRun",
-      targetId: null,
-      after: {
-        machineCountsSynthesized,
-        warehouseSubmissionsSynthesized,
-        placeholderBagsCreated,
-        eventsInserted,
-        errorCount: errors.length,
-        readModels,
-      },
-    });
+    try {
+      // Verify the actor exists in users before writing audit. The
+      // CLI driver runs as a synthetic system actor whose UUID is
+      // intentionally not in users; in that case we log the run
+      // outcome instead of throwing on an FK violation.
+      const [actorExists] = await db
+        .select({ id: usersSchema.id })
+        .from(usersSchema)
+        .where(eq(usersSchema.id, args.actor.id))
+        .limit(1);
+      if (actorExists) {
+        await writeAudit({
+          actorId: args.actor.id,
+          actorRole: args.actor.role,
+          action: "legacy_import.synthesize_submissions",
+          targetType: "LegacySynthesisRun",
+          targetId: null,
+          after: {
+            machineCountsSynthesized,
+            warehouseSubmissionsSynthesized,
+            placeholderBagsCreated,
+            eventsInserted,
+            errorCount: errors.length,
+            readModels,
+          },
+        });
+      } else {
+        console.log(
+          `[synthesizer] actor ${args.actor.id} not in users; skipping audit row (CLI run).`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal — synthesis already succeeded; we don't want to
+      // surface a write failure on a metadata row.
+      console.error("[synthesizer] writeAudit failed (non-fatal):", err);
+    }
   }
 
   return {
