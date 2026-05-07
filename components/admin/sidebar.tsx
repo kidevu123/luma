@@ -41,6 +41,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
     heading: "Operations",
     items: [
       { href: "/inbound", label: "POs & receiving", icon: Truck },
+      { href: "/inbound/packaging-materials", label: "Receive packaging", icon: Boxes },
       { href: "/batches", label: "Batches", icon: ShieldCheck },
       { href: "/finished-lots", label: "Finished lots", icon: PackageCheck },
       { href: "/qr-cards", label: "QR cards", icon: QrCode },
