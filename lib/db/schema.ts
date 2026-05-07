@@ -1755,6 +1755,280 @@ export const externalInventorySnapshots = pgTable(
   ],
 );
 
+// ─── Phase H.x3.6 — Raw bag allocation ledger + variety-pack components ───
+// Turns inventory_bag from a single-shot consumed flag into a balance
+// ledger. A bag can be opened, partially consumed, returned to stock,
+// reopened later for a different product. Variety packs require
+// multiple raw components (flavors); product_component_requirements
+// expresses that BOM at the raw level.
+
+export const rawBagAllocationSessions = pgTable(
+  "raw_bag_allocation_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    inventoryBagId: uuid("inventory_bag_id")
+      .notNull()
+      .references(() => inventoryBags.id, { onDelete: "cascade" }),
+    poId: uuid("po_id").references(() => purchaseOrders.id, {
+      onDelete: "set null",
+    }),
+    workflowBagId: uuid("workflow_bag_id").references(() => workflowBags.id, {
+      onDelete: "set null",
+    }),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    routeId: uuid("route_id").references(() => productionRoutes.id, {
+      onDelete: "set null",
+    }),
+    finishedLotId: uuid("finished_lot_id").references(() => finishedLots.id, {
+      onDelete: "set null",
+    }),
+    /** Variety-pack slot label. PRIMARY | FLAVOR_A | FLAVOR_B | FLAVOR_C
+     *  | COMPONENT | SECONDARY. Free-text — no enum. */
+    componentRole: text("component_role"),
+    /** OPEN | CLOSED | RETURNED_TO_STOCK | DEPLETED | VOIDED. */
+    allocationStatus: text("allocation_status").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    openedByUserId: uuid("opened_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    closedByUserId: uuid("closed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    startingBalanceQty: integer("starting_balance_qty"),
+    startingBalanceSource: text("starting_balance_source"),
+    endingBalanceQty: integer("ending_balance_qty"),
+    endingBalanceSource: text("ending_balance_source"),
+    consumedQty: integer("consumed_qty"),
+    consumedQtySource: text("consumed_qty_source"),
+    unitOfMeasure: text("unit_of_measure").notNull().default("tablets"),
+    confidence: text("confidence").notNull().default("LOW"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("rba_sessions_bag_idx").on(t.inventoryBagId, t.openedAt),
+    index("rba_sessions_po_idx").on(t.poId),
+    index("rba_sessions_product_idx").on(t.productId, t.allocationStatus),
+    index("rba_sessions_workflow_idx").on(t.workflowBagId),
+  ],
+);
+
+export const rawBagAllocationEvents = pgTable(
+  "raw_bag_allocation_events",
+  {
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .generatedAlwaysAsIdentity(),
+    allocationSessionId: uuid("allocation_session_id").references(
+      () => rawBagAllocationSessions.id,
+      { onDelete: "cascade" },
+    ),
+    inventoryBagId: uuid("inventory_bag_id")
+      .notNull()
+      .references(() => inventoryBags.id, { onDelete: "cascade" }),
+    workflowBagId: uuid("workflow_bag_id").references(() => workflowBags.id, {
+      onDelete: "set null",
+    }),
+    poId: uuid("po_id").references(() => purchaseOrders.id, {
+      onDelete: "set null",
+    }),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    routeId: uuid("route_id").references(() => productionRoutes.id, {
+      onDelete: "set null",
+    }),
+    finishedLotId: uuid("finished_lot_id").references(() => finishedLots.id, {
+      onDelete: "set null",
+    }),
+    /** RAW_BAG_OPENED | RAW_BAG_ALLOCATED | RAW_BAG_RETURNED_TO_STOCK
+     *  | RAW_BAG_PARTIAL_CONSUMED | RAW_BAG_DEPLETED | RAW_BAG_REWEIGHED
+     *  | RAW_BAG_ADJUSTED | RAW_BAG_VOIDED */
+    eventType: text("event_type").notNull(),
+    quantity: numeric("quantity", { precision: 20, scale: 6 }),
+    unitOfMeasure: text("unit_of_measure").notNull().default("tablets"),
+    /** VENDOR_DECLARED | RECEIVED_WEIGHT_ESTIMATE | MACHINE_COUNTER
+     *  | FINISHED_LOT_INPUT | MANUAL_ENTRY | WEIGH_BACK | ESTIMATED | UNKNOWN */
+    quantitySource: text("quantity_source"),
+    actorUserId: uuid("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    payload: jsonb("payload").notNull().default({}),
+    confidence: text("confidence").notNull().default("MEDIUM"),
+    missingInputs: jsonb("missing_inputs").notNull().default([]),
+    clientEventId: uuid("client_event_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("rba_events_bag_idx").on(t.inventoryBagId, t.occurredAt),
+    index("rba_events_session_idx").on(t.allocationSessionId),
+    index("rba_events_po_idx").on(t.poId),
+    index("rba_events_product_idx").on(t.productId),
+    index("rba_events_finished_lot_idx").on(t.finishedLotId),
+    index("rba_events_type_idx").on(t.eventType, t.occurredAt),
+  ],
+);
+
+export const productComponentRequirements = pgTable(
+  "product_component_requirements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    routeId: uuid("route_id").references(() => productionRoutes.id, {
+      onDelete: "set null",
+    }),
+    /** Generic items reference so future raw kinds work without a
+     *  migration. For today's variety packs this resolves to a
+     *  TABLET_TYPE-source item. */
+    componentItemId: uuid("component_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "restrict" }),
+    componentRole: text("component_role").notNull(),
+    quantityPerFinishedUnit: numeric("quantity_per_finished_unit", {
+      precision: 20,
+      scale: 6,
+    }).notNull(),
+    unitOfMeasure: text("unit_of_measure").notNull(),
+    effectiveFrom: date("effective_from").notNull().defaultNow(),
+    effectiveTo: date("effective_to"),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("pcr_product_idx").on(t.productId, t.isActive),
+    index("pcr_component_idx").on(t.componentItemId),
+  ],
+);
+
+// ─── Phase H.x3.5 — Raw-item unit-weight standards ─────────────────────────
+// Per-tablet-type unit weight, used to derive an internal
+// "our_estimated_count" from received_net_weight when the vendor's
+// declaration is missing or suspect. Empty by default. Production
+// code surfaces "Unit weight standard missing" when no row exists —
+// it never invents a unit weight.
+
+export const rawItemWeightStandards = pgTable(
+  "raw_item_weight_standards",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tabletTypeId: uuid("tablet_type_id")
+      .notNull()
+      .references(() => tabletTypes.id, { onDelete: "cascade" }),
+    sampleSource: text("sample_source"),
+    standardUnitWeight: numeric("standard_unit_weight", {
+      precision: 12,
+      scale: 6,
+    }).notNull(),
+    weightUnit: text("weight_unit").notNull().default("g"),
+    effectiveFrom: date("effective_from").notNull().defaultNow(),
+    effectiveTo: date("effective_to"),
+    isActive: boolean("is_active").notNull().default(true),
+    /** Free-text confidence; the helper layer coerces to the canonical
+     *  HIGH/MEDIUM/LOW/MISSING ladder. */
+    confidence: text("confidence").notNull().default("MEDIUM"),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("raw_item_weight_standards_lookup_idx").on(
+      t.tabletTypeId,
+      t.effectiveFrom,
+      t.isActive,
+    ),
+  ],
+);
+
+// ─── Phase H.x3 — Learned material usage standard (read model) ─────────────
+// Per (product, route, material, role, machine) bucket of empirical
+// grams-per-blister samples. Filled by lib/projector/material-usage-
+// learning.ts from rolls that have been weighed back. Used as fallback
+// when blister_material_standards has no configured row for the same
+// (product, role) pair. See docs/PRODUCT_STRUCTURE_AND_ZOHO_ITEMS.md
+// for the lexicon (CONFIGURED takes priority over LEARNED).
+
+export const readMaterialUsageLearning = pgTable(
+  "read_material_usage_learning",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    routeId: uuid("route_id").references(() => productionRoutes.id, {
+      onDelete: "set null",
+    }),
+    packagingMaterialId: uuid("packaging_material_id")
+      .notNull()
+      .references(() => packagingMaterials.id, { onDelete: "cascade" }),
+    /** "PVC" | "FOIL"; free-text to leave room for new roles. */
+    materialRole: text("material_role").notNull(),
+    machineId: uuid("machine_id").references(() => machines.id, {
+      onDelete: "set null",
+    }),
+    sampleCount: integer("sample_count").notNull().default(0),
+    totalBlistersProduced: bigint("total_blisters_produced", { mode: "number" }),
+    totalActualWeightUsedGrams: integer("total_actual_weight_used_grams"),
+    avgWeightPerBlister: numeric("avg_weight_per_blister", {
+      precision: 10,
+      scale: 4,
+    }),
+    medianWeightPerBlister: numeric("median_weight_per_blister", {
+      precision: 10,
+      scale: 4,
+    }),
+    p90WeightPerBlister: numeric("p90_weight_per_blister", {
+      precision: 10,
+      scale: 4,
+    }),
+    lastSampleAt: timestamp("last_sample_at", { withTimezone: true }),
+    /** HIGH ≥ 5 samples, MEDIUM 2–4, LOW = 1, MISSING = 0. */
+    confidence: text("confidence").notNull().default("MISSING"),
+    missingInputs: jsonb("missing_inputs").notNull().default([]),
+    source: text("source").notNull().default("LEARNED"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("read_material_usage_learning_lookup_idx").on(
+      t.packagingMaterialId,
+      t.materialRole,
+      t.productId,
+      t.machineId,
+    ),
+    index("read_material_usage_learning_product_idx").on(
+      t.productId,
+      t.materialRole,
+    ),
+  ],
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Context 6 — Read models (denormalized projections, refreshed by pg-boss
 //                          jobs that listen to workflow_events.pg_notify)
@@ -2299,6 +2573,11 @@ export type ReadBagState = typeof readBagState.$inferSelect;
 export type ReadDailyThroughput = typeof readDailyThroughput.$inferSelect;
 export type ReadMaterialBurn = typeof readMaterialBurn.$inferSelect;
 export type AuditLog = typeof auditLog.$inferSelect;
+export type RawItemWeightStandard = typeof rawItemWeightStandards.$inferSelect;
+export type RawBagAllocationSession = typeof rawBagAllocationSessions.$inferSelect;
+export type RawBagAllocationEvent = typeof rawBagAllocationEvents.$inferSelect;
+export type ProductComponentRequirement = typeof productComponentRequirements.$inferSelect;
+export type ReadMaterialUsageLearning = typeof readMaterialUsageLearning.$inferSelect;
 export type Item = typeof items.$inferSelect;
 export type ItemConversion = typeof itemConversions.$inferSelect;
 export type ExternalSystem = typeof externalSystems.$inferSelect;

@@ -23,6 +23,7 @@ import { rebuildStationQualityDaily } from "@/lib/projector/station-daily";
 import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
 import { rebuildMaterialConsumptionDaily } from "@/lib/projector/material-consumption-daily";
 import { rebuildRollUsage } from "@/lib/projector/roll-usage";
+import { rebuildMaterialUsageLearning } from "@/lib/projector/material-usage-learning";
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -43,6 +44,7 @@ async function main() {
     "read_material_lot_state",
     "read_material_consumption_daily",
     "read_roll_usage",
+    "read_material_usage_learning",
   ] as const;
 
   // Pre-rebuild row counts.
@@ -75,6 +77,8 @@ async function main() {
     await rebuildMaterialConsumptionDaily(tx);
     console.log("[rebuild-read-models] rebuilding read_roll_usage…");
     await rebuildRollUsage(tx);
+    console.log("[rebuild-read-models] rebuilding read_material_usage_learning…");
+    await rebuildMaterialUsageLearning(tx);
   });
 
   // Post-rebuild row counts.

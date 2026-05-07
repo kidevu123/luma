@@ -37,6 +37,7 @@ import {
 import { refreshSkuDailyForBag } from "./sku-daily";
 import { refreshMaterialReconciliationForBag } from "./material-reconciliation";
 import { refreshStationDailyForBag } from "./station-daily";
+import { emitMaterialConsumedFromBlister } from "./material-consumption-hook";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -311,6 +312,23 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
     await refreshSkuDailyForBag(tx, ev.workflowBagId);
     await refreshMaterialReconciliationForBag(tx, ev.workflowBagId);
     await refreshStationDailyForBag(tx, ev.workflowBagId);
+  }
+
+  // Phase H.x3 — When a BLISTER_COMPLETE event lands and an active
+  // PVC/foil roll is mounted on the station's machine, emit a
+  // MATERIAL_CONSUMED_ESTIMATED row per role using the configured-
+  // or-learned standard. The hook is silent when any required
+  // input (counter, mounted roll, standard) is missing — the UI
+  // surfaces the gap via the metric API, the projector never
+  // fabricates a number.
+  if (ev.eventType === "BLISTER_COMPLETE" && ev.stationId) {
+    await emitMaterialConsumedFromBlister(tx, {
+      workflowBagId: ev.workflowBagId,
+      stationId: ev.stationId,
+      payload: ev.payload ?? {},
+      occurredAt,
+      upstreamClientEventId: ev.clientEventId ?? null,
+    });
   }
 
   // 4. pg_notify on a single channel — the SSE relay LISTENs on this
