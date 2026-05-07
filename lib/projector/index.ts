@@ -30,6 +30,13 @@ import {
   inventoryBags,
   products,
 } from "@/lib/db/schema";
+import {
+  refreshQueueState,
+  QUEUE_REFRESH_EVENTS,
+} from "./queue-state";
+import { refreshSkuDailyForBag } from "./sku-daily";
+import { refreshMaterialReconciliationForBag } from "./material-reconciliation";
+import { refreshStationDailyForBag } from "./station-daily";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -287,6 +294,23 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
                       updated_at = ${occurredAtIso}::timestamptz
       `);
     }
+  }
+
+  // ── Phase C read-model extensions ─────────────────────────────
+  // read_queue_state — refresh the per-stage queue snapshot any
+  // time a bag's stage might change. Cheap (small WIP), worth it
+  // to keep the floor board in lock-step.
+  if (QUEUE_REFRESH_EVENTS.has(ev.eventType)) {
+    await refreshQueueState(tx);
+  }
+  // At BAG_FINALIZED time, populate the per-bag SKU rollup, the
+  // material reconciliation row, and the per-(day, machine, product)
+  // quality rollup. All three operate off read_bag_metrics which
+  // projectMetricsForFinalizedBag has already written above.
+  if (ev.eventType === "BAG_FINALIZED") {
+    await refreshSkuDailyForBag(tx, ev.workflowBagId);
+    await refreshMaterialReconciliationForBag(tx, ev.workflowBagId);
+    await refreshStationDailyForBag(tx, ev.workflowBagId);
   }
 
   // 4. pg_notify on a single channel — the SSE relay LISTENs on this

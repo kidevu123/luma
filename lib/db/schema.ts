@@ -1555,6 +1555,66 @@ export const readMaterialReconciliation = pgTable(
   ],
 );
 
+/** Per-(day, machine, product) quality + unit rollup. Inputs to OEE
+ *  Quality and Performance factors. The metric layer reads from
+ *  here; OEE refuses to compute until production_calendars and
+ *  station_standards exist regardless of how full this table is.
+ *
+ *  station_id is intentionally nullable: today's projector
+ *  attributes outputs at machine granularity (readBagMetrics has
+ *  machine_ids[], not station_id per output unit). Phase D / E
+ *  may extend the projector to attribute per-station as the floor
+ *  workflow gains finer-grained station scans.
+ *
+ *  Empty by default — populated by the BAG_FINALIZED projector
+ *  pathway in lib/projector/station-daily.ts. */
+export const readStationQualityDaily = pgTable(
+  "read_station_quality_daily",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    day: date("day").notNull(),
+    stationId: uuid("station_id").references(() => stations.id, {
+      onDelete: "cascade",
+    }),
+    machineId: uuid("machine_id").references(() => machines.id, {
+      onDelete: "cascade",
+    }),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    /** Mirrors stationStandards.output_unit lexicon. */
+    outputUnit: text("output_unit").notNull(),
+    totalUnits: integer("total_units").notNull().default(0),
+    goodUnits: integer("good_units").notNull().default(0),
+    rejectUnits: integer("reject_units").notNull().default(0),
+    scrapUnits: integer("scrap_units").notNull().default(0),
+    reworkUnits: integer("rework_units").notNull().default(0),
+    damagedUnits: integer("damaged_units").notNull().default(0),
+    /** Active runtime in minutes — computed from stage events of
+     *  the relevant kind for this (day, machine). */
+    activeMinutes: integer("active_minutes").notNull().default(0),
+    /** Planned production minutes — only filled when a production
+     *  calendar matches the day. NULL means OEE Availability is
+     *  Insufficient data. */
+    plannedMinutes: integer("planned_minutes"),
+    /** "HIGH" | "MEDIUM" | "LOW" — confidence in the rollup. LOW
+     *  surfaces when the projector had to estimate any component. */
+    dataConfidence: text("data_confidence").notNull().default("HIGH"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("read_station_quality_daily_unique").on(
+      t.day,
+      t.machineId,
+      t.productId,
+      t.outputUnit,
+    ),
+    index("read_station_quality_daily_day_idx").on(t.day),
+  ],
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Audit log (every write goes here)
 // ─────────────────────────────────────────────────────────────────────────────

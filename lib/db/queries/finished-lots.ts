@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
+import { projectEvent } from "@/lib/projector";
 
 export async function listFinishedLots() {
   return db
@@ -267,6 +268,27 @@ export async function setFinishedLotStatus(
       },
       tx,
     );
+    // Fire FINISHED_GOODS_RELEASED on the transition into RELEASED.
+    // Decoupled from BAG_FINALIZED — a lot can pass QC days after
+    // production completes. Only fires when the lot is linked to a
+    // workflow_bag (the projector key); free-form lots created
+    // without a bag are not tracked through workflow_events.
+    if (
+      next === "RELEASED" &&
+      before.status !== "RELEASED" &&
+      row?.workflowBagId
+    ) {
+      await projectEvent(tx, {
+        workflowBagId: row.workflowBagId,
+        eventType: "FINISHED_GOODS_RELEASED",
+        payload: {
+          finished_lot_id: id,
+          finished_lot_number: row.finishedLotNumber,
+          ...(reason ? { reason } : {}),
+          previous_status: before.status,
+        },
+      });
+    }
     return row;
   });
 }
