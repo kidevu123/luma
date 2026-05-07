@@ -92,6 +92,33 @@ export const packagingMaterialKindEnum = pgEnum("packaging_material_kind", [
   "CASE",
   "INSERT",
   "OTHER",
+  // Phase H additions
+  "PVC_ROLL",
+  "FOIL_ROLL",
+  "SHRINK_BAND",
+]);
+
+export const materialLotStatusEnum = pgEnum("material_lot_status", [
+  "AVAILABLE",
+  "IN_USE",
+  "DEPLETED",
+  "HELD",
+  "SCRAPPED",
+  "ADJUSTED",
+]);
+
+export const materialEventTypeEnum = pgEnum("material_event_type", [
+  "MATERIAL_RECEIVED",
+  "MATERIAL_ISSUED",
+  "MATERIAL_RETURNED",
+  "MATERIAL_CONSUMED_ESTIMATED",
+  "MATERIAL_CONSUMED_ACTUAL",
+  "MATERIAL_ADJUSTED",
+  "ROLL_MOUNTED",
+  "ROLL_UNMOUNTED",
+  "ROLL_WEIGHED",
+  "ROLL_DEPLETED",
+  "MATERIAL_SCRAPPED",
 ]);
 
 export const batchKindEnum = pgEnum("batch_kind", ["TABLET", "PACKAGING"]);
@@ -520,13 +547,26 @@ export const productPackagingSpecs = pgTable(
     /** Some materials are per-display (a shipper insert) or per-case
      *  (an outer label). null/per_unit = per finished unit. */
     perScope: text("per_scope").notNull().default("UNIT"), // UNIT | DISPLAY | CASE
+    /** Phase H — waste tolerance applied to expected consumption.
+     *  Default 0% (no waste built-in). Honest: must be configured
+     *  per material to apply. */
+    wasteAllowancePercent: numeric("waste_allowance_percent", {
+      precision: 5,
+      scale: 2,
+    }).default("0"),
     notes: text("notes"),
   },
   (t) => [primaryKey({ columns: [t.productId, t.packagingMaterialId, t.perScope] })],
 );
 
 /** Each shipment / lot of a packaging material we receive. Each lot
- *  has its own batch (kind=PACKAGING) for genealogy. */
+ *  has its own batch (kind=PACKAGING) for genealogy.
+ *
+ *  Phase H additions: roll-tracking columns (gross/tare/net/current
+ *  weight, roll number, supplier, location, scan token) for PVC and
+ *  foil rolls. Count-based materials use qtyReceived/qtyOnHand and
+ *  ignore weight columns. Status drives the "IN_USE / DEPLETED /
+ *  HELD" lifecycle. */
 export const packagingLots = pgTable(
   "packaging_lots",
   {
@@ -542,10 +582,147 @@ export const packagingLots = pgTable(
     expiryDate: date("expiry_date"),
     coaPath: text("coa_path"),
     notes: text("notes"),
+    // Phase H — lot-level lifecycle + roll fields
+    status: materialLotStatusEnum("status").notNull().default("AVAILABLE"),
+    rollNumber: text("roll_number"),
+    grossWeightGrams: integer("gross_weight_grams"),
+    tareWeightGrams: integer("tare_weight_grams"),
+    netWeightGrams: integer("net_weight_grams"),
+    currentWeightGramsEstimate: integer("current_weight_grams_estimate"),
+    weightUnit: text("weight_unit").default("g"),
+    widthMm: integer("width_mm"),
+    thicknessMicrons: integer("thickness_microns"),
+    materialSpec: text("material_spec"),
+    coreWeightGrams: integer("core_weight_grams"),
+    supplier: text("supplier"),
+    location: text("location"),
+    scanToken: text("scan_token"),
+    /** Confidence on the lot's recorded quantity. HIGH when net
+     *  weight came from gross-tare; MEDIUM when net was entered
+     *  directly; LOW when inferred. */
+    confidence: text("confidence").default("HIGH"),
   },
   (t) => [
     index("packaging_lots_material_idx").on(t.packagingMaterialId),
     index("packaging_lots_batch_idx").on(t.batchId),
+    index("packaging_lots_status_idx").on(t.status),
+  ],
+);
+
+// ─── Phase H — Material standards + event log ────────────────────
+
+/** Per-(product, role) PVC/foil consumption standard. material_role
+ *  is "PVC" or "FOIL". Either expectedGramsPerBlister OR
+ *  expectedBlistersPerKg is set — the projector prefers the per-
+ *  blister number when both are present. setup/changeover waste
+ *  in grams is added to the projected used weight per run. */
+export const blisterMaterialStandards = pgTable(
+  "blister_material_standards",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "cascade",
+    }),
+    packagingMaterialId: uuid("packaging_material_id")
+      .notNull()
+      .references(() => packagingMaterials.id, { onDelete: "cascade" }),
+    materialRole: text("material_role").notNull(), // PVC | FOIL
+    expectedGramsPerBlister: numeric("expected_grams_per_blister", {
+      precision: 10,
+      scale: 4,
+    }),
+    expectedBlistersPerKg: numeric("expected_blisters_per_kg", {
+      precision: 10,
+      scale: 3,
+    }),
+    setupWasteGrams: integer("setup_waste_grams").notNull().default(0),
+    changeoverWasteGrams: integer("changeover_waste_grams")
+      .notNull()
+      .default(0),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes"),
+    createdById: uuid("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("blister_material_standards_product_idx").on(
+      t.productId,
+      t.materialRole,
+    ),
+    index("blister_material_standards_active_idx").on(t.isActive),
+  ],
+);
+
+/** Append-only event log for material movements. Mirrors workflow_
+ *  events but for inventory state changes (received, issued,
+ *  consumed, scrapped, mounted, weighed). The metric layer reads
+ *  this to compute lot state and consumption rollups. */
+export const materialInventoryEvents = pgTable(
+  "material_inventory_events",
+  {
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .generatedAlwaysAsIdentity(),
+    eventType: materialEventTypeEnum("event_type").notNull(),
+    packagingMaterialId: uuid("packaging_material_id")
+      .notNull()
+      .references(() => packagingMaterials.id, { onDelete: "cascade" }),
+    packagingLotId: uuid("packaging_lot_id").references(
+      () => packagingLots.id,
+      { onDelete: "set null" },
+    ),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    workflowBagId: uuid("workflow_bag_id").references(() => workflowBags.id, {
+      onDelete: "set null",
+    }),
+    machineId: uuid("machine_id").references(() => machines.id, {
+      onDelete: "set null",
+    }),
+    stationId: uuid("station_id").references(() => stations.id, {
+      onDelete: "set null",
+    }),
+    actorUserId: uuid("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /** Count-based qty (e.g. caps issued). */
+    quantityUnits: integer("quantity_units"),
+    /** Weight-based qty (e.g. PVC consumed). Stored in grams as
+     *  integer per the no-floats design rule. */
+    quantityGrams: integer("quantity_grams"),
+    unitOfMeasure: text("unit_of_measure"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    source: text("source").notNull().default("system"),
+    /** Idempotency key. Floor PWA generates a UUID before fire-and-
+     *  retry; the partial unique index on (lot, type, client_event_id)
+     *  rejects duplicates. */
+    clientEventId: uuid("client_event_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("material_events_lot_idx").on(t.packagingLotId),
+    index("material_events_material_idx").on(t.packagingMaterialId),
+    index("material_events_bag_idx").on(t.workflowBagId),
+    index("material_events_machine_idx").on(t.machineId),
+    index("material_events_type_occurred_idx").on(
+      t.eventType,
+      t.occurredAt,
+    ),
   ],
 );
 
@@ -1613,6 +1790,125 @@ export const readStationQualityDaily = pgTable(
     ),
     index("read_station_quality_daily_day_idx").on(t.day),
   ],
+);
+
+// ─── Phase H read-models ─────────────────────────────────────────
+
+/** Per-lot live state. One row per packaging_lot. Includes both
+ *  count-based qty and weight-based qty so the metric layer can
+ *  serve roll dashboards and packaging-inventory dashboards from
+ *  the same table. confidence reflects how the lot's quantity
+ *  was sourced (HIGH = direct measurement, MEDIUM = entered net
+ *  weight, LOW = inferred). */
+export const readMaterialLotState = pgTable(
+  "read_material_lot_state",
+  {
+    packagingLotId: uuid("packaging_lot_id")
+      .primaryKey()
+      .references(() => packagingLots.id, { onDelete: "cascade" }),
+    packagingMaterialId: uuid("packaging_material_id").notNull(),
+    materialKind: text("material_kind").notNull(),
+    lotNumber: text("lot_number"),
+    rollNumber: text("roll_number"),
+    status: materialLotStatusEnum("status").notNull(),
+    initialQuantity: integer("initial_quantity"),
+    currentQuantityEstimate: integer("current_quantity_estimate"),
+    initialWeightGrams: integer("initial_weight_grams"),
+    currentWeightGramsEstimate: integer("current_weight_grams_estimate"),
+    unitOfMeasure: text("unit_of_measure").notNull(),
+    consumedEstimated: integer("consumed_estimated").notNull().default(0),
+    consumedActual: integer("consumed_actual"),
+    adjustedQuantity: integer("adjusted_quantity").notNull().default(0),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+    confidence: text("confidence").notNull().default("HIGH"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("read_material_lot_state_status_idx").on(t.status),
+    index("read_material_lot_state_material_idx").on(t.packagingMaterialId),
+  ],
+);
+
+/** Per-(day, material, lot, product, machine) consumption rollup.
+ *  Drives the inventory burn-down dashboards + variance reports. */
+export const readMaterialConsumptionDaily = pgTable(
+  "read_material_consumption_daily",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    day: date("day").notNull(),
+    packagingMaterialId: uuid("packaging_material_id")
+      .notNull()
+      .references(() => packagingMaterials.id, { onDelete: "cascade" }),
+    packagingLotId: uuid("packaging_lot_id").references(
+      () => packagingLots.id,
+      { onDelete: "set null" },
+    ),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    machineId: uuid("machine_id").references(() => machines.id, {
+      onDelete: "set null",
+    }),
+    stationId: uuid("station_id").references(() => stations.id, {
+      onDelete: "set null",
+    }),
+    estimatedConsumedUnits: integer("estimated_consumed_units").notNull().default(0),
+    actualConsumedUnits: integer("actual_consumed_units"),
+    estimatedConsumedGrams: integer("estimated_consumed_grams").notNull().default(0),
+    actualConsumedGrams: integer("actual_consumed_grams"),
+    unitOfMeasure: text("unit_of_measure").notNull(),
+    varianceQty: integer("variance_qty"),
+    variancePct: numeric("variance_pct", { precision: 7, scale: 3 }),
+    confidence: text("confidence").notNull().default("MEDIUM"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("read_material_consumption_daily_unique").on(
+      t.day,
+      t.packagingMaterialId,
+      t.packagingLotId,
+      t.productId,
+      t.machineId,
+    ),
+    index("read_material_consumption_daily_day_idx").on(t.day),
+  ],
+);
+
+/** Per-roll usage projection. One row per roll lot. Drives the
+ *  Active Rolls + Roll Variance panels. */
+export const readRollUsage = pgTable(
+  "read_roll_usage",
+  {
+    packagingLotId: uuid("packaging_lot_id")
+      .primaryKey()
+      .references(() => packagingLots.id, { onDelete: "cascade" }),
+    rollNumber: text("roll_number"),
+    materialKind: text("material_kind").notNull(),
+    materialRole: text("material_role"),
+    machineId: uuid("machine_id").references(() => machines.id, {
+      onDelete: "set null",
+    }),
+    mountedAt: timestamp("mounted_at", { withTimezone: true }),
+    unmountedAt: timestamp("unmounted_at", { withTimezone: true }),
+    startingWeightGrams: integer("starting_weight_grams"),
+    endingWeightGrams: integer("ending_weight_grams"),
+    expectedUsedGrams: integer("expected_used_grams"),
+    actualUsedGrams: integer("actual_used_grams"),
+    varianceGrams: integer("variance_grams"),
+    variancePct: numeric("variance_pct", { precision: 7, scale: 3 }),
+    blistersProduced: integer("blisters_produced"),
+    projectedRemainingGrams: integer("projected_remaining_grams"),
+    projectedBlistersRemaining: integer("projected_blisters_remaining"),
+    confidence: text("confidence").notNull().default("MEDIUM"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("read_roll_usage_machine_idx").on(t.machineId)],
 );
 
 // ─────────────────────────────────────────────────────────────────────────────

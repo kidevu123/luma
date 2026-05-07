@@ -78,6 +78,20 @@
       "when": 1778900000000,
       "tag": "0010_read_station_quality_daily",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779100000000,
+      "tag": "0011_packaging_material_kind_extensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779200000000,
+      "tag": "0012_material_inventory_phase_h",
+      "breakpoints": true
     }
   ]
 }
