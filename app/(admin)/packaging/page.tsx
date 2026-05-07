@@ -30,7 +30,7 @@ export default async function PackagingPage() {
       <PageHeader
         title="Packaging materials"
         description="Bottles, caps, labels, foil, cases — every consumable that touches a finished lot. Each lot you receive is tied to a packaging batch so the COA is one click away."
-        actions={<PackagingDialog triggerLabel="New material" triggerIcon={Plus} />}
+        actions={<PackagingDialog triggerLabel="New material" triggerIcon={<Plus className="h-4 w-4" aria-hidden />} />}
       />
 
       {rows.length === 0 ? (
@@ -38,7 +38,7 @@ export default async function PackagingPage() {
           icon={PackageCheck}
           title="No packaging materials yet"
           description="Add the consumables your products use. The BOM editor under each product references these."
-          action={<PackagingDialog triggerLabel="Create material" triggerIcon={Plus} />}
+          action={<PackagingDialog triggerLabel="Create material" triggerIcon={<Plus className="h-4 w-4" aria-hidden />} />}
         />
       ) : (
         <DataTable>

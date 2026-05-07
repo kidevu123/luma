@@ -18,7 +18,7 @@ export default async function TabletTypesPage() {
         actions={
           <TabletTypeDialog
             triggerLabel="New tablet type"
-            triggerIcon={Plus}
+            triggerIcon={<Plus className="h-4 w-4" aria-hidden />}
           />
         }
       />
@@ -31,7 +31,7 @@ export default async function TabletTypesPage() {
           action={
             <TabletTypeDialog
               triggerLabel="Create tablet type"
-              triggerIcon={Plus}
+              triggerIcon={<Plus className="h-4 w-4" aria-hidden />}
             />
           }
         />

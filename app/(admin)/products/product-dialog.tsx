@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { X, type LucideIcon } from "lucide-react";
+import { X } from "lucide-react";
 import type { Product } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -9,14 +9,19 @@ import { saveProductAction } from "./actions";
 
 type Row = (Product & { allowedCount?: number }) | undefined;
 
+// Note: triggerIcon must be a JSX node (not a component reference).
+// Next.js 15 disallows passing function values as props from server
+// components to client components — see digest 3173940408. The page
+// renders <ProductDialog triggerIcon={<Plus className="h-4 w-4" />} />
+// and we render {triggerIcon} directly.
 export function ProductDialog({
   row,
   triggerLabel,
-  triggerIcon: Icon,
+  triggerIcon,
 }: {
   row?: Row;
   triggerLabel: string;
-  triggerIcon?: LucideIcon;
+  triggerIcon?: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -32,7 +37,7 @@ export function ProductDialog({
         size={isEdit ? "sm" : "md"}
         onClick={() => setOpen(true)}
       >
-        {Icon && <Icon className="h-4 w-4" aria-hidden />}
+        {triggerIcon}
         {triggerLabel}
       </Button>
 

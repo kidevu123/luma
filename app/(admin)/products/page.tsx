@@ -16,7 +16,7 @@ export default async function ProductsPage() {
       <PageHeader
         title="Products"
         description="Finished goods. Each product has a kind (card, bottle, variety) and packaging spec (tablets/unit, units/display, displays/case)."
-        actions={<ProductDialog triggerLabel="New product" triggerIcon={Plus} />}
+        actions={<ProductDialog triggerLabel="New product" triggerIcon={<Plus className="h-4 w-4" aria-hidden />} />}
       />
 
       {rows.length === 0 ? (
@@ -24,7 +24,7 @@ export default async function ProductsPage() {
           icon={Boxes}
           title="No products yet"
           description="Create your first product so receiving + packaging have something to point at."
-          action={<ProductDialog triggerLabel="Create product" triggerIcon={Plus} />}
+          action={<ProductDialog triggerLabel="Create product" triggerIcon={<Plus className="h-4 w-4" aria-hidden />} />}
         />
       ) : (
         <DataTable>
