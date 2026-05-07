@@ -167,7 +167,7 @@ ON CONFLICT ("code") DO NOTHING;
 -- Seed CARD_BLISTER route operations.
 INSERT INTO "route_operations"
   ("route_id","operation_type_id","sequence","stage_key","next_stage_key","allowed_station_kind","allowed_machine_kind","requires_scan","requires_counter","requires_timer","output_unit")
-SELECT r.id, o.id, seq, stage_key, next_stage_key, station_kind, machine_kind, requires_scan, requires_counter, requires_timer, output_unit
+SELECT r.id, o.id, d.seq, d.stage_key, d.next_stage_key, d.station_kind, d.machine_kind, d.requires_scan, d.requires_counter, d.requires_timer, d.output_unit
 FROM "production_routes" r
 CROSS JOIN LATERAL (VALUES
   (1, 'RECEIVING',            'RECEIVING_QUEUE',          'BLISTER_QUEUE',           NULL,             NULL,             true,  false, false, NULL::text),
@@ -185,7 +185,7 @@ ON CONFLICT ("route_id","sequence") DO NOTHING;
 -- Seed BOTTLE route operations.
 INSERT INTO "route_operations"
   ("route_id","operation_type_id","sequence","stage_key","next_stage_key","allowed_station_kind","allowed_machine_kind","requires_scan","requires_counter","requires_timer","output_unit")
-SELECT r.id, o.id, seq, stage_key, next_stage_key, station_kind, machine_kind, requires_scan, requires_counter, requires_timer, output_unit
+SELECT r.id, o.id, d.seq, d.stage_key, d.next_stage_key, d.station_kind, d.machine_kind, d.requires_scan, d.requires_counter, d.requires_timer, d.output_unit
 FROM "production_routes" r
 CROSS JOIN LATERAL (VALUES
   (1, 'RECEIVING',       'RECEIVING_QUEUE',          'BOTTLE_FILL_QUEUE',        NULL,                NULL,              true,  false, false, NULL::text),
@@ -202,7 +202,7 @@ ON CONFLICT ("route_id","sequence") DO NOTHING;
 -- Seed STICKER_ONLY route operations.
 INSERT INTO "route_operations"
   ("route_id","operation_type_id","sequence","stage_key","next_stage_key","allowed_station_kind","allowed_machine_kind","requires_scan","requires_counter","requires_timer","output_unit")
-SELECT r.id, o.id, seq, stage_key, next_stage_key, station_kind, machine_kind, requires_scan, requires_counter, requires_timer, output_unit
+SELECT r.id, o.id, d.seq, d.stage_key, d.next_stage_key, d.station_kind, d.machine_kind, d.requires_scan, d.requires_counter, d.requires_timer, d.output_unit
 FROM "production_routes" r
 CROSS JOIN LATERAL (VALUES
   (1, 'RECEIVING',       'RECEIVING_QUEUE',         'BOTTLE_STICKER_QUEUE',  NULL,               NULL,             true,  false, false, NULL::text),
