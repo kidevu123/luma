@@ -176,7 +176,14 @@ export async function refreshMaterialReconciliationForBag(
   `);
 }
 
-/** Full rebuild — recomputes every finalised bag. */
+/** Full rebuild — recomputes every finalised bag.
+ *
+ *  Phase F refinement: when read_bag_metrics.units_yielded is 0 AND
+ *  the bag has packaging output rows (cases/displays/loose) that we
+ *  failed to convert (no product packaging spec), we tag missing_inputs
+ *  as "finished_yield_inferable" — distinct from "consumed,scrap,remaining"
+ *  — so the UI can render "Legacy import cannot prove finished yield"
+ *  rather than "True variance". */
 export async function rebuildMaterialReconciliation(tx: Tx): Promise<void> {
   await tx.execute(sql`DELETE FROM read_material_reconciliation;`);
   await tx.execute(sql`
@@ -188,20 +195,31 @@ export async function rebuildMaterialReconciliation(tx: Tx): Promise<void> {
     SELECT
       wb.id,
       ib.pill_count AS received,
-      CASE WHEN ib.pill_count IS NOT NULL THEN ib.pill_count - 0 ELSE NULL END AS consumed,
+      -- consumed = received - remaining (no remaining tracker yet)
+      CASE WHEN ib.pill_count IS NOT NULL THEN ib.pill_count ELSE NULL END AS consumed,
       rbm.units_yielded AS finished,
       0 AS scrap,
       0 AS remaining,
       CASE WHEN ib.pill_count IS NOT NULL
-           THEN ib.pill_count - rbm.units_yielded - 0 - 0
+           THEN ib.pill_count - COALESCE(rbm.units_yielded, 0) - rbm.damaged_packaging - 0 - 0
            ELSE NULL
       END AS variance,
       CASE WHEN ib.pill_count IS NOT NULL AND ib.pill_count > 0
-           THEN ROUND(((ib.pill_count - rbm.units_yielded - 0 - 0)::numeric / ib.pill_count) * 100, 3)
+           THEN ROUND(((ib.pill_count - COALESCE(rbm.units_yielded, 0) - rbm.damaged_packaging - 0 - 0)::numeric / ib.pill_count) * 100, 3)
            ELSE NULL
       END AS variance_pct,
       TRUE,
-      'consumed,scrap,remaining',
+      CASE
+        -- Yield not derivable: had packaging output rows but no product
+        -- spec to convert from cases/displays into tablets, OR no
+        -- packaging events at all.
+        WHEN COALESCE(rbm.units_yielded, 0) = 0
+             AND (rbm.master_cases > 0 OR rbm.displays_made > 0 OR rbm.loose_cards > 0)
+          THEN 'finished_yield_inferable,scrap,remaining'
+        WHEN COALESCE(rbm.units_yielded, 0) = 0
+          THEN 'finished_yield_unknown,scrap,remaining'
+        ELSE 'scrap,remaining'
+      END AS missing_inputs,
       now()
     FROM workflow_bags wb
     JOIN read_bag_metrics rbm ON rbm.workflow_bag_id = wb.id

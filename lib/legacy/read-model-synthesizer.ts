@@ -133,6 +133,21 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
   // ── 2. read_bag_metrics ─────────────────────────────────────────
   // One row per finalized workflow_bag. Total / active / paused
   // seconds; per-stage seconds derived from event-pair time deltas.
+  //
+  // Phase F additions (machine attribution + units yielded):
+  //   • machine_ids[] — distinct machine_ids touched by the bag,
+  //     looked up from workflow_events.station_id → stations.machine_id.
+  //     Drives read_station_quality_daily.
+  //   • units_yielded — derived from packaging payload fields:
+  //     1. packaged_tablets_total (HIGH) — direct counted output
+  //     2. cases × displays_per_case × units_per_display × tablets_per_unit (MEDIUM)
+  //     3. displays × units_per_display × tablets_per_unit (LOW)
+  //     4. bottles × tablets_per_unit for BOTTLE products (MEDIUM)
+  //     0 when none of the above apply — never invented.
+  //   • master_cases / displays_made / loose_cards / damaged_packaging /
+  //     ripped_cards — pulled directly from packaging payloads.
+  //   • yield_pct — units_yielded / inventory_bag.pill_count, when both
+  //     are present; null otherwise.
   await db.execute(sql`DELETE FROM read_bag_metrics`);
   const bagMetricsRes = await db.execute(sql`
     WITH paused AS (
@@ -183,13 +198,85 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
         COALESCE(SUM(gap_sec) FILTER (WHERE event_type = 'BOTTLE_STICKER_COMPLETE'), 0)::int AS bottle_sticker_seconds
       FROM stage_durations
       GROUP BY workflow_bag_id
+    ),
+    -- Phase F: machine attribution. Distinct machine_ids touched by
+    -- the bag, via station→machine join. NULL station_id or station
+    -- without machine_id contributes nothing — no fake attribution.
+    bag_machines AS (
+      SELECT
+        we.workflow_bag_id,
+        ARRAY_AGG(DISTINCT s.machine_id) FILTER (WHERE s.machine_id IS NOT NULL) AS machine_ids
+      FROM workflow_events we
+      JOIN stations s ON s.id = we.station_id
+      WHERE s.machine_id IS NOT NULL
+      GROUP BY we.workflow_bag_id
+    ),
+    -- Phase F: packaging payload aggregation — sum across all
+    -- PACKAGING_SNAPSHOT and PACKAGING_COMPLETE events for the bag.
+    -- Empty when neither event type fired.
+    bag_yield_raw AS (
+      SELECT
+        we.workflow_bag_id,
+        COALESCE(SUM(NULLIF((we.payload->>'packaged_tablets_total'), '')::int), 0) AS direct_tablets,
+        COALESCE(SUM(NULLIF((we.payload->>'master_cases'), '')::int), 0) AS cases,
+        COALESCE(SUM(NULLIF((we.payload->>'displays_made'), '')::int), 0) AS displays,
+        COALESCE(SUM(NULLIF((we.payload->>'loose_cards'), '')::int), 0) AS loose_cards,
+        COALESCE(SUM(NULLIF((we.payload->>'damaged_packaging'), '')::int), 0) AS damaged_packaging,
+        COALESCE(SUM(NULLIF((we.payload->>'ripped_cards'), '')::int), 0) AS ripped_cards,
+        COALESCE(SUM(NULLIF((we.payload->>'bottles_made'), '')::int), 0) AS bottles
+      FROM workflow_events we
+      WHERE we.event_type::text IN ('PACKAGING_SNAPSHOT','PACKAGING_COMPLETE','BOTTLE_CAP_SEAL_COMPLETE')
+      GROUP BY we.workflow_bag_id
+    ),
+    -- Resolve units_yielded with confidence. Confidence ladder:
+    --   HIGH    direct packaged_tablets_total reported
+    --   MEDIUM  computed via product packaging spec (tablets_per_unit
+    --           + units_per_display + displays_per_case)
+    --   LOW     partial spec (only displays × units_per_display)
+    --   MISSING no packaging output and no spec
+    bag_yield AS (
+      SELECT
+        byr.workflow_bag_id,
+        CASE
+          WHEN byr.direct_tablets > 0 THEN byr.direct_tablets
+          WHEN p.tablets_per_unit IS NOT NULL
+               AND p.units_per_display IS NOT NULL
+               AND p.displays_per_case IS NOT NULL
+               AND (byr.cases > 0 OR byr.displays > 0 OR byr.loose_cards > 0)
+            THEN (byr.cases * p.displays_per_case * p.units_per_display
+                  + byr.displays * p.units_per_display
+                  + byr.loose_cards) * p.tablets_per_unit
+          WHEN p.tablets_per_unit IS NOT NULL
+               AND p.units_per_display IS NOT NULL
+               AND (byr.displays > 0 OR byr.loose_cards > 0)
+            THEN (byr.displays * p.units_per_display + byr.loose_cards) * p.tablets_per_unit
+          WHEN p.tablets_per_unit IS NOT NULL
+               AND p.kind::text = 'BOTTLE'
+               AND byr.bottles > 0
+            THEN byr.bottles * p.tablets_per_unit
+          ELSE 0
+        END AS units_yielded,
+        byr.cases,
+        byr.displays,
+        byr.loose_cards,
+        byr.damaged_packaging,
+        byr.ripped_cards
+      FROM bag_yield_raw byr
+      LEFT JOIN workflow_bags wb ON wb.id = byr.workflow_bag_id
+      LEFT JOIN products p ON p.id = wb.product_id
     )
     INSERT INTO read_bag_metrics (
       workflow_bag_id, product_id,
       started_at, finalized_at,
       total_seconds, paused_seconds, active_seconds,
       blister_seconds, sealing_seconds, packaging_seconds,
-      bottle_handpack_seconds, bottle_cap_seal_seconds, bottle_sticker_seconds
+      bottle_handpack_seconds, bottle_cap_seal_seconds, bottle_sticker_seconds,
+      machine_ids,
+      units_yielded,
+      master_cases, displays_made, loose_cards,
+      damaged_packaging, ripped_cards,
+      input_pill_count,
+      yield_pct
     )
     SELECT
       wb.id,
@@ -208,10 +295,26 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
       NULLIF(st.packaging_seconds, 0),
       NULLIF(st.bottle_handpack_seconds, 0),
       NULLIF(st.bottle_cap_seal_seconds, 0),
-      NULLIF(st.bottle_sticker_seconds, 0)
+      NULLIF(st.bottle_sticker_seconds, 0),
+      COALESCE(bm.machine_ids, ARRAY[]::uuid[]) AS machine_ids,
+      COALESCE(by.units_yielded, 0) AS units_yielded,
+      COALESCE(by.cases, 0) AS master_cases,
+      COALESCE(by.displays, 0) AS displays_made,
+      COALESCE(by.loose_cards, 0) AS loose_cards,
+      COALESCE(by.damaged_packaging, 0) AS damaged_packaging,
+      COALESCE(by.ripped_cards, 0) AS ripped_cards,
+      ib.pill_count AS input_pill_count,
+      CASE
+        WHEN ib.pill_count IS NOT NULL AND ib.pill_count > 0 AND COALESCE(by.units_yielded, 0) > 0
+          THEN ROUND((COALESCE(by.units_yielded, 0)::numeric / ib.pill_count) * 100, 3)
+        ELSE NULL
+      END AS yield_pct
     FROM workflow_bags wb
     LEFT JOIN paused_total pt ON pt.workflow_bag_id = wb.id
     LEFT JOIN stage_totals st ON st.workflow_bag_id = wb.id
+    LEFT JOIN bag_machines bm ON bm.workflow_bag_id = wb.id
+    LEFT JOIN bag_yield by ON by.workflow_bag_id = wb.id
+    LEFT JOIN inventory_bags ib ON ib.id = wb.inventory_bag_id
     WHERE wb.finalized_at IS NOT NULL
   `);
 
