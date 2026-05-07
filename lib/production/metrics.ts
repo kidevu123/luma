@@ -52,6 +52,12 @@ import {
   inventoryBags,
   finishedLots,
   packagingMaterials,
+  packagingLots,
+  productPackagingSpecs,
+  blisterMaterialStandards,
+  readMaterialLotState,
+  readMaterialConsumptionDaily,
+  readRollUsage,
   employees,
   users,
 } from "@/lib/db/schema";
@@ -1435,4 +1441,492 @@ export function oee(
   const p = clampPct(performancePct);
   const q = clampPct(qualityPct);
   return clampPct((a * p * q) / 10000);
+}
+
+// ─── Phase H — material inventory metrics ────────────────────────
+
+/** All packaging materials with current on-hand + estimated qty.
+ *  Returns one MetricResult per material under stable keys. Reads
+ *  from read_material_lot_state aggregated up to the material level. */
+export async function derivePackagingInventory(): Promise<MetricBundle> {
+  const rows = await db.execute<{
+    packaging_material_id: string;
+    material_kind: string;
+    sku: string;
+    name: string;
+    par_level: number | null;
+    on_hand_units: number;
+    estimated_remaining_units: number;
+    on_hand_grams: number;
+    estimated_remaining_grams: number;
+    lot_count: number;
+    confidence: string;
+  }>(sql`
+    SELECT
+      pm.id AS packaging_material_id,
+      pm.kind::text AS material_kind,
+      pm.sku, pm.name, pm.par_level,
+      COALESCE(SUM(rls.initial_quantity), 0)::int AS on_hand_units,
+      COALESCE(SUM(rls.current_quantity_estimate), 0)::int AS estimated_remaining_units,
+      COALESCE(SUM(rls.initial_weight_grams), 0)::int AS on_hand_grams,
+      COALESCE(SUM(rls.current_weight_grams_estimate), 0)::int AS estimated_remaining_grams,
+      COUNT(rls.packaging_lot_id)::int AS lot_count,
+      CASE
+        WHEN BOOL_OR(rls.confidence = 'HIGH') THEN 'HIGH'
+        WHEN BOOL_OR(rls.confidence = 'MEDIUM') THEN 'MEDIUM'
+        WHEN COUNT(rls.packaging_lot_id) > 0 THEN 'LOW'
+        ELSE 'MISSING'
+      END AS confidence
+    FROM packaging_materials pm
+    LEFT JOIN read_material_lot_state rls
+      ON rls.packaging_material_id = pm.id
+     AND rls.status NOT IN ('DEPLETED','SCRAPPED')
+    WHERE pm.is_active = true
+    GROUP BY pm.id, pm.kind, pm.sku, pm.name, pm.par_level
+    ORDER BY pm.name;
+  `);
+  const out: MetricBundle = {};
+  if (rows.length === 0) {
+    out["_status"] = missing(
+      null,
+      ["packaging_materials"],
+      "No packaging materials configured",
+    );
+    return out;
+  }
+  for (const r of rows) {
+    const isRoll = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(
+      r.material_kind,
+    );
+    const remainingValue = isRoll
+      ? Number(r.estimated_remaining_grams)
+      : Number(r.estimated_remaining_units);
+    const unit = isRoll ? "g" : "units";
+    const conf = r.confidence as "HIGH" | "MEDIUM" | "LOW" | "MISSING";
+    out[`${r.sku}.onHand`] =
+      conf === "MISSING"
+        ? missing(unit, ["material_lots"], "No lots received yet")
+        : {
+            value: remainingValue,
+            unit,
+            confidence: conf,
+            missingInputs: [],
+            explanation: `${r.lot_count} lot(s) ${r.material_kind}`,
+          };
+    if (r.par_level != null && remainingValue < r.par_level && conf !== "MISSING") {
+      out[`${r.sku}.belowPar`] = ok(
+        `${remainingValue} / ${r.par_level}`,
+        unit,
+        { explanation: "Below par level" },
+      );
+    }
+  }
+  return out;
+}
+
+/** Per-product BOM listing with per-material qty + waste. Returns
+ *  MISSING when the product has no BOM rows at all. */
+export async function deriveProductPackagingRequirements(
+  productId: string,
+): Promise<MetricBundle> {
+  const rows = await db
+    .select({
+      packagingMaterialId: productPackagingSpecs.packagingMaterialId,
+      qtyPerUnit: productPackagingSpecs.qtyPerUnit,
+      perScope: productPackagingSpecs.perScope,
+      wasteAllowancePercent: productPackagingSpecs.wasteAllowancePercent,
+      sku: packagingMaterials.sku,
+      name: packagingMaterials.name,
+      kind: packagingMaterials.kind,
+      uom: packagingMaterials.uom,
+    })
+    .from(productPackagingSpecs)
+    .innerJoin(
+      packagingMaterials,
+      eq(packagingMaterials.id, productPackagingSpecs.packagingMaterialId),
+    )
+    .where(eq(productPackagingSpecs.productId, productId));
+  const out: MetricBundle = {};
+  if (rows.length === 0) {
+    out["_status"] = missing(
+      null,
+      ["product_packaging_specs"],
+      "Packaging BOM missing",
+      "Configure required materials at /settings/packaging-bom.",
+    );
+    return out;
+  }
+  for (const r of rows) {
+    const tag = `${r.sku}.${r.perScope}`;
+    out[`${tag}.qtyPerUnit`] = ok(r.qtyPerUnit, r.uom, {
+      explanation: `${r.qtyPerUnit} ${r.uom} per ${r.perScope.toLowerCase()}`,
+    });
+    if (r.wasteAllowancePercent && Number(r.wasteAllowancePercent) > 0) {
+      out[`${tag}.wasteAllowancePct`] = ok(
+        Number(r.wasteAllowancePercent),
+        "%",
+      );
+    }
+  }
+  return out;
+}
+
+/** Per-material consumption rollup over a date range. Reads
+ *  read_material_consumption_daily. */
+export async function derivePackagingMaterialConsumption(
+  dateRange: DateRange = lastNDays(7),
+): Promise<MetricBundle> {
+  const fromDay = dateRange.from.toISOString().slice(0, 10);
+  const toDay = dateRange.to.toISOString().slice(0, 10);
+  const rows = await db.execute<{
+    packaging_material_id: string;
+    sku: string;
+    estimated_units: number;
+    actual_units: number | null;
+    estimated_grams: number;
+    actual_grams: number | null;
+    has_actual: boolean;
+    has_lot: boolean;
+  }>(sql`
+    SELECT
+      rmcd.packaging_material_id,
+      pm.sku,
+      COALESCE(SUM(rmcd.estimated_consumed_units), 0)::int AS estimated_units,
+      NULLIF(SUM(COALESCE(rmcd.actual_consumed_units, 0))::int, 0) AS actual_units,
+      COALESCE(SUM(rmcd.estimated_consumed_grams), 0)::int AS estimated_grams,
+      NULLIF(SUM(COALESCE(rmcd.actual_consumed_grams, 0))::int, 0) AS actual_grams,
+      BOOL_OR(rmcd.actual_consumed_units IS NOT NULL OR rmcd.actual_consumed_grams IS NOT NULL) AS has_actual,
+      BOOL_OR(rmcd.packaging_lot_id IS NOT NULL) AS has_lot
+    FROM read_material_consumption_daily rmcd
+    JOIN packaging_materials pm ON pm.id = rmcd.packaging_material_id
+    WHERE rmcd.day >= ${fromDay}::date AND rmcd.day < ${toDay}::date
+    GROUP BY rmcd.packaging_material_id, pm.sku;
+  `);
+  const out: MetricBundle = {};
+  if (rows.length === 0) {
+    out["_status"] = missing(
+      null,
+      ["material_inventory_events"],
+      "No consumption recorded in window",
+    );
+    return out;
+  }
+  for (const r of rows) {
+    const conf =
+      r.has_actual && r.has_lot
+        ? "HIGH"
+        : r.has_actual
+          ? "MEDIUM"
+          : r.has_lot
+            ? "MEDIUM"
+            : "LOW";
+    if (Number(r.estimated_grams) > 0) {
+      out[`${r.sku}.estimatedConsumedGrams`] = {
+        value: Number(r.estimated_grams),
+        unit: "g",
+        confidence: conf,
+        missingInputs: r.has_lot ? [] : ["material_lot"],
+      };
+    }
+    if (Number(r.estimated_units) > 0) {
+      out[`${r.sku}.estimatedConsumedUnits`] = {
+        value: Number(r.estimated_units),
+        unit: "units",
+        confidence: conf,
+        missingInputs: r.has_lot ? [] : ["material_lot"],
+      };
+    }
+    if (r.actual_grams != null) {
+      out[`${r.sku}.actualConsumedGrams`] = ok(Number(r.actual_grams), "g");
+    }
+    if (r.actual_units != null) {
+      out[`${r.sku}.actualConsumedUnits`] = ok(Number(r.actual_units), "units");
+    }
+  }
+  return out;
+}
+
+/** Per-roll usage snapshot. Returns MISSING when the lot doesn't
+ *  exist or is not a roll. */
+export async function deriveRollUsage(
+  materialLotId: string,
+): Promise<MetricBundle> {
+  const [row] = await db
+    .select()
+    .from(readRollUsage)
+    .where(eq(readRollUsage.packagingLotId, materialLotId))
+    .limit(1);
+  if (!row) {
+    return {
+      _status: missing(null, ["read_roll_usage"], "Roll not found or not yet projected"),
+    };
+  }
+  const conf = row.confidence as "HIGH" | "MEDIUM" | "LOW" | "MISSING";
+  const missingInputs: string[] = [];
+  if (row.endingWeightGrams == null) missingInputs.push("weigh_back");
+  if (row.expectedUsedGrams == null) missingInputs.push("blister_material_standard");
+  return {
+    rollNumber: row.rollNumber ? ok(row.rollNumber, null) : missing(null, ["roll_number"], "—"),
+    materialKind: ok(row.materialKind, null),
+    materialRole: row.materialRole ? ok(row.materialRole, null) : missing(null, [], "—"),
+    startingWeightGrams:
+      row.startingWeightGrams != null
+        ? ok(row.startingWeightGrams, "g")
+        : missing("g", ["starting_weight"], "Roll has no recorded weight"),
+    endingWeightGrams:
+      row.endingWeightGrams != null
+        ? ok(row.endingWeightGrams, "g")
+        : missing("g", ["weigh_back"], "Roll not weighed back"),
+    expectedUsedGrams:
+      row.expectedUsedGrams != null
+        ? { value: row.expectedUsedGrams, unit: "g", confidence: conf, missingInputs }
+        : missing("g", ["blister_material_standard"], "Roll standard missing"),
+    actualUsedGrams:
+      row.actualUsedGrams != null
+        ? ok(row.actualUsedGrams, "g")
+        : missing("g", ["weigh_back"], "Roll not weighed back"),
+    varianceGrams:
+      row.varianceGrams != null
+        ? ok(row.varianceGrams, "g")
+        : missing("g", missingInputs, "Variance unavailable"),
+    variancePct:
+      row.variancePct != null
+        ? ok(Number(row.variancePct), "%")
+        : missing("%", missingInputs, "Variance unavailable"),
+    blistersProduced:
+      row.blistersProduced != null
+        ? ok(row.blistersProduced, "blisters")
+        : missing("blisters", ["BLISTER_COMPLETE counter"], "—"),
+    projectedRemainingGrams:
+      row.projectedRemainingGrams != null
+        ? ok(row.projectedRemainingGrams, "g")
+        : missing("g", ["starting_weight"], "—"),
+    projectedBlistersRemaining:
+      row.projectedBlistersRemaining != null
+        ? ok(row.projectedBlistersRemaining, "blisters")
+        : missing(
+            "blisters",
+            ["blister_material_standard"],
+            "Roll standard missing",
+          ),
+  };
+}
+
+/** Active rolls on a machine — currently mounted (mounted_at not
+ *  null, unmounted_at null). Returns one row per active mount. */
+export async function deriveActiveRolls(
+  machineId?: string,
+): Promise<MetricBundle> {
+  const where = machineId
+    ? sql`WHERE rru.unmounted_at IS NULL AND rru.machine_id = ${machineId}`
+    : sql`WHERE rru.unmounted_at IS NULL AND rru.mounted_at IS NOT NULL`;
+  const rows = await db.execute<{
+    packaging_lot_id: string;
+    roll_number: string | null;
+    material_role: string | null;
+    machine_id: string | null;
+    starting_weight_grams: number | null;
+    expected_used_grams: number | null;
+    projected_remaining_grams: number | null;
+    projected_blisters_remaining: number | null;
+    confidence: string;
+  }>(sql`
+    SELECT rru.packaging_lot_id, rru.roll_number, rru.material_role, rru.machine_id,
+           rru.starting_weight_grams, rru.expected_used_grams,
+           rru.projected_remaining_grams, rru.projected_blisters_remaining,
+           rru.confidence
+    FROM read_roll_usage rru
+    ${where}
+    ORDER BY rru.material_role, rru.mounted_at DESC;
+  `);
+  const out: MetricBundle = {};
+  if (rows.length === 0) {
+    out["_status"] = missing(
+      null,
+      ["roll_mounted"],
+      machineId ? "No active rolls on this machine" : "No active rolls",
+    );
+    return out;
+  }
+  for (const r of rows) {
+    const tag = r.roll_number ?? r.packaging_lot_id.slice(0, 8);
+    const conf = r.confidence as "HIGH" | "MEDIUM" | "LOW" | "MISSING";
+    out[`${tag}.role`] = ok(r.material_role ?? "—", null);
+    out[`${tag}.startingWeight`] =
+      r.starting_weight_grams != null
+        ? ok(r.starting_weight_grams, "g")
+        : missing("g", ["starting_weight"], "—");
+    out[`${tag}.projectedRemaining`] =
+      r.projected_remaining_grams != null
+        ? {
+            value: r.projected_remaining_grams,
+            unit: "g",
+            confidence: conf,
+            missingInputs: [],
+          }
+        : missing("g", ["starting_weight"], "—");
+    out[`${tag}.projectedBlistersRemaining`] =
+      r.projected_blisters_remaining != null
+        ? ok(r.projected_blisters_remaining, "blisters")
+        : missing(
+            "blisters",
+            ["blister_material_standard"],
+            "Roll standard missing",
+          );
+  }
+  return out;
+}
+
+/** Project when the active roll(s) on a machine will run out, given
+ *  recent consumption rate. MISSING when no standard or no rate. */
+export async function deriveRollRunoutProjection(
+  machineId: string,
+): Promise<MetricBundle> {
+  const out: MetricBundle = {};
+  const rows = await db.execute<{
+    packaging_lot_id: string;
+    material_role: string | null;
+    projected_remaining_grams: number | null;
+    confidence: string;
+  }>(sql`
+    SELECT rru.packaging_lot_id, rru.material_role,
+           rru.projected_remaining_grams, rru.confidence
+    FROM read_roll_usage rru
+    WHERE rru.machine_id = ${machineId}
+      AND rru.unmounted_at IS NULL
+      AND rru.mounted_at IS NOT NULL;
+  `);
+  if (rows.length === 0) {
+    out["_status"] = missing(
+      null,
+      ["active_roll"],
+      "No active rolls on machine",
+    );
+    return out;
+  }
+  // Recent consumption rate — grams per hour over the last 24h on
+  // this machine for these material roles.
+  const rateRow = await db.execute<{
+    role: string;
+    grams_per_hour: number | null;
+  }>(sql`
+    SELECT pm.kind::text AS role,
+           COALESCE(SUM(ev.quantity_grams)::numeric / 24, 0)::numeric AS grams_per_hour
+    FROM material_inventory_events ev
+    JOIN packaging_materials pm ON pm.id = ev.packaging_material_id
+    WHERE ev.event_type = 'MATERIAL_CONSUMED_ESTIMATED'
+      AND ev.machine_id = ${machineId}
+      AND ev.occurred_at >= now() - interval '24 hours'
+    GROUP BY pm.kind;
+  `);
+  const ratesByKind: Record<string, number> = {};
+  for (const r of rateRow) ratesByKind[r.role] = Number(r.grams_per_hour ?? 0);
+
+  for (const r of rows) {
+    const tag = r.material_role ?? r.packaging_lot_id.slice(0, 8);
+    const remainingG = r.projected_remaining_grams ?? null;
+    const rate =
+      r.material_role === "PVC"
+        ? ratesByKind["PVC_ROLL"] ?? 0
+        : r.material_role === "FOIL"
+          ? ratesByKind["FOIL_ROLL"] ?? ratesByKind["BLISTER_FOIL"] ?? 0
+          : 0;
+    if (remainingG == null) {
+      out[`${tag}.runoutHours`] = missing(
+        "h",
+        ["projected_remaining"],
+        "Cannot project — no starting weight",
+      );
+      continue;
+    }
+    if (rate <= 0) {
+      out[`${tag}.runoutHours`] = missing(
+        "h",
+        ["consumption_rate"],
+        "No recent consumption — cannot project runout",
+      );
+      continue;
+    }
+    out[`${tag}.runoutHours`] = ok(+(remainingG / rate).toFixed(1), "h", {
+      explanation: `${remainingG}g remaining ÷ ${rate.toFixed(0)}g/h`,
+    });
+  }
+  return out;
+}
+
+/** Materials below par given the current open production load. */
+export async function derivePackagingShortageRisk(
+  dateRange: DateRange = lastNDays(7),
+): Promise<MetricBundle> {
+  // Baseline: any active material with current_estimate < par_level.
+  // Refinement: when there's open packaging work on a SKU, scale the
+  // shortage by required-per-unit. Phase H.x2 keeps the baseline; the
+  // open-work join lands when the projector hook is wired.
+  const inv = await derivePackagingInventory();
+  const out: MetricBundle = {};
+  for (const [k, v] of Object.entries(inv)) {
+    if (k.endsWith(".belowPar")) {
+      const sku = k.slice(0, -".belowPar".length);
+      out[sku] = v;
+    }
+  }
+  if (Object.keys(out).length === 0) {
+    out["_status"] = ok(0, "shortages", {
+      explanation: "All active materials at or above par level.",
+    });
+  }
+  return out;
+}
+
+/** Variance between estimated and actual consumption per material
+ *  in the window. */
+export async function deriveMaterialVariance(
+  dateRange: DateRange = lastNDays(7),
+): Promise<MetricBundle> {
+  const fromDay = dateRange.from.toISOString().slice(0, 10);
+  const toDay = dateRange.to.toISOString().slice(0, 10);
+  const rows = await db.execute<{
+    sku: string;
+    estimated_total: number;
+    actual_total: number | null;
+    variance_qty: number | null;
+    variance_pct: number | null;
+  }>(sql`
+    SELECT
+      pm.sku,
+      COALESCE(SUM(rmcd.estimated_consumed_units + rmcd.estimated_consumed_grams), 0)::int AS estimated_total,
+      NULLIF(SUM(COALESCE(rmcd.actual_consumed_units, 0) + COALESCE(rmcd.actual_consumed_grams, 0))::int, 0) AS actual_total,
+      AVG(rmcd.variance_qty)::int AS variance_qty,
+      AVG(rmcd.variance_pct)::numeric AS variance_pct
+    FROM read_material_consumption_daily rmcd
+    JOIN packaging_materials pm ON pm.id = rmcd.packaging_material_id
+    WHERE rmcd.day >= ${fromDay}::date AND rmcd.day < ${toDay}::date
+    GROUP BY pm.sku;
+  `);
+  const out: MetricBundle = {};
+  if (rows.length === 0) {
+    out["_status"] = missing(
+      null,
+      ["read_material_consumption_daily"],
+      "No consumption in window",
+    );
+    return out;
+  }
+  for (const r of rows) {
+    if (r.actual_total == null) {
+      out[`${r.sku}.variance`] = missing(
+        "%",
+        ["actual_consumption"],
+        "No weigh-back / actual count yet",
+      );
+      continue;
+    }
+    out[`${r.sku}.variance`] = ok(Number(r.variance_qty ?? 0), "qty", {
+      explanation: `est ${r.estimated_total} vs actual ${r.actual_total}`,
+    });
+    if (r.variance_pct != null) {
+      out[`${r.sku}.variancePct`] = ok(Number(r.variance_pct), "%");
+    }
+  }
+  return out;
 }
