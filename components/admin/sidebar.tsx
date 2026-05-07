@@ -61,6 +61,16 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
     ],
   },
   {
+    heading: "Materials",
+    items: [
+      { href: "/packaging-inventory", label: "Packaging inventory", icon: Boxes },
+      { href: "/active-rolls", label: "Active rolls", icon: Activity },
+      { href: "/roll-variance", label: "Roll variance", icon: Scale },
+      { href: "/material-alerts", label: "Material alerts", icon: TrendingUp },
+      { href: "/po-reconciliation", label: "PO reconciliation", icon: Truck },
+    ],
+  },
+  {
     heading: "System",
     items: [{ href: "/settings", label: "Settings", icon: Sliders }],
   },
