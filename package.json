@@ -17,7 +17,8 @@
     "replay:workflow-events": "tsx scripts/replay-workflow-events.ts",
     "synthesize:legacy": "tsx scripts/synthesize-legacy.ts",
     "staging:seed": "tsx scripts/seed-staging-validation-data.ts",
-    "staging:cleanup": "tsx scripts/cleanup-staging-validation-data.ts"
+    "staging:cleanup": "tsx scripts/cleanup-staging-validation-data.ts",
+    "validation:snapshot": "tsx scripts/validation-snapshot.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
