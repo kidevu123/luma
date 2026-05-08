@@ -130,7 +130,7 @@ contract as other QC events:
   the product is set (new guard in `fireStageEventAction` mirroring
   the existing stage-progression guard)
 
-### Phase PRD-2 — packaging conversion guard
+### Phase PRD-2 — packaging conversion guard ✓ shipped (sha 8b7344b)
 - `packagingCompleteAction` rejects with *"Product packaging
   structure missing"* when:
   - `bag.product_id IS NULL`, OR
@@ -138,9 +138,38 @@ contract as other QC events:
   - `product.displays_per_case IS NULL`
 - UI surfaces the error in the existing red banner (v2E observable
   forms — already shipped)
-- Packaging station's main page displays *"This SKU: X units/display
-  · Y displays/case"* sourced from the bag's product BEFORE the
-  operator enters counts
+- Packaging station's main page should display *"This SKU: X units/
+  display · Y displays/case"* sourced from the bag's product BEFORE
+  the operator enters counts (UI surfacing pending — guard ships
+  the server-side floor first; UI text is part of polish phase or
+  can be tacked on with PRD-1)
+
+### Conversion formula (locked — never hardcoded)
+
+When PRD-2's prereqs pass, packaging completion derives good
+output from product structure:
+
+```
+good_units =
+    (master_cases × product.displays_per_case × product.units_per_display)
+  + (full_displays × product.units_per_display)
+  + loose_good_units
+```
+
+The first two terms are product-structure-driven. The third
+(`loose_good_units`) is operator-entered and counts as **good
+output, not damage**. Loose good units ≠ damaged packaging ≠
+damaged pills — those are separate entries with separate accounting
+effects. See `docs/QC_REWORK_DAMAGE_AND_COUNT_CONFIDENCE_PLAN.md`
+"Packaging output — eight labelled buckets" for the full taxonomy.
+
+Today's `packagingCompleteAction` accepts a `looseCards` field
+that is conflated with `damagedPackaging` + `rippedCards` in PO
+reconciliation's flat `known_loss`. That conflation is wrong and
+must be split when QC-4 ships. Until then, **operators should
+leave `looseCards`, `damagedPackaging`, and `rippedCards` at 0**
+in TEST D so the flat `known_loss = 0` and the bug doesn't
+surface.
 
 ### Phase PRD-3 — bottle-route first-op flow
 - Bottle Filling / Handpack station inherits the same first-op

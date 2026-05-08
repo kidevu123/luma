@@ -128,6 +128,52 @@ MACHINE_SETUP
 OTHER
 ```
 
+## Packaging output — eight labelled buckets (good vs damage vs WIP)
+
+> **Clarification (post-TEST-D4 owner direction):** loose good
+> cards/bottles are NOT damage. They are good output that did not
+> fill a display or master case. Damages must split into packaging
+> material loss vs raw product loss. Rework is WIP, not scrap.
+> Reconciliation must NOT collapse these into one `known_loss`.
+
+`packagingCompleteAction` produces these eight labelled buckets per
+workflow_bag (every field is a separate read-model column /
+reconciliation line — never merged):
+
+| Bucket | Source | Counts toward |
+|---|---|---|
+| `finished_case_units` | `master_cases × displays_per_case × units_per_display` (from product structure) | Good packaged output, sellable |
+| `finished_display_units` | `full_displays × units_per_display` (from product structure) | Good packaged output, sellable |
+| `loose_good_units` | operator entry: good cards/bottles that didn't fill a display/case | **Good output**, not damage. Sellable-or-not depends on business rule per product |
+| `known_packaging_damage_units` | operator entry — damaged packaging/card. `affects_packaging_material=true`, `affects_raw_product=false` | Packaging material loss only |
+| `known_raw_product_damage_units` | operator entry — damaged pills/product. `affects_raw_product=true`, `affects_packaging_material=true` if card also lost | Raw product loss (may also be packaging loss) |
+| `rework_units` | operator entry — sent back to sealing. Fires `REWORK_SENT` | WIP. NOT scrap. Stays tied to same `workflow_bag_id` |
+| `scrap_units` | operator entry — confirmed final loss. Fires `SCRAP_RECORDED` | Confirmed loss against PO + raw bag |
+| `unknown_variance` | derived — residual after the seven explicit buckets above + remaining inventory | Surfaced as *"Manual review required"* in reconciliation, NOT silently labelled "loss" |
+
+### Conversion formula (product-specific, never hardcoded)
+
+```
+good_units =
+    (master_cases × product.displays_per_case × product.units_per_display)
+  + (full_displays × product.units_per_display)
+  + loose_good_units
+```
+
+The first two terms come from product structure (`products.units_per_display`, `products.displays_per_case`, or the more granular `product_packaging_specs` / `item_conversions` for routes that need them). `loose_good_units` is operator-entered.
+
+If product structure is missing → blocked by `checkPackagingPrereqs` (PRD-2, already shipped). The conversion math NEVER runs without product structure.
+
+### Why loose ≠ damage
+
+Loose good units (cards / bottles produced but unboxed because they're a partial display short of a full one) are:
+- Sellable as-is OR carried forward to next run, depending on the per-product business rule.
+- Not material loss.
+- Not packaging loss.
+- Not raw product loss.
+
+The previous model lumped `looseCards` into the same payload bucket as `damagedPackaging` / `rippedCards` and the PO reconciliation collapsed all three into one `known_loss` — which incorrectly counted good output as loss.
+
 ## Reconciliation model
 
 For each bag / PO / product route, **preserve all count layers**
@@ -138,12 +184,15 @@ vendor_declared_count
 received_weight_estimate
 blister_press_count
 sealing_press_count
-packaging_verified_count
-known_card_packaging_damage          (affects_packaging_material=true)
-known_raw_product_damage             (affects_raw_product=true)
-rework_wip                           (REWORK_SENT minus REWORK_RESOLVED)
-scrap                                (SCRAP_RECORDED only)
-unknown_variance                     (residual — may not be loss)
+packaging_verified_count             (= finished_case_units + finished_display_units + loose_good_units)
+finished_case_units                  (good output, fully boxed)
+finished_display_units               (good output, in displays)
+loose_good_units                     (good output, not boxed)
+known_packaging_damage_units         (packaging material loss only)
+known_raw_product_damage_units       (raw product loss; may also imply packaging loss)
+rework_wip                           (REWORK_SENT minus REWORK_RESOLVED — STILL part of this bag)
+scrap                                (SCRAP_RECORDED only — confirmed)
+unknown_variance                     (residual — may not be loss; "Manual review required")
 ```
 
 Derived metrics (each carries its own `confidence`):
@@ -205,19 +254,32 @@ Optional details (default 0):
 If any optional > 0 → fire `QUALITY_DEFECT_RECORDED` and/or
 `SCRAP_RECORDED` events alongside `SEALING_COMPLETE`.
 
-### Packaging complete (extended)
+### Packaging complete (extended — eight-bucket model)
 
 ```
-Master cases:        [_]   Displays:        [_]   Loose cards: [_]
-Bottles (if route):  [_]
-Damaged packaging:   [0]
-Bad seal found:      [0]   ← new — fires PACKAGING_DAMAGE_RETURN
-Send back to sealing:[0]   ← new — fires REWORK_SENT
-Scrap (final loss):  [0]   ← new — fires SCRAP_RECORDED
-Notes:               [_____________]
+This SKU: <name>  ·  <X> units/display  ·  <Y> displays/case
+                                                     (from product structure)
+
+Good output:
+  Master cases:        [_]    full cases produced
+  Full displays:       [_]    full displays produced (not in cases)
+  Loose good units:    [_]    good cards/bottles that didn't fill a display
+
+Damages (default 0):
+  Damaged packaging:   [0]    card/foil/case loss only — fires QUALITY_DEFECT_RECORDED
+                              (affects_packaging_material=true, affects_raw_product=false)
+  Damaged pills:       [0]    product loss — fires QUALITY_DEFECT_RECORDED
+                              (affects_raw_product=true)
+  Bad seal found:      [0]    fires PACKAGING_DAMAGE_RETURN
+  Send back to sealing:[0]    fires REWORK_SENT (WIP, not scrap)
+  Scrap (final loss):  [0]    fires SCRAP_RECORDED
+
+  Notes:               [_____________]
 
 [Complete packaging]
 ```
+
+Visible computed line above the buttons: *"Good output this run: \<finished_case_units + finished_display_units + loose_good_units> units."*
 
 ### Rework picked up at sealing
 
@@ -262,6 +324,12 @@ forward-only `EVENT_STAGE_PREREQ` rule).
 | 12 | Raw-bag reconciliation reflects damaged raw product losses, NOT packaging damage |
 | 13 | Floor UI defaults all optional QC counts to 0 |
 | 14 | Missing/blank QC counts do NOT silently fabricate loss numbers |
+| 15 | `loose_good_units` is treated as **good output**, NOT loss, in PO reconciliation |
+| 16 | `loose_good_units > 0 + zero damage` flows through reconciliation with `known_loss = 0`, no warning |
+| 17 | Conversion uses `product.units_per_display × product.displays_per_case` from the bag's product (regression: never hardcoded) |
+| 18 | Two products with different `units_per_display` produce different `good_units` for the same operator entry |
+| 19 | `damaged_packaging_units > 0` reduces packaging-material inventory but not raw-product inventory |
+| 20 | `damaged_pills_units > 0` reduces raw-product inventory; reduces packaging inventory only when also paired with damaged-card entry |
 
 ## Implementation phases (suggested)
 
@@ -293,7 +361,11 @@ forward-only `EVENT_STAGE_PREREQ` rule).
 
 ### Phase QC-4 — reconciliation rewrite
 - Update `derivePoRawMaterialReconciliation` to split
-  `known_loss` into the five labelled buckets above.
+  `known_loss` into the **eight** labelled buckets above
+  (finished_case_units, finished_display_units, loose_good_units,
+  known_packaging_damage_units, known_raw_product_damage_units,
+  rework_units, scrap_units, unknown_variance). Do NOT lump loose
+  good units into damage.
 - Update `lib/projector/material-reconciliation.ts` with separate
   raw-vs-packaging consumption ledgers.
 - Update `read_sku_daily` + `read_station_daily` to populate
