@@ -184,9 +184,11 @@ export async function emitMaterialConsumedFromBlister(
         confidence: "HIGH",
       },
       source: "projector.blister_complete_hook",
-      ...(args.upstreamClientEventId
-        ? { clientEventId: `${args.upstreamClientEventId}-${roll.role.toLowerCase()}` }
-        : {}),
+      // No clientEventId: the column is uuid-typed and we can't derive a
+      // unique-per-role UUID from the upstream id by concatenation. The
+      // projector runs once per workflow_event insert (and the replay
+      // script gates on "no segments yet for this bag"), so duplicates
+      // are prevented at the call site.
     });
   }
 }
