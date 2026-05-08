@@ -173,11 +173,14 @@ export default async function PacktrackMappingPage() {
               <Field label="Mapping type">
                 <select
                   name="mappingType"
-                  defaultValue="MATERIAL"
+                  defaultValue="PACKAGING_MATERIAL"
                   className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
                 >
-                  <option value="MATERIAL">MATERIAL</option>
-                  <option value="OTHER">OTHER</option>
+                  <option value="PACKAGING_MATERIAL">PACKAGING_MATERIAL</option>
+                  <option value="RAW_MATERIAL">RAW_MATERIAL</option>
+                  <option value="COMPONENT">COMPONENT</option>
+                  <option value="INTERMEDIATE_GOOD">INTERMEDIATE_GOOD</option>
+                  <option value="UNKNOWN">UNKNOWN</option>
                 </select>
               </Field>
               <button

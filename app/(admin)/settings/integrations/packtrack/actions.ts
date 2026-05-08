@@ -15,7 +15,21 @@ const createSchema = z.object({
   externalItemId: z.string().min(1, "PackTrack material code is required.").max(120),
   externalItemName: z.string().max(200).optional().nullable(),
   materialItemId: z.string().uuid("Pick a Luma packaging material."),
-  mappingType: z.string().min(1).max(40).default("MATERIAL"),
+  // CHECK constraint on external_item_mappings.mapping_type accepts:
+  // RAW_MATERIAL, PACKAGING_MATERIAL, COMPONENT, INTERMEDIATE_GOOD,
+  // FINISHED_GOOD, SELLABLE_SKU, UNKNOWN. PackTrack receipts are
+  // packaging material by default.
+  mappingType: z
+    .enum([
+      "PACKAGING_MATERIAL",
+      "RAW_MATERIAL",
+      "COMPONENT",
+      "INTERMEDIATE_GOOD",
+      "FINISHED_GOOD",
+      "SELLABLE_SKU",
+      "UNKNOWN",
+    ])
+    .default("PACKAGING_MATERIAL"),
 });
 
 /** Create a new active PackTrack -> Luma material mapping. Rejects when
@@ -30,7 +44,7 @@ export async function createPacktrackMappingAction(
     externalItemId: formData.get("externalItemId"),
     externalItemName: formData.get("externalItemName") || null,
     materialItemId: formData.get("materialItemId"),
-    mappingType: formData.get("mappingType") || "MATERIAL",
+    mappingType: formData.get("mappingType") || "PACKAGING_MATERIAL",
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
