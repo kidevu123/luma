@@ -79,11 +79,33 @@ export async function POST(req: Request) {
           : result.code === "INVALID"
             ? 400
             : 500;
+      console.warn(
+        "[packtrack.receipts]",
+        JSON.stringify({
+          outcome:
+            result.code === "MAPPING_MISSING"
+              ? "MAPPING_MISSING"
+              : result.code === "INVALID"
+                ? "INVALID"
+                : "INSERT_FAILED",
+          reason: result.reason,
+          dry_run: dryRun,
+        }),
+      );
       return NextResponse.json(
         { ok: false, error: result.reason, code: result.code },
         { status },
       );
     }
+    console.log(
+      "[packtrack.receipts]",
+      JSON.stringify({
+        outcome: result.created ? "IMPORTED" : "DUPLICATE_SKIPPED",
+        luma_packaging_lot_id: result.lotId,
+        confidence: result.acceptance.confidence,
+        events_emitted: result.eventsEmitted,
+      }),
+    );
     return NextResponse.json({
       ok: true,
       luma_packaging_lot_id: result.lotId,
