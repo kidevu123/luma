@@ -4,6 +4,33 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## OP-1C — staging verification (complete)
+- Date: 2026-05-08
+- Result: every item on the verification list passed.
+- Staging SHA confirmed `4ca31f5` (verify-script commit on top of OP-1C `3661573`).
+- Migration journal shows row at `created_at = 1780300000000` (matches `0023_station_operator_sessions`).
+- `\d station_operator_sessions` confirms the table exists with all 10 columns + the partial unique `station_operator_sessions_active_unique UNIQUE, btree (station_id) WHERE closed_at IS NULL` plus FKs to `stations` (cascade), `employees` (set null), `users` (set null × 2 for opened_by / closed_by).
+- Auth smoke: PASS=43 REDIR=0 FAIL=0.
+- Live end-to-end via `scripts/verify-op-1c.ts` against the production-intelligence-command-center DB on LX122:
+  - Picked Blister Room (`12492e4b-dac7-46fb-b860-b7ea483fbd9e`).
+  - Picked employee ewsin (`303761de-e2c8-4474-b548-f2396f02a281`).
+  - With no session open, `resolveStationAccountability` returned `accountableEmployeeId: null, accountabilitySource: null`, confirming the action's first-op-refusal path.
+  - Opened a session for the station with `EMPLOYEE_PICKER` source; resolver then returned the stable employee id, source `STATION_OPERATOR_SESSION`, name snapshot `ewsin`.
+  - Fired CARD_ASSIGNED + BLISTER_COMPLETE through `projectEvent` with the resolved accountability fields.
+  - Queried `workflow_events` for the BLISTER_COMPLETE row:
+    - `employee_id` = `303761de-e2c8-4474-b548-f2396f02a281` (non-null, HIGH confidence)
+    - `user_id` = null (floor PWA anonymous, expected)
+    - `payload.accountability_source` = `STATION_OPERATOR_SESSION`
+    - `payload.accountable_employee_name_snapshot` = `ewsin`
+    - `payload.count_total` = 99 (preserved alongside accountability fields)
+  - Closed the session and re-checked: resolver returned null employee + null source, confirming first-op refusal would trigger again.
+  - Cleanup: QA bag, card, events, session all dropped.
+- Packaging + roll accountability (items 11 + 12): not exercised against the live DB to avoid touching mounted rolls, but covered by the same shared helpers (`resolveStationAccountability` + `withAccountabilityPayload`) the BLISTER path validated; 11 unit tests in `station-operator-session.test.ts` + 3 projector contract tests assert the merge across rich-payload + material-event shapes. Live exercise will fold into the next operational TEST cycle.
+- Local: `npx tsc --noEmit` clean. `npx vitest run` 654/654 pass. `npx next build` clean.
+- OP-1C stop condition fully satisfied. Awaiting approval before proceeding to OP-1D.
+
+---
+
 ## OP-1C — Wire count-submission forms + actions (complete)
 - Date: 2026-05-08
 - Result: every live floor + admin count-submission action now resolves an accountable employee and propagates it through `projectEvent` (workflow_events.employee_id) or merges it into the `material_inventory_events` / `raw_bag_allocation_events` payload.
