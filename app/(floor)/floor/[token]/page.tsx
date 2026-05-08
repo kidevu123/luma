@@ -16,11 +16,16 @@ import {
   workflowBags,
   readBagState,
   readStationLive,
+  products,
 } from "@/lib/db/schema";
 import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
 import { STATION_PICKUP_FROM_STAGE } from "@/lib/production/stage-progression";
+import {
+  FIRST_OP_STATION_KINDS,
+  STATION_KIND_TO_PRODUCT_KINDS,
+} from "@/lib/production/first-op-product";
 
 export const dynamic = "force-dynamic";
 
@@ -40,17 +45,22 @@ export default async function FloorStationPage({
 
   // The bag at THIS station (and only this one) lives in
   // read_station_live.currentWorkflowBagId. Joining qr_cards back
-  // gives us the card label + scan token for display.
+  // gives us the card label + scan token for display, and joining
+  // products surfaces the SKU + units/display + displays/case so
+  // downstream stations can show the inherited product without
+  // re-asking the operator.
   const [currentAtStation] = await db
     .select({
       bag: workflowBags,
       card: qrCards,
       state: readBagState,
+      product: products,
     })
     .from(readStationLive)
     .innerJoin(workflowBags, eq(readStationLive.currentWorkflowBagId, workflowBags.id))
     .leftJoin(qrCards, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
     .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .leftJoin(products, eq(products.id, workflowBags.productId))
     .where(eq(readStationLive.stationId, station.station.id));
 
   // Idle cards available to scan, sorted by label so the dropdown
@@ -59,6 +69,31 @@ export default async function FloorStationPage({
     .select()
     .from(qrCards)
     .where(eq(qrCards.status, "IDLE"));
+
+  // First-op product picker (PRD-1): when this station is BLISTER /
+  // COMBINED, the operator must pick a product on a fresh-card scan.
+  // List active products whose kind is allowed for this station kind.
+  const requireFirstOpProduct = FIRST_OP_STATION_KINDS.has(station.station.kind);
+  const allowedProductKinds =
+    STATION_KIND_TO_PRODUCT_KINDS[station.station.kind] ?? [];
+  const allowedProducts = requireFirstOpProduct && allowedProductKinds.length > 0
+    ? await db
+        .select({
+          id: products.id,
+          sku: products.sku,
+          name: products.name,
+          kind: products.kind,
+          unitsPerDisplay: products.unitsPerDisplay,
+          displaysPerCase: products.displaysPerCase,
+        })
+        .from(products)
+        .where(
+          and(
+            eq(products.isActive, true),
+            inArray(products.kind, allowedProductKinds as ("CARD" | "BOTTLE" | "VARIETY")[]),
+          ),
+        )
+    : [];
 
   // ASSIGNED cards whose bag is at a stage THIS station can pick up
   // (multi-station travel — VALIDATION-2D model). Sealing accepts
@@ -158,6 +193,12 @@ export default async function FloorStationPage({
                   bagId: c.bagId,
                   bagStage: c.bagStage,
                 }))}
+              allowedProducts={allowedProducts.map((p) => ({
+                id: p.id,
+                sku: p.sku,
+                name: p.name,
+              }))}
+              requireProductForFreshBag={requireFirstOpProduct}
             />
           </div>
         ) : (
@@ -171,7 +212,36 @@ export default async function FloorStationPage({
                   {currentAtStation.bag.id.slice(0, 8)}
                 </span>
               </div>
-              <p className="text-xs text-text-muted">
+              {currentAtStation.product ? (
+                <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900 space-y-0.5">
+                  <div className="font-semibold">
+                    Making: {currentAtStation.product.sku}
+                    {currentAtStation.product.name
+                      ? ` — ${currentAtStation.product.name}`
+                      : ""}
+                  </div>
+                  {currentAtStation.product.unitsPerDisplay != null &&
+                  currentAtStation.product.displaysPerCase != null ? (
+                    <div className="text-emerald-900/70">
+                      {currentAtStation.product.unitsPerDisplay} units/display ·{" "}
+                      {currentAtStation.product.displaysPerCase} displays/case
+                    </div>
+                  ) : (
+                    <div className="text-amber-700">
+                      Packaging structure incomplete — supervisor must update.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <div className="font-semibold">No product set on this bag.</div>
+                  <div>
+                    This bag was started before the first-op product picker
+                    landed. Packaging completion will be blocked.
+                  </div>
+                </div>
+              )}
+              <p className="text-xs text-text-muted mt-2">
                 Started{" "}
                 {currentAtStation.bag.startedAt
                   ? new Date(

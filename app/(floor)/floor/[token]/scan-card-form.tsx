@@ -15,11 +15,19 @@ export type EligiblePickup = {
   bagStage: string;
 };
 
+export type AllowedProduct = {
+  id: string;
+  sku: string;
+  name: string;
+};
+
 export function ScanCardForm({
   token,
   stationId,
   idleCards,
   eligiblePickups = [],
+  allowedProducts = [],
+  requireProductForFreshBag = false,
 }: {
   token: string;
   stationId: string;
@@ -28,10 +36,31 @@ export function ScanCardForm({
    *  (e.g. SEALING station accepts BLISTERED bags). Surfaced so the
    *  operator can claim a released bag with the same QR. */
   eligiblePickups?: EligiblePickup[];
+  /** Products the operator can pick when starting a fresh bag at this
+   *  station. Empty list when this station kind doesn't require a
+   *  first-op product (sealing, packaging, etc.). */
+  allowedProducts?: AllowedProduct[];
+  /** True when the station's kind is in FIRST_OP_STATION_KINDS
+   *  (BLISTER / COMBINED today). Triggers the product-picker reveal
+   *  whenever the operator selects an IDLE card. */
+  requireProductForFreshBag?: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [selectedCardId, setSelectedCardId] = React.useState("");
+  const [productId, setProductId] = React.useState("");
+
+  const idleSet = React.useMemo(
+    () => new Set(idleCards.map((c) => c.id)),
+    [idleCards],
+  );
+  const isIdleCardSelected =
+    selectedCardId !== "" && idleSet.has(selectedCardId);
+  const showProductPicker =
+    requireProductForFreshBag &&
+    isIdleCardSelected &&
+    allowedProducts.length > 0;
 
   const hasIdle = idleCards.length > 0;
   const hasPickups = eligiblePickups.length > 0;
@@ -41,6 +70,18 @@ export function ScanCardForm({
       action={async (form) => {
         setPending(true);
         setError(null);
+        // Client-side preflight: require product when needed.
+        if (
+          requireProductForFreshBag &&
+          isIdleCardSelected &&
+          (!productId || productId === "")
+        ) {
+          setError(
+            "Pick a product before starting. The first production station must record what's being made.",
+          );
+          setPending(false);
+          return;
+        }
         try {
           const r = await scanCardAction(form);
           if (r?.error) setError(r.error);
@@ -56,13 +97,15 @@ export function ScanCardForm({
       <select
         name="cardId"
         required
+        value={selectedCardId}
+        onChange={(e) => {
+          setSelectedCardId(e.target.value);
+          setProductId(""); // reset product when card changes
+        }}
         className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
-        defaultValue=""
       >
         <option value="" disabled>
-          {hasPickups
-            ? "Pick a card to scan…"
-            : "Pick an idle card…"}
+          {hasPickups ? "Pick a card to scan…" : "Pick an idle card…"}
         </option>
         {hasPickups && (
           <optgroup label="Pick up released bag (same QR continues)">
@@ -83,10 +126,46 @@ export function ScanCardForm({
           </optgroup>
         )}
       </select>
+
+      {showProductPicker && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
+          <div className="font-semibold text-sm">What are you making?</div>
+          <div className="text-amber-900/80">
+            Pick the finished SKU for this production run. It will travel with
+            the bag through sealing and packaging.
+          </div>
+          <select
+            name="productId"
+            required
+            value={productId}
+            onChange={(e) => setProductId(e.target.value)}
+            className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
+          >
+            <option value="" disabled>
+              — Select product —
+            </option>
+            {allowedProducts.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.sku} — {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {requireProductForFreshBag &&
+        isIdleCardSelected &&
+        allowedProducts.length === 0 && (
+          <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            No active products configured for this station kind. Supervisor
+            must add a product to the route.
+          </p>
+        )}
+
       {hasPickups && (
         <p className="text-[11px] text-text-muted">
-          A "Pick up" option claims a bag released from the previous
-          station. The same QR card stays attached to the bag.
+          A "Pick up" option claims a bag released from the previous station.
+          The same QR card stays attached to the bag.
         </p>
       )}
       {error && (
@@ -100,7 +179,11 @@ export function ScanCardForm({
         className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-base font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60 transition-colors"
       >
         <ScanLine className="h-5 w-5" />
-        {pending ? "Scanning…" : "Scan card"}
+        {pending
+          ? "Scanning…"
+          : showProductPicker
+            ? "Start production"
+            : "Scan card"}
       </button>
     </form>
   );

@@ -98,6 +98,10 @@ const scanSchema = z.object({
   token: z.string(),
   stationId: z.string().uuid(),
   cardId: z.string().uuid(),
+  /** Required at first-op stations (BLISTER / COMBINED) when scanning
+   *  an IDLE card. Ignored at downstream pickups — the bag already
+   *  carries a product. */
+  productId: z.string().uuid().optional().nullable().or(z.literal("")),
 });
 
 export async function scanCardAction(
@@ -107,9 +111,14 @@ export async function scanCardAction(
     token: formData.get("token"),
     stationId: formData.get("stationId"),
     cardId: formData.get("cardId"),
+    productId: formData.get("productId") || undefined,
   });
   if (!parsed.success) return { error: "Invalid input." };
   const { token, stationId, cardId } = parsed.data;
+  const pickedProductId =
+    parsed.data.productId && parsed.data.productId !== ""
+      ? parsed.data.productId
+      : null;
 
   try {
     const station = await authStation(token, stationId);
@@ -126,9 +135,37 @@ export async function scanCardAction(
       if (!card) throw new Error("Card not found.");
 
       if (card.status === "IDLE") {
-        // Fresh scan — first station claims an idle card and creates
-        // the workflow bag.
-        const [bag] = await tx.insert(workflowBags).values({}).returning();
+        // Fresh scan — first-op stations REQUIRE a product pick so
+        // workflow_bags.product_id lands non-null at the very first
+        // event. Downstream stations inherit via the projector's
+        // COALESCE pattern.
+        const productLookup = pickedProductId
+          ? (
+              await tx
+                .select({
+                  id: products.id,
+                  sku: products.sku,
+                  name: products.name,
+                  kind: products.kind,
+                  isActive: products.isActive,
+                })
+                .from(products)
+                .where(eq(products.id, pickedProductId))
+            )[0] ?? null
+          : null;
+        const firstOp = checkFirstOpProductSelection({
+          stationKind: station.kind,
+          cardStatus: "IDLE",
+          pickedProductId,
+          product: productLookup,
+        });
+        if (!firstOp.ok) throw new Error(firstOp.reason);
+
+        const productIdToSet = firstOp.productId; // null when not first-op
+        const [bag] = await tx
+          .insert(workflowBags)
+          .values(productIdToSet ? { productId: productIdToSet } : {})
+          .returning();
         if (!bag) throw new Error("Could not create workflow bag.");
         await tx
           .update(qrCards)
@@ -140,6 +177,21 @@ export async function scanCardAction(
           eventType: "CARD_ASSIGNED",
           payload: { qr_card_id: cardId, station_kind: station.kind },
         });
+        if (productIdToSet && productLookup) {
+          await projectEvent(tx, {
+            workflowBagId: bag.id,
+            stationId: station.id,
+            eventType: "PRODUCT_MAPPED",
+            payload: {
+              product_id: productIdToSet,
+              product_sku: productLookup.sku,
+              product_name: productLookup.name,
+              product_kind: productLookup.kind,
+              station_kind: station.kind,
+              source: "FIRST_OPERATION_SELECTION",
+            },
+          });
+        }
         await writeAudit(
           {
             actorId: null,
@@ -147,7 +199,12 @@ export async function scanCardAction(
             action: "floor.card_assigned",
             targetType: "WorkflowBag",
             targetId: bag.id,
-            after: { card_id: cardId, station_id: stationId },
+            after: {
+              card_id: cardId,
+              station_id: stationId,
+              product_id: productIdToSet,
+              product_sku: productLookup?.sku ?? null,
+            },
           },
           tx,
         );
@@ -247,6 +304,10 @@ const eventSchema = z.object({
 
 import { checkStageProgression } from "@/lib/production/stage-progression";
 import { checkPackagingPrereqs } from "@/lib/production/packaging-prereqs";
+import {
+  FIRST_OP_STATION_KINDS,
+  checkFirstOpProductSelection,
+} from "@/lib/production/first-op-product";
 
 export async function fireStageEventAction(
   formData: FormData,
