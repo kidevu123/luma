@@ -18,6 +18,9 @@ import {
   machines,
   packagingLots,
   packagingMaterials,
+  readStationLive,
+  workflowBags,
+  qrCards,
 } from "@/lib/db/schema";
 import { getActiveRollsForMachine } from "@/lib/production/active-rolls";
 import {
@@ -71,6 +74,30 @@ export default async function FloorRollsPage({
   const idleRollLots = availableLots.filter((l) =>
     ROLL_KINDS.includes(l.materialKind as (typeof ROLL_KINDS)[number]),
   );
+
+  // Active bag at THIS station — the segment will be allocated to it
+  // (alongside the active PVC + active foil rolls). Pulled from
+  // read_station_live so the operator never types a UUID. Filtered to
+  // bags that are still alive (not finalized).
+  const [activeBagRow] = await db
+    .select({
+      bagId: readStationLive.currentWorkflowBagId,
+      cardLabel: qrCards.label,
+      bagStartedAt: workflowBags.startedAt,
+      bagFinalizedAt: workflowBags.finalizedAt,
+    })
+    .from(readStationLive)
+    .leftJoin(workflowBags, eq(workflowBags.id, readStationLive.currentWorkflowBagId))
+    .leftJoin(qrCards, eq(qrCards.assignedWorkflowBagId, readStationLive.currentWorkflowBagId))
+    .where(eq(readStationLive.stationId, station.id));
+  const activeBag =
+    activeBagRow?.bagId && !activeBagRow.bagFinalizedAt
+      ? {
+          id: activeBagRow.bagId,
+          label: activeBagRow.cardLabel ?? `bag ${activeBagRow.bagId.slice(0, 8)}`,
+          startedAt: activeBagRow.bagStartedAt,
+        }
+      : null;
 
   return (
     <main className="min-h-dvh bg-page p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
@@ -304,6 +331,12 @@ export default async function FloorRollsPage({
             No replacement roll inventory available. Receive rolls in
             /inbound/packaging-materials first.
           </Empty>
+        ) : !activeBag ? (
+          <Empty>
+            No active bag at this station. Scan a card on the main station page
+            to start a bag, then return here. The mid-bag segment must be
+            allocated to a real bag — typing a UUID is not allowed.
+          </Empty>
         ) : (
           <form
             action={async (fd) => {
@@ -315,6 +348,22 @@ export default async function FloorRollsPage({
             <input type="hidden" name="token" value={token} />
             <input type="hidden" name="stationId" value={station.id} />
             <input type="hidden" name="clientEventId" value={randomUUID()} />
+            <input type="hidden" name="workflowBagId" value={activeBag.id} />
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs space-y-0.5">
+              <div className="font-semibold text-amber-900">
+                Segment will be allocated to: {activeBag.label}
+              </div>
+              <div className="text-amber-900/80 font-mono text-[10px]">
+                bag {activeBag.id.slice(0, 8)} · started{" "}
+                {activeBag.startedAt
+                  ? new Date(activeBag.startedAt).toLocaleString()
+                  : "—"}
+              </div>
+              <div className="text-amber-900/80">
+                Counter goes to the old roll, the still-active other-role roll,
+                and this bag.
+              </div>
+            </div>
             <p className="text-xs text-text-muted">
               Use this when a roll runs out (or is changed out) mid-bag. Enter
               the machine counter when this roll stopped — that count goes to the
@@ -358,14 +407,6 @@ export default async function FloorRollsPage({
                   </option>
                 ))}
               </select>
-            </Field>
-            <Field label="Workflow bag id (optional — current bag)">
-              <input
-                type="text"
-                name="workflowBagId"
-                placeholder="UUID of the bag currently being run"
-                className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm font-mono text-[11px]"
-              />
             </Field>
             <Field label="Notes (optional)">
               <input

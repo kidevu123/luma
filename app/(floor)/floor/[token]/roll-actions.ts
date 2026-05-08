@@ -25,6 +25,8 @@ import {
   packagingLots,
   packagingMaterials,
   materialInventoryEvents,
+  readStationLive,
+  workflowBags,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { rebuildRollUsage } from "@/lib/projector/roll-usage";
@@ -521,7 +523,9 @@ const changeSchema = z
     token: z.string().regex(UUID_RE, "Invalid token."),
     stationId: z.string().uuid(),
     role: z.enum(["PVC", "FOIL"]),
-    workflowBagId: z.string().uuid().optional().nullable().or(z.literal("")),
+    workflowBagId: z
+      .string()
+      .uuid("Mid-bag roll change requires an active workflow bag at this station."),
     counterSegmentCount: z.coerce.number().int().min(1, "Counter segment must be > 0"),
     newPackagingLotId: z.string().uuid().optional(),
     newRollNumber: z.string().min(1).max(80).optional(),
@@ -551,7 +555,7 @@ export async function changeRollAction(
     token: formData.get("token"),
     stationId: formData.get("stationId"),
     role: formData.get("role"),
-    workflowBagId: formData.get("workflowBagId") || undefined,
+    workflowBagId: formData.get("workflowBagId"),
     counterSegmentCount: formData.get("counterSegmentCount"),
     newPackagingLotId: formData.get("newPackagingLotId") || undefined,
     newRollNumber: formData.get("newRollNumber") || undefined,
@@ -566,6 +570,36 @@ export async function changeRollAction(
   try {
     const station = await authStation(d.token, d.stationId);
     if (!station.machineId) return { error: "Station is not bound to a machine." };
+
+    // Defense in depth: the form auto-fills workflowBagId from the
+    // station's read_station_live row. Re-verify here so a tampered
+    // hidden input cannot land a segment on a stale or unrelated bag.
+    const [live] = await db
+      .select({
+        currentWorkflowBagId: readStationLive.currentWorkflowBagId,
+      })
+      .from(readStationLive)
+      .where(eq(readStationLive.stationId, d.stationId));
+    if (!live?.currentWorkflowBagId) {
+      return {
+        error:
+          "No active bag at this station. Scan a card to start a bag before changing rolls.",
+      };
+    }
+    if (live.currentWorkflowBagId !== d.workflowBagId) {
+      return {
+        error:
+          "Workflow bag does not match the station's active bag. Reload the page.",
+      };
+    }
+    const [bagRow] = await db
+      .select({ finalizedAt: workflowBags.finalizedAt })
+      .from(workflowBags)
+      .where(eq(workflowBags.id, d.workflowBagId));
+    if (!bagRow) return { error: "Workflow bag not found." };
+    if (bagRow.finalizedAt) {
+      return { error: "Workflow bag is already finalized — cannot change roll mid-bag." };
+    }
 
     // Resolve the new roll lot — same lookup pattern as mount.
     const newLot = await findLotByRollNumberOrId({
@@ -633,7 +667,7 @@ export async function changeRollAction(
       return { error: "New roll is the same as the old roll. Pick a different lot." };
     }
 
-    const workflowBagId = d.workflowBagId && d.workflowBagId !== "" ? d.workflowBagId : null;
+    const workflowBagId = d.workflowBagId;
     const newStartingWeight = d.newStartingWeightGrams ?? newLot.net_weight_grams;
 
     let oldFinalYield = 0;
