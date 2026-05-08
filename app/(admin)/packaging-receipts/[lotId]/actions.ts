@@ -11,6 +11,10 @@ import {
   materialInventoryEvents,
 } from "@/lib/db/schema";
 import { classifyVarianceSeverity } from "@/lib/inbound/packaging-receipt";
+import {
+  resolveAdminAccountability,
+  withAccountabilityPayload,
+} from "@/lib/production/station-operator-session";
 
 import { ADJUST_REASON_OPTIONS } from "./constants";
 
@@ -52,6 +56,7 @@ export async function adjustPackagingLotAction(
 
   try {
     await db.transaction(async (tx) => {
+      const accountability = await resolveAdminAccountability(tx, { actor });
       const [lot] = await tx
         .select({
           id: packagingLots.id,
@@ -80,14 +85,17 @@ export async function adjustPackagingLotAction(
         actorUserId: actor.id,
         quantityUnits: Math.abs(delta),
         unitOfMeasure: lot.uom,
-        payload: {
-          adjustment: delta,
-          prior_qty_on_hand: priorOnHand,
-          new_qty_on_hand: newOnHand,
-          reason: parsed.data.reason,
-          notes: parsed.data.notes ?? null,
-          adjusted_by_user_id: actor.id,
-        },
+        payload: withAccountabilityPayload(
+          {
+            adjustment: delta,
+            prior_qty_on_hand: priorOnHand,
+            new_qty_on_hand: newOnHand,
+            reason: parsed.data.reason,
+            notes: parsed.data.notes ?? null,
+            adjusted_by_user_id: actor.id,
+          },
+          accountability,
+        ),
         source: "admin.cycle_count",
       });
 
@@ -103,17 +111,20 @@ export async function adjustPackagingLotAction(
           actorUserId: actor.id,
           quantityUnits: Math.abs(delta),
           unitOfMeasure: lot.uom,
-          payload: {
-            prior_qty_on_hand: priorOnHand,
-            counted_quantity: newOnHand,
-            variance: delta,
-            severity: classifyVarianceSeverity({
+          payload: withAccountabilityPayload(
+            {
+              prior_qty_on_hand: priorOnHand,
+              counted_quantity: newOnHand,
               variance: delta,
-              declared: declaredApprox,
-            }),
-            kind: "CYCLE_COUNT_VARIANCE", // NOT receipt variance, NOT production loss
-            reason: parsed.data.reason,
-          },
+              severity: classifyVarianceSeverity({
+                variance: delta,
+                declared: declaredApprox,
+              }),
+              kind: "CYCLE_COUNT_VARIANCE", // NOT receipt variance, NOT production loss
+              reason: parsed.data.reason,
+            },
+            accountability,
+          ),
           source: "admin.cycle_count",
         });
       }

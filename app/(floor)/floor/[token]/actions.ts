@@ -20,6 +20,15 @@ import {
   STATION_PICKUP_FROM_STAGE,
   STATIONS_THAT_FINALIZE,
 } from "@/lib/production/stage-progression";
+import { resolveStationAccountability } from "@/lib/production/station-operator-session";
+
+// First-op count submissions where accountability is mandatory (the
+// queue stop condition: refuse a fresh blister/handpack count when
+// nobody owns it). All other events soft-fall-through.
+const FIRST_OP_COUNT_EVENTS: ReadonlySet<string> = new Set([
+  "BLISTER_COMPLETE",
+  "BOTTLE_HANDPACK_COMPLETE",
+]);
 
 // Floor PWA actions are anonymous (no admin login). Authorization is
 // the station's scan_token, which lives in the URL. Every action MUST
@@ -102,6 +111,11 @@ const scanSchema = z.object({
    *  an IDLE card. Ignored at downstream pickups — the bag already
    *  carries a product. */
   productId: z.string().uuid().optional().nullable().or(z.literal("")),
+  /** OP-1C per-form override: a supervisor entering a count on behalf
+   *  of another operator. Resolved server-side via the accountability
+   *  resolver. When omitted the active station-operator-session
+   *  defaults the accountable employee. */
+  overrideEmployeeCode: z.string().max(40).optional().nullable(),
 });
 
 export async function scanCardAction(
@@ -112,9 +126,10 @@ export async function scanCardAction(
     stationId: formData.get("stationId"),
     cardId: formData.get("cardId"),
     productId: formData.get("productId") || undefined,
+    overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) return { error: "Invalid input." };
-  const { token, stationId, cardId } = parsed.data;
+  const { token, stationId, cardId, overrideEmployeeCode } = parsed.data;
   const pickedProductId =
     parsed.data.productId && parsed.data.productId !== ""
       ? parsed.data.productId
@@ -123,6 +138,10 @@ export async function scanCardAction(
   try {
     const station = await authStation(token, stationId);
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId,
+        overrideEmployeeCode: overrideEmployeeCode ?? null,
+      });
       // FOR UPDATE prevents the IDLE→ASSIGNED race where two
       // concurrent scanners both pass the IDLE check.
       await tx.execute(
@@ -176,6 +195,11 @@ export async function scanCardAction(
           stationId: station.id,
           eventType: "CARD_ASSIGNED",
           payload: { qr_card_id: cardId, station_kind: station.kind },
+          enteredByUserId: accountability.enteredByUserId,
+          accountableEmployeeId: accountability.accountableEmployeeId,
+          accountabilitySource: accountability.accountabilitySource,
+          accountableEmployeeNameSnapshot:
+            accountability.accountableEmployeeNameSnapshot,
         });
         if (productIdToSet && productLookup) {
           await projectEvent(tx, {
@@ -190,6 +214,11 @@ export async function scanCardAction(
               station_kind: station.kind,
               source: "FIRST_OPERATION_SELECTION",
             },
+            enteredByUserId: accountability.enteredByUserId,
+            accountableEmployeeId: accountability.accountableEmployeeId,
+            accountabilitySource: accountability.accountabilitySource,
+            accountableEmployeeNameSnapshot:
+              accountability.accountableEmployeeNameSnapshot,
           });
         }
         await writeAudit(
@@ -254,6 +283,11 @@ export async function scanCardAction(
             station_kind: station.kind,
             from_stage: state.stage,
           },
+          enteredByUserId: accountability.enteredByUserId,
+          accountableEmployeeId: accountability.accountableEmployeeId,
+          accountabilitySource: accountability.accountabilitySource,
+          accountableEmployeeNameSnapshot:
+            accountability.accountableEmployeeNameSnapshot,
         });
         await writeAudit(
           {
@@ -300,6 +334,10 @@ const eventSchema = z.object({
   ]),
   countTotal: z.coerce.number().int().min(0).max(100000).optional(),
   clientEventId: clientEventIdField,
+  /** OP-1C per-form supervisor override. Resolved by the
+   *  station-operator-session helper; falls back to the active
+   *  session when omitted. */
+  overrideEmployeeCode: z.string().max(40).optional().nullable(),
 });
 
 import { checkStageProgression } from "@/lib/production/stage-progression";
@@ -319,10 +357,18 @@ export async function fireStageEventAction(
     eventType: formData.get("eventType"),
     countTotal: formData.get("countTotal") || 0,
     clientEventId: pickClientEventId(formData),
+    overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) return { error: "Invalid input." };
-  const { token, workflowBagId, stationId, eventType, countTotal, clientEventId } =
-    parsed.data;
+  const {
+    token,
+    workflowBagId,
+    stationId,
+    eventType,
+    countTotal,
+    clientEventId,
+    overrideEmployeeCode,
+  } = parsed.data;
 
   try {
     const station = await authStation(token, stationId);
@@ -360,12 +406,32 @@ export async function fireStageEventAction(
     }
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId,
+        overrideEmployeeCode: overrideEmployeeCode ?? null,
+      });
+      // First-op count submissions (BLISTER_COMPLETE / BOTTLE_HANDPACK_
+      // COMPLETE) MUST identify the accountable employee. Refuse early
+      // if neither an active session nor a per-form override resolved.
+      if (
+        FIRST_OP_COUNT_EVENTS.has(eventType) &&
+        !accountability.accountableEmployeeId
+      ) {
+        throw new Error(
+          "No operator on shift. Open a shift on this station before submitting the first count.",
+        );
+      }
       await projectEvent(tx, {
         workflowBagId,
         stationId,
         eventType,
         payload: countTotal ? { count_total: countTotal } : {},
         ...(clientEventId ? { clientEventId } : {}),
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot:
+          accountability.accountableEmployeeNameSnapshot,
       });
     });
   } catch (err) {
@@ -414,6 +480,10 @@ export async function pauseBagAction(
     if (state?.isPaused) return { error: "Bag is already paused." };
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+        overrideEmployeeCode: parsed.data.operatorCode ?? null,
+      });
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
@@ -428,6 +498,11 @@ export async function pauseBagAction(
         ...(parsed.data.clientEventId
           ? { clientEventId: parsed.data.clientEventId }
           : {}),
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot:
+          accountability.accountableEmployeeNameSnapshot,
       });
     });
   } catch (err) {
@@ -467,6 +542,10 @@ export async function resumeBagAction(
     if (!state?.isPaused) return { error: "Bag isn't paused." };
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+        overrideEmployeeCode: parsed.data.operatorCode ?? null,
+      });
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
@@ -477,6 +556,11 @@ export async function resumeBagAction(
         ...(parsed.data.clientEventId
           ? { clientEventId: parsed.data.clientEventId }
           : {}),
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot:
+          accountability.accountableEmployeeNameSnapshot,
       });
     });
   } catch (err) {
@@ -510,11 +594,20 @@ export async function setOperatorAction(
   try {
     await authStation(parsed.data.token, parsed.data.stationId);
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+        overrideEmployeeCode: parsed.data.operatorCode,
+      });
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
         eventType: "OPERATOR_CHANGE",
         payload: { operator_code: parsed.data.operatorCode },
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot:
+          accountability.accountableEmployeeNameSnapshot,
       });
     });
   } catch (err) {
@@ -732,6 +825,10 @@ export async function packagingCompleteAction(
     }
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+        overrideEmployeeCode: parsed.data.operatorCode ?? null,
+      });
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
@@ -749,6 +846,11 @@ export async function packagingCompleteAction(
         ...(parsed.data.clientEventId
           ? { clientEventId: parsed.data.clientEventId }
           : {}),
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot:
+          accountability.accountableEmployeeNameSnapshot,
       });
     });
   } catch (err) {
@@ -802,6 +904,9 @@ export async function finalizeBagAction(
     }
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+      });
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
@@ -809,6 +914,11 @@ export async function finalizeBagAction(
         ...(parsed.data.clientEventId
           ? { clientEventId: parsed.data.clientEventId }
           : {}),
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot:
+          accountability.accountableEmployeeNameSnapshot,
       });
     });
   } catch (err) {
@@ -869,6 +979,9 @@ export async function releaseBagAction(
     }
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+      });
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
@@ -880,6 +993,11 @@ export async function releaseBagAction(
         ...(parsed.data.clientEventId
           ? { clientEventId: parsed.data.clientEventId }
           : {}),
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot:
+          accountability.accountableEmployeeNameSnapshot,
       });
     });
   } catch (err) {

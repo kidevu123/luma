@@ -162,6 +162,13 @@
       "when": 1780200000000,
       "tag": "0022_employee_code",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1780300000000,
+      "tag": "0023_station_operator_sessions",
+      "breakpoints": true
     }
   ]
 }

@@ -124,7 +124,7 @@ Migration applied on staging. `currentUser()` exposes `employeeId`. `EventInput`
 
 ---
 
-### [ ] OP-1C — Wire count-submission forms + actions
+### [x] OP-1C — Wire count-submission forms + actions
 **Objective.** Every live count-submission form requires (or defaults from station-operator-session) an accountable employee, and every server action propagates it through `projectEvent` to populate `workflow_events.employee_id` and the payload accountability fields.
 
 **Files likely touched.**

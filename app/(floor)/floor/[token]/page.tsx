@@ -26,6 +26,9 @@ import {
   FIRST_OP_STATION_KINDS,
   STATION_KIND_TO_PRODUCT_KINDS,
 } from "@/lib/production/first-op-product";
+import { OperatorSessionPanel } from "./operator-session-form";
+import { listActiveEmployeeOptions } from "./operator-session-actions";
+import { getActiveStationSession } from "@/lib/production/station-operator-session";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +45,14 @@ export default async function FloorStationPage({
     .leftJoin(machines, eq(stations.machineId, machines.id))
     .where(eq(stations.scanToken, token));
   if (!station) notFound();
+
+  // OP-1C: active operator session + the picker options for opening
+  // a new one. activeSession is null until someone runs Open shift;
+  // the panel below handles both states.
+  const [activeSession, employeeOptions] = await Promise.all([
+    getActiveStationSession(db, station.station.id),
+    listActiveEmployeeOptions(),
+  ]);
 
   // The bag at THIS station (and only this one) lives in
   // read_station_live.currentWorkflowBagId. Joining qr_cards back
@@ -156,6 +167,13 @@ export default async function FloorStationPage({
           Variety pack
         </a>
       </nav>
+
+      <OperatorSessionPanel
+        token={token}
+        stationId={station.station.id}
+        activeSession={activeSession}
+        employeeOptions={employeeOptions}
+      />
 
       <section className="rounded-2xl bg-surface border border-border p-5 space-y-4">
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-subtle">

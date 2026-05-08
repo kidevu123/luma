@@ -16,6 +16,10 @@ import {
   computeAcceptance,
   classifyVarianceSeverity,
 } from "@/lib/inbound/packaging-receipt";
+import {
+  resolveAdminAccountability,
+  withAccountabilityPayload,
+} from "@/lib/production/station-operator-session";
 
 // ─── Mode 1 — count-based receive ───────────────────────────────
 
@@ -101,6 +105,7 @@ export async function receivePackagingMaterialAction(
   try {
     let lotId: string | undefined;
     await db.transaction(async (tx) => {
+      const accountability = await resolveAdminAccountability(tx, { actor });
       const [lot] = await tx
         .insert(packagingLots)
         .values(
@@ -134,13 +139,16 @@ export async function receivePackagingMaterialAction(
         actorUserId: actor.id,
         quantityUnits: acceptedQty,
         unitOfMeasure: parsed.data.uom,
-        payload: {
-          supplier: parsed.data.supplier ?? null,
-          receipt_number: parsed.data.receiptNumber ?? null,
-          lot_number: parsed.data.lotNumber ?? null,
-          location: parsed.data.location ?? null,
-          source_system: "MANUAL_LUMA",
-        },
+        payload: withAccountabilityPayload(
+          {
+            supplier: parsed.data.supplier ?? null,
+            receipt_number: parsed.data.receiptNumber ?? null,
+            lot_number: parsed.data.lotNumber ?? null,
+            location: parsed.data.location ?? null,
+            source_system: "MANUAL_LUMA",
+          },
+          accountability,
+        ),
         source: "admin.receive_packaging",
       });
 
@@ -153,12 +161,15 @@ export async function receivePackagingMaterialAction(
           actorUserId: actor.id,
           quantityUnits: declaredIn,
           unitOfMeasure: parsed.data.uom,
-          payload: {
-            source_system: "MANUAL_LUMA",
-            box_number: parsed.data.boxNumber ?? null,
-            declared_quantity: declaredIn,
-            supplier_lot_number: parsed.data.lotNumber ?? null,
-          },
+          payload: withAccountabilityPayload(
+            {
+              source_system: "MANUAL_LUMA",
+              box_number: parsed.data.boxNumber ?? null,
+              declared_quantity: declaredIn,
+              supplier_lot_number: parsed.data.lotNumber ?? null,
+            },
+            accountability,
+          ),
           source: "admin.receive_packaging",
         });
       }
@@ -172,12 +183,15 @@ export async function receivePackagingMaterialAction(
           actorUserId: actor.id,
           quantityUnits: countedIn,
           unitOfMeasure: parsed.data.uom,
-          payload: {
-            box_number: parsed.data.boxNumber ?? null,
-            counted_quantity: countedIn,
-            prior_declared_quantity: declaredIn,
-            variance: declaredIn != null ? countedIn - declaredIn : null,
-          },
+          payload: withAccountabilityPayload(
+            {
+              box_number: parsed.data.boxNumber ?? null,
+              counted_quantity: countedIn,
+              prior_declared_quantity: declaredIn,
+              variance: declaredIn != null ? countedIn - declaredIn : null,
+            },
+            accountability,
+          ),
           source: "admin.receive_packaging",
         });
       }
@@ -191,18 +205,21 @@ export async function receivePackagingMaterialAction(
           actorUserId: actor.id,
           quantityUnits: Math.abs(acceptance.variance),
           unitOfMeasure: parsed.data.uom,
-          payload: {
-            declared_quantity: declaredIn,
-            counted_quantity: countedIn,
-            variance: acceptance.variance,
-            variance_pct:
-              declaredIn > 0 ? acceptance.variance / declaredIn : null,
-            severity: classifyVarianceSeverity({
+          payload: withAccountabilityPayload(
+            {
+              declared_quantity: declaredIn,
+              counted_quantity: countedIn,
               variance: acceptance.variance,
-              declared: declaredIn,
-            }),
-            kind: "RECEIPT_VARIANCE",
-          },
+              variance_pct:
+                declaredIn > 0 ? acceptance.variance / declaredIn : null,
+              severity: classifyVarianceSeverity({
+                variance: acceptance.variance,
+                declared: declaredIn,
+              }),
+              kind: "RECEIPT_VARIANCE",
+            },
+            accountability,
+          ),
           source: "admin.receive_packaging",
         });
       }
@@ -310,6 +327,7 @@ export async function receiveRollAction(
   try {
     let lotId: string | undefined;
     await db.transaction(async (tx) => {
+      const accountability = await resolveAdminAccountability(tx, { actor });
       const [lot] = await tx
         .insert(packagingLots)
         .values(
@@ -346,17 +364,20 @@ export async function receiveRollAction(
         actorUserId: actor.id,
         quantityGrams: net.netGrams,
         unitOfMeasure: "g",
-        payload: {
-          supplier: parsed.data.supplier ?? null,
-          receipt_number: parsed.data.receiptNumber ?? null,
-          lot_number: parsed.data.lotNumber ?? null,
-          roll_number: parsed.data.rollNumber,
-          gross_weight_grams: parsed.data.grossWeightGrams ?? null,
-          tare_weight_grams: parsed.data.tareWeightGrams ?? null,
-          weight_unit: parsed.data.weightUnit,
-          confidence: net.confidence,
-          missing_inputs: net.missingInputs,
-        },
+        payload: withAccountabilityPayload(
+          {
+            supplier: parsed.data.supplier ?? null,
+            receipt_number: parsed.data.receiptNumber ?? null,
+            lot_number: parsed.data.lotNumber ?? null,
+            roll_number: parsed.data.rollNumber,
+            gross_weight_grams: parsed.data.grossWeightGrams ?? null,
+            tare_weight_grams: parsed.data.tareWeightGrams ?? null,
+            weight_unit: parsed.data.weightUnit,
+            confidence: net.confidence,
+            missing_inputs: net.missingInputs,
+          },
+          accountability,
+        ),
         source: "admin.receive_roll",
       });
     });

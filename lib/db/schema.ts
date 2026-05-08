@@ -413,6 +413,50 @@ export const stations = pgTable(
   (t) => [uniqueIndex("stations_scan_token_unique").on(t.scanToken)],
 );
 
+/** OP-1C: per-station operator session. The currently-open session
+ *  (closed_at IS NULL) is what every floor count submission reads to
+ *  default `workflow_events.employee_id` without forcing the operator
+ *  to retype their code per click. Only one open session per station
+ *  is allowed via the partial unique index in migration 0023. */
+export const stationOperatorSessions = pgTable(
+  "station_operator_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stationId: uuid("station_id")
+      .notNull()
+      .references(() => stations.id, { onDelete: "cascade" }),
+    /** Stable employee identity. Null only when the session was opened
+     *  with a free-text fallback (LEGACY_TEXT / MANUAL_TEXT) — those
+     *  sessions still serve as accountability context but are
+     *  confidence-LOW downstream. */
+    employeeId: uuid("employee_id"),
+    /** Frozen at session open so audit reads stay readable even if the
+     *  employees row is later renamed. */
+    employeeNameSnapshot: text("employee_name_snapshot").notNull(),
+    /** One of the AccountabilitySource union values. Stored as text
+     *  rather than an enum to avoid a second ALTER TYPE per source
+     *  addition; the helper validates on read/write. */
+    accountabilitySource: text("accountability_source").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    /** When an admin opened the session on the operator's behalf. */
+    openedByUserId: uuid("opened_by_user_id"),
+    closedByUserId: uuid("closed_by_user_id"),
+    notes: text("notes"),
+  },
+  (t) => [
+    uniqueIndex("station_operator_sessions_active_unique")
+      .on(t.stationId)
+      .where(sql`closed_at IS NULL`),
+    index("station_operator_sessions_employee_idx")
+      .on(t.employeeId)
+      .where(sql`employee_id IS NOT NULL`),
+    index("station_operator_sessions_opened_idx").on(t.openedAt),
+  ],
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Context 2 — Inbound (POs, receives, raw-tablet bags, packaging materials)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2607,6 +2651,7 @@ export type TabletType = typeof tabletTypes.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Machine = typeof machines.$inferSelect;
 export type Station = typeof stations.$inferSelect;
+export type StationOperatorSession = typeof stationOperatorSessions.$inferSelect;
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 export type PoLine = typeof poLines.$inferSelect;
 export type Shipment = typeof shipments.$inferSelect;

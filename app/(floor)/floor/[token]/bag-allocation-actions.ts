@@ -24,6 +24,10 @@ import {
   rawBagAllocationSessions,
   rawBagAllocationEvents,
 } from "@/lib/db/schema";
+import {
+  resolveStationAccountability,
+  withAccountabilityPayload,
+} from "@/lib/production/station-operator-session";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -143,6 +147,9 @@ export async function openAllocationSessionAction(
 
     let sessionId = "";
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: d.stationId,
+      });
       const inserted = await tx
         .insert(rawBagAllocationSessions)
         .values({
@@ -175,10 +182,13 @@ export async function openAllocationSessionAction(
         ...(startingBalance != null ? { quantity: String(startingBalance) } : {}),
         unitOfMeasure: "tablets",
         ...(startingSource ? { quantitySource: startingSource } : {}),
-        payload: {
-          component_role: d.componentRole ?? null,
-          notes: d.notes ?? null,
-        },
+        payload: withAccountabilityPayload(
+          {
+            component_role: d.componentRole ?? null,
+            notes: d.notes ?? null,
+          },
+          accountability,
+        ),
         confidence: "MEDIUM",
         ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
@@ -244,6 +254,9 @@ export async function closeAllocationSessionAction(
     }
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: d.stationId,
+      });
       // Emit a CONSUMED event for the consumed qty (if provided).
       if (d.consumedQty != null && d.consumedQty > 0) {
         await tx.insert(rawBagAllocationEvents).values({
@@ -258,11 +271,14 @@ export async function closeAllocationSessionAction(
           quantity: String(d.consumedQty),
           unitOfMeasure: "tablets",
           ...(d.consumedQtySource ? { quantitySource: d.consumedQtySource } : { quantitySource: "MANUAL_ENTRY" }),
-          payload: {
-            component_role: session.componentRole ?? null,
-            notes: d.notes ?? null,
-            session_close: true,
-          },
+          payload: withAccountabilityPayload(
+            {
+              component_role: session.componentRole ?? null,
+              notes: d.notes ?? null,
+              session_close: true,
+            },
+            accountability,
+          ),
           confidence: "HIGH",
           ...(d.clientEventId ? { clientEventId: `${d.clientEventId}-c` } : {}),
         });
@@ -338,6 +354,9 @@ export async function returnRawBagAction(
     }
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: d.stationId,
+      });
       await tx.insert(rawBagAllocationEvents).values({
         allocationSessionId: session.id,
         inventoryBagId: session.inventoryBagId,
@@ -348,10 +367,13 @@ export async function returnRawBagAction(
         quantity: String(d.returnedQty),
         unitOfMeasure: "tablets",
         quantitySource: "MANUAL_ENTRY",
-        payload: {
-          remaining_weight_grams: d.remainingWeightGrams ?? null,
-          notes: d.notes ?? null,
-        },
+        payload: withAccountabilityPayload(
+          {
+            remaining_weight_grams: d.remainingWeightGrams ?? null,
+            notes: d.notes ?? null,
+          },
+          accountability,
+        ),
         confidence: "MEDIUM",
         ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
@@ -419,6 +441,9 @@ export async function markBagDepletedAction(
     }
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: d.stationId,
+      });
       await tx.insert(rawBagAllocationEvents).values({
         allocationSessionId: session.id,
         inventoryBagId: session.inventoryBagId,
@@ -428,7 +453,10 @@ export async function markBagDepletedAction(
         ...(d.finalConsumedQty != null ? { quantity: String(d.finalConsumedQty) } : {}),
         unitOfMeasure: "tablets",
         quantitySource: "MANUAL_ENTRY",
-        payload: { notes: d.notes ?? null },
+        payload: withAccountabilityPayload(
+          { notes: d.notes ?? null },
+          accountability,
+        ),
         confidence: "HIGH",
         ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
@@ -488,16 +516,24 @@ export async function adjustRawBagAction(
     const bag = await loadInventoryBag(d.inventoryBagId);
     if (!bag) return { error: "Inventory bag not found." };
 
-    await db.insert(rawBagAllocationEvents).values({
-      inventoryBagId: d.inventoryBagId,
-      ...(bag.po_id ? { poId: bag.po_id } : {}),
-      eventType: "RAW_BAG_ADJUSTED",
-      quantity: String(d.adjustmentQty),
-      unitOfMeasure: "tablets",
-      quantitySource: "MANUAL_ENTRY",
-      payload: { reason: d.reason, notes: d.notes ?? null },
-      confidence: "MEDIUM",
-      ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: d.stationId,
+      });
+      await tx.insert(rawBagAllocationEvents).values({
+        inventoryBagId: d.inventoryBagId,
+        ...(bag.po_id ? { poId: bag.po_id } : {}),
+        eventType: "RAW_BAG_ADJUSTED",
+        quantity: String(d.adjustmentQty),
+        unitOfMeasure: "tablets",
+        quantitySource: "MANUAL_ENTRY",
+        payload: withAccountabilityPayload(
+          { reason: d.reason, notes: d.notes ?? null },
+          accountability,
+        ),
+        confidence: "MEDIUM",
+        ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
+      });
     });
 
     return { ok: true };

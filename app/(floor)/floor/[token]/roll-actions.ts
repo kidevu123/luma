@@ -33,6 +33,10 @@ import { writeAudit } from "@/lib/db/audit";
 import { rebuildRollUsage } from "@/lib/projector/roll-usage";
 import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
 import { nextLotStatusForUnmount } from "@/lib/production/active-rolls";
+import {
+  resolveStationAccountability,
+  withAccountabilityPayload,
+} from "@/lib/production/station-operator-session";
 
 // Same UUID-v4-ish pattern used in actions.ts. The floor PWA passes
 // a clientEventId so a network retry doesn't double-fire. We persist
@@ -124,6 +128,9 @@ const mountSchema = z
     startingWeightGrams: z.coerce.number().int().min(1).optional().nullable(),
     notes: z.string().max(500).optional().nullable(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
+    /** OP-1C per-form supervisor override — resolved against
+     *  employee_code, falls back to the active station-operator-session. */
+    overrideEmployeeCode: z.string().max(40).optional().nullable(),
   })
   .refine((d) => d.packagingLotId != null || (d.rollNumber != null && d.rollNumber !== ""), {
     message: "Roll number or lot id is required.",
@@ -143,6 +150,7 @@ export async function mountRollAction(
     startingWeightGrams: formData.get("startingWeightGrams") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: formData.get("clientEventId") || undefined,
+    overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -210,6 +218,10 @@ export async function mountRollAction(
     const workflowBagId = d.workflowBagId && d.workflowBagId !== "" ? d.workflowBagId : null;
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: station.id,
+        overrideEmployeeCode: d.overrideEmployeeCode ?? null,
+      });
       await tx.insert(materialInventoryEvents).values({
         eventType: "ROLL_MOUNTED",
         packagingMaterialId: lot.packaging_material_id,
@@ -219,12 +231,15 @@ export async function mountRollAction(
         ...(workflowBagId ? { workflowBagId } : {}),
         ...(startingWeight != null ? { quantityGrams: startingWeight } : {}),
         unitOfMeasure: "g",
-        payload: {
-          roll_role: d.role,
-          starting_weight_grams: startingWeight,
-          previous_status: lot.status,
-          notes: d.notes ?? null,
-        },
+        payload: withAccountabilityPayload(
+          {
+            roll_role: d.role,
+            starting_weight_grams: startingWeight,
+            previous_status: lot.status,
+            notes: d.notes ?? null,
+          },
+          accountability,
+        ),
         source: "floor.mount_roll",
         ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
@@ -270,6 +285,7 @@ const unmountSchema = z
     endingWeightGrams: z.coerce.number().int().min(0).optional().nullable(),
     notes: z.string().max(500).optional().nullable(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
+    overrideEmployeeCode: z.string().max(40).optional().nullable(),
   })
   .refine((d) => d.packagingLotId != null || (d.rollNumber != null && d.rollNumber !== ""), {
     message: "Roll number or lot id is required.",
@@ -287,6 +303,7 @@ export async function unmountRollAction(
     endingWeightGrams: formData.get("endingWeightGrams") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: formData.get("clientEventId") || undefined,
+    overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -329,6 +346,10 @@ export async function unmountRollAction(
     });
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: station.id,
+        overrideEmployeeCode: d.overrideEmployeeCode ?? null,
+      });
       // Optional weigh-back first so deriveRollUsage etc. see it.
       if (d.endingWeightGrams != null) {
         await tx.insert(materialInventoryEvents).values({
@@ -339,13 +360,16 @@ export async function unmountRollAction(
           stationId: station.id,
           quantityGrams: d.endingWeightGrams,
           unitOfMeasure: "g",
-          payload: {
-            previous_weight_estimate: lot.current_weight_grams_estimate,
-            current_weight: d.endingWeightGrams,
-            weight_unit: "g",
-            confidence: "HIGH",
-            source: "unmount.weigh_back",
-          },
+          payload: withAccountabilityPayload(
+            {
+              previous_weight_estimate: lot.current_weight_grams_estimate,
+              current_weight: d.endingWeightGrams,
+              weight_unit: "g",
+              confidence: "HIGH",
+              source: "unmount.weigh_back",
+            },
+            accountability,
+          ),
           source: "floor.unmount_roll",
           // Same event_type as the parent ROLL_UNMOUNTED row would
           // collide on the partial unique (workflow_bag_id, event_type,
@@ -362,12 +386,15 @@ export async function unmountRollAction(
         stationId: station.id,
         ...(d.endingWeightGrams != null ? { quantityGrams: d.endingWeightGrams } : {}),
         unitOfMeasure: "g",
-        payload: {
-          ending_weight_grams: d.endingWeightGrams ?? null,
-          weight_unit: "g",
-          confidence: d.endingWeightGrams != null ? "HIGH" : "MEDIUM",
-          notes: d.notes ?? null,
-        },
+        payload: withAccountabilityPayload(
+          {
+            ending_weight_grams: d.endingWeightGrams ?? null,
+            weight_unit: "g",
+            confidence: d.endingWeightGrams != null ? "HIGH" : "MEDIUM",
+            notes: d.notes ?? null,
+          },
+          accountability,
+        ),
         source: "floor.unmount_roll",
         ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
@@ -420,6 +447,7 @@ const weighSchema = z
     currentWeightGrams: z.coerce.number().int().min(1, "Weight must be > 0"),
     notes: z.string().max(500).optional().nullable(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
+    overrideEmployeeCode: z.string().max(40).optional().nullable(),
   })
   .refine((d) => d.packagingLotId != null || (d.rollNumber != null && d.rollNumber !== ""), {
     message: "Roll number or lot id is required.",
@@ -437,6 +465,7 @@ export async function weighRollAction(
     currentWeightGrams: formData.get("currentWeightGrams"),
     notes: formData.get("notes") || undefined,
     clientEventId: formData.get("clientEventId") || undefined,
+    overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -459,6 +488,10 @@ export async function weighRollAction(
     const variance = previousEstimate != null ? d.currentWeightGrams - previousEstimate : null;
 
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: station.id,
+        overrideEmployeeCode: d.overrideEmployeeCode ?? null,
+      });
       await tx.insert(materialInventoryEvents).values({
         eventType: "ROLL_WEIGHED",
         packagingMaterialId: lot.packaging_material_id,
@@ -467,14 +500,17 @@ export async function weighRollAction(
         stationId: station.id,
         quantityGrams: d.currentWeightGrams,
         unitOfMeasure: "g",
-        payload: {
-          previous_weight_estimate: previousEstimate,
-          current_weight: d.currentWeightGrams,
-          weight_unit: "g",
-          variance_from_estimate: variance,
-          confidence: "HIGH",
-          notes: d.notes ?? null,
-        },
+        payload: withAccountabilityPayload(
+          {
+            previous_weight_estimate: previousEstimate,
+            current_weight: d.currentWeightGrams,
+            weight_unit: "g",
+            variance_from_estimate: variance,
+            confidence: "HIGH",
+            notes: d.notes ?? null,
+          },
+          accountability,
+        ),
         source: "floor.weigh_roll",
         ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
@@ -540,6 +576,7 @@ const changeSchema = z
     newStartingWeightGrams: z.coerce.number().int().min(1).optional().nullable(),
     notes: z.string().max(500).optional().nullable(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
+    overrideEmployeeCode: z.string().max(40).optional().nullable(),
   })
   .refine(
     (d) =>
@@ -570,6 +607,7 @@ export async function changeRollAction(
     newStartingWeightGrams: formData.get("newStartingWeightGrams") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: formData.get("clientEventId") || undefined,
+    overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -686,6 +724,10 @@ export async function changeRollAction(
     // role suffixes — that was the original 22P02 bug).
     const segmentGroupId = randomUUID();
     await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: station.id,
+        overrideEmployeeCode: d.overrideEmployeeCode ?? null,
+      });
       // 1. Emit ROLL_COUNTER_SEGMENT_RECORDED for EACH active roll
       //    (PVC + FOIL). Both rolls produced this segment.
       for (const a of active) {
@@ -728,24 +770,27 @@ export async function changeRollAction(
           stationId: station.id,
           quantityUnits: d.counterSegmentCount,
           unitOfMeasure: "blisters",
-          payload: {
-            roll_role: a.role,
-            material_lot_id: a.packaging_lot_id,
-            counter_segment_count: d.counterSegmentCount,
-            segment_reason: "ROLL_CHANGE",
-            bag_segment_sequence: bagSegmentSequence,
-            roll_segment_sequence: rollSegmentSequence,
-            active_bag_total_after_segment: activeBagTotalAfterSegment,
-            roll_total_after_segment: rollTotalAfterSegment,
-            workflow_bag_id: workflowBagId,
-            machine_id: station.machineId,
-            confidence: "HIGH",
-            notes: d.notes ?? null,
-            // Correlation across the rows this form submit emits.
-            segment_group_id: segmentGroupId,
-            source_action: "change_roll",
-            form_client_event_id: d.clientEventId ?? null,
-          },
+          payload: withAccountabilityPayload(
+            {
+              roll_role: a.role,
+              material_lot_id: a.packaging_lot_id,
+              counter_segment_count: d.counterSegmentCount,
+              segment_reason: "ROLL_CHANGE",
+              bag_segment_sequence: bagSegmentSequence,
+              roll_segment_sequence: rollSegmentSequence,
+              active_bag_total_after_segment: activeBagTotalAfterSegment,
+              roll_total_after_segment: rollTotalAfterSegment,
+              workflow_bag_id: workflowBagId,
+              machine_id: station.machineId,
+              confidence: "HIGH",
+              notes: d.notes ?? null,
+              // Correlation across the rows this form submit emits.
+              segment_group_id: segmentGroupId,
+              source_action: "change_roll",
+              form_client_event_id: d.clientEventId ?? null,
+            },
+            accountability,
+          ),
           source: "floor.change_roll",
           // Two segment rows (PVC + FOIL) share the same
           // (workflow_bag_id, event_type) — using d.clientEventId on
@@ -770,20 +815,23 @@ export async function changeRollAction(
         stationId: station.id,
         ...(workflowBagId ? { workflowBagId } : {}),
         unitOfMeasure: "g",
-        payload: {
-          roll_role: d.role,
-          material_lot_id: oldLot.packaging_lot_id,
-          final_roll_yield_blisters: oldFinalYield,
-          net_weight_grams: oldLot.net_weight_grams,
-          grams_per_blister: gramsPerBlister,
-          depleted_during_bag: workflowBagId != null,
-          workflow_bag_id: workflowBagId,
-          confidence: gramsPerBlister != null ? "HIGH" : "MEDIUM",
-          notes: d.notes ?? null,
-          segment_group_id: segmentGroupId,
-          source_action: "change_roll",
-          form_client_event_id: d.clientEventId ?? null,
-        },
+        payload: withAccountabilityPayload(
+          {
+            roll_role: d.role,
+            material_lot_id: oldLot.packaging_lot_id,
+            final_roll_yield_blisters: oldFinalYield,
+            net_weight_grams: oldLot.net_weight_grams,
+            grams_per_blister: gramsPerBlister,
+            depleted_during_bag: workflowBagId != null,
+            workflow_bag_id: workflowBagId,
+            confidence: gramsPerBlister != null ? "HIGH" : "MEDIUM",
+            notes: d.notes ?? null,
+            segment_group_id: segmentGroupId,
+            source_action: "change_roll",
+            form_client_event_id: d.clientEventId ?? null,
+          },
+          accountability,
+        ),
         source: "floor.change_roll",
         // ROLL_DEPLETED is a distinct event_type from the segment
         // rows above, so the partial unique on (workflow_bag_id,
@@ -807,16 +855,19 @@ export async function changeRollAction(
         ...(workflowBagId ? { workflowBagId } : {}),
         ...(newStartingWeight != null ? { quantityGrams: newStartingWeight } : {}),
         unitOfMeasure: "g",
-        payload: {
-          roll_role: d.role,
-          starting_weight_grams: newStartingWeight,
-          previous_status: newLot.status,
-          mounted_via: "ROLL_CHANGE",
-          notes: d.notes ?? null,
-          segment_group_id: segmentGroupId,
-          source_action: "change_roll",
-          form_client_event_id: d.clientEventId ?? null,
-        },
+        payload: withAccountabilityPayload(
+          {
+            roll_role: d.role,
+            starting_weight_grams: newStartingWeight,
+            previous_status: newLot.status,
+            mounted_via: "ROLL_CHANGE",
+            notes: d.notes ?? null,
+            segment_group_id: segmentGroupId,
+            source_action: "change_roll",
+            form_client_event_id: d.clientEventId ?? null,
+          },
+          accountability,
+        ),
         source: "floor.change_roll",
         // ROLL_MOUNTED is a distinct event_type from the rows above
         // so no partial-unique collision. Reuse d.clientEventId for
