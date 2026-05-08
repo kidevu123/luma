@@ -12,19 +12,41 @@ import {
   materialInventoryEvents,
 } from "@/lib/db/schema";
 import { computeNetWeight } from "@/lib/production/material";
+import {
+  computeAcceptance,
+  classifyVarianceSeverity,
+} from "@/lib/inbound/packaging-receipt";
 
 // ─── Mode 1 — count-based receive ───────────────────────────────
 
-const countSchema = z.object({
-  packagingMaterialId: z.string().uuid(),
-  supplier: z.string().max(120).optional().nullable(),
-  receiptNumber: z.string().max(60).optional().nullable(),
-  lotNumber: z.string().max(60).optional().nullable(),
-  qtyReceived: z.coerce.number().int().min(1, "Quantity must be > 0"),
-  uom: z.string().min(1).max(40),
-  location: z.string().max(120).optional().nullable(),
-  notes: z.string().max(500).optional().nullable(),
-});
+const countSchema = z
+  .object({
+    packagingMaterialId: z.string().uuid(),
+    supplier: z.string().max(120).optional().nullable(),
+    receiptNumber: z.string().max(60).optional().nullable(),
+    lotNumber: z.string().max(60).optional().nullable(),
+    boxNumber: z.string().max(60).optional().nullable(),
+    declaredQuantity: z.coerce.number().int().min(0).optional().nullable(),
+    countedQuantity: z.coerce.number().int().min(0).optional().nullable(),
+    /** Legacy single-quantity field for back-compat. If declared/
+     *  counted are absent and qtyReceived is set, treat it as a
+     *  manually counted ("HIGH" confidence) entry. */
+    qtyReceived: z.coerce.number().int().min(0).optional().nullable(),
+    uom: z.string().min(1).max(40),
+    location: z.string().max(120).optional().nullable(),
+    notes: z.string().max(500).optional().nullable(),
+  })
+  .refine(
+    (d) =>
+      d.declaredQuantity != null ||
+      d.countedQuantity != null ||
+      d.qtyReceived != null,
+    {
+      message:
+        "Enter at least one of declared quantity, counted quantity, or legacy qty.",
+      path: ["declaredQuantity"],
+    },
+  );
 
 export async function receivePackagingMaterialAction(
   formData: FormData,
@@ -35,7 +57,10 @@ export async function receivePackagingMaterialAction(
     supplier: formData.get("supplier") || null,
     receiptNumber: formData.get("receiptNumber") || null,
     lotNumber: formData.get("lotNumber") || null,
-    qtyReceived: formData.get("qtyReceived"),
+    boxNumber: formData.get("boxNumber") || null,
+    declaredQuantity: formData.get("declaredQuantity") || null,
+    countedQuantity: formData.get("countedQuantity") || null,
+    qtyReceived: formData.get("qtyReceived") || null,
     uom: formData.get("uom") || "each",
     location: formData.get("location") || null,
     notes: formData.get("notes") || null,
@@ -56,6 +81,23 @@ export async function receivePackagingMaterialAction(
       error: "This material is a roll. Use the PVC/foil roll form instead.",
     };
   }
+  // Resolve the receipt-quantity model. PT-2: if declared/counted
+  // are explicit, use them. Otherwise fall back to the legacy
+  // qty_received as a counted entry (HIGH confidence — operator
+  // has typed a verified number).
+  const declaredIn = parsed.data.declaredQuantity ?? null;
+  const countedIn =
+    parsed.data.countedQuantity ?? parsed.data.qtyReceived ?? null;
+  const acceptance = computeAcceptance({
+    declaredQuantity: declaredIn,
+    countedQuantity: countedIn,
+    source: "MANUAL_LUMA",
+  });
+  if (acceptance.acceptedQuantity == null || acceptance.acceptedQuantity <= 0) {
+    return { error: "Quantity must be > 0." };
+  }
+  const acceptedQty: number = acceptance.acceptedQuantity;
+
   try {
     let lotId: string | undefined;
     await db.transaction(async (tx) => {
@@ -64,33 +106,106 @@ export async function receivePackagingMaterialAction(
         .values(
           compact({
             packagingMaterialId: parsed.data.packagingMaterialId,
-            qtyReceived: parsed.data.qtyReceived,
-            qtyOnHand: parsed.data.qtyReceived,
+            qtyReceived: acceptedQty, // back-compat
+            qtyOnHand: acceptedQty,
             supplier: parsed.data.supplier,
             location: parsed.data.location,
             notes: parsed.data.notes,
             status: "AVAILABLE" as const,
-            confidence: "HIGH",
+            confidence: acceptance.confidence,
+            declaredQuantity: declaredIn,
+            countedQuantity: countedIn,
+            acceptedQuantity: acceptedQty,
+            boxNumber: parsed.data.boxNumber,
+            supplierLotNumber: parsed.data.lotNumber,
+            sourceSystem: "MANUAL_LUMA" as const,
+            receivedByUserId: actor.id,
           }),
         )
         .returning({ id: packagingLots.id });
       if (!lot) throw new Error("Insert returned no lot id.");
       lotId = lot.id;
+
+      // 1. MATERIAL_RECEIVED — generic ledger row (existing pattern).
       await tx.insert(materialInventoryEvents).values({
         eventType: "MATERIAL_RECEIVED",
         packagingMaterialId: parsed.data.packagingMaterialId,
         packagingLotId: lot.id,
         actorUserId: actor.id,
-        quantityUnits: parsed.data.qtyReceived,
+        quantityUnits: acceptedQty,
         unitOfMeasure: parsed.data.uom,
         payload: {
           supplier: parsed.data.supplier ?? null,
           receipt_number: parsed.data.receiptNumber ?? null,
           lot_number: parsed.data.lotNumber ?? null,
           location: parsed.data.location ?? null,
+          source_system: "MANUAL_LUMA",
         },
         source: "admin.receive_packaging",
       });
+
+      // 2. PACKAGING_BOX_RECEIVED — declared box label entry.
+      if (declaredIn != null) {
+        await tx.insert(materialInventoryEvents).values({
+          eventType: "PACKAGING_BOX_RECEIVED",
+          packagingMaterialId: parsed.data.packagingMaterialId,
+          packagingLotId: lot.id,
+          actorUserId: actor.id,
+          quantityUnits: declaredIn,
+          unitOfMeasure: parsed.data.uom,
+          payload: {
+            source_system: "MANUAL_LUMA",
+            box_number: parsed.data.boxNumber ?? null,
+            declared_quantity: declaredIn,
+            supplier_lot_number: parsed.data.lotNumber ?? null,
+          },
+          source: "admin.receive_packaging",
+        });
+      }
+
+      // 3. PACKAGING_BOX_COUNTED — physically counted entry.
+      if (countedIn != null) {
+        await tx.insert(materialInventoryEvents).values({
+          eventType: "PACKAGING_BOX_COUNTED",
+          packagingMaterialId: parsed.data.packagingMaterialId,
+          packagingLotId: lot.id,
+          actorUserId: actor.id,
+          quantityUnits: countedIn,
+          unitOfMeasure: parsed.data.uom,
+          payload: {
+            box_number: parsed.data.boxNumber ?? null,
+            counted_quantity: countedIn,
+            prior_declared_quantity: declaredIn,
+            variance: declaredIn != null ? countedIn - declaredIn : null,
+          },
+          source: "admin.receive_packaging",
+        });
+      }
+
+      // 4. PACKAGING_VARIANCE_RECORDED — only when counted ≠ declared.
+      if (acceptance.hasVariance && acceptance.variance != null && declaredIn != null) {
+        await tx.insert(materialInventoryEvents).values({
+          eventType: "PACKAGING_VARIANCE_RECORDED",
+          packagingMaterialId: parsed.data.packagingMaterialId,
+          packagingLotId: lot.id,
+          actorUserId: actor.id,
+          quantityUnits: Math.abs(acceptance.variance),
+          unitOfMeasure: parsed.data.uom,
+          payload: {
+            declared_quantity: declaredIn,
+            counted_quantity: countedIn,
+            variance: acceptance.variance,
+            variance_pct:
+              declaredIn > 0 ? acceptance.variance / declaredIn : null,
+            severity: classifyVarianceSeverity({
+              variance: acceptance.variance,
+              declared: declaredIn,
+            }),
+            kind: "RECEIPT_VARIANCE",
+          },
+          source: "admin.receive_packaging",
+        });
+      }
     });
     revalidatePath("/inbound/packaging-materials");
     return { ok: true, ...(lotId ? { lotId } : {}) };

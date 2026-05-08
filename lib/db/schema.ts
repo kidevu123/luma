@@ -120,6 +120,22 @@ export const materialEventTypeEnum = pgEnum("material_event_type", [
   "ROLL_DEPLETED",
   "MATERIAL_SCRAPPED",
   "ROLL_COUNTER_SEGMENT_RECORDED",
+  // PT-1 — PackTrack -> Luma packaging-receipt vocabulary.
+  "PACKAGING_RECEIPT_IMPORTED",
+  "PACKAGING_BOX_RECEIVED",
+  "PACKAGING_BOX_COUNTED",
+  "PACKAGING_RECEIPT_ADJUSTED",
+  "PACKAGING_VARIANCE_RECORDED",
+]);
+
+/** Source system that produced a packaging-receipt row. PackTrack is
+ *  the procurement system; MANUAL_LUMA is the in-app receive form;
+ *  ZOHO is the inventory ERP; IMPORT is the legacy bulk-import path. */
+export const packagingReceiptSourceEnum = pgEnum("packaging_receipt_source", [
+  "PACKTRACK",
+  "MANUAL_LUMA",
+  "ZOHO",
+  "IMPORT",
 ]);
 
 export const batchKindEnum = pgEnum("batch_kind", ["TABLET", "PACKAGING"]);
@@ -607,14 +623,33 @@ export const packagingLots = pgTable(
     location: text("location"),
     scanToken: text("scan_token"),
     /** Confidence on the lot's recorded quantity. HIGH when net
-     *  weight came from gross-tare; MEDIUM when net was entered
-     *  directly; LOW when inferred. */
+     *  weight came from gross-tare OR counted_quantity was entered;
+     *  MEDIUM when only the supplier-declared box quantity is on
+     *  file; LOW when imported/incomplete; MISSING when no usable
+     *  quantity exists. */
     confidence: text("confidence").default("HIGH"),
+    // PT-1 — PackTrack-aware packaging-receipt fields. All nullable
+    // and additive; legacy rows backfill accepted_quantity from
+    // qty_received via 0021 migration.
+    declaredQuantity: integer("declared_quantity"),
+    countedQuantity: integer("counted_quantity"),
+    /** accepted_quantity = COALESCE(counted_quantity, declared_quantity).
+     *  This is the figure Luma uses for inventory availability and
+     *  shortage projection going forward. qty_received is kept for
+     *  back-compat. */
+    acceptedQuantity: integer("accepted_quantity"),
+    boxNumber: text("box_number"),
+    supplierLotNumber: text("supplier_lot_number"),
+    packtrackPoId: text("packtrack_po_id"),
+    packtrackReceiptId: text("packtrack_receipt_id"),
+    sourceSystem: packagingReceiptSourceEnum("source_system"),
+    receivedByUserId: uuid("received_by_user_id"), // FK applied below
   },
   (t) => [
     index("packaging_lots_material_idx").on(t.packagingMaterialId),
     index("packaging_lots_batch_idx").on(t.batchId),
     index("packaging_lots_status_idx").on(t.status),
+    index("packaging_lots_packtrack_receipt_idx").on(t.packtrackReceiptId),
   ],
 );
 
