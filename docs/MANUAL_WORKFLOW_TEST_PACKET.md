@@ -128,11 +128,13 @@ The blister machine counter is reset between segments. Each counter value entere
 
 The flow exercises one bag with no roll change, then one bag with a mid-bag PVC change, matching the worked example in the spec.
 
-#### Setup (already done from TEST B)
-- PVC Roll 1 (`QA_TEST_PVC_ROLL_001`, net 5000 g) — IN_USE on Blister Machine
-- Foil Roll 1 (`QA_TEST_FOIL_ROLL_001`, net 1500 g) — IN_USE on Blister Machine
+#### Setup (post-VALIDATION-2C.1 seed)
+- PVC Roll 1 (`QA_TEST_PVC_ROLL_001`, net 1500 g) — AVAILABLE
+- PVC Roll 2 (`QA_TEST_PVC_ROLL_002`, net 1500 g) — AVAILABLE
+- Foil Roll 1 (`QA_TEST_FOIL_ROLL_001`, net 1500 g) — AVAILABLE
+- Foil Roll 2 (`QA_TEST_FOIL_ROLL_002`, net 1500 g) — AVAILABLE
 
-**Note for the staging test:** the spec's example uses arbitrary roll numbering (PVC Roll 1, PVC Roll 2). On staging we only have one PVC roll lot seeded, so the "PVC Roll 2" step requires receiving a second PVC roll first via `/inbound/packaging-materials` (or extending the seed). For the first run, you can shorten this test to exercise just **Bag 1 → Bag 2 segment 1** (skip the actual roll change) and confirm the segment math matches.
+Mount PVC Roll 1 + Foil Roll 1 on the Blister Room (TEST B equivalent) before starting C1. PVC Roll 2 is the replacement for the mid-bag change in C3.
 
 #### Step C1 — Bag 1 completes at 20,324
 
@@ -175,6 +177,16 @@ Bag 2 is now the active bag. Operator resets counter (mental, no system action).
 | Expected DB result | `read_roll_usage` row for PVC Roll 1: `blisters_produced = 35562`, `actual_used_grams = 1500` (full net since DEPLETED), `confidence = HIGH`. The implied `grams_per_blister = 1500 / 35562 ≈ 0.04218` is calculable in the metric API. `read_material_usage_learning` may pick up PVC Roll 1 as a sample once a future rebuild captures it (this depends on whether the learning rebuilder includes DEPLETED-without-weigh-back rolls; verify behavior and report). |
 | PASS criteria | DEPLETED PVC Roll 1 contributes a HIGH-confidence sample to learned standards without requiring a weigh-back. |
 | FAIL criteria | Sample only counted with weigh-back present (would be a regression from VALIDATION-2C). |
+
+#### Optional TEST C2 — Foil change while PVC continues
+
+This exercises the symmetric case: foil runs out mid-bag and is replaced; PVC keeps running. Use Bag 3 (or reset and start fresh).
+
+| | |
+|---|---|
+| Human action | After PVC Roll 2 + Foil Roll 1 are mounted, start a Bag 3. Mid-bag, fire `changeRollAction` with role=FOIL, segment=10000, new lot=`QA_TEST_FOIL_ROLL_002`. Then complete the bag with counter=5000. |
+| Expected DB result | Bag 3 segments: 10000 (FOIL change, hits PVC Roll 2 + Foil Roll 1) + 5000 (BAG_COMPLETE, hits PVC Roll 2 + Foil Roll 2). Foil Roll 1 status → DEPLETED with `final_roll_yield_blisters = 40062 + 10000 = 50062`. PVC Roll 2 yield += 10000 + 5000 = 15000 (cumulative since C4 = 4500 + 15000 = 19500). Foil Roll 2 yield = 5000. |
+| PASS criteria | PVC change closes only PVC; foil change closes only foil. The "other" roll keeps accumulating. |
 
 ### TEST D — Single bag allocation to card product
 

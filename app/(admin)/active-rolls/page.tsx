@@ -209,9 +209,11 @@ export default async function ActiveRollsPage() {
                         <td className="p-2">
                           {r.weighback_at != null
                             ? "Actual (weigh-back)"
-                            : r.expected_used_grams != null
-                              ? "Estimated (configured / learned)"
-                              : "Roll standard missing"}
+                            : r.blisters_produced != null && r.blisters_produced > 0
+                              ? r.expected_used_grams != null
+                                ? "Counter segments + standard"
+                                : "Counter segments only (standard missing)"
+                              : "Mounted, no segments yet"}
                         </td>
                       </tr>
                     ))}

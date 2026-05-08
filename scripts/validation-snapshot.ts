@@ -107,11 +107,13 @@ async function main() {
     role: string | null;
     roll_number: string | null;
     starting_weight_grams: number | null;
+    blisters_produced: number | null;
     confidence: string;
   };
   const activeRolls = (await db.execute<ActiveRollRow>(sql`
     SELECT m.name AS machine_name, rru.material_role AS role,
-           rru.roll_number, rru.starting_weight_grams, rru.confidence
+           rru.roll_number, rru.starting_weight_grams,
+           rru.blisters_produced, rru.confidence
     FROM read_roll_usage rru
     LEFT JOIN machines m ON m.id = rru.machine_id
     WHERE rru.mounted_at IS NOT NULL AND rru.unmounted_at IS NULL
@@ -126,7 +128,105 @@ async function main() {
           `  ${(r.machine_name ?? "—").padEnd(20)} ${(r.role ?? "—").padEnd(6)} ` +
             `${(r.roll_number ?? "—").padEnd(28)} ` +
             `start=${String(r.starting_weight_grams ?? "—").padStart(6)}g  ` +
+            `yield=${String(r.blisters_produced ?? 0).padStart(6)}  ` +
             `conf=${r.confidence}`,
+        );
+      }
+    }
+  });
+
+  // ── Roll segment ledger (VALIDATION-2C primary signal) ──
+  type SegmentByRollRow = {
+    roll_number: string | null;
+    role: string | null;
+    status: string;
+    net_weight_grams: number | null;
+    segments: number;
+    yield_blisters: number;
+    g_per_blister: string | null;
+  };
+  const segByRoll = (await db.execute<SegmentByRollRow>(sql`
+    SELECT
+      pl.roll_number,
+      (CASE pm.kind::text
+        WHEN 'PVC_ROLL' THEN 'PVC'
+        WHEN 'FOIL_ROLL' THEN 'FOIL'
+        WHEN 'BLISTER_FOIL' THEN 'FOIL'
+       END) AS role,
+      pl.status::text AS status,
+      pl.net_weight_grams,
+      COUNT(ev.id)::int AS segments,
+      COALESCE(SUM(NULLIF((ev.payload->>'counter_segment_count'),'')::int), 0)::int AS yield_blisters,
+      CASE
+        WHEN pl.status = 'DEPLETED'
+             AND pl.net_weight_grams IS NOT NULL
+             AND COALESCE(SUM(NULLIF((ev.payload->>'counter_segment_count'),'')::int), 0) > 0
+          THEN ROUND(
+            pl.net_weight_grams::numeric /
+            COALESCE(SUM(NULLIF((ev.payload->>'counter_segment_count'),'')::int), 0)::numeric,
+            5
+          )::text
+        ELSE NULL
+      END AS g_per_blister
+    FROM packaging_lots pl
+    JOIN packaging_materials pm ON pm.id = pl.packaging_material_id
+    LEFT JOIN material_inventory_events ev
+      ON ev.packaging_lot_id = pl.id
+     AND ev.event_type = 'ROLL_COUNTER_SEGMENT_RECORDED'
+    WHERE pm.kind::text IN ('PVC_ROLL','FOIL_ROLL','BLISTER_FOIL')
+    GROUP BY pl.id, pl.roll_number, pm.kind, pl.status, pl.net_weight_grams
+    ORDER BY pm.kind, pl.roll_number
+  `)) as unknown as SegmentByRollRow[];
+  section("Roll yield from segments (primary signal)", () => {
+    if (segByRoll.length === 0) {
+      console.log("  (no roll lots)");
+    } else {
+      for (const r of segByRoll) {
+        console.log(
+          `  ${(r.roll_number ?? "—").padEnd(28)} ${(r.role ?? "—").padEnd(6)} ${r.status.padEnd(10)} ` +
+            `net=${String(r.net_weight_grams ?? "—").padStart(6)}g  ` +
+            `segments=${String(r.segments).padStart(3)}  ` +
+            `yield=${String(r.yield_blisters).padStart(8)} blisters` +
+            (r.g_per_blister != null ? `  g/blister=${r.g_per_blister}` : ""),
+        );
+      }
+    }
+  });
+
+  // ── Roll segments by bag ──
+  type SegmentByBagRow = {
+    workflow_bag_id: string | null;
+    bag_total: number;
+    segment_count: number;
+    pvc_total: number;
+    foil_total: number;
+  };
+  const segByBag = (await db.execute<SegmentByBagRow>(sql`
+    SELECT
+      ev.workflow_bag_id::text AS workflow_bag_id,
+      SUM(NULLIF((ev.payload->>'counter_segment_count'),'')::int) /
+        NULLIF(COUNT(DISTINCT ev.packaging_lot_id), 0)::int                                    AS bag_total,
+      COUNT(*)::int                                                                              AS segment_count,
+      SUM(CASE WHEN (ev.payload->>'roll_role') = 'PVC'
+               THEN NULLIF((ev.payload->>'counter_segment_count'),'')::int ELSE 0 END)::int      AS pvc_total,
+      SUM(CASE WHEN (ev.payload->>'roll_role') = 'FOIL'
+               THEN NULLIF((ev.payload->>'counter_segment_count'),'')::int ELSE 0 END)::int      AS foil_total
+    FROM material_inventory_events ev
+    WHERE ev.event_type = 'ROLL_COUNTER_SEGMENT_RECORDED'
+      AND ev.workflow_bag_id IS NOT NULL
+    GROUP BY ev.workflow_bag_id
+    ORDER BY MIN(ev.occurred_at)
+  `)) as unknown as SegmentByBagRow[];
+  section("Bag totals from segments", () => {
+    if (segByBag.length === 0) {
+      console.log("  (no bag segments yet)");
+    } else {
+      for (const b of segByBag) {
+        console.log(
+          `  bag=${(b.workflow_bag_id ?? "—").slice(0, 8).padEnd(10)} ` +
+            `total=${String(b.bag_total).padStart(6)}  ` +
+            `segments=${String(b.segment_count).padStart(2)}  ` +
+            `pvc=${String(b.pvc_total).padStart(6)}  foil=${String(b.foil_total).padStart(6)}`,
         );
       }
     }
@@ -329,22 +429,87 @@ async function main() {
     pass: activeRolls.length === expectedActive,
     note: `active=${activeRolls.length}  mounted-unmounted=${expectedActive}`,
   });
-  // Roll consumption emission gate (TEST 3 invariant)
-  const consumedEstimated = matEvents.find((e) => e.event_type === "MATERIAL_CONSUMED_ESTIMATED")?.n ?? 0;
+  // Segment ledger primary signal (VALIDATION-2C).
+  const segmentEvents = matEvents.find((e) => e.event_type === "ROLL_COUNTER_SEGMENT_RECORDED")?.n ?? 0;
   hints.push({
-    label: "MATERIAL_CONSUMED_ESTIMATED only when roll mounted + counter + standard",
-    pass: rollMountedCount === 0 ? consumedEstimated === 0 : null,
+    label: "Roll yield = sum of ROLL_COUNTER_SEGMENT_RECORDED (primary signal)",
+    pass: rollMountedCount === 0 ? segmentEvents === 0 : null,
     note:
-      rollMountedCount === 0 && consumedEstimated > 0
-        ? `WARN: ${consumedEstimated} consumption events with no ROLL_MOUNTED — INVESTIGATE`
-        : `mounted=${rollMountedCount}  consumed_est=${consumedEstimated}`,
+      rollMountedCount === 0 && segmentEvents > 0
+        ? `WARN: ${segmentEvents} segment events with no ROLL_MOUNTED — INVESTIGATE`
+        : `segments=${segmentEvents}  active_rolls=${activeRolls.length}`,
   });
-  // No MATERIAL_CONSUMED_ACTUAL (H.x3 only emits ESTIMATED)
+  // No MATERIAL_CONSUMED_ACTUAL (segment ledger never auto-emits this).
   const consumedActual = matEvents.find((e) => e.event_type === "MATERIAL_CONSUMED_ACTUAL")?.n ?? 0;
   hints.push({
-    label: "MATERIAL_CONSUMED_ACTUAL not emitted by H.x3",
+    label: "MATERIAL_CONSUMED_ACTUAL not emitted automatically",
     pass: consumedActual === 0,
     note: consumedActual === 0 ? "0 ACTUAL events" : `WARN: ${consumedActual} ACTUAL events present`,
+  });
+  // MATERIAL_CONSUMED_ESTIMATED is now legacy — info only.
+  const consumedEstimated = matEvents.find((e) => e.event_type === "MATERIAL_CONSUMED_ESTIMATED")?.n ?? 0;
+  hints.push({
+    label: "MATERIAL_CONSUMED_ESTIMATED (legacy / pre-2C — not the primary signal)",
+    pass: null,
+    note: consumedEstimated === 0
+      ? "0 (expected post-2C; segments are the primary signal)"
+      : `${consumedEstimated} legacy events present (informational only)`,
+  });
+  // Each active roll yield matches sum of its segments.
+  const yieldMismatchRows = (await db.execute<{ roll_number: string | null; expected: number; actual: number | null }>(sql`
+    SELECT
+      pl.roll_number,
+      COALESCE(SUM(NULLIF((ev.payload->>'counter_segment_count'),'')::int), 0)::int AS expected,
+      MAX(rru.blisters_produced) AS actual
+    FROM packaging_lots pl
+    JOIN packaging_materials pm ON pm.id = pl.packaging_material_id
+    LEFT JOIN material_inventory_events ev
+      ON ev.packaging_lot_id = pl.id
+     AND ev.event_type = 'ROLL_COUNTER_SEGMENT_RECORDED'
+    LEFT JOIN read_roll_usage rru ON rru.packaging_lot_id = pl.id
+    WHERE pm.kind::text IN ('PVC_ROLL','FOIL_ROLL','BLISTER_FOIL')
+    GROUP BY pl.id, pl.roll_number
+    HAVING COALESCE(SUM(NULLIF((ev.payload->>'counter_segment_count'),'')::int), 0)::int <> COALESCE(MAX(rru.blisters_produced), 0)::int
+  `)) as unknown as Array<{ roll_number: string | null; expected: number; actual: number | null }>;
+  hints.push({
+    label: "read_roll_usage.blisters_produced equals SUM(segments) per roll",
+    pass: yieldMismatchRows.length === 0,
+    note:
+      yieldMismatchRows.length === 0
+        ? "All rolls reconcile (consider running rebuild:read-models if a mismatch is suspected)"
+        : `WARN: ${yieldMismatchRows.length} roll(s) mismatch — re-run rebuild:read-models`,
+  });
+  // Depleted rolls with net_weight + yield should derive grams/blister.
+  type DepletedRow = { has_gpb: number; missing_gpb: number };
+  const depletedDeriveRows = (await db.execute<DepletedRow>(sql`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE pl.net_weight_grams IS NOT NULL
+          AND COALESCE(seg.total, 0) > 0
+      )::int AS has_gpb,
+      COUNT(*) FILTER (
+        WHERE pl.net_weight_grams IS NULL
+           OR COALESCE(seg.total, 0) = 0
+      )::int AS missing_gpb
+    FROM packaging_lots pl
+    JOIN packaging_materials pm ON pm.id = pl.packaging_material_id
+    LEFT JOIN (
+      SELECT packaging_lot_id, SUM(NULLIF((payload->>'counter_segment_count'),'')::int) AS total
+      FROM material_inventory_events
+      WHERE event_type = 'ROLL_COUNTER_SEGMENT_RECORDED'
+      GROUP BY packaging_lot_id
+    ) seg ON seg.packaging_lot_id = pl.id
+    WHERE pl.status = 'DEPLETED'
+      AND pm.kind::text IN ('PVC_ROLL','FOIL_ROLL','BLISTER_FOIL')
+  `)) as unknown as DepletedRow[];
+  const dr = depletedDeriveRows[0] ?? { has_gpb: 0, missing_gpb: 0 };
+  hints.push({
+    label: "Depleted rolls derive grams/blister from net_weight + segments",
+    pass: dr.missing_gpb === 0 ? null : false,
+    note:
+      dr.has_gpb + dr.missing_gpb === 0
+        ? "(no depleted rolls yet)"
+        : `derivable=${dr.has_gpb}  missing_inputs=${dr.missing_gpb}`,
   });
   // No bag double-OPEN
   type BagOpenRow = { inventory_bag_id: string; n: number };

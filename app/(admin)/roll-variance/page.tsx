@@ -102,7 +102,7 @@ export default async function RollVariancePage() {
     <div className="space-y-5">
       <PageHeader
         title="Roll variance"
-        description="Configured / expected vs actual roll consumption. Variance > 5% per roll is flagged. Rolls without a weigh-back appear with actual = — and confidence MEDIUM at best."
+        description="Counter-segment yield × standard = expected grams. Actual grams = weigh-back OR full net weight when DEPLETED. Variance > 5% per roll is flagged. Rolls without a weigh-back AND not yet DEPLETED show actual = — at MEDIUM confidence."
       />
 
       <Card>

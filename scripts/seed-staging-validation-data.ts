@@ -683,8 +683,14 @@ async function ensureRollLots(
     `);
     count++;
   };
-  await insertRoll("QA_TEST_PVC_ROLL", "QA_TEST_PVC_ROLL_001", 5000);
+  // VALIDATION-2C.1 — 4 lots so TEST C's mid-bag PVC and FOIL roll
+  // changes are exercisable end-to-end. Net weights chosen to match
+  // the worked example math: net 1500 g for PVC Roll 1 means
+  // grams/blister = 1500 / 35562 ≈ 0.04218 once depleted.
+  await insertRoll("QA_TEST_PVC_ROLL", "QA_TEST_PVC_ROLL_001", 1500);
+  await insertRoll("QA_TEST_PVC_ROLL", "QA_TEST_PVC_ROLL_002", 1500);
   await insertRoll("QA_TEST_FOIL_ROLL", "QA_TEST_FOIL_ROLL_001", 1500);
+  await insertRoll("QA_TEST_FOIL_ROLL", "QA_TEST_FOIL_ROLL_002", 1500);
   return count;
 }
 
