@@ -155,8 +155,10 @@ All live count-submission paths populate `workflow_events.employee_id`. Smoke ru
 
 ---
 
-### [ ] OP-1D — Damages / rework / scrap / supervisor-correction wiring (optional within OP-1)
-**Objective.** Decide phase-by-phase: either (a) defer entirely to QC subsystem (recommended — these have no live UI today), or (b) ship a minimal supervisor-correction action that emits `SUBMISSION_CORRECTED` with full accountability, while leaving damage/rework/scrap to QC. Pick at start of phase, document in chat, execute. Default = defer.
+### [x] OP-1D — Damages / rework / scrap / supervisor-correction wiring (optional within OP-1)
+**Decision (2026-05-08): DEFERRED to the QC subsystem phase.** No code changed. The live QC forms do not exist today; building them now would expand OP-1 scope past the accountability charter. The OP-1B / OP-1C plumbing (`projectEvent` accepts `enteredByUserId`, `accountableEmployeeId`, `accountabilitySource`, `accountableEmployeeNameSnapshot`; admin actions resolve via `resolveAdminAccountability`; floor actions via `resolveStationAccountability`) is ready, so when the QC subsystem phase wires `PACKAGING_DAMAGE_RETURN`, `REWORK_SENT`, `REWORK_RECEIVED`, `SCRAP_RECORDED`, and `SUBMISSION_CORRECTED` they each get full accountability for free. See `docs/CURRENT_PHASE_STATUS.md` for the rationale.
+
+**Objective (original).** Decide phase-by-phase: either (a) defer entirely to QC subsystem (recommended — these have no live UI today), or (b) ship a minimal supervisor-correction action that emits `SUBMISSION_CORRECTED` with full accountability, while leaving damage/rework/scrap to QC. Pick at start of phase, document in chat, execute. Default = defer.
 
 **Files likely touched.**
 - If deferred: zero. Update this checkbox and `docs/CURRENT_PHASE_STATUS.md` with the decision + rationale.
