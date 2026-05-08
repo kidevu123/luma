@@ -39,6 +39,11 @@ services:
       AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER:-}
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      # PT-3 PackTrack webhook shared-secret (validated against
+      # x-packtrack-secret header in app/api/integrations/packtrack/
+      # receipts/route.ts). Empty default = webhook returns 503 until
+      # the operator sets it in /opt/luma/.env.
+      PACKTRACK_INTEGRATION_SECRET: ${PACKTRACK_INTEGRATION_SECRET:-}
       STORAGE_ROOT: /data
       NODE_ENV: production
     volumes:
