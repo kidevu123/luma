@@ -19,6 +19,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { eq, and, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import {
   stations,
@@ -346,7 +347,11 @@ export async function unmountRollAction(
             source: "unmount.weigh_back",
           },
           source: "floor.unmount_roll",
-          ...(d.clientEventId ? { clientEventId: `${d.clientEventId}-w` } : {}),
+          // Same event_type as the parent ROLL_UNMOUNTED row would
+          // collide on the partial unique (workflow_bag_id, event_type,
+          // client_event_id) — but this is ROLL_WEIGHED, a distinct
+          // event_type, so we can reuse d.clientEventId directly.
+          ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
         });
       }
       await tx.insert(materialInventoryEvents).values({
@@ -674,6 +679,12 @@ export async function changeRollAction(
     const newStartingWeight = d.newStartingWeightGrams ?? newLot.net_weight_grams;
 
     let oldFinalYield = 0;
+    // One UUID correlates the PVC + FOIL segment rows + the
+    // ROLL_DEPLETED + ROLL_MOUNTED rows that come from THIS form
+    // submit. Stored in payload.segment_group_id (NOT in
+    // client_event_id, which is a uuid column and can't carry
+    // role suffixes — that was the original 22P02 bug).
+    const segmentGroupId = randomUUID();
     await db.transaction(async (tx) => {
       // 1. Emit ROLL_COUNTER_SEGMENT_RECORDED for EACH active roll
       //    (PVC + FOIL). Both rolls produced this segment.
@@ -730,9 +741,17 @@ export async function changeRollAction(
             machine_id: station.machineId,
             confidence: "HIGH",
             notes: d.notes ?? null,
+            // Correlation across the rows this form submit emits.
+            segment_group_id: segmentGroupId,
+            source_action: "change_roll",
+            form_client_event_id: d.clientEventId ?? null,
           },
           source: "floor.change_roll",
-          ...(d.clientEventId ? { clientEventId: `${d.clientEventId}-seg-${a.role.toLowerCase()}` } : {}),
+          // Two segment rows (PVC + FOIL) share the same
+          // (workflow_bag_id, event_type) — using d.clientEventId on
+          // both would violate the partial unique index. Use the
+          // payload.segment_group_id for correlation instead and
+          // leave client_event_id null on segment rows.
         });
       }
 
@@ -761,9 +780,17 @@ export async function changeRollAction(
           workflow_bag_id: workflowBagId,
           confidence: gramsPerBlister != null ? "HIGH" : "MEDIUM",
           notes: d.notes ?? null,
+          segment_group_id: segmentGroupId,
+          source_action: "change_roll",
+          form_client_event_id: d.clientEventId ?? null,
         },
         source: "floor.change_roll",
-        ...(d.clientEventId ? { clientEventId: `${d.clientEventId}-deplete` } : {}),
+        // ROLL_DEPLETED is a distinct event_type from the segment
+        // rows above, so the partial unique on (workflow_bag_id,
+        // event_type, client_event_id) does NOT collide. Reuse
+        // d.clientEventId so a network retry of the whole form
+        // submit is rejected by the index.
+        ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
       await tx
         .update(packagingLots)
@@ -786,9 +813,17 @@ export async function changeRollAction(
           previous_status: newLot.status,
           mounted_via: "ROLL_CHANGE",
           notes: d.notes ?? null,
+          segment_group_id: segmentGroupId,
+          source_action: "change_roll",
+          form_client_event_id: d.clientEventId ?? null,
         },
         source: "floor.change_roll",
-        ...(d.clientEventId ? { clientEventId: `${d.clientEventId}-mount` } : {}),
+        // ROLL_MOUNTED is a distinct event_type from the rows above
+        // so no partial-unique collision. Reuse d.clientEventId for
+        // network-retry safety. (For a real second user submit, the
+        // newLot.status check above already rejects the retry —
+        // newLot is now IN_USE.)
+        ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
       await tx
         .update(packagingLots)

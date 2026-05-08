@@ -132,6 +132,16 @@ function useFormSubmit() {
   const [error, setError] = React.useState<string | null>(null);
   const [okMsg, setOkMsg] = React.useState<string | null>(null);
 
+  function safeError(raw: string): string {
+    // Don't expose raw PG error syntax to operators. Translate the
+    // most common contract-violation pattern; pass other messages
+    // through unchanged.
+    if (/invalid input syntax for type uuid/i.test(raw)) {
+      return "Roll change failed because the event id was invalid. Please call supervisor — server logs have the details.";
+    }
+    return raw;
+  }
+
   async function submit(
     fn: (fd: FormData) => Promise<ActionResult>,
     fd: FormData,
@@ -143,13 +153,13 @@ function useFormSubmit() {
     try {
       const res = await fn(fd);
       if (res && "error" in res && res.error) {
-        setError(res.error);
+        setError(safeError(res.error));
         return;
       }
       setOkMsg(successMsg);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unexpected error.");
+      setError(err instanceof Error ? safeError(err.message) : "Unexpected error.");
     } finally {
       setPending(false);
     }
