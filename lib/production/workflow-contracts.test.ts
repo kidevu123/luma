@@ -220,12 +220,14 @@ describe("CONTRACT 5 — PO settlement decision", () => {
   });
 });
 
-describe("CONTRACT 6 — Material consumption emission gate", () => {
+describe("CONTRACT 6 — Roll segment emission gate (VALIDATION-2C)", () => {
   // The hook (lib/projector/material-consumption-hook.ts) emits
-  // MATERIAL_CONSUMED_ESTIMATED only when ALL three are present:
+  // ROLL_COUNTER_SEGMENT_RECORDED — one per active roll role — when:
   //   • mounted PVC/foil roll on the station's machine
-  //   • payload.machine_count > 0
-  //   • configured OR learned standard returns a positive value
+  //   • payload.machine_count > 0 (the SEGMENT count, not a bag total)
+  // Standard is NOT required for emission. Weight consumption is
+  // derived from segments × standard later, never auto-emitted.
+  // The pure helper below is still used for downstream weight derivations.
 
   it("CONFIGURED standard + 1000 blisters = real value with HIGH confidence", () => {
     const r = computeExpectedGramsForBlisters(1000, {

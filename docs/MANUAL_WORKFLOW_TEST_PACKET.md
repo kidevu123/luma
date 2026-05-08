@@ -122,17 +122,59 @@ Compare the two snapshots. The diff should match the "Expected DB result" rows b
 | FAIL criteria | Server returned an error toast; second mount blocked unexpectedly; lot still AVAILABLE. |
 | Evidence | Screenshots of both mounts + snapshot. |
 
-### TEST C — Weigh roll
+### TEST C — Roll segment ledger (VALIDATION-2C model, replaces weigh-back-as-primary)
 
-| Field | Value |
+The blister machine counter is reset between segments. Each counter value entered IS the segment count for that span. Roll yield is the sum of segments allocated to the roll. Same segment is allocated to BOTH active rolls (PVC + FOIL) AND the active workflow bag.
+
+The flow exercises one bag with no roll change, then one bag with a mid-bag PVC change, matching the worked example in the spec.
+
+#### Setup (already done from TEST B)
+- PVC Roll 1 (`QA_TEST_PVC_ROLL_001`, net 5000 g) — IN_USE on Blister Machine
+- Foil Roll 1 (`QA_TEST_FOIL_ROLL_001`, net 1500 g) — IN_USE on Blister Machine
+
+**Note for the staging test:** the spec's example uses arbitrary roll numbering (PVC Roll 1, PVC Roll 2). On staging we only have one PVC roll lot seeded, so the "PVC Roll 2" step requires receiving a second PVC roll first via `/inbound/packaging-materials` (or extending the seed). For the first run, you can shorten this test to exercise just **Bag 1 → Bag 2 segment 1** (skip the actual roll change) and confirm the segment math matches.
+
+#### Step C1 — Bag 1 completes at 20,324
+
+| | |
 |---|---|
-| Human action | Same `/floor/<token>/rolls` page → "Weigh roll" form → pick the PVC roll → enter a weight (e.g. `4500` for 4500 g) → submit. |
-| Expected UI | "Active rolls" section refreshes; the PVC roll's "current est." now shows the entered grams; confidence climbs to `HIGH` for that roll. |
-| Expected DB result | `material_inventory_events` `ROLL_WEIGHED` = 1; `packaging_lots.current_weight_grams_estimate` for the PVC lot = 4500. After rebuild, `read_roll_usage.confidence` = `HIGH` for that roll. |
-| Verification query | `npm run validation:snapshot`: "Material events" shows `ROLL_WEIGHED 1`; "Roll lots" PVC row shows `est=4500g`. |
-| PASS criteria | One ROLL_WEIGHED; estimate updated; confidence improved. |
-| FAIL criteria | No event written; estimate unchanged; confidence unchanged. |
-| Evidence | Screenshot + snapshot. |
+| Human action | 1. Scan a card at `/floor/<Blister Room token>` to start a workflow bag. 2. Run blister production (the operator side; we don't simulate it). 3. Fire BLISTER_COMPLETE for that bag with counter = `20324`. |
+| Expected DB result | `material_inventory_events` `ROLL_COUNTER_SEGMENT_RECORDED` count += 2 (one for PVC Roll 1, one for Foil Roll 1), each with `payload.counter_segment_count = 20324`, `payload.segment_reason = 'BAG_COMPLETE'`, `payload.workflow_bag_id` = the new bag, `payload.bag_segment_sequence = 1`, `payload.roll_segment_sequence = 1`. |
+| Verification | `npm run validation:snapshot` — "Material events" shows `ROLL_COUNTER_SEGMENT_RECORDED 2`. Then run `psql` query: `SELECT roll_role, counter_segment_count, roll_total_after_segment, active_bag_total_after_segment FROM (SELECT (payload->>'roll_role') AS roll_role, (payload->>'counter_segment_count')::int AS counter_segment_count, (payload->>'roll_total_after_segment')::int AS roll_total_after_segment, (payload->>'active_bag_total_after_segment')::int AS active_bag_total_after_segment FROM material_inventory_events WHERE event_type='ROLL_COUNTER_SEGMENT_RECORDED' ORDER BY id) sub;` |
+| PASS criteria | 2 segment rows. PVC's `roll_total_after_segment = 20324`. FOIL's `roll_total_after_segment = 20324`. Bag total = 20324. |
+
+#### Step C2 — Bag 2 starts (scan a second card)
+
+Bag 2 is now the active bag. Operator resets counter (mental, no system action).
+
+#### Step C3 — Mid-bag PVC change at counter = 15,238
+
+| | |
+|---|---|
+| Human action | At `/floor/<Blister Room token>/rolls` → "Change roll mid-bag" → role=PVC → counter=`15238` → new roll = (a second PVC roll lot you've received in advance). Submit. |
+| Expected DB result | `ROLL_COUNTER_SEGMENT_RECORDED` += 2 (PVC Roll 1, Foil Roll 1) with `payload.counter_segment_count = 15238`, `payload.segment_reason = 'ROLL_CHANGE'`. `ROLL_DEPLETED` += 1 (PVC Roll 1) with `payload.final_roll_yield_blisters = 35562` and `payload.grams_per_blister ≈ 0.04218`. `ROLL_MOUNTED` += 1 (PVC Roll 2). PVC Roll 1 status → DEPLETED, PVC Roll 2 status → IN_USE. |
+| Verification | `npm run validation:snapshot` — "Material events" shows additional 2 `ROLL_COUNTER_SEGMENT_RECORDED`, 1 `ROLL_DEPLETED`, 1 `ROLL_MOUNTED`. "Roll lots" shows PVC Roll 1 = DEPLETED, PVC Roll 2 = IN_USE. |
+| PASS criteria | After this step: PVC Roll 1 yield = 20324 + 15238 = **35,562**. Foil Roll 1 yield = 20324 + 15238 = **35,562** (still in production). PVC Roll 2 yield = 0 (just mounted). |
+
+#### Step C4 — Bag 2 completes at counter = 4,500
+
+| | |
+|---|---|
+| Human action | Fire BLISTER_COMPLETE for Bag 2 with counter = `4500`. |
+| Expected DB result | `ROLL_COUNTER_SEGMENT_RECORDED` += 2 (PVC Roll 2, Foil Roll 1) with `payload.counter_segment_count = 4500`, `payload.segment_reason = 'BAG_COMPLETE'`. |
+| Verification | `npm run validation:snapshot`. Then SQL: `SELECT pl.roll_number, SUM((ev.payload->>'counter_segment_count')::int) AS yield FROM material_inventory_events ev JOIN packaging_lots pl ON pl.id = ev.packaging_lot_id WHERE ev.event_type = 'ROLL_COUNTER_SEGMENT_RECORDED' GROUP BY pl.roll_number;` |
+| PASS criteria | PVC Roll 1 yield = **35,562**. PVC Roll 2 yield = **4,500**. Foil Roll 1 yield = **40,062** (= 20324 + 15238 + 4500). Bag 2 total in last segment payload `active_bag_total_after_segment` = **19,738** (= 15238 + 4500). |
+| FAIL criteria | Any of those numbers off; double-counting; foil roll yield not equal to bag1 total + bag2 total. |
+| Evidence | Snapshot diff + SQL output of the yield query. |
+
+#### Step C5 — Verify learned standard (auto-derived, no weigh-back required)
+
+| | |
+|---|---|
+| Human action | None. Just run `npm run rebuild:read-models` and observe. |
+| Expected DB result | `read_roll_usage` row for PVC Roll 1: `blisters_produced = 35562`, `actual_used_grams = 1500` (full net since DEPLETED), `confidence = HIGH`. The implied `grams_per_blister = 1500 / 35562 ≈ 0.04218` is calculable in the metric API. `read_material_usage_learning` may pick up PVC Roll 1 as a sample once a future rebuild captures it (this depends on whether the learning rebuilder includes DEPLETED-without-weigh-back rolls; verify behavior and report). |
+| PASS criteria | DEPLETED PVC Roll 1 contributes a HIGH-confidence sample to learned standards without requiring a weigh-back. |
+| FAIL criteria | Sample only counted with weigh-back present (would be a regression from VALIDATION-2C). |
 
 ### TEST D — Single bag allocation to card product
 

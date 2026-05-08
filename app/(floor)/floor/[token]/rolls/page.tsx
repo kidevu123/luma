@@ -24,6 +24,7 @@ import {
   mountRollAction,
   unmountRollAction,
   weighRollAction,
+  changeRollAction,
 } from "../roll-actions";
 
 export const dynamic = "force-dynamic";
@@ -291,6 +292,90 @@ export default async function FloorRollsPage({
               />
             </Field>
             <Submit>Record weight</Submit>
+          </form>
+        )}
+      </Section>
+
+      <Section title="Change roll mid-bag">
+        {activeRolls.length === 0 ? (
+          <Empty>No active rolls to change.</Empty>
+        ) : idleRollLots.length === 0 ? (
+          <Empty>
+            No replacement roll inventory available. Receive rolls in
+            /inbound/packaging-materials first.
+          </Empty>
+        ) : (
+          <form
+            action={async (fd) => {
+              "use server";
+              await changeRollAction(fd);
+            }}
+            className="space-y-3"
+          >
+            <input type="hidden" name="token" value={token} />
+            <input type="hidden" name="stationId" value={station.id} />
+            <input type="hidden" name="clientEventId" value={randomUUID()} />
+            <p className="text-xs text-text-muted">
+              Use this when a roll runs out (or is changed out) mid-bag. Enter
+              the machine counter when this roll stopped — that count goes to the
+              old roll AND to the other active roll for the segment.
+            </p>
+            <Field label="Role being changed">
+              <div className="flex gap-2">
+                {(["PVC", "FOIL"] as const).map((r) => (
+                  <label
+                    key={r}
+                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded border border-border bg-surface text-sm cursor-pointer"
+                  >
+                    <input type="radio" name="role" value={r} required />
+                    {r}
+                  </label>
+                ))}
+              </div>
+            </Field>
+            <Field label="Counter when this roll stopped (segment count)">
+              <input
+                type="number"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                required
+                name="counterSegmentCount"
+                className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm tabular-nums"
+              />
+            </Field>
+            <Field label="New roll lot (replacement)">
+              <select
+                name="newPackagingLotId"
+                required
+                className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
+              >
+                <option value="">— Select new roll —</option>
+                {idleRollLots.map((lot) => (
+                  <option key={lot.id} value={lot.id}>
+                    {lot.rollNumber ?? lot.id.slice(0, 8)} · {lot.materialName} ·{" "}
+                    {lot.netWeightGrams != null ? `${lot.netWeightGrams} g` : "weight ?"}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Workflow bag id (optional — current bag)">
+              <input
+                type="text"
+                name="workflowBagId"
+                placeholder="UUID of the bag currently being run"
+                className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm font-mono text-[11px]"
+              />
+            </Field>
+            <Field label="Notes (optional)">
+              <input
+                type="text"
+                name="notes"
+                maxLength={500}
+                className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
+              />
+            </Field>
+            <Submit>Change roll</Submit>
           </form>
         )}
       </Section>

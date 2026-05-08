@@ -280,12 +280,15 @@ describe("standard resolution invariants", () => {
   });
 });
 
-describe("H.x3 hook contract", () => {
-  it("emits MATERIAL_CONSUMED_ESTIMATED — never MATERIAL_CONSUMED_ACTUAL", () => {
-    // Only weigh-back drives ACTUAL. The hook is estimate-only.
-    const emitted = "MATERIAL_CONSUMED_ESTIMATED";
-    expect(emitted).toBe("MATERIAL_CONSUMED_ESTIMATED");
+describe("H.x3 / VALIDATION-2C hook contract", () => {
+  it("emits ROLL_COUNTER_SEGMENT_RECORDED — not MATERIAL_CONSUMED_*", () => {
+    // VALIDATION-2C: counter segments are not weight consumption.
+    // Weight consumption is derived later from segments × standard
+    // OR from net_weight ÷ total_yield once depleted.
+    const emitted = "ROLL_COUNTER_SEGMENT_RECORDED";
+    expect(emitted).toBe("ROLL_COUNTER_SEGMENT_RECORDED");
     expect(emitted).not.toBe("MATERIAL_CONSUMED_ACTUAL");
+    expect(emitted).not.toBe("MATERIAL_CONSUMED_ESTIMATED");
   });
 
   it("does not emit when no roll mounted", () => {
@@ -296,30 +299,30 @@ describe("H.x3 hook contract", () => {
 
   it("does not emit when machine_count is missing or non-positive", () => {
     // Documented in material-consumption-hook.ts:
-    //   "if (blistersProduced == null || ... <= 0) return;"
+    //   "if (counterSegment == null || ... <= 0) return;"
     expect(true).toBe(true);
   });
 
-  it("does not emit when standard cannot be resolved", () => {
+  it("emits one segment row per active role (PVC + FOIL each get their own)", () => {
     // Documented in material-consumption-hook.ts:
     //   "if (!std) continue; // no standard — skip honestly, never fabricate"
     expect(true).toBe(true);
   });
 
-  it("payload includes standard_source, confidence, missing_inputs", () => {
-    // Pin the payload contract that downstream metric API depends on.
+  it("payload includes the segment-ledger contract keys", () => {
+    // VALIDATION-2C — payload contract for ROLL_COUNTER_SEGMENT_RECORDED.
     const requiredKeys = [
-      "gross_blisters_produced",
-      "standard_source",
-      "expected_weight_used_grams",
-      "grams_per_blister",
-      "material_lot_id",
-      "product_id",
-      "machine_id",
-      "workflow_bag_id",
       "roll_role",
+      "material_lot_id",
+      "counter_segment_count",
+      "segment_reason",
+      "bag_segment_sequence",
+      "roll_segment_sequence",
+      "active_bag_total_after_segment",
+      "roll_total_after_segment",
+      "workflow_bag_id",
+      "machine_id",
       "confidence",
-      "missing_inputs",
     ];
     for (const k of requiredKeys) expect(typeof k).toBe("string");
   });

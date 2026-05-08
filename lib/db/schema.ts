@@ -119,6 +119,7 @@ export const materialEventTypeEnum = pgEnum("material_event_type", [
   "ROLL_WEIGHED",
   "ROLL_DEPLETED",
   "MATERIAL_SCRAPPED",
+  "ROLL_COUNTER_SEGMENT_RECORDED",
 ]);
 
 export const batchKindEnum = pgEnum("batch_kind", ["TABLET", "PACKAGING"]);

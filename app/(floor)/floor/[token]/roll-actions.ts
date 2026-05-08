@@ -500,3 +500,300 @@ export async function weighRollAction(
     return { error: err instanceof Error ? err.message : "Weigh failed." };
   }
 }
+
+// ── changeRollAction ───────────────────────────────────────────
+//
+// Mid-bag roll change. The operator entered the counter value at the
+// moment the OLD roll ran out / was changed out. This action:
+//   1. Validates an active roll exists for the role on this machine
+//   2. Records ROLL_COUNTER_SEGMENT_RECORDED for both PVC and FOIL
+//      active rolls (the segment was produced under both, even if
+//      only one is being changed) — segment_reason='ROLL_CHANGE'
+//   3. Marks the OLD roll DEPLETED (status = DEPLETED), emits
+//      ROLL_DEPLETED with final_roll_yield_blisters
+//   4. Mounts the NEW roll for the same role with ROLL_MOUNTED
+//   5. Bag stays open
+//
+// All inside a transaction. Read models are rebuilt at the end.
+
+const changeSchema = z
+  .object({
+    token: z.string().regex(UUID_RE, "Invalid token."),
+    stationId: z.string().uuid(),
+    role: z.enum(["PVC", "FOIL"]),
+    workflowBagId: z.string().uuid().optional().nullable().or(z.literal("")),
+    counterSegmentCount: z.coerce.number().int().min(1, "Counter segment must be > 0"),
+    newPackagingLotId: z.string().uuid().optional(),
+    newRollNumber: z.string().min(1).max(80).optional(),
+    newStartingWeightGrams: z.coerce.number().int().min(1).optional().nullable(),
+    notes: z.string().max(500).optional().nullable(),
+    clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
+  })
+  .refine(
+    (d) =>
+      d.newPackagingLotId != null || (d.newRollNumber != null && d.newRollNumber !== ""),
+    {
+      message: "New roll number or lot id is required.",
+      path: ["newPackagingLotId"],
+    },
+  );
+
+export async function changeRollAction(
+  formData: FormData,
+): Promise<{
+  ok?: true;
+  error?: string;
+  oldLotId?: string;
+  newLotId?: string;
+  oldFinalYield?: number;
+}> {
+  const parsed = changeSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    role: formData.get("role"),
+    workflowBagId: formData.get("workflowBagId") || undefined,
+    counterSegmentCount: formData.get("counterSegmentCount"),
+    newPackagingLotId: formData.get("newPackagingLotId") || undefined,
+    newRollNumber: formData.get("newRollNumber") || undefined,
+    newStartingWeightGrams: formData.get("newStartingWeightGrams") || undefined,
+    notes: formData.get("notes") || undefined,
+    clientEventId: formData.get("clientEventId") || undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+  try {
+    const station = await authStation(d.token, d.stationId);
+    if (!station.machineId) return { error: "Station is not bound to a machine." };
+
+    // Resolve the new roll lot — same lookup pattern as mount.
+    const newLot = await findLotByRollNumberOrId({
+      ...(d.newPackagingLotId != null ? { packagingLotId: d.newPackagingLotId } : {}),
+      ...(d.newRollNumber != null ? { rollNumber: d.newRollNumber } : {}),
+    });
+    if (!newLot) return { error: "New roll lot not found." };
+    if (!ROLL_KINDS.includes(newLot.kind as (typeof ROLL_KINDS)[number])) {
+      return { error: "New material is not a roll." };
+    }
+    if (newLot.status === "HELD" || newLot.status === "SCRAPPED") {
+      return { error: `New roll is ${newLot.status.toLowerCase()} — cannot mount.` };
+    }
+    if (newLot.status === "DEPLETED") {
+      return { error: "New roll is depleted — cannot mount." };
+    }
+    if (newLot.status === "IN_USE") {
+      return { error: "New roll is already mounted — pick a different lot." };
+    }
+
+    // Identify the active rolls for this machine (latest event per lot pattern).
+    type ActiveRow = {
+      packaging_lot_id: string;
+      packaging_material_id: string;
+      role: string | null;
+      net_weight_grams: number | null;
+    };
+    const active = (await db.execute<ActiveRow>(sql`
+      WITH latest_event AS (
+        SELECT DISTINCT ON (ev.packaging_lot_id)
+          ev.packaging_lot_id,
+          ev.event_type,
+          ev.machine_id,
+          ev.payload
+        FROM material_inventory_events ev
+        WHERE ev.event_type IN ('ROLL_MOUNTED','ROLL_UNMOUNTED','ROLL_WEIGHED','ROLL_DEPLETED')
+        ORDER BY ev.packaging_lot_id, ev.occurred_at DESC, ev.id DESC
+      )
+      SELECT
+        lot.id::text                    AS packaging_lot_id,
+        lot.packaging_material_id::text AS packaging_material_id,
+        COALESCE(
+          (le.payload->>'roll_role'),
+          CASE pm.kind::text
+            WHEN 'PVC_ROLL'    THEN 'PVC'
+            WHEN 'FOIL_ROLL'   THEN 'FOIL'
+            WHEN 'BLISTER_FOIL' THEN 'FOIL'
+          END
+        ) AS role,
+        lot.net_weight_grams           AS net_weight_grams
+      FROM packaging_lots lot
+      JOIN packaging_materials pm ON pm.id = lot.packaging_material_id
+      JOIN latest_event le ON le.packaging_lot_id = lot.id
+      WHERE le.event_type = 'ROLL_MOUNTED'
+        AND le.machine_id = ${station.machineId}
+        AND lot.status = 'IN_USE'
+        AND pm.kind::text IN ('PVC_ROLL','FOIL_ROLL','BLISTER_FOIL')
+    `)) as unknown as ActiveRow[];
+
+    const activeForRole = active.find((r) => r.role === d.role);
+    if (!activeForRole) {
+      return { error: `No active ${d.role} roll on this machine. Mount one first.` };
+    }
+    if (activeForRole.packaging_lot_id === newLot.id) {
+      return { error: "New roll is the same as the old roll. Pick a different lot." };
+    }
+
+    const workflowBagId = d.workflowBagId && d.workflowBagId !== "" ? d.workflowBagId : null;
+    const newStartingWeight = d.newStartingWeightGrams ?? newLot.net_weight_grams;
+
+    let oldFinalYield = 0;
+    await db.transaction(async (tx) => {
+      // 1. Emit ROLL_COUNTER_SEGMENT_RECORDED for EACH active roll
+      //    (PVC + FOIL). Both rolls produced this segment.
+      for (const a of active) {
+        if (a.role !== "PVC" && a.role !== "FOIL") continue;
+        // sequence numbering
+        type CountRow = { n: number; total: number };
+        const rollPriorRows = (await tx.execute<CountRow>(sql`
+          SELECT COUNT(*)::int AS n,
+                 COALESCE(SUM((payload->>'counter_segment_count')::int), 0)::int AS total
+          FROM material_inventory_events
+          WHERE event_type = 'ROLL_COUNTER_SEGMENT_RECORDED'
+            AND packaging_lot_id = ${a.packaging_lot_id}
+        `)) as unknown as CountRow[];
+        const rollPriorTotal = rollPriorRows[0]?.total ?? 0;
+        const rollSegmentSequence = (rollPriorRows[0]?.n ?? 0) + 1;
+        const rollTotalAfterSegment = rollPriorTotal + d.counterSegmentCount;
+
+        if (a.packaging_lot_id === activeForRole.packaging_lot_id) {
+          oldFinalYield = rollTotalAfterSegment;
+        }
+
+        const bagPriorRows = workflowBagId
+          ? ((await tx.execute<CountRow>(sql`
+              SELECT COUNT(*)::int AS n,
+                     COALESCE(SUM((payload->>'counter_segment_count')::int), 0)::int AS total
+              FROM material_inventory_events
+              WHERE event_type = 'ROLL_COUNTER_SEGMENT_RECORDED'
+                AND workflow_bag_id = ${workflowBagId}
+            `)) as unknown as CountRow[])
+          : ([{ n: 0, total: 0 }] as CountRow[]);
+        const bagSegmentSequence = (bagPriorRows[0]?.n ?? 0) + 1;
+        const activeBagTotalAfterSegment = (bagPriorRows[0]?.total ?? 0) + d.counterSegmentCount;
+
+        await tx.insert(materialInventoryEvents).values({
+          eventType: "ROLL_COUNTER_SEGMENT_RECORDED",
+          packagingMaterialId: a.packaging_material_id,
+          packagingLotId: a.packaging_lot_id,
+          ...(workflowBagId ? { workflowBagId } : {}),
+          machineId: station.machineId,
+          stationId: station.id,
+          quantityUnits: d.counterSegmentCount,
+          unitOfMeasure: "blisters",
+          payload: {
+            roll_role: a.role,
+            material_lot_id: a.packaging_lot_id,
+            counter_segment_count: d.counterSegmentCount,
+            segment_reason: "ROLL_CHANGE",
+            bag_segment_sequence: bagSegmentSequence,
+            roll_segment_sequence: rollSegmentSequence,
+            active_bag_total_after_segment: activeBagTotalAfterSegment,
+            roll_total_after_segment: rollTotalAfterSegment,
+            workflow_bag_id: workflowBagId,
+            machine_id: station.machineId,
+            confidence: "HIGH",
+            notes: d.notes ?? null,
+          },
+          source: "floor.change_roll",
+          ...(d.clientEventId ? { clientEventId: `${d.clientEventId}-seg-${a.role.toLowerCase()}` } : {}),
+        });
+      }
+
+      // 2. Deplete the OLD roll for the chosen role.
+      const oldLot = activeForRole;
+      const gramsPerBlister =
+        oldLot.net_weight_grams != null && oldFinalYield > 0
+          ? oldLot.net_weight_grams / oldFinalYield
+          : null;
+
+      await tx.insert(materialInventoryEvents).values({
+        eventType: "ROLL_DEPLETED",
+        packagingMaterialId: oldLot.packaging_material_id,
+        packagingLotId: oldLot.packaging_lot_id,
+        machineId: station.machineId,
+        stationId: station.id,
+        ...(workflowBagId ? { workflowBagId } : {}),
+        unitOfMeasure: "g",
+        payload: {
+          roll_role: d.role,
+          material_lot_id: oldLot.packaging_lot_id,
+          final_roll_yield_blisters: oldFinalYield,
+          net_weight_grams: oldLot.net_weight_grams,
+          grams_per_blister: gramsPerBlister,
+          depleted_during_bag: workflowBagId != null,
+          workflow_bag_id: workflowBagId,
+          confidence: gramsPerBlister != null ? "HIGH" : "MEDIUM",
+          notes: d.notes ?? null,
+        },
+        source: "floor.change_roll",
+        ...(d.clientEventId ? { clientEventId: `${d.clientEventId}-deplete` } : {}),
+      });
+      await tx
+        .update(packagingLots)
+        .set({ status: "DEPLETED" })
+        .where(eq(packagingLots.id, oldLot.packaging_lot_id));
+
+      // 3. Mount the NEW roll for the same role.
+      await tx.insert(materialInventoryEvents).values({
+        eventType: "ROLL_MOUNTED",
+        packagingMaterialId: newLot.packaging_material_id,
+        packagingLotId: newLot.id,
+        machineId: station.machineId,
+        stationId: station.id,
+        ...(workflowBagId ? { workflowBagId } : {}),
+        ...(newStartingWeight != null ? { quantityGrams: newStartingWeight } : {}),
+        unitOfMeasure: "g",
+        payload: {
+          roll_role: d.role,
+          starting_weight_grams: newStartingWeight,
+          previous_status: newLot.status,
+          mounted_via: "ROLL_CHANGE",
+          notes: d.notes ?? null,
+        },
+        source: "floor.change_roll",
+        ...(d.clientEventId ? { clientEventId: `${d.clientEventId}-mount` } : {}),
+      });
+      await tx
+        .update(packagingLots)
+        .set({ status: "IN_USE" })
+        .where(eq(packagingLots.id, newLot.id));
+
+      // 4. Refresh read models.
+      await rebuildMaterialLotState(tx);
+      await rebuildRollUsage(tx);
+
+      // 5. Audit (best-effort).
+      try {
+        await writeAudit(
+          {
+            actorId: null,
+            actorRole: null,
+            action: "ROLL_CHANGED_MID_BAG",
+            targetType: "packaging_lot",
+            targetId: oldLot.packaging_lot_id,
+            after: {
+              role: d.role,
+              new_lot_id: newLot.id,
+              counter_segment_count: d.counterSegmentCount,
+              old_final_yield: oldFinalYield,
+              workflow_bag_id: workflowBagId,
+            },
+          },
+          tx,
+        );
+      } catch {
+        // anon floor — best effort
+      }
+    });
+
+    revalidatePath(`/floor/${d.token}/rolls`);
+    return {
+      ok: true,
+      oldLotId: activeForRole.packaging_lot_id,
+      newLotId: newLot.id,
+      oldFinalYield,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Roll change failed." };
+  }
+}
