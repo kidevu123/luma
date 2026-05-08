@@ -17,9 +17,10 @@ import {
   readBagState,
   readStationLive,
 } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
+import { STATION_PICKUP_FROM_STAGE } from "@/lib/production/stage-progression";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,38 @@ export default async function FloorStationPage({
     .select()
     .from(qrCards)
     .where(eq(qrCards.status, "IDLE"));
+
+  // ASSIGNED cards whose bag is at a stage THIS station can pick up
+  // (multi-station travel — VALIDATION-2D model). Sealing accepts
+  // BLISTERED, packaging accepts SEALED, etc. Surfacing these in the
+  // scan picker is the only way the operator can claim a released
+  // bag without typing a UUID.
+  const pickupStages = STATION_PICKUP_FROM_STAGE[station.station.kind] ?? [];
+  const eligiblePickups =
+    pickupStages.length === 0
+      ? []
+      : await db
+          .select({
+            id: qrCards.id,
+            label: qrCards.label,
+            scanToken: qrCards.scanToken,
+            bagId: qrCards.assignedWorkflowBagId,
+            bagStage: readBagState.stage,
+          })
+          .from(qrCards)
+          .innerJoin(
+            readBagState,
+            eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
+          )
+          .where(
+            and(
+              eq(qrCards.status, "ASSIGNED"),
+              isNotNull(qrCards.assignedWorkflowBagId),
+              eq(readBagState.isFinalized, false),
+              eq(readBagState.isPaused, false),
+              inArray(readBagState.stage, pickupStages as string[]),
+            ),
+          );
 
   return (
     <main className="min-h-dvh bg-page p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
@@ -106,6 +139,25 @@ export default async function FloorStationPage({
                 label: c.label,
                 scanToken: c.scanToken,
               }))}
+              eligiblePickups={eligiblePickups
+                .filter(
+                  (
+                    c,
+                  ): c is {
+                    id: string;
+                    label: string;
+                    scanToken: string;
+                    bagId: string;
+                    bagStage: string;
+                  } => c.bagId != null,
+                )
+                .map((c) => ({
+                  id: c.id,
+                  label: c.label,
+                  scanToken: c.scanToken,
+                  bagId: c.bagId,
+                  bagStage: c.bagStage,
+                }))}
             />
           </div>
         ) : (
