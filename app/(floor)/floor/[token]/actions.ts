@@ -172,6 +172,8 @@ const eventSchema = z.object({
   clientEventId: clientEventIdField,
 });
 
+import { checkStageProgression } from "@/lib/production/stage-progression";
+
 export async function fireStageEventAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: true } | void> {
@@ -201,12 +203,26 @@ export async function fireStageEventAction(
     // Refuse if the bag is currently paused — operator must Resume
     // first. Stops phantom completes on a paused bag.
     const [state] = await db
-      .select({ isPaused: readBagState.isPaused, isFinalized: readBagState.isFinalized })
+      .select({
+        isPaused: readBagState.isPaused,
+        isFinalized: readBagState.isFinalized,
+        stage: readBagState.stage,
+      })
       .from(readBagState)
       .where(eq(readBagState.workflowBagId, workflowBagId));
-    if (state?.isFinalized) return { error: "Bag is already finalized." };
-    if (state?.isPaused)
-      return { error: "Bag is paused — resume it before firing stage events." };
+    // Stage-progression guard: this is what stops a duplicate
+    // BLISTER_COMPLETE landing on the same bag from a stale-looking
+    // screen. The bag must be at the predecessor stage. Same helper
+    // is consumed by the floor UI so server + client stay in sync.
+    const progression = checkStageProgression({
+      eventType,
+      currentStage: state?.stage ?? null,
+      isPaused: state?.isPaused ?? false,
+      isFinalized: state?.isFinalized ?? false,
+    });
+    if (!progression.allowed) {
+      return { error: progression.reason };
+    }
 
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
@@ -529,6 +545,22 @@ export async function packagingCompleteAction(
     ) {
       return { error: "Enter at least one count before saving." };
     }
+    // Stage-progression guard — same rule as fireStageEventAction.
+    const [pkgState] = await db
+      .select({
+        isPaused: readBagState.isPaused,
+        isFinalized: readBagState.isFinalized,
+        stage: readBagState.stage,
+      })
+      .from(readBagState)
+      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
+    const pkgProg = checkStageProgression({
+      eventType: "PACKAGING_COMPLETE",
+      currentStage: pkgState?.stage ?? null,
+      isPaused: pkgState?.isPaused ?? false,
+      isFinalized: pkgState?.isFinalized ?? false,
+    });
+    if (!pkgProg.allowed) return { error: pkgProg.reason };
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,

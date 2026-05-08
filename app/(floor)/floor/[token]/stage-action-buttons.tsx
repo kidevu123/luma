@@ -54,18 +54,24 @@ const STAGE_BY_KIND: Record<string, { label: string; eventType: string }[]> = {
   ],
 };
 
+import { EVENT_STAGE_PREREQ } from "@/lib/production/stage-progression";
+
 export function StageActionButtons({
   token,
   stationId,
   stationKind,
   workflowBagId,
   isPaused = false,
+  currentStage = null,
 }: {
   token: string;
   stationId: string;
   stationKind: string;
   workflowBagId: string | null;
   isPaused?: boolean;
+  /** Bag's current stage from read_bag_state (STARTED | BLISTERED |
+   *  SEALED | PACKAGED | FINALIZED). Null when read model lags. */
+  currentStage?: string | null;
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -95,8 +101,18 @@ export function StageActionButtons({
   }
 
   if (!workflowBagId) return null;
-  const stages = STAGE_BY_KIND[stationKind] ?? [];
+  const allStages = STAGE_BY_KIND[stationKind] ?? [];
+  // Hide forward-stage buttons whose prereq is not satisfied by the
+  // bag's current stage. The server enforces the same rule; this
+  // just stops the operator tapping a button that will be rejected.
+  const stages = allStages.filter((s) => {
+    const prereq = EVENT_STAGE_PREREQ[s.eventType];
+    if (!prereq) return true;
+    if (currentStage == null) return true; // lag — let server decide
+    return prereq.includes(currentStage);
+  });
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
+  const packagingReady = !currentStage || currentStage === "SEALED";
 
   function baseFd(opts: { withClientEventId?: boolean } = {}): FormData {
     const fd = new FormData();
@@ -228,7 +244,7 @@ export function StageActionButtons({
         ))}
 
       {/* Packaging gets its own rich form */}
-      {!isPaused && isPackaging && (
+      {!isPaused && isPackaging && packagingReady && (
         <button
           type="button"
           disabled={pending !== null}

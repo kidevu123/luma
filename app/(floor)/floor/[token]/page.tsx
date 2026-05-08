@@ -137,6 +137,17 @@ export default async function FloorStationPage({
               stationKind={station.station.kind}
               workflowBagId={currentAtStation.bag.id}
               isPaused={currentAtStation.state?.isPaused ?? false}
+              currentStage={currentAtStation.state?.stage ?? null}
+            />
+            {/* Help operator pick the next action when the bag has
+             *  already advanced past this station's stage. The
+             *  StageActionButtons hides its primary button in that
+             *  case; this banner replaces it. */}
+            <BagAdvancedBanner
+              token={token}
+              stationKind={station.station.kind}
+              currentStage={currentAtStation.state?.stage ?? null}
+              isFinalized={currentAtStation.state?.isFinalized ?? false}
             />
           </div>
         )}
@@ -146,5 +157,77 @@ export default async function FloorStationPage({
         Luma · {process.env.BUILD_GIT_SHA?.slice(0, 7) ?? "dev"}
       </p>
     </main>
+  );
+}
+
+// Maps a station kind to the stage a bag must be at for that
+// station's primary stage event to be valid. Mirrors the server-side
+// EVENT_STAGE_PREREQ map; kept inline here so the UI never imports
+// from "use server" actions.
+const STATION_PREREQ_STAGE: Record<string, string> = {
+  BLISTER: "STARTED",
+  SEALING: "BLISTERED",
+  PACKAGING: "SEALED",
+  COMBINED: "STARTED", // first action is BLISTER_COMPLETE
+  BOTTLE_HANDPACK: "STARTED",
+  BOTTLE_CAP_SEAL: "BLISTERED",
+  BOTTLE_STICKER: "SEALED",
+};
+
+function BagAdvancedBanner({
+  token,
+  stationKind,
+  currentStage,
+  isFinalized,
+}: {
+  token: string;
+  stationKind: string;
+  currentStage: string | null;
+  isFinalized: boolean;
+}) {
+  if (!currentStage) return null;
+  if (isFinalized) {
+    return (
+      <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <p className="font-semibold">Bag is finalized.</p>
+        <p className="text-xs">
+          Scan a new card to start the next bag at this station.
+        </p>
+      </div>
+    );
+  }
+  const prereq = STATION_PREREQ_STAGE[stationKind];
+  if (!prereq || currentStage === prereq) return null;
+
+  // The bag has advanced past (or is otherwise out of sequence with)
+  // this station's primary action. Spell out the next step instead
+  // of leaving the form looking like it's still ready.
+  const stageWord =
+    {
+      STARTED: "started",
+      BLISTERED: "blistered",
+      SEALED: "sealed",
+      PACKAGED: "packaged",
+      FINALIZED: "finalized",
+    }[currentStage] ?? currentStage.toLowerCase();
+  const nextHint =
+    currentStage === "BLISTERED"
+      ? "Move bag to the Sealing station, or tap Finalize bag below to release the card."
+      : currentStage === "SEALED"
+        ? "Move bag to the Packaging station, or tap Finalize bag."
+        : currentStage === "PACKAGED"
+          ? "Tap Finalize bag below to release the card back to the IDLE pool."
+          : `Bag is at ${stageWord}; this station has no further forward action.`;
+  return (
+    <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900 space-y-0.5">
+      <p className="font-semibold">Bag already {stageWord} at this station.</p>
+      <p className="text-xs">{nextHint}</p>
+      <p className="text-xs">
+        <a href={`/floor/${token}`} className="underline">
+          Refresh
+        </a>{" "}
+        once finalized to scan the next card.
+      </p>
+    </div>
   );
 }
