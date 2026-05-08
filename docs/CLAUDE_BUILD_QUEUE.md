@@ -97,7 +97,7 @@ No code change. Findings recorded in chat (and condensed in `docs/CURRENT_PHASE_
 
 ## Pending phases (work in this exact order)
 
-### [ ] OP-1B — Employee / accountability foundation
+### [x] OP-1B — Employee / accountability foundation
 **Objective.** Establish a stable accountability identity for every count submission without a new operator-profiles table. Use the existing `employees` + `users` tables; populate the existing `workflow_events.employee_id` / `.user_id` columns; encode source + name snapshot in payload.
 
 **Files likely touched.**

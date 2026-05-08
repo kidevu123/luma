@@ -43,6 +43,19 @@ type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
 type WorkflowEventType = typeof workflowEvents.$inferInsert["eventType"];
 
+/** OP-1B: how an accountable employee was identified for a count
+ *  submission. Used to band confidence on operator productivity
+ *  metrics and audit lineage. */
+export type AccountabilitySource =
+  | "LOGGED_IN_USER"
+  | "EMPLOYEE_PICKER"
+  | "EMPLOYEE_CODE"
+  | "BADGE_SCAN"
+  | "SUPERVISOR_OVERRIDE"
+  | "STATION_OPERATOR_SESSION"
+  | "LEGACY_TEXT"
+  | "MANUAL_TEXT";
+
 type EventInput = {
   workflowBagId: string;
   stationId?: string | null;
@@ -54,6 +67,15 @@ type EventInput = {
    *  index we swallow the conflict — the action becomes a no-op
    *  on retry instead of double-firing the stage. */
   clientEventId?: string | null;
+  /** OP-1B accountability — additive, optional, fully backwards
+   *  compatible. enteredByUserId / accountableEmployeeId land in
+   *  the corresponding workflow_events FK columns. accountability
+   *  source + name snapshot are merged into payload so audit
+   *  consumers can read them without a second join. */
+  enteredByUserId?: string | null;
+  accountableEmployeeId?: string | null;
+  accountabilitySource?: AccountabilitySource | null;
+  accountableEmployeeNameSnapshot?: string | null;
 };
 
 const STAGE_FOR_EVENT: Record<string, string> = {
@@ -88,6 +110,24 @@ const THROUGHPUT_COLUMN: Record<string, string> = {
 export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
   const occurredAt = ev.occurredAt ?? new Date();
 
+  // Merge OP-1B accountability metadata into payload alongside any
+  // caller-supplied fields. The FK columns get the stable IDs; the
+  // payload carries the source label + readable name snapshot so
+  // genealogy / audit can render without a second join.
+  const basePayload = ev.payload ?? {};
+  const accountabilityPayload: Record<string, unknown> = {};
+  if (ev.accountabilitySource) {
+    accountabilityPayload.accountability_source = ev.accountabilitySource;
+  }
+  if (ev.accountableEmployeeNameSnapshot) {
+    accountabilityPayload.accountable_employee_name_snapshot =
+      ev.accountableEmployeeNameSnapshot;
+  }
+  const mergedPayload =
+    Object.keys(accountabilityPayload).length > 0
+      ? { ...basePayload, ...accountabilityPayload }
+      : basePayload;
+
   // Idempotency: if the floor sent a clientEventId, the partial
   // unique index (workflow_bag_id, event_type, client_event_id)
   // catches retries. onConflictDoNothing → empty RETURNING means
@@ -99,9 +139,11 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       workflowBagId: ev.workflowBagId,
       stationId: ev.stationId ?? null,
       eventType: ev.eventType,
-      payload: ev.payload ?? {},
+      payload: mergedPayload,
       occurredAt,
       clientEventId: ev.clientEventId ?? null,
+      employeeId: ev.accountableEmployeeId ?? null,
+      userId: ev.enteredByUserId ?? null,
     })
     .onConflictDoNothing()
     .returning({ id: workflowEvents.id });

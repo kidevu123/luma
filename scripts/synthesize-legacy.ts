@@ -29,6 +29,7 @@ async function main() {
       id: "00000000-0000-0000-0000-000000000000",
       role: "OWNER",
       email: "system@luma",
+      employeeId: null,
     },
     dryRun,
   });

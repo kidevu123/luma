@@ -300,21 +300,33 @@ export const users = pgTable(
 // Context 1 — Master data
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const employees = pgTable("employees", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  legacyId: text("legacy_id"),
-  fullName: text("full_name").notNull(),
-  preferredName: text("preferred_name"),
-  email: text("email"),
-  phone: text("phone"),
-  language: text("language").notNull().default("en"), // en | es
-  status: employeeStatusEnum("status").notNull().default("ACTIVE"),
-  hiredOn: date("hired_on"),
-  birthday: date("birthday"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const employees = pgTable(
+  "employees",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    legacyId: text("legacy_id"),
+    fullName: text("full_name").notNull(),
+    preferredName: text("preferred_name"),
+    email: text("email"),
+    phone: text("phone"),
+    /** Short, operator-friendly badge / login code (e.g. "1042"). Optional;
+     *  partial unique index below enforces uniqueness only among ACTIVE
+     *  employees so the code can be reused after termination. */
+    employeeCode: text("employee_code"),
+    language: text("language").notNull().default("en"), // en | es
+    status: employeeStatusEnum("status").notNull().default("ACTIVE"),
+    hiredOn: date("hired_on"),
+    birthday: date("birthday"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("employees_code_active_unique")
+      .on(t.employeeCode)
+      .where(sql`status = 'ACTIVE' AND employee_code IS NOT NULL`),
+  ],
+);
 
 export const tabletTypes = pgTable(
   "tablet_types",
