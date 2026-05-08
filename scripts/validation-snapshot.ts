@@ -29,6 +29,10 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { sql } from "drizzle-orm";
+import {
+  reconcileBagTotal,
+  formatBagTotalLine,
+} from "@/lib/production/snapshot-helpers";
 
 function refuseInProduction() {
   const envSaysProd = process.env.NODE_ENV === "production";
@@ -194,9 +198,14 @@ async function main() {
   });
 
   // ── Roll segments by bag ──
+  // Bag total = matched PVC/FOIL segment sum (both rolls advance
+  // through the same blister cycles, so the totals MUST be equal).
+  // We compute pvc_total + foil_total in SQL, then reconcile in TS
+  // so the logic is unit-testable. The previous SUM/DISTINCT-lot
+  // formula coincidentally worked for single-roll bags but broke
+  // for any bag with a mid-bag roll change (yielded SUM/3 etc).
   type SegmentByBagRow = {
     workflow_bag_id: string | null;
-    bag_total: number;
     segment_count: number;
     pvc_total: number;
     foil_total: number;
@@ -204,8 +213,6 @@ async function main() {
   const segByBag = (await db.execute<SegmentByBagRow>(sql`
     SELECT
       ev.workflow_bag_id::text AS workflow_bag_id,
-      SUM(NULLIF((ev.payload->>'counter_segment_count'),'')::int) /
-        NULLIF(COUNT(DISTINCT ev.packaging_lot_id), 0)::int                                    AS bag_total,
       COUNT(*)::int                                                                              AS segment_count,
       SUM(CASE WHEN (ev.payload->>'roll_role') = 'PVC'
                THEN NULLIF((ev.payload->>'counter_segment_count'),'')::int ELSE 0 END)::int      AS pvc_total,
@@ -222,12 +229,8 @@ async function main() {
       console.log("  (no bag segments yet)");
     } else {
       for (const b of segByBag) {
-        console.log(
-          `  bag=${(b.workflow_bag_id ?? "—").slice(0, 8).padEnd(10)} ` +
-            `total=${String(b.bag_total).padStart(6)}  ` +
-            `segments=${String(b.segment_count).padStart(2)}  ` +
-            `pvc=${String(b.pvc_total).padStart(6)}  foil=${String(b.foil_total).padStart(6)}`,
-        );
+        const display = reconcileBagTotal(b);
+        console.log(formatBagTotalLine(display));
       }
     }
   });
