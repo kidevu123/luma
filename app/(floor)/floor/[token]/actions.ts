@@ -11,6 +11,7 @@ import {
   inventoryBags,
   batches,
   readBagState,
+  products,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
@@ -245,6 +246,7 @@ const eventSchema = z.object({
 });
 
 import { checkStageProgression } from "@/lib/production/stage-progression";
+import { checkPackagingPrereqs } from "@/lib/production/packaging-prereqs";
 
 export async function fireStageEventAction(
   formData: FormData,
@@ -633,6 +635,41 @@ export async function packagingCompleteAction(
       isFinalized: pkgState?.isFinalized ?? false,
     });
     if (!pkgProg.allowed) return { error: pkgProg.reason };
+
+    // PRD-2 — Packaging prereq guard. Cannot complete packaging
+    // without product + packaging structure: the projector would
+    // otherwise silently record unitsYielded=0 (because its product
+    // lookup returns nothing), which corrupts PO reconciliation,
+    // supplier settlement, and finished-goods inventory.
+    const [bagRow] = await db
+      .select({ id: workflowBags.id, productId: workflowBags.productId })
+      .from(workflowBags)
+      .where(eq(workflowBags.id, parsed.data.workflowBagId));
+    if (!bagRow) {
+      return { error: "Workflow bag not found." };
+    }
+    const productRow = bagRow.productId
+      ? (
+          await db
+            .select({
+              id: products.id,
+              name: products.name,
+              sku: products.sku,
+              unitsPerDisplay: products.unitsPerDisplay,
+              displaysPerCase: products.displaysPerCase,
+            })
+            .from(products)
+            .where(eq(products.id, bagRow.productId))
+        )[0] ?? null
+      : null;
+    const prereq = checkPackagingPrereqs({
+      bag: { id: bagRow.id, productId: bagRow.productId ?? null },
+      product: productRow ?? null,
+    });
+    if (!prereq.ok) {
+      return { error: prereq.reason };
+    }
+
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
