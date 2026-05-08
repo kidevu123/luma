@@ -253,6 +253,7 @@ export async function mountRollAction(
     revalidatePath(`/floor/${d.token}/rolls`);
     return { ok: true, lotId: lot.id, rollNumber: lot.roll_number ?? "" };
   } catch (err) {
+    console.error("[mountRollAction] failed:", err);
     return { error: err instanceof Error ? err.message : "Mount failed." };
   }
 }
@@ -398,6 +399,7 @@ export async function unmountRollAction(
     revalidatePath(`/floor/${d.token}/rolls`);
     return { ok: true, status: nextStatus };
   } catch (err) {
+    console.error("[unmountRollAction] failed:", err);
     return { error: err instanceof Error ? err.message : "Unmount failed." };
   }
 }
@@ -499,6 +501,7 @@ export async function weighRollAction(
     revalidatePath(`/floor/${d.token}/rolls`);
     return { ok: true, varianceGrams: variance };
   } catch (err) {
+    console.error("[weighRollAction] failed:", err);
     return { error: err instanceof Error ? err.message : "Weigh failed." };
   }
 }
@@ -828,6 +831,7 @@ export async function changeRollAction(
       oldFinalYield,
     };
   } catch (err) {
+    console.error("[changeRollAction] failed:", err);
     return { error: err instanceof Error ? err.message : "Roll change failed." };
   }
 }
