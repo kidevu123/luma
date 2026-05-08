@@ -12,11 +12,16 @@ import {
 import {
   fireStageEventAction,
   finalizeBagAction,
+  releaseBagAction,
   pauseBagAction,
   resumeBagAction,
   setOperatorAction,
   packagingCompleteAction,
 } from "./actions";
+import {
+  STATION_RELEASE_FROM_STAGE,
+  STATIONS_THAT_FINALIZE,
+} from "@/lib/production/stage-progression";
 
 // crypto.randomUUID() is only available in secure contexts (HTTPS or
 // localhost). Floor PWA runs over plain HTTP on the LAN, so we fall
@@ -114,6 +119,26 @@ export function StageActionButtons({
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
   const packagingReady = !currentStage || currentStage === "SEALED";
 
+  // Release button shows after this station's stage event has fired
+  // and the bag is at the station's "ready to release" stage.
+  const releaseAtStage = STATION_RELEASE_FROM_STAGE[stationKind];
+  const releaseReady =
+    releaseAtStage != null && currentStage === releaseAtStage;
+  const releaseLabel =
+    stationKind === "BLISTER" || stationKind === "BOTTLE_HANDPACK"
+      ? "Release to sealing queue"
+      : stationKind === "SEALING" || stationKind === "BOTTLE_CAP_SEAL"
+        ? "Release to packaging queue"
+        : stationKind === "BOTTLE_STICKER"
+          ? "Release to finishing queue"
+          : "Release to next station";
+
+  // Only stations that finalize show the Finalize button — and only
+  // when the bag is at PACKAGED. Everywhere else, finalize is hidden.
+  const canFinalize =
+    STATIONS_THAT_FINALIZE.has(stationKind) &&
+    (currentStage == null || currentStage === "PACKAGED");
+
   function baseFd(opts: { withClientEventId?: boolean } = {}): FormData {
     const fd = new FormData();
     fd.set("token", token);
@@ -153,12 +178,24 @@ export function StageActionButtons({
 
   async function finalize() {
     if (!workflowBagId) return;
-    if (!confirm("Finalize this bag? The card returns to the IDLE pool."))
+    if (!confirm("Finalize this bag? Closes the production cycle and returns the card to the IDLE pool."))
       return;
     setPending("finalize");
     setError(null);
     try {
       const r = await finalizeBagAction(baseFd());
+      if (r?.error) setError(r.error);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function release() {
+    if (!workflowBagId) return;
+    setPending("release");
+    setError(null);
+    try {
+      const r = await releaseBagAction(baseFd());
       if (r?.error) setError(r.error);
     } finally {
       setPending(null);
@@ -256,6 +293,22 @@ export function StageActionButtons({
         </button>
       )}
 
+      {/* Release to next station — visible only after this station's
+       *  stage event has fired and the bag is ready to hand forward.
+       *  The QR card stays attached to the bag; the next station picks
+       *  up by scanning the same card. */}
+      {!isPaused && releaseReady && (
+        <button
+          type="button"
+          disabled={pending !== null}
+          onClick={release}
+          className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-sky-700 text-white text-base font-semibold shadow-sm hover:bg-sky-800 disabled:opacity-60 transition-colors"
+        >
+          <CheckCircle2 className="h-5 w-5" />
+          {pending === "release" ? "Releasing…" : releaseLabel}
+        </button>
+      )}
+
       {/* Pause / Resume row */}
       {!isPaused ? (
         <button
@@ -279,15 +332,17 @@ export function StageActionButtons({
         </button>
       )}
 
-      <button
-        type="button"
-        disabled={pending !== null}
-        onClick={finalize}
-        className="w-full h-12 inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface text-text-muted hover:text-text hover:bg-surface-2 text-sm font-medium transition-colors"
-      >
-        <Flag className="h-4 w-4" />
-        Finalize bag
-      </button>
+      {canFinalize && (
+        <button
+          type="button"
+          disabled={pending !== null}
+          onClick={finalize}
+          className="w-full h-12 inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface text-text-muted hover:text-text hover:bg-surface-2 text-sm font-medium transition-colors"
+        >
+          <Flag className="h-4 w-4" />
+          Finalize bag
+        </button>
+      )}
 
       {error && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">

@@ -107,9 +107,24 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
     .returning({ id: workflowEvents.id });
   if (inserted.length === 0) return;
 
-  // 1. read_station_live — only meaningful when the event has a station
-  //    AND the bag isn't being finalized (finalize releases the station).
-  if (ev.stationId && ev.eventType !== "BAG_FINALIZED") {
+  // 1. read_station_live — track which bag is "currently at" each
+  //    station. Three classes of event affect this read model:
+  //
+  //    a. Forward stage events with a stationId (and not BAG_FINALIZED
+  //       and not BAG_RELEASED) keep the station pinned to the bag.
+  //
+  //    b. BAG_RELEASED clears THIS station's slot only. The bag is
+  //       still alive and the QR card is still ASSIGNED to it; the
+  //       next station picks it up by scanning the card (which fires
+  //       BAG_PICKED_UP).
+  //
+  //    c. BAG_FINALIZED clears EVERY station's slot for this bag and
+  //       returns the QR card to IDLE. End of cycle.
+  if (
+    ev.stationId &&
+    ev.eventType !== "BAG_FINALIZED" &&
+    ev.eventType !== "BAG_RELEASED"
+  ) {
     await tx
       .insert(readStationLive)
       .values({
@@ -128,6 +143,24 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
           updatedAt: occurredAt,
         },
       });
+  } else if (ev.eventType === "BAG_RELEASED" && ev.stationId) {
+    // Release THIS station's slot, leave others alone (they shouldn't
+    // hold this bag anyway in the single-station-at-a-time model, but
+    // be defensive: only touch the firing station).
+    await tx
+      .update(readStationLive)
+      .set({
+        currentWorkflowBagId: null,
+        lastEventType: "BAG_RELEASED",
+        lastEventAt: occurredAt,
+        updatedAt: occurredAt,
+      })
+      .where(
+        and(
+          eq(readStationLive.stationId, ev.stationId),
+          eq(readStationLive.currentWorkflowBagId, ev.workflowBagId),
+        ),
+      );
   } else if (ev.eventType === "BAG_FINALIZED") {
     // Release any station that was pinned to this bag.
     await tx

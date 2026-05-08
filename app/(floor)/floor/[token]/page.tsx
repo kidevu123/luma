@@ -212,22 +212,16 @@ function BagAdvancedBanner({
     }[currentStage] ?? currentStage.toLowerCase();
   const nextHint =
     currentStage === "BLISTERED"
-      ? "Move bag to the Sealing station, or tap Finalize bag below to release the card."
+      ? "Tap Release to sealing queue below. The card stays attached and the sealing station scans the same card to claim the bag."
       : currentStage === "SEALED"
-        ? "Move bag to the Packaging station, or tap Finalize bag."
+        ? "Tap Release to packaging queue below. The card stays attached and the packaging station scans the same card to claim the bag."
         : currentStage === "PACKAGED"
-          ? "Tap Finalize bag below to release the card back to the IDLE pool."
+          ? "Tap Finalize bag below at the packaging station to close the production cycle and release the card."
           : `Bag is at ${stageWord}; this station has no further forward action.`;
   return (
     <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900 space-y-0.5">
       <p className="font-semibold">Bag already {stageWord} at this station.</p>
       <p className="text-xs">{nextHint}</p>
-      <p className="text-xs">
-        <a href={`/floor/${token}`} className="underline">
-          Refresh
-        </a>{" "}
-        once finalized to scan the next card.
-      </p>
     </div>
   );
 }

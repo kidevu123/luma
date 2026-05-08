@@ -14,6 +14,11 @@ import {
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
+import {
+  STATION_RELEASE_FROM_STAGE,
+  STATION_PICKUP_FROM_STAGE,
+  STATIONS_THAT_FINALIZE,
+} from "@/lib/production/stage-progression";
 
 // Floor PWA actions are anonymous (no admin login). Authorization is
 // the station's scan_token, which lives in the URL. Every action MUST
@@ -118,32 +123,99 @@ export async function scanCardAction(
         .from(qrCards)
         .where(eq(qrCards.id, cardId));
       if (!card) throw new Error("Card not found.");
-      if (card.status !== "IDLE") {
-        throw new Error(`Card already ${card.status.toLowerCase()}.`);
+
+      if (card.status === "IDLE") {
+        // Fresh scan — first station claims an idle card and creates
+        // the workflow bag.
+        const [bag] = await tx.insert(workflowBags).values({}).returning();
+        if (!bag) throw new Error("Could not create workflow bag.");
+        await tx
+          .update(qrCards)
+          .set({ status: "ASSIGNED", assignedWorkflowBagId: bag.id })
+          .where(eq(qrCards.id, cardId));
+        await projectEvent(tx, {
+          workflowBagId: bag.id,
+          stationId: station.id,
+          eventType: "CARD_ASSIGNED",
+          payload: { qr_card_id: cardId, station_kind: station.kind },
+        });
+        await writeAudit(
+          {
+            actorId: null,
+            actorRole: null,
+            action: "floor.card_assigned",
+            targetType: "WorkflowBag",
+            targetId: bag.id,
+            after: { card_id: cardId, station_id: stationId },
+          },
+          tx,
+        );
+        return;
       }
-      const [bag] = await tx.insert(workflowBags).values({}).returning();
-      if (!bag) throw new Error("Could not create workflow bag.");
-      await tx
-        .update(qrCards)
-        .set({ status: "ASSIGNED", assignedWorkflowBagId: bag.id })
-        .where(eq(qrCards.id, cardId));
-      await projectEvent(tx, {
-        workflowBagId: bag.id,
-        stationId: station.id,
-        eventType: "CARD_ASSIGNED",
-        payload: { qr_card_id: cardId, station_kind: station.kind },
-      });
-      await writeAudit(
-        {
-          actorId: null,
-          actorRole: null,
-          action: "floor.card_assigned",
-          targetType: "WorkflowBag",
-          targetId: bag.id,
-          after: { card_id: cardId, station_id: stationId },
-        },
-        tx,
-      );
+
+      if (card.status === "ASSIGNED") {
+        // Multi-station travel: the same QR is scanned at a downstream
+        // station to pick up a bag that a prior station released. The
+        // card stays ASSIGNED; we only update station_live via a
+        // BAG_PICKED_UP event.
+        const bagId = card.assignedWorkflowBagId;
+        if (!bagId) {
+          throw new Error(
+            "Card is assigned but has no workflow bag — data inconsistent.",
+          );
+        }
+        const [state] = await tx
+          .select({
+            stage: readBagState.stage,
+            isPaused: readBagState.isPaused,
+            isFinalized: readBagState.isFinalized,
+          })
+          .from(readBagState)
+          .where(eq(readBagState.workflowBagId, bagId));
+        if (state?.isFinalized) {
+          throw new Error(
+            "Bag is already finalized — scan a fresh card to start a new bag.",
+          );
+        }
+        const allowedStages =
+          STATION_PICKUP_FROM_STAGE[station.kind] ?? [];
+        if (!state?.stage || !allowedStages.includes(state.stage)) {
+          const list = allowedStages.length === 0
+            ? "no pickup stages defined"
+            : allowedStages.join(" or ");
+          throw new Error(
+            `${station.kind} station expects bag at ${list} (bag is ${state?.stage ?? "unknown"}).`,
+          );
+        }
+        await projectEvent(tx, {
+          workflowBagId: bagId,
+          stationId: station.id,
+          eventType: "BAG_PICKED_UP",
+          payload: {
+            qr_card_id: cardId,
+            station_kind: station.kind,
+            from_stage: state.stage,
+          },
+        });
+        await writeAudit(
+          {
+            actorId: null,
+            actorRole: null,
+            action: "floor.bag_picked_up",
+            targetType: "WorkflowBag",
+            targetId: bagId,
+            after: {
+              card_id: cardId,
+              station_id: stationId,
+              from_stage: state.stage,
+            },
+          },
+          tx,
+        );
+        return;
+      }
+
+      throw new Error(`Card status ${card.status.toLowerCase()} is not scannable.`);
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Scan failed." };
@@ -609,12 +681,27 @@ export async function finalizeBagAction(
   });
   if (!parsed.success) return { error: "Invalid input." };
   try {
-    await authStation(parsed.data.token, parsed.data.stationId);
+    const station = await authStation(parsed.data.token, parsed.data.stationId);
+    // Finalize is the END of the production cycle — only stations that
+    // close the bag may fire it. Other stations must use Release.
+    if (!STATIONS_THAT_FINALIZE.has(station.kind)) {
+      return {
+        error: `${station.kind} station does not finalize bags. Use "Release to next stage" instead.`,
+      };
+    }
     const [state] = await db
-      .select({ isFinalized: readBagState.isFinalized })
+      .select({
+        isFinalized: readBagState.isFinalized,
+        stage: readBagState.stage,
+      })
       .from(readBagState)
       .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
     if (state?.isFinalized) return { error: "Bag is already finalized." };
+    if (state?.stage !== "PACKAGED") {
+      return {
+        error: `Bag must be packaged before finalize (currently ${state?.stage ?? "unknown"}).`,
+      };
+    }
 
     await db.transaction(async (tx) => {
       await projectEvent(tx, {
@@ -628,6 +715,77 @@ export async function finalizeBagAction(
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Finalize failed." };
+  }
+  revalidatePath(`/floor/${parsed.data.token}`);
+  revalidatePath(`/floor-board`);
+  return { ok: true };
+}
+
+// ── release to next station ─────────────────────────────────────────────────
+
+const releaseSchema = z.object({
+  token: z.string(),
+  workflowBagId: z.string().uuid(),
+  stationId: z.string().uuid(),
+  clientEventId: clientEventIdField,
+});
+
+/** Hand the bag forward without finalizing it. Clears this station's
+ *  read_station_live entry. The QR card stays ASSIGNED to travel
+ *  with the bag. The next station picks the bag up by scanning the
+ *  same card (scanCardAction handles the ASSIGNED-card path). */
+export async function releaseBagAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const parsed = releaseSchema.safeParse({
+    token: formData.get("token"),
+    workflowBagId: formData.get("workflowBagId"),
+    stationId: formData.get("stationId"),
+    clientEventId: pickClientEventId(formData),
+  });
+  if (!parsed.success) return { error: "Invalid input." };
+  try {
+    const station = await authStation(parsed.data.token, parsed.data.stationId);
+    const releaseAtStage = STATION_RELEASE_FROM_STAGE[station.kind];
+    if (!releaseAtStage) {
+      return {
+        error: `${station.kind} station does not release bags forward.`,
+      };
+    }
+    const [state] = await db
+      .select({
+        isFinalized: readBagState.isFinalized,
+        isPaused: readBagState.isPaused,
+        stage: readBagState.stage,
+      })
+      .from(readBagState)
+      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
+    if (state?.isFinalized) return { error: "Bag is already finalized." };
+    if (state?.isPaused) {
+      return { error: "Bag is paused — resume before releasing." };
+    }
+    if (state?.stage !== releaseAtStage) {
+      return {
+        error: `Bag must be at ${releaseAtStage} before release (currently ${state?.stage ?? "unknown"}).`,
+      };
+    }
+
+    await db.transaction(async (tx) => {
+      await projectEvent(tx, {
+        workflowBagId: parsed.data.workflowBagId,
+        stationId: parsed.data.stationId,
+        eventType: "BAG_RELEASED",
+        payload: {
+          station_kind: station.kind,
+          released_at_stage: state.stage,
+        },
+        ...(parsed.data.clientEventId
+          ? { clientEventId: parsed.data.clientEventId }
+          : {}),
+      });
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Release failed." };
   }
   revalidatePath(`/floor/${parsed.data.token}`);
   revalidatePath(`/floor-board`);

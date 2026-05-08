@@ -1,9 +1,11 @@
 // Stage-progression helper — pure logic shared by the floor server
 // action and the floor client UI. Decides whether a forward stage
-// event is allowed given the bag's current stage.
+// event is allowed given the bag's current stage, and which station
+// kinds may release a bag at which stages, and which station kinds
+// may pick up a bag at which stages.
 //
-// Single source of truth for both:
-//   • app/(floor)/floor/[token]/actions.ts (server-side guard)
+// Single source of truth for:
+//   • app/(floor)/floor/[token]/actions.ts (server-side guards)
 //   • app/(floor)/floor/[token]/stage-action-buttons.tsx (UI gate)
 //   • app/(floor)/floor/[token]/page.tsx (BagAdvancedBanner)
 
@@ -16,6 +18,42 @@ export const EVENT_STAGE_PREREQ: Readonly<Record<string, ReadonlyArray<string>>>
   BOTTLE_CAP_SEAL_COMPLETE: ["BLISTERED"],
   BOTTLE_STICKER_COMPLETE: ["SEALED"],
 };
+
+// A station may release a bag forward only after that station's stage
+// event has fired. Blister releases bags at BLISTERED, sealing at
+// SEALED, packaging/sticker never releases (they finalize). The card
+// is NOT touched by release; it stays ASSIGNED to travel with the bag.
+export const STATION_RELEASE_FROM_STAGE: Readonly<Record<string, string>> = {
+  BLISTER: "BLISTERED",
+  SEALING: "SEALED",
+  BOTTLE_HANDPACK: "BLISTERED",
+  BOTTLE_CAP_SEAL: "SEALED",
+  // PACKAGING, COMBINED, BOTTLE_STICKER do NOT release forward — the
+  // bag is closed by BAG_FINALIZED at the last station.
+};
+
+// A station may pick up a bag whose current stage matches one of the
+// stages this station kind operates on. The card must be ASSIGNED
+// (already attached to a workflow_bag) and no other station can
+// currently hold the bag.
+export const STATION_PICKUP_FROM_STAGE: Readonly<Record<string, ReadonlyArray<string>>> = {
+  SEALING: ["BLISTERED"],
+  PACKAGING: ["SEALED"],
+  BOTTLE_CAP_SEAL: ["BLISTERED"],
+  BOTTLE_STICKER: ["SEALED"],
+  // BLISTER + BOTTLE_HANDPACK + COMBINED accept the bag via first
+  // CARD_ASSIGNED on an IDLE card, not via pickup of an ASSIGNED card.
+};
+
+// Station kinds that finalize a bag (close the workflow + return QR
+// to IDLE). Anything else MUST use release, not finalize.
+// BOTTLE_STICKER is the last station in the bottle pipeline so it
+// finalizes there rather than releasing forward.
+export const STATIONS_THAT_FINALIZE: ReadonlySet<string> = new Set([
+  "PACKAGING",
+  "COMBINED",
+  "BOTTLE_STICKER",
+]);
 
 export type StageProgressionResult =
   | { allowed: true }

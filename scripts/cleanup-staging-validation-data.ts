@@ -94,6 +94,51 @@ async function main() {
   }
 
   // Order: leaves first.
+
+  // Wipe in-flight workflow bags and their dependents. Any
+  // non-finalized workflow_bag is by definition a test artifact
+  // (legitimate runs always finalize). This catches the orphan bags
+  // that earlier QA sessions left pinned to read_station_live, plus
+  // their workflow_events, material_inventory_events, read_bag_state
+  // rows, and qr_card assignments.
+  //
+  // Staging-only — refuseInProduction() above already gates this.
+  await db.execute(sql`
+    UPDATE qr_cards
+    SET status = 'IDLE', assigned_workflow_bag_id = NULL
+    WHERE assigned_workflow_bag_id IN (
+      SELECT id FROM workflow_bags WHERE finalized_at IS NULL
+    )
+  `);
+  await db.execute(sql`
+    UPDATE read_station_live
+    SET current_workflow_bag_id = NULL
+    WHERE current_workflow_bag_id IN (
+      SELECT id FROM workflow_bags WHERE finalized_at IS NULL
+    )
+  `);
+  await db.execute(sql`
+    DELETE FROM material_inventory_events
+    WHERE workflow_bag_id IN (
+      SELECT id FROM workflow_bags WHERE finalized_at IS NULL
+    )
+  `);
+  await db.execute(sql`
+    DELETE FROM workflow_events
+    WHERE workflow_bag_id IN (
+      SELECT id FROM workflow_bags WHERE finalized_at IS NULL
+    )
+  `);
+  await db.execute(sql`
+    DELETE FROM read_bag_state
+    WHERE workflow_bag_id IN (
+      SELECT id FROM workflow_bags WHERE finalized_at IS NULL
+    )
+  `);
+  await db.execute(sql`
+    DELETE FROM workflow_bags WHERE finalized_at IS NULL
+  `);
+
   await db.execute(sql`
     -- Material consumption events tied to QA bags / lots / products
     DELETE FROM material_inventory_events

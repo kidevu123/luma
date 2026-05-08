@@ -188,6 +188,14 @@ export const workflowEventTypeEnum = pgEnum("workflow_event_type", [
   "BATCH_RECALLED",
   // Material consumption (synthesized by projector from production events)
   "MATERIAL_CONSUMED",
+  // Station hand-off — a station hands a bag forward (not finalize).
+  // Clears that station's read_station_live entry; does not close
+  // the bag and does not touch the QR card. Card stays ASSIGNED.
+  "BAG_RELEASED",
+  // The next station claims the bag by scanning its still-ASSIGNED
+  // card. Updates that station's read_station_live entry; does not
+  // change the bag's stage on its own.
+  "BAG_PICKED_UP",
   // Corrections + termination
   "SUBMISSION_CORRECTED",
   "BAG_FINALIZED",
