@@ -77,6 +77,18 @@ export default async function FloorStationPage({
         </span>
       </header>
 
+      <nav className="flex flex-wrap gap-2 text-xs">
+        <a href={`/floor/${token}/rolls`} className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page">
+          Rolls
+        </a>
+        <a href={`/floor/${token}/bag-allocation`} className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page">
+          Bag allocation
+        </a>
+        <a href={`/floor/${token}/variety-pack`} className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page">
+          Variety pack
+        </a>
+      </nav>
+
       <section className="rounded-2xl bg-surface border border-border p-5 space-y-4">
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-subtle">
           Current bag

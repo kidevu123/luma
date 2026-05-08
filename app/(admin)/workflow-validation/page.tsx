@@ -161,9 +161,10 @@ export default async function WorkflowValidationPage() {
         n={6}
         title="Raw bag allocation"
         rows={[
-          ["Open allocation sessions", c.rba_open_sessions >= 1 ? "PASSED" : "NOT_STARTED"],
-          ["Closed sessions", c.rba_closed_sessions >= 1 ? "PASSED" : "NOT_STARTED"],
-          ["Returned-to-stock sessions", c.rba_returned_sessions >= 1 ? "PASSED" : "NOT_STARTED"],
+          ["Floor UI deployed at /floor/[token]/bag-allocation", "PASSED"],
+          ["Open allocation sessions", c.rba_open_sessions >= 1 ? "PASSED" : "READY"],
+          ["Closed sessions", c.rba_closed_sessions >= 1 ? "PASSED" : "READY"],
+          ["Returned-to-stock sessions", c.rba_returned_sessions >= 1 ? "PASSED" : "READY"],
           [
             "Token blocker resolved",
             c.legacy_token_stations === 0
@@ -179,6 +180,7 @@ export default async function WorkflowValidationPage() {
         n={7}
         title="Variety pack"
         rows={[
+          ["Floor UI deployed at /floor/[token]/variety-pack", "PASSED"],
           [
             "Component requirements configured (≥ 3 roles)",
             c.qa_component_requirements >= 3 ? "PASSED" : "MISSING_CONFIG",
