@@ -3,10 +3,14 @@
 // When a BLISTER_COMPLETE event fires:
 //   1. Find the active mounted PVC + foil rolls for the station's
 //      machine.
-//   2. Read the counter SEGMENT from payload.machine_count. The
-//      operator resets the counter between segments; the value
-//      they enter at BLISTER_COMPLETE is the count for that final
-//      segment of the bag (NOT a bag total or a lifetime counter).
+//   2. Read the counter SEGMENT from payload.count_total (the field
+//      the existing fireStageEventAction writes for BLISTER_COMPLETE).
+//      The operator resets the physical machine counter between
+//      segments; the value they enter at BLISTER_COMPLETE is the
+//      count for that final segment of the bag (NOT a bag total or a
+//      lifetime counter). The payload key is named `count_total` for
+//      historical reasons — keep it stable to avoid orphaning legacy
+//      events.
 //   3. For each active roll role (PVC and FOIL), emit one
 //      ROLL_COUNTER_SEGMENT_RECORDED event with:
 //        • workflow_bag_id, machine_id, station_id
@@ -30,7 +34,7 @@
 //     just record the value they entered.
 //
 // Honest skip rules (same as before):
-//   • No machine_count or counter <= 0 → skip emission silently
+//   • No count_total or counter <= 0 → skip emission silently
 //   • No active roll for the role → skip that role's emission
 //   • Standard / weight inputs are no longer required for emission
 
@@ -74,8 +78,11 @@ export async function emitMaterialConsumedFromBlister(
     .where(eq(workflowBags.id, args.workflowBagId));
   const productId = bagRow?.productId ?? null;
 
-  // Counter segment from the event payload.
-  const rawCount = args.payload?.["machine_count"];
+  // Counter segment from the event payload. The fireStageEventAction
+  // writes this under `count_total`; we accept `machine_count` as an
+  // alias for forward-compatibility but `count_total` wins if both are
+  // present.
+  const rawCount = args.payload?.["count_total"] ?? args.payload?.["machine_count"];
   const counterSegment =
     typeof rawCount === "number"
       ? Math.trunc(rawCount)
