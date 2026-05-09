@@ -38,6 +38,7 @@ import { refreshSkuDailyForBag } from "./sku-daily";
 import { refreshMaterialReconciliationForBag } from "./material-reconciliation";
 import { refreshStationDailyForBag } from "./station-daily";
 import { emitMaterialConsumedFromBlister } from "./material-consumption-hook";
+import { attributeFinalizedBag } from "./operator-daily-attribution";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -668,22 +669,67 @@ async function projectMetricsForFinalizedBag(
     })
     .onConflictDoNothing({ target: readBagMetrics.workflowBagId });
 
-  // Per-(day, operator) rollup for the leaderboard.
-  if (operatorCodes.length > 0) {
+  // Per-(day, operator) rollup for the leaderboard. OP-1E: prefers
+  // stable employee_id when accountability landed on the events;
+  // falls back to free-text operator_code only for legacy bags whose
+  // events never carried an employee_id. The pure helper enforces
+  // "no double-counting": a code that travelled with an employee
+  // tags the employee row, never produces a separate code-only row.
+  const attribution = attributeFinalizedBag(
+    events.map((e) => {
+      const p = (e.payload ?? {}) as Record<string, unknown>;
+      return {
+        employeeId: e.employeeId ?? null,
+        operatorCode: typeof p.operator_code === "string" ? p.operator_code : null,
+      };
+    }),
+  );
+  const damageCount = damagedPackaging + rippedCards;
+  if (attribution.employees.size > 0 || attribution.codeOnly.size > 0) {
     const day = finalizedAt.toISOString().slice(0, 10);
     const finalizedAtIso = finalizedAt.toISOString();
-    for (const code of operatorCodes) {
-      // ::timestamptz cast forces postgres-js to bind the parameter
-      // as text — passing a bare Date instance triggers the
-      // 'Received an instance of Date' Bind crash.
+    // Employee-keyed rows. ON CONFLICT targets the partial unique on
+    // (day, employee_id) WHERE employee_id IS NOT NULL.
+    for (const [employeeId, info] of attribution.employees) {
       await tx.execute(sql`
-        INSERT INTO read_operator_daily (day, operator_code, bags_finalized, active_seconds_total, damage_count_total, updated_at)
-        VALUES (${day}, ${code}, 1, ${activeSeconds}, ${damagedPackaging + rippedCards}, ${finalizedAtIso}::timestamptz)
-        ON CONFLICT (day, operator_code)
+        INSERT INTO read_operator_daily (
+          day, employee_id, operator_code, bags_finalized,
+          active_seconds_total, damage_count_total, updated_at
+        )
+        VALUES (
+          ${day}, ${employeeId}::uuid, ${info.operatorCode}, 1,
+          ${activeSeconds}, ${damageCount}, ${finalizedAtIso}::timestamptz
+        )
+        ON CONFLICT (day, employee_id)
+        WHERE employee_id IS NOT NULL
         DO UPDATE SET
           bags_finalized = read_operator_daily.bags_finalized + 1,
           active_seconds_total = read_operator_daily.active_seconds_total + ${activeSeconds},
-          damage_count_total = read_operator_daily.damage_count_total + ${damagedPackaging + rippedCards},
+          damage_count_total = read_operator_daily.damage_count_total + ${damageCount},
+          operator_code = COALESCE(read_operator_daily.operator_code, EXCLUDED.operator_code),
+          updated_at = ${finalizedAtIso}::timestamptz
+      `);
+    }
+    // Legacy code-only rows. ON CONFLICT targets the partial unique on
+    // (day, operator_code) WHERE employee_id IS NULL AND
+    // operator_code IS NOT NULL. These rows render as LOW confidence
+    // downstream so the operator-productivity surface can flag them.
+    for (const code of attribution.codeOnly) {
+      await tx.execute(sql`
+        INSERT INTO read_operator_daily (
+          day, employee_id, operator_code, bags_finalized,
+          active_seconds_total, damage_count_total, updated_at
+        )
+        VALUES (
+          ${day}, NULL, ${code}, 1,
+          ${activeSeconds}, ${damageCount}, ${finalizedAtIso}::timestamptz
+        )
+        ON CONFLICT (day, operator_code)
+        WHERE employee_id IS NULL AND operator_code IS NOT NULL
+        DO UPDATE SET
+          bags_finalized = read_operator_daily.bags_finalized + 1,
+          active_seconds_total = read_operator_daily.active_seconds_total + ${activeSeconds},
+          damage_count_total = read_operator_daily.damage_count_total + ${damageCount},
           updated_at = ${finalizedAtIso}::timestamptz
       `);
     }

@@ -559,7 +559,19 @@ export async function getPauseReasons7d(): Promise<PauseReasonRow[]> {
 // ─── operator-on-shift table (last 24h) ──────────────────────────────────
 
 export type OperatorOnShiftRow = {
-  operatorCode: string;
+  /** Stable group key. Either an employee uuid or `__code:<code>` for
+   *  legacy payload-only rows. */
+  groupKey: string;
+  /** Display label — employees.fullName when known, else the typed
+   *  operator code. */
+  displayName: string;
+  /** Stable identity when accountability resolved. Null for legacy. */
+  employeeId: string | null;
+  /** Free-text code when known. May be null on employee-keyed rows
+   *  whose events did not include a typed code. */
+  operatorCode: string | null;
+  /** HIGH for employee-keyed rows, LOW for legacy code-only rows. */
+  confidence: "HIGH" | "LOW";
   events: number;
   lastEventAt: Date | null;
   distinctStations: number;
@@ -572,45 +584,81 @@ export async function getOperatorsOnShift24h(): Promise<{
   console.error("[floor-board] getOperatorsOnShift24h start");
   try {
     const since = new Date(Date.now() - 24 * ONE_HOUR);
-    // First: any operator_code in the last 24h?
+    // OP-1E: prefer workflow_events.employee_id (HIGH confidence)
+    // and fall back to payload->>'operator_code' for legacy events
+    // that pre-date OP-1B / OP-1C accountability.
     const [seen] = await db
       .select({ n: sql<number>`COUNT(*)::int` })
       .from(workflowEvents)
       .where(
         and(
           gte(workflowEvents.occurredAt, since),
-          sql`${workflowEvents.payload}->>'operator_code' IS NOT NULL`,
+          sql`(${workflowEvents.employeeId} IS NOT NULL OR ${workflowEvents.payload}->>'operator_code' IS NOT NULL)`,
         ),
       );
     if (!seen || seen.n === 0) {
       return { rows: [], hasOperatorPayload: false };
     }
     const rows = (await db.execute(sql`
+      WITH attributed AS (
+        SELECT
+          we.id,
+          we.station_id,
+          we.occurred_at,
+          we.employee_id,
+          NULLIF(we.payload->>'operator_code', '') AS operator_code,
+          CASE
+            WHEN we.employee_id IS NOT NULL
+              THEN we.employee_id::text
+            ELSE '__code:' || COALESCE(we.payload->>'operator_code', '')
+          END AS group_key
+        FROM workflow_events we
+        WHERE we.occurred_at >= ${since.toISOString()}::timestamptz
+          AND (
+            we.employee_id IS NOT NULL
+            OR (we.payload->>'operator_code' IS NOT NULL
+                AND we.payload->>'operator_code' <> '')
+          )
+      )
       SELECT
-        we.payload->>'operator_code' AS operator_code,
+        a.group_key,
+        MAX(a.employee_id::text) AS employee_id,
+        MAX(a.operator_code) AS operator_code,
+        e.full_name AS employee_full_name,
         COUNT(*)::int AS events,
-        MAX(we.occurred_at) AS last_event_at,
-        COUNT(DISTINCT we.station_id)::int AS distinct_stations
-      FROM workflow_events we
-      WHERE we.occurred_at >= ${since.toISOString()}::timestamptz
-        AND we.payload->>'operator_code' IS NOT NULL
-        AND we.payload->>'operator_code' <> ''
-      GROUP BY we.payload->>'operator_code'
+        MAX(a.occurred_at) AS last_event_at,
+        COUNT(DISTINCT a.station_id)::int AS distinct_stations
+      FROM attributed a
+      LEFT JOIN employees e ON e.id::text = a.group_key
+      GROUP BY a.group_key, e.full_name
       ORDER BY events DESC
       LIMIT 8
     `)) as unknown as Array<{
-      operator_code: string;
+      group_key: string;
+      employee_id: string | null;
+      operator_code: string | null;
+      employee_full_name: string | null;
       events: number;
       last_event_at: string;
       distinct_stations: number;
     }>;
     return {
-      rows: rows.map((r) => ({
-        operatorCode: r.operator_code,
-        events: Number(r.events) || 0,
-        lastEventAt: r.last_event_at ? new Date(r.last_event_at) : null,
-        distinctStations: Number(r.distinct_stations) || 0,
-      })),
+      rows: rows.map((r) => {
+        const isEmployee = r.employee_id != null;
+        const displayName = isEmployee
+          ? r.employee_full_name ?? r.operator_code ?? r.employee_id!.slice(0, 8)
+          : r.operator_code ?? "(unknown)";
+        return {
+          groupKey: r.group_key,
+          displayName,
+          employeeId: r.employee_id,
+          operatorCode: r.operator_code,
+          confidence: isEmployee ? "HIGH" : "LOW",
+          events: Number(r.events) || 0,
+          lastEventAt: r.last_event_at ? new Date(r.last_event_at) : null,
+          distinctStations: Number(r.distinct_stations) || 0,
+        };
+      }),
       hasOperatorPayload: true,
     };
   } catch (err) {

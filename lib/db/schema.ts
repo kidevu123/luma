@@ -2269,13 +2269,26 @@ export const readBagMetrics = pgTable(
 
 /** Per-(day, operator) rollup — drives the operator leaderboard
  *  and per-employee productivity stats. Updated at BAG_FINALIZED
- *  time alongside read_bag_metrics. */
+ *  time alongside read_bag_metrics.
+ *
+ *  OP-1E: rows are now keyed by stable employee_id when accountability
+ *  resolved. Legacy rows (employee_id null) still key on operator_code.
+ *  The CHECK constraint at the DB layer guarantees at least one
+ *  identity is set; the two partial unique indexes keep employee-id
+ *  rows and code-only rows from colliding. */
 export const readOperatorDaily = pgTable(
   "read_operator_daily",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     day: date("day").notNull(),
-    operatorCode: text("operator_code").notNull(),
+    /** Stable identity. Populated when the bag's accountable employee
+     *  was resolved at finalize time. Null only for legacy rows that
+     *  carry only a free-text operator_code. */
+    employeeId: uuid("employee_id"),
+    /** Free-text operator code seen in payload. Optional now — kept
+     *  populated alongside employee_id when both are known so legacy
+     *  reports keep linking. Required only when employee_id is null. */
+    operatorCode: text("operator_code"),
     bagsFinalized: integer("bags_finalized").notNull().default(0),
     activeSecondsTotal: integer("active_seconds_total").notNull().default(0),
     damageCountTotal: integer("damage_count_total").notNull().default(0),
@@ -2284,10 +2297,15 @@ export const readOperatorDaily = pgTable(
       .defaultNow(),
   },
   (t) => [
-    uniqueIndex("read_operator_daily_day_operator_unique").on(
-      t.day,
-      t.operatorCode,
-    ),
+    uniqueIndex("read_operator_daily_day_employee_unique")
+      .on(t.day, t.employeeId)
+      .where(sql`employee_id IS NOT NULL`),
+    uniqueIndex("read_operator_daily_day_code_legacy_unique")
+      .on(t.day, t.operatorCode)
+      .where(sql`employee_id IS NULL AND operator_code IS NOT NULL`),
+    index("read_operator_daily_employee_idx")
+      .on(t.employeeId)
+      .where(sql`employee_id IS NOT NULL`),
     index("read_operator_daily_day_idx").on(t.day),
   ],
 );

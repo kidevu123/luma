@@ -1000,30 +1000,37 @@ export async function deriveFlavorMetrics(
 }
 
 // ─── 12. deriveOperatorMetrics ────────────────────────────────────
-// Per-operator productivity. Reads readOperatorDaily — already
-// populated for finalised bags by the existing projector.
+// Per-operator productivity. Reads readOperatorDaily, which is
+// keyed two ways post-OP-1E:
+//   - employee_id-keyed rows (HIGH confidence — accountability resolved)
+//   - operator_code legacy rows (LOW confidence — code-only)
+//
+// We group by COALESCE(employee_id::text, '__code:'||operator_code) so
+// the two row classes never merge into the same key, then join
+// employees so the leaderboard can render full name when known.
+
+export type OperatorRow = {
+  /** Stable group key. Either an employee UUID or the prefixed
+   *  legacy code. */
+  groupKey: string;
+  employeeId: string | null;
+  employeeFullName: string | null;
+  operatorCode: string | null;
+  /** Display label the UI should show. Falls back to the operator
+   *  code when no employee is known. */
+  displayName: string;
+  /** Confidence per row class — HIGH for employee_id rows, LOW for
+   *  legacy code-only rows. */
+  confidence: "HIGH" | "LOW";
+  bagsFinalized: number;
+  activeSeconds: number;
+  damages: number;
+};
 
 export async function deriveOperatorMetrics(
   dateRange: DateRange = lastNDays(7),
 ): Promise<MetricBundle> {
-  const fromDay = dateRange.from.toISOString().slice(0, 10);
-  const toDay = dateRange.to.toISOString().slice(0, 10);
-  const rows = await db
-    .select({
-      operatorCode: readOperatorDaily.operatorCode,
-      bagsFinalized: sum(readOperatorDaily.bagsFinalized).mapWith(Number),
-      activeSeconds: sum(readOperatorDaily.activeSecondsTotal).mapWith(Number),
-      damages: sum(readOperatorDaily.damageCountTotal).mapWith(Number),
-    })
-    .from(readOperatorDaily)
-    .where(
-      and(
-        gte(readOperatorDaily.day, fromDay),
-        lt(readOperatorDaily.day, toDay),
-      ),
-    )
-    .groupBy(readOperatorDaily.operatorCode)
-    .orderBy(desc(sum(readOperatorDaily.bagsFinalized)));
+  const rows = await deriveOperatorRows(dateRange);
   const out: MetricBundle = {};
   if (rows.length === 0) {
     out["_status"] = missing(
@@ -1034,26 +1041,74 @@ export async function deriveOperatorMetrics(
     return out;
   }
   for (const r of rows) {
-    out[`${r.operatorCode}.bagsFinalized`] = ok(
-      Number(r.bagsFinalized ?? 0),
-      "bags",
-    );
-    out[`${r.operatorCode}.activeMinutes`] = ok(
-      Math.round(Number(r.activeSeconds ?? 0) / 60),
+    out[`${r.groupKey}.bagsFinalized`] = ok(r.bagsFinalized, "bags");
+    out[`${r.groupKey}.activeMinutes`] = ok(
+      Math.round(r.activeSeconds / 60),
       "min",
     );
-    out[`${r.operatorCode}.damages`] = ok(
-      Number(r.damages ?? 0),
-      "units",
-    );
-    const bags = Number(r.bagsFinalized ?? 0);
-    const sec = Number(r.activeSeconds ?? 0);
-    out[`${r.operatorCode}.unitsPerHour`] =
-      bags > 0 && sec > 0
-        ? ok(Math.round((bags / sec) * 3600), "bags/hr")
+    out[`${r.groupKey}.damages`] = ok(r.damages, "units");
+    out[`${r.groupKey}.unitsPerHour`] =
+      r.bagsFinalized > 0 && r.activeSeconds > 0
+        ? ok(Math.round((r.bagsFinalized / r.activeSeconds) * 3600), "bags/hr")
         : zero("bags/hr");
   }
   return out;
+}
+
+/** Operator-row reader used by both the metric bundle path and the
+ *  /operator-productivity page (which needs the structured rows for
+ *  rendering employee names + confidence badges). */
+export async function deriveOperatorRows(
+  dateRange: DateRange = lastNDays(7),
+): Promise<OperatorRow[]> {
+  const fromDay = dateRange.from.toISOString().slice(0, 10);
+  const toDay = dateRange.to.toISOString().slice(0, 10);
+  const raw = await db
+    .select({
+      employeeId: readOperatorDaily.employeeId,
+      operatorCode: readOperatorDaily.operatorCode,
+      employeeFullName: employees.fullName,
+      bagsFinalized: sum(readOperatorDaily.bagsFinalized).mapWith(Number),
+      activeSeconds: sum(readOperatorDaily.activeSecondsTotal).mapWith(Number),
+      damages: sum(readOperatorDaily.damageCountTotal).mapWith(Number),
+    })
+    .from(readOperatorDaily)
+    .leftJoin(employees, eq(employees.id, readOperatorDaily.employeeId))
+    .where(
+      and(
+        gte(readOperatorDaily.day, fromDay),
+        lt(readOperatorDaily.day, toDay),
+      ),
+    )
+    // Group by both keys so the partial-unique splits stay distinct
+    // across summing — `(employee_id IS NOT NULL → employee row)` and
+    // `(employee_id NULL + operator_code → legacy row)` never merge.
+    .groupBy(
+      readOperatorDaily.employeeId,
+      readOperatorDaily.operatorCode,
+      employees.fullName,
+    )
+    .orderBy(desc(sum(readOperatorDaily.bagsFinalized)));
+  return raw.map((r) => {
+    const isEmployee = r.employeeId != null;
+    const groupKey = isEmployee
+      ? r.employeeId!
+      : `__code:${r.operatorCode ?? ""}`;
+    const displayName = isEmployee
+      ? r.employeeFullName ?? r.operatorCode ?? r.employeeId!.slice(0, 8)
+      : r.operatorCode ?? "(unknown)";
+    return {
+      groupKey,
+      employeeId: r.employeeId ?? null,
+      employeeFullName: r.employeeFullName ?? null,
+      operatorCode: r.operatorCode ?? null,
+      displayName,
+      confidence: isEmployee ? "HIGH" : "LOW",
+      bagsFinalized: Number(r.bagsFinalized ?? 0),
+      activeSeconds: Number(r.activeSeconds ?? 0),
+      damages: Number(r.damages ?? 0),
+    } satisfies OperatorRow;
+  });
 }
 
 // ─── 13. deriveMaterialReconciliation ─────────────────────────────
