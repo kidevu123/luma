@@ -4,6 +4,73 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-6B — Pure 8-bucket reconciliation helpers + tests (complete)
+- Date: 2026-05-08
+- Result: pure-logic helpers shipped per `docs/PT-6_RECONCILIATION_PLAN.md`. **No DB changes; no projector or UI changes.** PT-6 queue checkbox stays unchecked because the queue has a single PT-6 entry — only flips after PT-6E ships.
+
+### Files changed
+- `lib/production/reconciliation-v2.ts` (new) — 8-bucket helpers + types.
+- `lib/production/reconciliation-v2.test.ts` (new) — 47 cases.
+- `docs/CURRENT_PHASE_STATUS.md` (this entry).
+
+### Helpers added
+- `normalizeQuantity(value)` — rejects NaN / Infinity / non-numbers; returns null otherwise.
+- `combineConfidence(values)` — lowest-of (`HIGH > MEDIUM > LOW > MISSING`).
+- `classifyVarianceSeverity(value, baseline)` — `NONE | LOW | MEDIUM | HIGH | MISSING` per ≤1% / ≤5% / >5% baseline-relative bands; falls back to absolute (≤1, ≤5, >5) when baseline is null/zero.
+- `deriveDeclaredQuantity(receipt, unit)` — never HIGH; tagged `packtrack_declared` vs `declared_quantity`.
+- `deriveCountedQuantity(receipt, unit)` — HIGH when present, else MISSING.
+- `deriveAcceptedQuantity(receipt, unit)` — counted (HIGH) ?? declared (MEDIUM) ?? legacy qty_received (LOW) ?? MISSING.
+- `deriveConsumedEstimated(consumption, unit)` — MEDIUM (BOM / segment standard) or LOW (legacy); tagged `estimated: true`.
+- `deriveConsumedActual(consumption, unit)` — HIGH (weigh-back / cycle-count delta / manual entry) or MEDIUM (depletion yield).
+- `deriveScrappedOrDamaged(scrap, unit)` — HIGH (explicit scrap event), MEDIUM (read_bag_metrics damage), MISSING (default — QC deferral).
+- `deriveOnHand(inventory, unit)` — HIGH (cycle count / weigh-back-derived), MEDIUM (qty_on_hand projection).
+- `deriveReceiptVariance(receipt, unit)` — `counted - declared`; severity vs declared.
+- `deriveEstimatedRemaining(input)` — `accepted - consumed_estimated - scrap + adjustments`; null when accepted missing.
+- `deriveCycleCountVariance(input)` — `actual_remaining - estimated_remaining`; HIGH confidence (cycle counts are physical).
+- `deriveConsumptionVariance(input)` — `actual - estimated`; confidence is `min(estimated, actual)`.
+- `deriveUnknownVariance(input)` — residual `accepted - consumed_used - scrap - on_hand`; confidence capped at LOW (plan §1.8.d).
+- `deriveReconciliationResult(input)` — top-level shape with all 8 buckets, the 4 variance subtypes, `overallConfidence`, and `warnings[]`.
+
+### Type model summary
+- `ReconciliationConfidence` = `HIGH | MEDIUM | LOW | MISSING`.
+- `ReconciliationBucketName` = the 8 bucket names from the plan.
+- `VarianceKind` = `RECEIPT_VARIANCE | CYCLE_COUNT_VARIANCE | CONSUMPTION_VARIANCE | UNKNOWN_VARIANCE`.
+- `VarianceSeverity` = `NONE | LOW | MEDIUM | HIGH | MISSING`.
+- `ReconciliationQuantity` carries `value | null`, `unit`, `confidence`, `source`, `missingInputs[]`, optional `explanation` + `estimated`.
+- `ReconciliationVariance` carries `kind`, `value | null`, `unit`, `confidence`, `severity`, `explanation`, `missingInputs[]`.
+- `ReconciliationResult` is the union with `variances[]` and `overallConfidence` + `warnings`.
+- Input types (`ReceiptInput`, `ConsumptionInput`, `InventoryInput`, `ScrapInput`, `ReconciliationInput`) match what PT-6C will assemble from read models / projectors.
+
+### Tests added
+**47 new tests** covering all 32 numbered scenarios from the prompt + the canonical full-stack fixture (declared 1000 / counted 972 / accepted 972 / consumed_est 800 / consumed_actual 820 / on_hand 150 / cycle 140) + UI-copy invariants (receipt variance never says "production loss"/"yield"/"scrap"; cycle-count variance never says "vendor"/"supplier") + edge cases (whitespace, missing baselines, signed adjustments, unknown-variance confidence ceiling).
+
+### Build / test results
+- `npx tsc --noEmit` clean.
+- `npx vitest run` — **752 / 752** pass across 33 files (+47 new). Up from 705 in OP-1F.
+- `npx next build` clean.
+
+### Formula decisions that differed from the PT-6A plan
+1. **UNKNOWN_VARIANCE formula simplified.** Plan §3.7 sketched `accepted - consumed_used - scrap - on_hand - receipt_variance - cycle_count_variance - consumption_variance`, which double-subtracts: receipt variance is already inside `accepted` (anchored at counted), cycle-count variance is already inside `on_hand` (cycle-count value used directly), consumption variance is already inside `consumed_actual` (which we use when present). The implemented formula is the cleaner `accepted - consumed_used - scrap - on_hand` where `consumed_used = consumed_actual ?? consumed_estimated ?? 0`. This matches the §1.8 prose ("the four subtypes are PARALLEL, not additive") and produces the expected zero in the canonical fixture's "all material accounted for" case.
+2. **UNKNOWN_VARIANCE confidence is hard-capped at LOW** (or MISSING when ACCEPTED is null). The plan said "always LOW (by construction we cannot classify)." Implementation honors this; even if every input was HIGH-confidence, the bucket's classification confidence stays LOW. Severity is still computed normally.
+3. **Cycle-count + receipt explanations omit the "NOT vendor / NOT loss" disclaimer text.** The plan §5 (UI rules) covers that responsibility at the column-header / pill level; embedding the disclaimer in the explanation field made the test invariant ("never contains 'production loss' / 'vendor'") coincidentally false even on the correct branches. The bucket name + the natural-language explanation already convey the meaning. The UI in PT-6D will keep the four buckets visually distinct so the attribution stays correct.
+4. **`combineConfidence` returns lowest-of strictly.** The "overall confidence" rule from the plan that says "don't blindly use lowest if missing optional buckets would drag everything down" is implemented at `deriveReconciliationResult` level only; `combineConfidence` itself is a pure utility used inside per-bucket helpers where lowest-wins is the right behavior. Documented in code.
+
+### PT-6C readiness
+**Ready.** PT-6B's helpers take plain object inputs that PT-6C can assemble from:
+- `packaging_lots` rows for ReceiptInput + ON_HAND.
+- `material_inventory_events` (filtered to specific event types) for the Consumption + Scrap signals.
+- `read_material_lot_state` / `read_roll_usage` for current state.
+- A new `read_material_reconciliation_v2` table (decision deferred to PT-6C based on benchmarking).
+The static invariant scanner from OP-1F is unaffected (PT-6 introduces no new event types).
+
+### Stop condition met
+- Pure helpers shipped; tests green; build clean.
+- No migrations, no projectors, no UI touched.
+- PT-6 queue checkbox stays `[ ]` per user instruction (no PT-6B sub-checkbox in the queue).
+- Awaiting approval to start PT-6C.
+
+---
+
 ## OP-1F — Final OP-1 invariant tests + verification sweep (complete)
 - Date: 2026-05-08
 - Result: OP-1 phase fully complete. No new product features, no UI redesign, no schema changes.
