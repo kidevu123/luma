@@ -39,6 +39,15 @@ export default async function PoReconciliationListPage({
         description="Reconcile vendor declared counts vs. our internal estimate, finished output, known loss, and remaining inventory per purchase order."
       />
 
+      <div className="flex items-center justify-end text-xs">
+        <Link
+          href="/po-reconciliation-v2"
+          className="text-cyan-700 hover:text-cyan-800 underline"
+        >
+          New 8-bucket view →
+        </Link>
+      </div>
+
       <form className="flex flex-wrap gap-2 items-end" action="/po-reconciliation">
         <label className="text-sm">
           <div className="text-[11px] uppercase text-text-muted mb-0.5">PO number</div>
