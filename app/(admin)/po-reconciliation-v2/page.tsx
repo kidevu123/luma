@@ -553,15 +553,14 @@ function DisclosureFooter() {
       <ul className="mt-1 list-disc list-inside space-y-0.5">
         <li>
           <strong>Receipt variance</strong> — declared vs counted at receipt.
-          Vendor / shipping discrepancy. Not production loss.
+          Vendor / shipping discrepancy.
         </li>
         <li>
           <strong>Cycle-count variance</strong> — physical count vs system expectation
-          mid-life. Drift / shrink / mis-issue. Not vendor shortage.
+          mid-life. Drift / shrink / mis-issue.
         </li>
         <li>
-          <strong>Consumption variance</strong> — actual use vs BOM-driven
-          expected use. Process loss vs standard.
+          <strong>Consumption variance</strong> — actual use vs BOM-driven expected use.
         </li>
         <li>
           <strong>Unknown variance</strong> — residual when the named buckets do not
