@@ -17,6 +17,16 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 - Staging verification: pending deploy of this SHA. `scripts/smoke-authenticated-routes.ts` now includes `/product-packaging-requirements` alongside the four existing material routes.
 - Next unchecked phase: **QC subsystem — Damages / rework / scrap / supervisor-correction live**.
 
+### H.x7 staging verification
+- Date: 2026-05-09
+- Deployed SHA verified on LX122: `c3abc3c9dd7814328aa6bc5a0df8fef6cc55d69c`.
+- `/api/health`: app OK, db OK.
+- Auth smoke: PASS=45 REDIR=0 FAIL=0. Material routes all returned 200: `/packaging-inventory`, `/product-packaging-requirements`, `/active-rolls`, `/roll-variance`, `/material-alerts`.
+- Render verifier: all five routes returned 200 under admin auth and included the material sidebar links.
+- Staging data observed: packaging_lots=5, counted_high=1, declared_medium=0, legacy_low=0, active_products=57, bom_lines=8, active_rolls=0, roll_rows=5, v2_variance_rows=1.
+- Honest-state verification: packaging inventory rendered receipt truth + confidence labels; product requirements rendered configured/missing states; active rolls rendered no-fake-roll empty state; roll variance rendered expected/actual separation and confidence; material alerts rendered PT-6 v2 variance/empty state.
+- Banned-language verification passed: no rendered H.x7 route called receipt variance production loss, cycle-count variance supplier/vendor shortage, or MEDIUM/LOW receipt truth confirmed.
+
 ---
 
 ## PT-6E — Final PT-6 verification + closeout (complete)
