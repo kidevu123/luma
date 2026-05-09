@@ -111,8 +111,11 @@ async function main() {
   if (!html.includes("100")) logFail("expected '100' (declared) in body");
   if (!html.includes("98")) logFail("expected '98' (counted/accepted) in body");
   if (!html.includes("-2")) logFail("expected '-2' (receipt variance) in body");
-  // Severity badge text
-  if (!html.includes("severity: MEDIUM")) logFail("expected 'severity: MEDIUM'");
+  // Severity badge text. React inserts an HTML comment between
+  // static text and an interpolated expression in JSX; allow it.
+  if (!/severity:\s*(?:<!--\s*-->\s*)?MEDIUM/.test(html)) {
+    logFail("expected 'severity: MEDIUM' (allowing React's text-interpolation comment) in body");
+  }
   logOK("PackTrack numbers + severity rendered");
 
   step("4", "verify variance labels follow plan §5 — no banned wording");
