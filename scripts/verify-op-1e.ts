@@ -210,23 +210,21 @@ async function main() {
 
   // 7. Confirm no duplicate legacy code-only row was created for the
   //    same day. (operator_code on the bag's events was null because
-  //    the modern flow uses the session, not a typed code.)
+  //    the modern flow uses the session, not a typed code.) The
+  //    invariant: this finalize must NOT produce an employee_id-NULL
+  //    legacy row whose updated_at landed in the last 5 seconds.
   logStep("7", "verify no duplicate legacy row");
-  const codeRows = (await db.execute(sql`
+  const recent = (await db.execute(sql`
     SELECT id, operator_code FROM read_operator_daily
     WHERE day = ${today}
       AND employee_id IS NULL
-      AND created_at IS NULL  -- never (column doesn't exist) — placeholder
-  `)) as unknown as Array<unknown>;
-  // Real check: count legacy rows whose code matches anything we put
-  // on the QA bag's events. We didn't put any operator_code in the
-  // payload, so there should be ZERO legacy rows with our QA prefix
-  // anywhere. Use the safer existence assertion below.
-  void codeRows;
-  // The strong invariant: this finalize did not create any (employee_id
-  // IS NULL) legacy row, because every event carried employee_id.
-  // We'd see one only if the projector double-counted — which is what
-  // attributeFinalizedBag protects against.
+      AND updated_at >= now() - interval '5 seconds'
+  `)) as unknown as Array<{ id: string; operator_code: string | null }>;
+  if (recent.length > 0) {
+    logFail(
+      `found ${recent.length} legacy code-only row(s) updated in the last 5s — projector double-counted`,
+    );
+  }
   logOK("no double-counting (legacy row not created for this finalize)");
 
   // 8. Cleanup.
