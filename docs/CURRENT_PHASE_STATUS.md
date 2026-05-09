@@ -4,6 +4,100 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-6C — 8-bucket read model + projector / rebuild wiring (complete)
+- Date: 2026-05-09
+- Result: shipped + verified on staging. PT-6 queue checkbox stays `[ ]` per the multi-phase split (flips after PT-6E).
+
+### Migration number used
+**0025_read_material_reconciliation_v2** (idx 25, when 1780500000000). Next unused after OP-1E's 0024.
+
+### Files changed
+- `drizzle/0025_read_material_reconciliation_v2.sql` (new)
+- `drizzle/meta/_journal.json` (idx 25 entry)
+- `lib/db/schema.ts` (`readMaterialReconciliationV2` table + 5 indexes + type export)
+- `lib/projector/material-reconciliation-v2.ts` (new — assembler + projector)
+- `lib/projector/material-reconciliation-v2.test.ts` (new — 17 cases)
+- `scripts/rebuild-read-models.ts` (calls v2 rebuilder; pre/post counts include the new table)
+- `docs/CURRENT_PHASE_STATUS.md` (this entry)
+
+Commits: `6f9a6f1` (initial), `1c2d362` (roll-grams fix), `0a17fe7` (data-driven unit selection per lot).
+
+### Schema / read model added
+`read_material_reconciliation_v2` is additive — coexists with v1 `read_material_reconciliation` (untouched). Per-row scope discriminator (`PACKAGING_LOT | RAW_BAG | ROLL | MATERIAL_ITEM | PO`) with FKs to `packaging_materials`, `packaging_lots`, `inventory_bags`, `purchase_orders`, `products`. All 8 buckets stored as typed columns (numeric(20,6) value + confidence + source) plus jsonb `*_missing_inputs` per bucket. Variances stored as value + confidence + severity columns (no jsonb for variances — they're simpler). Top-level `overall_confidence`, `warnings` (jsonb), `source_snapshot` (jsonb). Indexes:
+- `(scope_type, scope_id)` UNIQUE — drives idempotent upsert.
+- Partial indexes on `material_item_id`, `packaging_lot_id`, `raw_bag_id`, `po_id` (each WHERE NOT NULL).
+- Full index on `overall_confidence`.
+
+CHECK constraints lock `scope_type` and `overall_confidence` to known ladders.
+
+### Input assembler behavior (`buildPackagingLotReconciliationInput`)
+**Data-driven unit selection per lot**, not material-kind-driven:
+- if `lot.netWeightGrams` is non-null AND no count signals (declared/counted/non-placeholder qty_received): unit=`g`, weight mode (counted = net_weight_grams HIGH, declared null, no legacy fallback).
+- else: unit=`each`, count mode (declared / counted / qty_received cascade per PT-6B helper). Roll-placeholder qty_received=1 is ignored as a count signal.
+- `scope_type` still reflects the material classification (`ROLL` for PVC_ROLL/FOIL_ROLL/BLISTER_FOIL, else `PACKAGING_LOT`) so UI filters by kind work.
+
+Source mapping:
+- ACCEPTED: cascade per PT-6B (counted → declared → legacy qty_received → MISSING). PackTrack source-system tagged on declared-only path.
+- CONSUMED_ESTIMATED: from `read_material_lot_state.consumedEstimated` with source `ROLL_SEGMENT_STANDARD` (rolls) or `BOM` (count-based), MEDIUM.
+- CONSUMED_ACTUAL: from `read_material_lot_state.consumedActual` with source tagged from the most recent of `ROLL_WEIGHED` (HIGH) / `ROLL_DEPLETED` (MEDIUM) / `MATERIAL_CONSUMED_ACTUAL` (MANUAL_ENTRY HIGH).
+- SCRAPPED_OR_DAMAGED: stays MISSING — QC subsystem deferral. Per-result warning surfaces this.
+- ON_HAND: `current_weight_grams_estimate` (weight mode → WEIGH_BACK_DERIVED HIGH) or `qty_on_hand` (count mode → QTY_ON_HAND MEDIUM); upgraded to `CYCLE_COUNT` HIGH when a `PACKAGING_RECEIPT_ADJUSTED` event is in the lot's history.
+- `cycleCountActualRemaining` from latest `PACKAGING_RECEIPT_ADJUSTED.payload.new_qty_on_hand`.
+
+The 4 PT-6B variances (RECEIPT / CYCLE_COUNT / CONSUMPTION / UNKNOWN) flow through unchanged.
+
+### Rebuild command / script
+Extended `scripts/rebuild-read-models.ts` — the existing canonical rebuild walks v2 alongside v1. Idempotent: ON CONFLICT (scope_type, scope_id) updates in place. v1 left untouched. Run via:
+```
+ALLOW_STAGING_QA_DATA=true npx tsx scripts/rebuild-read-models.ts
+```
+Per-lot rebuilder (`rebuildMaterialReconciliationV2ForLot`) is also exported for future projector hooks (event-driven incremental refresh — not wired this phase).
+
+### Tests added
+**17 new tests** in `material-reconciliation-v2.test.ts`. Cover:
+- null lot returns null; no upsert.
+- count-based PackTrack lot HIGH path (declared+counted → accepted=98 HIGH).
+- declared-only MEDIUM (supplier-declared) with `packtrack_declared` source.
+- legacy qty_received-only LOW.
+- roll lot with net weight: unit=g, accepted from `net_weight_grams`, on_hand from `current_weight_grams_estimate`.
+- roll lot without net weight: MISSING (placeholder qty_received=1 not used).
+- **roll-kind lot received via PackTrack count fields**: unit=each, accepted=98 HIGH, receipt_variance=-2 (the real `c63821ec` staging case).
+- cycle-count adjust payload → `cycleCountActualRemaining` and `CYCLE_COUNT` source.
+- weigh-back vs depletion source tagging.
+- scrap MISSING does not collapse overall confidence.
+- single-row upsert; running twice produces identical content (idempotent); update-set wired.
+- HIGH path holds when accepted+actual+cycle-counted on_hand all HIGH.
+- MISSING/LOW boundary checks.
+
+Suite total: **769/769** pass across 34 files.
+
+### Build / test results
+- `npx tsc --noEmit` clean.
+- `npx vitest run` 769/769.
+- `npx next build` clean.
+
+### Basic staging verification (SHA `0a17fe7`)
+Verified on LX122:
+1. `/api/health` → `0a17fe7…`.
+2. `\d read_material_reconciliation_v2` shows 10 columns, 7 indexes (pkey + scope unique + 4 partial + overall), 2 CHECK constraints, FKs to packaging_materials / packaging_lots / inventory_bags / purchase_orders / products.
+3. Rebuild script ran: `v2 scanned=5 written=5`. Pre + post row counts match.
+4. v2 row content (post-fix):
+   - **PackTrack FOIL_ROLL count receipt** (`c63821ec`): scope_type=ROLL, unit=each, declared=100, counted=98, accepted=98 HIGH, on_hand=98 QTY_ON_HAND MEDIUM, receipt_variance=-2 MEDIUM (2% of 100), overall MEDIUM. **Matches the verification target exactly.**
+   - **4 weighed roll lots**: scope_type=ROLL, unit=g, declared=null, counted=net_weight_grams=1500 HIGH, accepted=1500 HIGH, on_hand=1500 WEIGH_BACK_DERIVED HIGH. No receipt variance (declared null). overall HIGH.
+5. Idempotency: rebuild re-run produced same 5 rows; no duplicates.
+6. v1 (`read_material_reconciliation`) preserved at 911 rows; never touched.
+
+### PT-6D readiness
+**Ready.** PT-6D's UI will read from `read_material_reconciliation_v2` and surface the 8 buckets per the plan §5 UI rules (4 distinct variance columns, never collapse vendor / cycle-count / consumption / unknown into one number, legacy LOW pill, estimated badge). Existing v1 page can stay live behind a "Legacy view" toggle during the transition. PT-6E does the staging walkthrough.
+
+### Decisions captured
+1. **Unit selection is data-driven, not material-kind-driven.** A FOIL_ROLL material received via PackTrack as a count-based lot reconciles in `each`; a FOIL_ROLL received with a weighed entry reconciles in `g`. The `scope_type` still tracks the material kind so UI filtering works, but `unit_of_measure` is per-row.
+2. **Roll placeholder qty_received=1 is suppressed.** Without this rule the legacy fallback would inject a meaningless "1 roll" into ACCEPTED for weighed roll lots whose unit is grams.
+3. **Per-bucket missing_inputs lives in jsonb.** Variance values use plain typed columns (no missing_inputs jsonb) — variance MISSING is itself a complete signal; the bucket-level missing_inputs would just duplicate the parent quantity's lineage.
+4. **No projector hook on event commit (yet).** Rebuild is the canonical write path. PT-6C ships the per-lot helper (`rebuildMaterialReconciliationV2ForLot`) so a future projector hook can call it from `projectEvent` after a relevant material event lands; that wiring waits for PT-6E perf benchmarks.
+
+---
+
 ## PT-6B — Pure 8-bucket reconciliation helpers + tests (complete)
 - Date: 2026-05-08
 - Result: pure-logic helpers shipped per `docs/PT-6_RECONCILIATION_PLAN.md`. **No DB changes; no projector or UI changes.** PT-6 queue checkbox stays unchecked because the queue has a single PT-6 entry — only flips after PT-6E ships.
