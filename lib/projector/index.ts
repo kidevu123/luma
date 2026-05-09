@@ -15,7 +15,7 @@
 // the only place that's allowed to insert into workflow_events going
 // forward.
 
-import { eq, sql, and, asc } from "drizzle-orm";
+import { eq, sql, and, asc, inArray } from "drizzle-orm";
 import type { db as Db } from "@/lib/db";
 import {
   workflowEvents,
@@ -624,10 +624,14 @@ async function projectMetricsForFinalizedBag(
   );
   let machineIds: string[] = [];
   if (stationIds.length > 0) {
+    // Drizzle's inArray handles both single- and multi-element JS
+    // arrays cleanly. The previous `${arr}::uuid[]` cast pattern
+    // failed under postgres-js when the array had only one element
+    // because the driver bound it as a scalar text param.
     const stationRows = await tx
       .select({ machineId: stations.machineId })
       .from(stations)
-      .where(sql`${stations.id} = ANY(${stationIds}::uuid[])`);
+      .where(inArray(stations.id, stationIds));
     machineIds = Array.from(
       new Set(
         stationRows.map((r) => r.machineId).filter((m): m is string => !!m),
