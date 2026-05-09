@@ -19,6 +19,7 @@ import * as schema from "@/lib/db/schema";
 import { rebuildQueueState } from "@/lib/projector/queue-state";
 import { rebuildSkuDaily } from "@/lib/projector/sku-daily";
 import { rebuildMaterialReconciliation } from "@/lib/projector/material-reconciliation";
+import { rebuildMaterialReconciliationV2 } from "@/lib/projector/material-reconciliation-v2";
 import { rebuildStationQualityDaily } from "@/lib/projector/station-daily";
 import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
 import { rebuildMaterialConsumptionDaily } from "@/lib/projector/material-consumption-daily";
@@ -40,6 +41,7 @@ async function main() {
     "read_queue_state",
     "read_sku_daily",
     "read_material_reconciliation",
+    "read_material_reconciliation_v2",
     "read_station_quality_daily",
     "read_material_lot_state",
     "read_material_consumption_daily",
@@ -69,6 +71,13 @@ async function main() {
     await rebuildSkuDaily(tx);
     console.log("[rebuild-read-models] rebuilding read_material_reconciliation…");
     await rebuildMaterialReconciliation(tx);
+    console.log(
+      "[rebuild-read-models] rebuilding read_material_reconciliation_v2…",
+    );
+    const v2Result = await rebuildMaterialReconciliationV2(tx);
+    console.log(
+      `[rebuild-read-models]   v2 scanned=${v2Result.scanned} written=${v2Result.written}`,
+    );
     console.log("[rebuild-read-models] rebuilding read_station_quality_daily…");
     await rebuildStationQualityDaily(tx);
     console.log("[rebuild-read-models] rebuilding read_material_lot_state…");

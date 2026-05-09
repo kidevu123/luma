@@ -2449,6 +2449,125 @@ export const readMaterialReconciliation = pgTable(
   ],
 );
 
+/** PT-6C — 8-bucket reconciliation read model (v2). Coexists with
+ *  v1 (`read_material_reconciliation`) until PT-6D switches the UI.
+ *  Each row captures one (scope_type, scope_id) snapshot — typically
+ *  per packaging_lot. PT-6B's pure helpers compute the bucket values;
+ *  this projector persists them so the UI can read without re-walking
+ *  the event ledger. */
+export const readMaterialReconciliationV2 = pgTable(
+  "read_material_reconciliation_v2",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scopeType: text("scope_type").notNull(),
+    scopeId: uuid("scope_id").notNull(),
+    materialItemId: uuid("material_item_id"),
+    packagingLotId: uuid("packaging_lot_id"),
+    rawBagId: uuid("raw_bag_id"),
+    poId: uuid("po_id"),
+    productId: uuid("product_id"),
+    unitOfMeasure: text("unit_of_measure").notNull(),
+
+    declaredValue: numeric("declared_value", { precision: 20, scale: 6 }),
+    declaredConfidence: text("declared_confidence").notNull(),
+    declaredSource: text("declared_source"),
+    declaredMissingInputs: jsonb("declared_missing_inputs")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
+    countedValue: numeric("counted_value", { precision: 20, scale: 6 }),
+    countedConfidence: text("counted_confidence").notNull(),
+    countedSource: text("counted_source"),
+    countedMissingInputs: jsonb("counted_missing_inputs")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
+    acceptedValue: numeric("accepted_value", { precision: 20, scale: 6 }),
+    acceptedConfidence: text("accepted_confidence").notNull(),
+    acceptedSource: text("accepted_source"),
+    acceptedMissingInputs: jsonb("accepted_missing_inputs")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
+    consumedEstimatedValue: numeric("consumed_estimated_value", { precision: 20, scale: 6 }),
+    consumedEstimatedConfidence: text("consumed_estimated_confidence").notNull(),
+    consumedEstimatedSource: text("consumed_estimated_source"),
+    consumedEstimatedMissingInputs: jsonb("consumed_estimated_missing_inputs")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
+    consumedActualValue: numeric("consumed_actual_value", { precision: 20, scale: 6 }),
+    consumedActualConfidence: text("consumed_actual_confidence").notNull(),
+    consumedActualSource: text("consumed_actual_source"),
+    consumedActualMissingInputs: jsonb("consumed_actual_missing_inputs")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
+    scrappedOrDamagedValue: numeric("scrapped_or_damaged_value", { precision: 20, scale: 6 }),
+    scrappedOrDamagedConfidence: text("scrapped_or_damaged_confidence").notNull(),
+    scrappedOrDamagedSource: text("scrapped_or_damaged_source"),
+    scrappedOrDamagedMissingInputs: jsonb("scrapped_or_damaged_missing_inputs")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
+    onHandValue: numeric("on_hand_value", { precision: 20, scale: 6 }),
+    onHandConfidence: text("on_hand_confidence").notNull(),
+    onHandSource: text("on_hand_source"),
+    onHandMissingInputs: jsonb("on_hand_missing_inputs")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
+    receiptVarianceValue: numeric("receipt_variance_value", { precision: 20, scale: 6 }),
+    receiptVarianceConfidence: text("receipt_variance_confidence").notNull(),
+    receiptVarianceSeverity: text("receipt_variance_severity").notNull(),
+
+    cycleCountVarianceValue: numeric("cycle_count_variance_value", { precision: 20, scale: 6 }),
+    cycleCountVarianceConfidence: text("cycle_count_variance_confidence").notNull(),
+    cycleCountVarianceSeverity: text("cycle_count_variance_severity").notNull(),
+
+    consumptionVarianceValue: numeric("consumption_variance_value", { precision: 20, scale: 6 }),
+    consumptionVarianceConfidence: text("consumption_variance_confidence").notNull(),
+    consumptionVarianceSeverity: text("consumption_variance_severity").notNull(),
+
+    unknownVarianceValue: numeric("unknown_variance_value", { precision: 20, scale: 6 }),
+    unknownVarianceConfidence: text("unknown_variance_confidence").notNull(),
+    unknownVarianceSeverity: text("unknown_variance_severity").notNull(),
+
+    overallConfidence: text("overall_confidence").notNull(),
+    warnings: jsonb("warnings").notNull().default(sql`'[]'::jsonb`),
+    sourceSnapshot: jsonb("source_snapshot").notNull().default(sql`'{}'::jsonb`),
+
+    calculatedAt: timestamp("calculated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("read_material_reconciliation_v2_scope_unique").on(
+      t.scopeType,
+      t.scopeId,
+    ),
+    index("read_material_reconciliation_v2_material_idx")
+      .on(t.materialItemId)
+      .where(sql`material_item_id IS NOT NULL`),
+    index("read_material_reconciliation_v2_packaging_lot_idx")
+      .on(t.packagingLotId)
+      .where(sql`packaging_lot_id IS NOT NULL`),
+    index("read_material_reconciliation_v2_raw_bag_idx")
+      .on(t.rawBagId)
+      .where(sql`raw_bag_id IS NOT NULL`),
+    index("read_material_reconciliation_v2_po_idx")
+      .on(t.poId)
+      .where(sql`po_id IS NOT NULL`),
+    index("read_material_reconciliation_v2_overall_idx").on(t.overallConfidence),
+  ],
+);
+
 /** Per-(day, machine, product) quality + unit rollup. Inputs to OEE
  *  Quality and Performance factors. The metric layer reads from
  *  here; OEE refuses to compute until production_calendars and
@@ -2670,6 +2789,7 @@ export type Product = typeof products.$inferSelect;
 export type Machine = typeof machines.$inferSelect;
 export type Station = typeof stations.$inferSelect;
 export type StationOperatorSession = typeof stationOperatorSessions.$inferSelect;
+export type ReadMaterialReconciliationV2 = typeof readMaterialReconciliationV2.$inferSelect;
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 export type PoLine = typeof poLines.$inferSelect;
 export type Shipment = typeof shipments.$inferSelect;

@@ -176,6 +176,13 @@
       "when": 1780400000000,
       "tag": "0024_operator_daily_employee_id",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1780500000000,
+      "tag": "0025_read_material_reconciliation_v2",
+      "breakpoints": true
     }
   ]
 }
