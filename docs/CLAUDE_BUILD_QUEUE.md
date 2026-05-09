@@ -201,7 +201,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 
 ---
 
-### [ ] OP-1F — Tests + verification
+### [x] OP-1F — Tests + verification
 **Objective.** Final regression sweep across the OP-1 surface. No new features.
 
 **Files likely touched.** Test files only.

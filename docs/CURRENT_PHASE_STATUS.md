@@ -4,6 +4,96 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## OP-1F — Final OP-1 invariant tests + verification sweep (complete)
+- Date: 2026-05-08
+- Result: OP-1 phase fully complete. No new product features, no UI redesign, no schema changes.
+
+### Files changed
+- `lib/production/op-1-invariant-scanner.test.ts` — new static scanner.
+- `docs/CLAUDE_BUILD_QUEUE.md` — checkbox flipped.
+- `docs/CURRENT_PHASE_STATUS.md` — this entry.
+
+### Invariant tests added (40 new tests)
+The scanner reads each live floor + admin action file and asserts:
+1. Every `projectEvent(tx, { ... })` call site includes the four accountability keys (`enteredByUserId`, `accountableEmployeeId`, `accountabilitySource`, `accountableEmployeeNameSnapshot`). Deferred event types are excluded.
+2. Every `tx.insert(materialInventoryEvents).values({ ... })` call site wraps its payload with `withAccountabilityPayload(...)`.
+3. Every `tx.insert(rawBagAllocationEvents).values({ ... })` call site wraps its payload with `withAccountabilityPayload(...)`.
+4. Each accountable event-type literal appears at least once across the live action files (coverage check).
+5. Each deferred event-type literal does NOT appear in any live action file (anti-coverage check — fails the moment a future phase silently wires a deferred event without removing it from the deferred list).
+
+Files scanned:
+- `app/(floor)/floor/[token]/actions.ts`
+- `app/(floor)/floor/[token]/roll-actions.ts`
+- `app/(floor)/floor/[token]/bag-allocation-actions.ts`
+- `app/(admin)/inbound/packaging-materials/actions.ts`
+- `app/(admin)/packaging-receipts/[lotId]/actions.ts`
+
+### Event types covered (now accountable)
+**workflow_events (write to `workflow_events.employee_id` + payload):**
+- `CARD_ASSIGNED`, `PRODUCT_MAPPED`, `BAG_PICKED_UP`
+- `BLISTER_COMPLETE`, `SEALING_COMPLETE`, `PACKAGING_SNAPSHOT`, `PACKAGING_COMPLETE`
+- `BOTTLE_HANDPACK_COMPLETE`, `BOTTLE_CAP_SEAL_COMPLETE`, `BOTTLE_STICKER_COMPLETE`
+- `BAG_PAUSED`, `BAG_RESUMED`, `BAG_RELEASED`, `BAG_FINALIZED`
+- `OPERATOR_CHANGE`
+
+**material_inventory_events (payload-merged via `withAccountabilityPayload`):**
+- `MATERIAL_RECEIVED`
+- `ROLL_MOUNTED`, `ROLL_UNMOUNTED`, `ROLL_WEIGHED`, `ROLL_DEPLETED`
+- `ROLL_COUNTER_SEGMENT_RECORDED`
+- `PACKAGING_BOX_RECEIVED`, `PACKAGING_BOX_COUNTED`, `PACKAGING_VARIANCE_RECORDED`, `PACKAGING_RECEIPT_ADJUSTED`
+
+**raw_bag_allocation_events (payload-merged):**
+- `RAW_BAG_OPENED`, `RAW_BAG_PARTIAL_CONSUMED`, `RAW_BAG_RETURNED_TO_STOCK`, `RAW_BAG_DEPLETED`, `RAW_BAG_ADJUSTED`
+
+### Event types intentionally deferred
+**Deferred to QC subsystem phase per OP-1D decision:**
+- `PACKAGING_DAMAGE_RETURN`
+- `REWORK_SENT`
+- `REWORK_RECEIVED`
+- `SCRAP_RECORDED`
+- `SUBMISSION_CORRECTED`
+
+These are declared in the workflow_event_type enum but have **no live emission path** today. The scanner enforces this — if a future commit wires any of them without removing it from the deferred list, the test fails so the reviewer is forced to also wire accountability.
+
+### Other workflow event types not covered by OP-1
+- `BAG_VERIFIED` — read-only vendor barcode lookup helper. Not currently emitted live; left out of OP-1 scope.
+- `STATION_PAUSED`, `STATION_RESUMED` — station-level pause events. No live emission today.
+- `BATCH_RELEASED`, `BATCH_HELD`, `BATCH_RECALLED` — admin batch lifecycle. Currently only emitted by legacy synthesizer / batch-admin actions outside the OP-1 surface; will be folded into a future batch-admin pass.
+- `MATERIAL_CONSUMED` — synthesized by projector hook from `BLISTER_COMPLETE`; the hook reads `workflow_events.employee_id` from the parent event so accountability is preserved transitively.
+- `STATION_SCAN_TOKEN_ROTATED`, `DOWNTIME_STARTED`, `DOWNTIME_ENDED`, `MATERIAL_CHANGED`, `QA_HOLD_STARTED`, `QA_HOLD_RELEASED` — admin / system events whose accountability path is the admin user (covered when emitted by admin actions). No live emission today; logged here to keep the disclosure honest.
+- `VARIETY_SOURCES_ASSIGNED`, `FINISHED_GOODS_RELEASED`, `CARD_FORCE_RELEASED` — admin-side events outside the per-bag operator-productivity surface.
+
+### Reporting verification
+- `/operator-productivity` page: route renders 200 under the auth smoke (admin@luma OWNER). Page is rebuilt around `deriveOperatorRows` which already returns rows tagged with employee fullName + LOW/HIGH confidence; UI rendering of `displayName` and the legacy pill is shipped + covered by typecheck + build.
+- Floor-board operator-on-shift card: same. Loader is rebuilt around the unified `OperatorOnShiftRow` shape; component renders `displayName` and pills the legacy code-only rows.
+- Bag genealogy: `deriveBagGenealogy` already joins `employees.fullName` via `workflow_events.employee_id` (verified during OP-1A audit). Now that OP-1B/OP-1C populate that column on every live emission, the timeline shows the employee name out of the box.
+- Page-level employee-name rendering not curl-asserted live this run (no QA bag exists outside the verifier's transaction window). The unit-test surface plus the staging verifier's confirmation that read_operator_daily.employee_id populates correctly is sufficient evidence.
+
+### Staging verification (SHA `49b41ce`)
+- `/api/health` → `sha=49b41ce39392…`.
+- Auth smoke: PASS=43 REDIR=0 FAIL=0.
+- `scripts/verify-op-1e.ts` re-run on `49b41ce`: all checks green. Walked CARD_ASSIGNED → BLISTER_COMPLETE → SEALING_COMPLETE → PACKAGING_COMPLETE → BAG_FINALIZED with accountability; verified `read_operator_daily.employee_id` populated (`303761de…`, ewsin), `bags_finalized=1` (was 0 because the prior orphaned row had been cleaned up after OP-1E); no double-counting; cleanup ran.
+
+### Build / test / smoke
+- `npx tsc --noEmit` clean.
+- `npx vitest run` — **705 / 705 pass** across 32 files (+40 invariant scanner tests on top of the OP-1B/C/E base).
+- `npx next build` clean.
+- Auth smoke: PASS=43 REDIR=0 FAIL=0.
+
+### OP-1 status
+**OP-1 is fully complete.** The accountability charter is implemented: every live count-submission path captures a stable employee identity (or honestly degrades to LEGACY_TEXT for free-text fallbacks). Operator productivity rolls up by `read_operator_daily.employee_id` with legacy `operator_code` rows still rendering at LOW confidence. Five QC event types are deferred to the QC subsystem phase; the invariant scanner enforces that deferral so they cannot be silently shipped without accountability.
+
+### Known limitations
+- Floor PWA remains anonymous. Supervisor override is per-form (`overrideEmployeeCode`) rather than role-gated by login — gating that requires a floor-auth refactor outside OP-1.
+- No backfill of historical `workflow_events.employee_id`. Bags finalized before OP-1B keep `employee_id IS NULL` and continue to render as legacy code-only on the leaderboard.
+- Damage / rework / scrap / supervisor-correction events are deferred (OP-1D). Plumbing is ready; the QC phase wires the live forms.
+- Rendering of employee fullName on the operator-productivity HTML is not curl-asserted live. The route returns 200 under auth smoke; deriveOperatorRows is unit-covered. Adding a live HTML grep would require seeding a finalized bag outside the verifier's cleanup window — explicitly out of scope this phase.
+
+### Next unchecked phase per `docs/CLAUDE_BUILD_QUEUE.md`
+**PT-6 — 8-bucket reconciliation.** Awaiting your go.
+
+---
+
 ## OP-1E — Operator metrics switch to employee_id (complete)
 - Date: 2026-05-08
 - Result: shipped + verified end-to-end on staging.
