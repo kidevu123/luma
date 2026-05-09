@@ -248,7 +248,7 @@ describe("buildPackagingLotReconciliationInput — packaging lot mapping", () =>
     expect(result.accepted.confidence).toBe("HIGH");
   });
 
-  it("roll lot with no net weight reports MISSING accepted (does NOT use qty_received placeholder of 1)", async () => {
+  it("roll lot with no net weight and only qty_received placeholder reports MISSING accepted", async () => {
     const tx = buildStubTx({
       lotJoin: {
         lot: { ...ROLL_LOT, netWeightGrams: null },
@@ -261,6 +261,39 @@ describe("buildPackagingLotReconciliationInput — packaging lot mapping", () =>
     expect(out!.input.receipt.qtyReceivedLegacy).toBeNull();
     expect(result.accepted.value).toBeNull();
     expect(result.accepted.confidence).toBe("MISSING");
+  });
+
+  it("roll-kind lot with PackTrack count fields reconciles in `each`, not grams", async () => {
+    // Real staging case: c63821ec FOIL_ROLL with declared=100 / counted=98
+    // (received via PackTrack as count-based) and no net_weight_grams.
+    // The lot's material is a roll, but the reconciliation mode is
+    // data-driven: declared+counted dominate when present.
+    const tx = buildStubTx({
+      lotJoin: {
+        lot: {
+          ...ROLL_LOT,
+          netWeightGrams: null,
+          declaredQuantity: 100,
+          countedQuantity: 98,
+          acceptedQuantity: 98,
+          qtyReceived: 98,
+          sourceSystem: "PACKTRACK",
+        },
+        mat: ROLL_MAT,
+      },
+      lotState: null, latestWeigh: null, latestAdjust: null, upserts: [],
+    });
+    const out = await buildPackagingLotReconciliationInput(tx, ROLL_LOT.id);
+    expect(out!.scopeType).toBe("ROLL"); // material classification stays
+    expect(out!.unit).toBe("each"); // unit follows the data
+    expect(out!.input.receipt.declaredQuantity).toBe(100);
+    expect(out!.input.receipt.countedQuantity).toBe(98);
+    expect(out!.input.receipt.qtyReceivedLegacy).toBeNull();
+    const result = deriveReconciliationResult(out!.input);
+    expect(result.accepted.value).toBe(98);
+    expect(result.accepted.confidence).toBe("HIGH");
+    const recv = result.variances.find((v) => v.kind === "RECEIPT_VARIANCE")!;
+    expect(recv.value).toBe(-2);
   });
 
   it("cycle-count adjustment payload becomes cycleCountActualRemaining", async () => {

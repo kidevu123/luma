@@ -73,14 +73,27 @@ export async function buildPackagingLotReconciliationInput(
   const lot = row.lot;
   const mat = row.mat;
 
-  // Roll vs count-based packaging is decided by the material's kind.
-  // Rolls report in grams; count-based packaging in `each`. The PT-6B
-  // helpers don't care about the unit name itself — they just carry
-  // it through the result — but the unit must be consistent across
-  // all buckets for the same row.
-  const isRoll = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(mat.kind);
-  const scopeType = isRoll ? "ROLL" : "PACKAGING_LOT";
-  const unit = isRoll ? "g" : "each";
+  // The unit and reconciliation mode is DATA-DRIVEN, not driven by
+  // the material's kind. A roll material received with net_weight_
+  // grams reconciles in grams; the same kind received via a PackTrack
+  // count receipt reconciles in `each`. This is honest: the buckets
+  // report whichever measurement Luma actually has.
+  const materialKindIsRoll = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(
+    mat.kind,
+  );
+  const hasWeight = lot.netWeightGrams != null;
+  const hasCounts =
+    lot.declaredQuantity != null ||
+    lot.countedQuantity != null ||
+    // qtyReceived === 1 on a roll-kind lot is the placeholder; ignore
+    // it for count-based detection.
+    (lot.qtyReceived != null &&
+      !(materialKindIsRoll && lot.qtyReceived === 1));
+  const useWeightMode = hasWeight && !hasCounts;
+  // scope_type still reflects the lot's material classification — UI
+  // filters by ROLL vs PACKAGING_LOT — but the unit is per-row.
+  const scopeType = materialKindIsRoll ? "ROLL" : "PACKAGING_LOT";
+  const unit = useWeightMode ? "g" : "each";
 
   // Receipt inputs come straight off the packaging_lots row.
   // For COUNT-BASED packaging: declared/counted/qty_received are the
@@ -95,19 +108,27 @@ export async function buildPackagingLotReconciliationInput(
   //     gross-tare or was entered directly)
   //   - qtyReceivedLegacy: null (the placeholder 1 must NOT drive
   //     ACCEPTED in grams)
-  let receiptDeclared: number | null = lot.declaredQuantity ?? null;
-  let receiptCounted: number | null = lot.countedQuantity ?? null;
+  let receiptDeclared: number | null = null;
+  let receiptCounted: number | null = null;
   let qtyReceivedLegacy: number | null = null;
-  if (isRoll) {
+  if (useWeightMode) {
+    // Weight-based: declared null (rolls don't have a declared-vs-
+    // counted shape at receipt), counted = net_weight_grams (HIGH).
     receiptDeclared = null;
     receiptCounted = lot.netWeightGrams ?? null;
-    // No legacy fallback for rolls — without net_weight_grams the
-    // accepted bucket is honestly MISSING.
   } else {
-    qtyReceivedLegacy =
-      lot.declaredQuantity == null && lot.countedQuantity == null
-        ? lot.qtyReceived
-        : null;
+    // Count-based: trust declared/counted as-is. qtyReceived is a
+    // legacy fallback only when neither declared nor counted is set
+    // AND the value isn't the roll-placeholder 1.
+    receiptDeclared = lot.declaredQuantity ?? null;
+    receiptCounted = lot.countedQuantity ?? null;
+    if (
+      lot.declaredQuantity == null &&
+      lot.countedQuantity == null &&
+      !(materialKindIsRoll && lot.qtyReceived === 1)
+    ) {
+      qtyReceivedLegacy = lot.qtyReceived;
+    }
   }
 
   // Consumption signals come from read_material_lot_state, which is
@@ -126,7 +147,12 @@ export async function buildPackagingLotReconciliationInput(
     .from(readMaterialLotState)
     .where(eq(readMaterialLotState.packagingLotId, lotId));
 
-  const estimatedSource: EstimatedConsumptionSource = isRoll
+  // Estimated-consumption source name follows the unit. Rolls in
+  // grams use the segment-ledger × standard math; count-based lots
+  // use BOM × output. The lot's material kind is the better proxy
+  // here because consumed_estimated lives in read_material_lot_state
+  // and that table's source code follows kind, not per-lot mode.
+  const estimatedSource: EstimatedConsumptionSource = materialKindIsRoll
     ? "ROLL_SEGMENT_STANDARD"
     : "BOM";
   const consumedEstimated =
@@ -187,20 +213,18 @@ export async function buildPackagingLotReconciliationInput(
       ? (adjustPayload["new_qty_on_hand"] as number)
       : null;
 
-  // ON_HAND prefers a recently-cycle-counted value (HIGH); otherwise
-  // we read the lot's qty_on_hand (count-based) or current_weight_
-  // grams_estimate (rolls). For roll lots we report the weight, not
-  // the count — the unit is "g".
-  const onHandQty = isRoll
+  // ON_HAND follows the same data-driven mode the receipt section
+  // chose. Weight-mode reads current_weight_grams_estimate; count-
+  // mode reads qty_on_hand. A recent cycle count on a count-mode lot
+  // upgrades the source from QTY_ON_HAND (MEDIUM) to CYCLE_COUNT (HIGH).
+  const onHandQty = useWeightMode
     ? lot.currentWeightGramsEstimate ?? null
     : lot.qtyOnHand;
   let onHandSource: OnHandSource = "QTY_ON_HAND";
-  if (cycleCountActualRemaining != null && !isRoll) {
-    // The cycle-count flow only writes new_qty_on_hand for count-based
-    // lots today; rolls don't have a parallel cycle-count yet.
-    onHandSource = "CYCLE_COUNT";
-  } else if (isRoll) {
+  if (useWeightMode) {
     onHandSource = "WEIGH_BACK_DERIVED";
+  } else if (cycleCountActualRemaining != null) {
+    onHandSource = "CYCLE_COUNT";
   }
 
   const sourceSystem = (lot.sourceSystem ?? null) as
@@ -234,7 +258,8 @@ export async function buildPackagingLotReconciliationInput(
     packaging_lot_id: lot.id,
     packaging_material_id: lot.packagingMaterialId,
     material_kind: mat.kind,
-    is_roll: isRoll,
+    material_kind_is_roll: materialKindIsRoll,
+    use_weight_mode: useWeightMode,
     source_system: lot.sourceSystem ?? null,
     declared_quantity: lot.declaredQuantity ?? null,
     counted_quantity: lot.countedQuantity ?? null,
