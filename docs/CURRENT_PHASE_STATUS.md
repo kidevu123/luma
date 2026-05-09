@@ -4,6 +4,49 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## OP-1E — Operator metrics switch to employee_id (complete)
+- Date: 2026-05-08
+- Result: shipped + verified end-to-end on staging.
+- Migration number: **0024** (queue draft mentioned 0023 but OP-1C already used 0023 for station_operator_sessions; next unused was 0024, journal `when=1780400000000` strictly increasing).
+- Schema:
+  - `read_operator_daily.employee_id uuid` added (FK employees, ON DELETE SET NULL).
+  - `operator_code` dropped from NOT NULL.
+  - Old `(day, operator_code)` unique replaced with TWO partial uniques:
+    - `read_operator_daily_day_employee_unique` on `(day, employee_id) WHERE employee_id IS NOT NULL` — modern HIGH-confidence rows.
+    - `read_operator_daily_day_code_legacy_unique` on `(day, operator_code) WHERE employee_id IS NULL AND operator_code IS NOT NULL` — legacy LOW-confidence rows.
+  - `read_operator_daily_employee_idx` for the leaderboard join.
+  - `CHECK (employee_id IS NOT NULL OR operator_code IS NOT NULL)` constraint blocks orphaned rows.
+- Projector:
+  - New pure helper `lib/projector/operator-daily-attribution.ts` (`attributeFinalizedBag`) — given a finalized bag's events, returns `{employees, codeOnly}`. Hard rule: when an event has both employee_id and operator_code, the code becomes a tag on the employee row, never a separate legacy row. Prevents double-counting.
+  - `projectMetricsForFinalizedBag` rewritten around the helper. Two upsert variants: one targeting `(day, employee_id)` partial unique, one targeting the `(day, operator_code) WHERE employee_id IS NULL` legacy partial unique.
+- Metrics:
+  - New structured `deriveOperatorRows(dateRange)` returns `OperatorRow[]` with `groupKey`, `employeeId`, `employeeFullName`, `operatorCode`, `displayName`, `confidence` (HIGH | LOW), aggregated counters. Group key is the employee uuid for stable rows or `__code:<text>` for legacy — two same-named employees stay distinct.
+  - `deriveOperatorMetrics` now wraps `deriveOperatorRows` for the metric-bundle API consumers.
+- UI:
+  - `/operator-productivity` renders employee fullName when known, the operator_code as a separate column, and a "legacy code only" amber pill on LOW-confidence rows.
+  - `floor-board` operators-on-shift loader switched to a CTE that prefers `workflow_events.employee_id` over `payload.operator_code`, joins `employees`, and returns the unified `OperatorOnShiftRow` shape with `confidence`.
+  - `OperatorOnShiftCard` renders the new shape with the legacy pill.
+- Tests:
+  - `lib/projector/operator-daily-attribution.test.ts` — 11 cases (empty, single employee, code-tag merge, no-promote-when-code-claimed, first-code-wins, null→non-null upgrade, two distinct employees, legacy code promotion, whitespace handling, no-double-count under mixed events, two same-named employees stay separate).
+  - 665/665 vitest pass; tsc --noEmit clean; next build clean.
+- Bug fix bundled in this phase: `lib/projector/index.ts` — replaced the pre-existing `${stationIds}::uuid[]` pattern in the same finalize function with `inArray(stations.id, stationIds)`. The old pattern failed under postgres-js when stationIds had a single element ("Array value must start with `{`"). Surfaced by the OP-1E verifier walking a single-station QA bag.
+- Staging verification (`scripts/verify-op-1e.ts` against LX122 DB):
+  - SHA `cbe0617` live.
+  - Migration applied: column, two partial uniques, employee idx, CHECK constraint, FK all confirmed via `\d read_operator_daily`.
+  - Walked CARD_ASSIGNED → BLISTER_COMPLETE → SEALING_COMPLETE → PACKAGING_COMPLETE → BAG_FINALIZED with accountability fields.
+  - read_operator_daily row keyed `(today, ewsin.id)` populated, `bags_finalized` incremented (+1, was 1 → 2 after second run).
+  - No legacy code-only row created in the same window — projector did not double-count.
+  - Cleanup ran (bag, card, events, session, QA delta on read_operator_daily). Pre-existing orphaned QA row from initial failed run was deleted manually after the bug fix.
+- Auth smoke after the route changes: PASS=43 REDIR=0 FAIL=0.
+- Operator metrics now use employee_id end-to-end. Legacy operator_code rows still appear, marked LOW confidence.
+- What remains for OP-1F final verification:
+  - Sweep the existing test corpus + write the OP-1 invariant scanner test that asserts every live event-emission path covered by OP-1B/OP-1C produces at least one workflow_events row (or material_inventory_events / raw_bag_allocation_events row) with employee_id (or accountable_employee_id payload field) populated when accountability is resolvable in the test seed.
+  - Honest-disclosure docs: enumerate which event types still don't carry accountability and why (the QC subsystem deferral list from OP-1D).
+  - Run full suite + build + auth smoke as a regression sweep.
+- Next phase: OP-1F (final verification sweep).
+
+---
+
 ## OP-1D — Damages / rework / scrap / supervisor-correction (DEFERRED)
 - Date: 2026-05-08
 - Decision: **DEFERRED** to the QC subsystem phase. No code changed.

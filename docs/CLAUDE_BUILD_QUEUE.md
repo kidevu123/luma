@@ -176,7 +176,7 @@ Decision in `docs/CURRENT_PHASE_STATUS.md`. If shipped, build + tests green. Upd
 
 ---
 
-### [ ] OP-1E — Operator metrics switch to employee_id
+### [x] OP-1E — Operator metrics switch to employee_id
 **Objective.** Replace `operator_code` text-keyed productivity rollups with stable `employee_id`. Keep the text column for backward-compat reads of legacy data; new rows populate both. `deriveOperatorMetrics` switches grouping to `employee_id` when available.
 
 **Files likely touched.**
