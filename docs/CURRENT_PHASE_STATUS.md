@@ -4,6 +4,89 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-6D — 8-bucket reconciliation UI (complete)
+- Date: 2026-05-09
+- Result: shipped + verified on staging. PT-6 queue checkbox stays `[ ]` until PT-6E ships.
+
+### Latest SHA verification
+Pre-flight: PT-6C report named `791c804` as the last commit. Verified `791c804` was **docs-only** (single file `docs/CURRENT_PHASE_STATUS.md`, +94 lines) — no code change to land. Staging was on `0a17fe7` (the last code-affecting PT-6C commit) and v2 rebuild was producing the expected 5 rows. Safe to proceed.
+
+PT-6D commits: `56ad4a7` (page + loader + tests + auth-smoke entry) → `945bce4` (verifier script) → `2f8dba2` (verifier regex tolerates React's text-interpolation comment) → `0c76776` (footer copy fix). Staging now on `0c76776`.
+
+### Files changed
+- `lib/production/reconciliation-v2-loader.ts` (new) — DB → view-row shaping + filters + `VARIANCE_LABELS`.
+- `lib/production/reconciliation-v2-loader.test.ts` (new) — 17 cases.
+- `app/(admin)/po-reconciliation-v2/page.tsx` (new) — the 8-bucket page.
+- `app/(admin)/po-reconciliation/page.tsx` — added `New 8-bucket view →` link.
+- `scripts/smoke-authenticated-routes.ts` — added `/po-reconciliation-v2`.
+- `scripts/verify-pt-6d.ts` (new) — JWT-minting page-render verifier.
+
+### UI route / page
+**New route:** `/po-reconciliation-v2`. Reads from `read_material_reconciliation_v2`. UI does not recompute math — formulas stay in PT-6B + PT-6C.
+
+Per row:
+- Identity strip — scope_type, unit, calculated_at, material SKU + name, lot/roll number, kind.
+- 7 typed buckets in a grid: DECLARED · COUNTED · ACCEPTED · CONSUMED_ESTIMATED (with "estimated, not measured" hint) · CONSUMED_ACTUAL · SCRAPPED_OR_DAMAGED · ON_HAND. Each cell shows value + unit + `ConfidenceBadge` + source + missing-input list.
+- 4 variance cells in a parallel grid (RECEIPT / CYCLE_COUNT / CONSUMPTION / UNKNOWN), severity-colour-coded (NONE/LOW emerald · MEDIUM amber · HIGH rose · MISSING slate). Each shows value + unit + confidence + severity. Subtype labels keep the four meanings distinct.
+- Warnings banner when the row carries any.
+- Expandable detail panel (HTML `<details>` element) with scope_id, packaging_lot_id, po_id, calculated_at, the confidence-ladder explanation, and the raw `source_snapshot` JSONB rendered as a code block.
+
+### Legacy view behaviour
+v1 lives at `/po-reconciliation` (untouched). v2 is the new route at `/po-reconciliation-v2`. Both pages cross-link:
+- v1 header now shows a `New 8-bucket view →` link (small, top-right under the page header).
+- v2 header shows a `← legacy PO reconciliation` link.
+No toggle inside a single page — the v1 surface is PO-keyed and the v2 surface is lot-keyed, so a shared route would force a UX compromise. Cross-linking keeps both views first-class.
+
+### Filters added (search-param driven)
+- `scope` — PACKAGING_LOT / RAW_BAG / ROLL / MATERIAL_ITEM / PO
+- `conf` — overall_confidence (HIGH / MEDIUM / LOW / MISSING)
+- `vKind` — only rows with non-zero variance of the selected kind
+- `vSev` — only rows where any variance bucket has the selected severity
+- `source` — source_system from `source_snapshot` (PACKTRACK / MANUAL_LUMA / ZOHO / IMPORT)
+- `varianceOnly` — checkbox; drops rows where all four variance buckets are null/zero
+- `missingOnly` — checkbox; keeps rows with at least one MISSING bucket
+- `Apply` button submits, `clear` resets.
+
+### Row detail behaviour
+Each row uses an HTML `<details>` element so server-rendered HTML stays cacheable + JS-free. Expanded panel shows the full bucket payload (identity KVs), confidence-ladder explainer copy, and the raw `source_snapshot` blob as pretty-printed JSON. The bucket grid + variance grid stay visible in the summary line so collapsed rows still convey the headline numbers.
+
+### Tests added
+`lib/production/reconciliation-v2-loader.test.ts` — 17 cases:
+- numeric strings parse to numbers; jsonb arrays preserved; source_snapshot is a record; warnings list reads.
+- Weight-mode and count-mode rows render correct shape.
+- All 6 filters covered (scopeType, confidence, varianceKind, varianceSeverity, sourceSystem, varianceOnly, missingOnly).
+- VARIANCE_LABELS invariants — RECEIPT never says "production loss"/"scrap"/"yield"; CYCLE_COUNT never says "supplier shortage"/"vendor"; CONSUMPTION never says "shortage"/"short-shipped"; UNKNOWN says "unclassified"; all four titles + subtitles distinct (no copy collision).
+- `reconciliationV2HasAnyRows` true/false.
+
+Suite total: **786 / 786** pass across 35 files (+17 new on top of PT-6C's 769).
+
+### Build / test / smoke results
+- `npx tsc --noEmit` clean.
+- `npx vitest run` 786/786.
+- `npx next build` clean (pre-existing OTel warning unchanged).
+- Auth smoke: PASS=44 REDIR=0 FAIL=0 (was 43; +1 for `/po-reconciliation-v2`).
+
+### Staging verification (`scripts/verify-pt-6d.ts` against SHA `0c76776`)
+1. Mint admin JWT for `admin@luma` — ok.
+2. `GET /po-reconciliation-v2` → 200, body 188,590 bytes — ok.
+3. PackTrack receipt numbers rendered:
+   - `100` (declared), `98` (counted/accepted), `-2` (receipt variance) all present in HTML.
+   - `severity: MEDIUM` rendered (regex tolerates React's `<!-- -->` text-interpolation comment).
+4. Banned-phrase scan: `production loss`, `supplier shortage`, `vendor shortage` — none present anywhere in rendered HTML. UI keeps the four variance subtypes visually distinct.
+5. All four subtype titles present: "Receipt variance", "Cycle-count variance", "Consumption variance", "Unknown variance".
+6. v2 → v1 link ("← legacy PO reconciliation") present.
+7. v1 still renders 200 + carries the forward link "New 8-bucket view →".
+
+### PT-6E readiness
+**Ready.** v2 page renders correctly with real staging data (PackTrack receipt 100/98/-2/MEDIUM/MEDIUM, plus 4 weighed roll rows in grams). PT-6E does the broader sweep across the 8-bucket model: end-to-end staging walkthrough, regression sweep on prior phases, possibly a perf benchmark to decide whether to wire an event-driven projector hook (PT-6C decision deferred). UI is intentionally functional, not polish — the command-center polish phase is its own queue item.
+
+### Decisions
+1. **Two routes, not a toggle.** v1 is PO-keyed; v2 is lot-keyed. Cross-links beat a shared route that would compromise both UX.
+2. **Footer disclaimers trimmed.** "Not production loss" / "Not vendor shortage" copy in body content trips the static invariant. The bucket name + column header carry the meaning. Same lesson as PT-6B explanations.
+3. **JSX text-interpolation comment is real.** React inserts `<!-- -->` between adjacent static text and an interpolated expression; verifier regex must tolerate it. Documented in the verifier.
+
+---
+
 ## PT-6C — 8-bucket read model + projector / rebuild wiring (complete)
 - Date: 2026-05-09
 - Result: shipped + verified on staging. PT-6 queue checkbox stays `[ ]` per the multi-phase split (flips after PT-6E).
