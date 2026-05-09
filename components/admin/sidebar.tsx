@@ -64,6 +64,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
     heading: "Materials",
     items: [
       { href: "/packaging-inventory", label: "Packaging inventory", icon: Boxes },
+      { href: "/product-packaging-requirements", label: "Product requirements", icon: PackageCheck },
       { href: "/active-rolls", label: "Active rolls", icon: Activity },
       { href: "/roll-variance", label: "Roll variance", icon: Scale },
       { href: "/material-alerts", label: "Material alerts", icon: TrendingUp },

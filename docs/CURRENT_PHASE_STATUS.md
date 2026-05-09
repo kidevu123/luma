@@ -4,6 +4,21 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## H.x7 — Material panels (4 read-only) (complete)
+- Date: 2026-05-09
+- Result: **complete**. Queue checkbox flipped to `[x]`.
+- Audit finding: existing `/active-rolls`, `/material-alerts`, `/packaging-inventory`, and `/roll-variance` routes were real read-only panels, not stubs, but needed stronger loader separation, confidence badges, missing-state labels, PT-6 v2 variance surfacing, and the missing product packaging requirements panel.
+- Added `lib/production/material-panels.ts` as the read-only loader/format layer. React pages now render shaped rows from existing source tables/read models only; no business math moved into JSX and no events are emitted.
+- Panels covered: `/packaging-inventory`, `/product-packaging-requirements`, `/active-rolls`, `/roll-variance`, `/material-alerts`.
+- Data sources: `packaging_lots`, `packaging_materials`, `product_packaging_specs`, `products`, `read_roll_usage`, `read_material_reconciliation_v2`, plus existing source-system joins.
+- Honest-data rules: PackTrack counted receipts stay HIGH / "Physically counted"; declared-only stays MEDIUM / "Supplier-declared only"; legacy/imported stays LOW / "Legacy code only"; roll rows show "Estimated", "Actual (weigh-back)", "Roll standard missing", or "Not weighed back" explicitly.
+- Tests: added `lib/production/material-panels.test.ts` (10 cases) covering receipt confidence labels, no fake actual roll usage, variance severity, missing BOM state, and banned variance-conflation wording.
+- Verification: `npx tsc --noEmit` clean; `npx vitest run` 796/796 pass across 36 files; `npx next build` clean with the pre-existing Next config / OpenTelemetry warnings.
+- Staging verification: pending deploy of this SHA. `scripts/smoke-authenticated-routes.ts` now includes `/product-packaging-requirements` alongside the four existing material routes.
+- Next unchecked phase: **QC subsystem — Damages / rework / scrap / supervisor-correction live**.
+
+---
+
 ## PT-6E — Final PT-6 verification + closeout (complete)
 - Date: 2026-05-09
 - Result: **PT-6 fully complete**. Queue checkbox flipped to `[x]`.

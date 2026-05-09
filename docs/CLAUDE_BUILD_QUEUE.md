@@ -239,7 +239,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 
 ---
 
-### [ ] H.x7 — Material panels (4 read-only)
+### [x] H.x7 — Material panels (4 read-only)
 **Objective.** Build 4 read-only admin panels surfacing the existing material read models (already specified in chat history as completed under task #187). Verify whether this is genuinely live or whether the placeholder is a stub. If genuinely live, mark complete; if a stub, finish per spec.
 
 **Files likely touched.**
