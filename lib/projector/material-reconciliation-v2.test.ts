@@ -33,6 +33,7 @@ type LotRow = {
   declaredQuantity: number | null;
   countedQuantity: number | null;
   acceptedQuantity: number | null;
+  netWeightGrams: number | null;
   currentWeightGramsEstimate: number | null;
   sourceSystem: "PACKTRACK" | "MANUAL_LUMA" | "ZOHO" | "IMPORT" | null;
 };
@@ -133,6 +134,7 @@ const COUNT_LOT: LotRow = {
   declaredQuantity: 100,
   countedQuantity: 98,
   acceptedQuantity: 98,
+  netWeightGrams: null,
   currentWeightGramsEstimate: null,
   sourceSystem: "PACKTRACK",
 };
@@ -147,6 +149,7 @@ const ROLL_LOT: LotRow = {
   declaredQuantity: null,
   countedQuantity: null,
   acceptedQuantity: 1,
+  netWeightGrams: 35562,
   currentWeightGramsEstimate: 25000,
   sourceSystem: "MANUAL_LUMA",
 };
@@ -225,7 +228,7 @@ describe("buildPackagingLotReconciliationInput — packaging lot mapping", () =>
     expect(result.overallConfidence).toBe("LOW");
   });
 
-  it("roll lot reports unit=g and reads weight from currentWeightGramsEstimate", async () => {
+  it("roll lot reports unit=g, accepted from net_weight_grams, on_hand from current weight estimate", async () => {
     const tx = buildStubTx({
       lotJoin: { lot: ROLL_LOT, mat: ROLL_MAT },
       lotState: null, latestWeigh: null, latestAdjust: null, upserts: [],
@@ -233,8 +236,31 @@ describe("buildPackagingLotReconciliationInput — packaging lot mapping", () =>
     const out = await buildPackagingLotReconciliationInput(tx, ROLL_LOT.id);
     expect(out!.scopeType).toBe("ROLL");
     expect(out!.unit).toBe("g");
+    // Roll-specific receipt mapping: declared null, counted = net_weight_grams.
+    expect(out!.input.receipt.declaredQuantity).toBeNull();
+    expect(out!.input.receipt.countedQuantity).toBe(35562);
+    expect(out!.input.receipt.qtyReceivedLegacy).toBeNull();
+    // ON_HAND comes from current_weight_grams_estimate (g).
     expect(out!.input.inventory.onHandQty).toBe(25000);
     expect(out!.input.inventory.onHandSource).toBe("WEIGH_BACK_DERIVED");
+    const result = deriveReconciliationResult(out!.input);
+    expect(result.accepted.value).toBe(35562);
+    expect(result.accepted.confidence).toBe("HIGH");
+  });
+
+  it("roll lot with no net weight reports MISSING accepted (does NOT use qty_received placeholder of 1)", async () => {
+    const tx = buildStubTx({
+      lotJoin: {
+        lot: { ...ROLL_LOT, netWeightGrams: null },
+        mat: ROLL_MAT,
+      },
+      lotState: null, latestWeigh: null, latestAdjust: null, upserts: [],
+    });
+    const out = await buildPackagingLotReconciliationInput(tx, ROLL_LOT.id);
+    const result = deriveReconciliationResult(out!.input);
+    expect(out!.input.receipt.qtyReceivedLegacy).toBeNull();
+    expect(result.accepted.value).toBeNull();
+    expect(result.accepted.confidence).toBe("MISSING");
   });
 
   it("cycle-count adjustment payload becomes cycleCountActualRemaining", async () => {

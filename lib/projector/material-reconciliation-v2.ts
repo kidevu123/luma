@@ -83,12 +83,32 @@ export async function buildPackagingLotReconciliationInput(
   const unit = isRoll ? "g" : "each";
 
   // Receipt inputs come straight off the packaging_lots row.
-  // qtyReceivedLegacy is only used when neither declared nor counted
-  // exist — the helper's ACCEPTED cascade handles the precedence.
-  const qtyReceivedLegacy =
-    lot.declaredQuantity == null && lot.countedQuantity == null
-      ? lot.qtyReceived
-      : null;
+  // For COUNT-BASED packaging: declared/counted/qty_received are the
+  // direct ACCEPTED inputs. qtyReceivedLegacy fires only when neither
+  // declared nor counted is filled.
+  // For ROLL lots: weight is the unit. The roll-receive form stores
+  // qty_received=1 as a placeholder (one roll), which is meaningless
+  // when ACCEPTED is in grams. The honest mapping is:
+  //   - declared_quantity: null (rolls don't have a separate declared
+  //     vs counted weight at receipt)
+  //   - counted_quantity:  net_weight_grams (HIGH when net came from
+  //     gross-tare or was entered directly)
+  //   - qtyReceivedLegacy: null (the placeholder 1 must NOT drive
+  //     ACCEPTED in grams)
+  let receiptDeclared: number | null = lot.declaredQuantity ?? null;
+  let receiptCounted: number | null = lot.countedQuantity ?? null;
+  let qtyReceivedLegacy: number | null = null;
+  if (isRoll) {
+    receiptDeclared = null;
+    receiptCounted = lot.netWeightGrams ?? null;
+    // No legacy fallback for rolls — without net_weight_grams the
+    // accepted bucket is honestly MISSING.
+  } else {
+    qtyReceivedLegacy =
+      lot.declaredQuantity == null && lot.countedQuantity == null
+        ? lot.qtyReceived
+        : null;
+  }
 
   // Consumption signals come from read_material_lot_state, which is
   // maintained by the H.x4 / H.x3 projector hooks. estimated reads
@@ -190,8 +210,8 @@ export async function buildPackagingLotReconciliationInput(
   const input: ReconciliationInput = {
     unit,
     receipt: {
-      declaredQuantity: lot.declaredQuantity ?? null,
-      countedQuantity: lot.countedQuantity ?? null,
+      declaredQuantity: receiptDeclared,
+      countedQuantity: receiptCounted,
       qtyReceivedLegacy,
       sourceSystem,
     },
