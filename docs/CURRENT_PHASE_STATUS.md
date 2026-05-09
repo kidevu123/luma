@@ -4,6 +4,124 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-6E — Final PT-6 verification + closeout (complete)
+- Date: 2026-05-09
+- Result: **PT-6 fully complete**. Queue checkbox flipped to `[x]`.
+
+### PT-6 sub-phase status
+- **PT-6A** — plan doc (`docs/PT-6_RECONCILIATION_PLAN.md`) — complete.
+- **PT-6B** — pure helpers (`lib/production/reconciliation-v2.ts`) + 47 tests — complete.
+- **PT-6C** — read model migration `0025_read_material_reconciliation_v2.sql` + projector/rebuild wiring + 17 tests — complete.
+- **PT-6D** — admin UI at `/po-reconciliation-v2` + cross-link from legacy v1 + 17 loader tests — complete.
+- **PT-6E** — final verification sweep (this entry) — complete.
+
+### 1. Latest SHA verification
+- Branch HEAD: `3d0515f`.
+- Staging SHA: `3d0515f` (matches).
+- `3d0515f` is **docs-only** (single file, +83 lines).
+- Last code-affecting SHA `0c76776` is live. No deploy needed.
+
+### 2. Migration / read model verification
+- Migration journal entry `created_at = 1780500000000` present (idx 25).
+- `read_material_reconciliation_v2` table exists with 7 indexes:
+  - `read_material_reconciliation_v2_pkey`
+  - `read_material_reconciliation_v2_scope_unique` (UNIQUE on scope_type, scope_id)
+  - 4 partial indexes: `material_idx`, `packaging_lot_idx`, `raw_bag_idx`, `po_idx`
+  - `overall_idx` on overall_confidence
+- 8 constraints: pkey, `scope_type_chk`, `overall_chk` (CHECK constraints), 5 FKs (material_item / packaging_lot / raw_bag / po / product).
+- v1 `read_material_reconciliation` untouched (911 rows preserved).
+
+### 3. Rebuild idempotency
+| | Run 1 | Run 2 |
+|---|---|---|
+| v2 scanned | 5 | 5 |
+| v2 written | 5 | 5 |
+| v2 row count after | 5 | 5 |
+| v1 row count | 911 | 911 |
+| `calculated_at` (max) | 2026-05-09 16:42:16 UTC (refreshed) | (refreshed again, no row count change) |
+
+No duplicates. v1 unchanged across both runs.
+
+### 4. Known PackTrack receipt verification
+Row `c63821ec` (FOIL_ROLL with PackTrack count receipt):
+- declared = 100 ✓
+- counted = 98 ✓
+- accepted = 98 ✓ (HIGH from counted)
+- receipt_variance = -2 ✓
+- receipt_variance_severity = MEDIUM ✓ (2% of 100)
+- unit_of_measure = `each` ✓
+- overall_confidence = MEDIUM (correct — accepted HIGH but no actual consumption signal)
+- 2 warnings: scrap deferral + actual-consumption MISSING
+- Page render assertion: rendered HTML contains `100`, `98`, `-2`, `severity: MEDIUM`. Banned phrases (`production loss`, `supplier shortage`, `vendor shortage`) absent.
+
+### 5. Weighed roll verification
+4 rows, all PVC_ROLL/FOIL_ROLL:
+- unit_of_measure = `g` ✓
+- counted = net_weight_grams = 1500 (HIGH) ✓
+- accepted = 1500 (HIGH from counted) ✓
+- on_hand = 1500 ✓ source = `WEIGH_BACK_DERIVED` ✓ confidence = HIGH ✓
+- declared null (no declared-vs-counted shape on weighed receipts)
+- receipt_variance MISSING (declared null) — correct
+- overall_confidence = HIGH ✓
+- 1 warning each: scrap deferral
+
+### 6. Missing QC scrap behavior
+- `scrapped_or_damaged_confidence = MISSING` on every row (no live scrap event today).
+- Overall confidence does **not** collapse to MISSING from scrap alone — HIGH/MEDIUM holds when accepted/actual/on_hand inputs warrant it.
+- Warning text: `"no scrap/damage signal — raw-material scrap deferred to QC subsystem"` confirms the missing source honestly.
+
+### 7. UI verification
+- Auth smoke: PASS=44 REDIR=0 FAIL=0. Both `/po-reconciliation` (legacy v1) and `/po-reconciliation-v2` return 200.
+- `verify-pt-6d.ts` re-run on PT-6E checkpoint: 7/7 steps green. PackTrack numbers + severity rendered, no banned phrases, all 4 subtype titles present, cross-links work both directions.
+- Filter probe: `/po-reconciliation-v2` returns 200 under `?varianceOnly=1`, `?vKind=RECEIPT_VARIANCE`, `?conf=HIGH`, `?source=PACKTRACK`, `?missingOnly=1`, `?scope=ROLL` — all 6 filters confirmed.
+- Filter math correctness covered by 17 unit tests in `lib/production/reconciliation-v2-loader.test.ts`.
+
+### 8. Event-driven refresh decision
+**DEFERRED** to a future phase. Rebuild remains the canonical write path for v2.
+
+Why deferred:
+- v2 read model is brand-new; let it stabilize under the rebuild path before adding incremental projection.
+- Rebuild is idempotent (verified — Run 2 produced identical row count and content).
+- UI is read-only, so rebuild lag is not load-bearing.
+- CONSUMED_ACTUAL and SCRAPPED_OR_DAMAGED sources will continue evolving as the QC subsystem ships; an incremental projector wired today would need rework when those events go live.
+
+What a future phase would add:
+- Hook `rebuildMaterialReconciliationV2ForLot(tx, lotId)` (already exported by PT-6C) into `projectEvent` after relevant material events: `MATERIAL_RECEIVED`, `PACKAGING_BOX_COUNTED`, `PACKAGING_RECEIPT_ADJUSTED`, `PACKAGING_VARIANCE_RECORDED`, `ROLL_WEIGHED`, `ROLL_DEPLETED`, and the future QC events.
+- Same opt-in pattern as the existing `refreshMaterialReconciliationForBag` hook on BAG_FINALIZED.
+- Add a benchmark first to confirm event-time projection beats nightly rebuild on staging-scale data.
+
+### 9. Full regression
+- `npx tsc --noEmit` clean.
+- `npx vitest run` — **786 / 786** pass across 35 files.
+- `npx next build` clean (only the pre-existing OTel `Critical dependency` warning, unchanged for 6+ phases).
+- Auth smoke: PASS=44 REDIR=0 FAIL=0.
+
+### 10. Docs updated
+- `docs/CLAUDE_BUILD_QUEUE.md` — PT-6 checkbox flipped to `[x]`.
+- `docs/CURRENT_PHASE_STATUS.md` — this PT-6E entry; full PT-6 sub-phase summary above.
+- `docs/PT-6_RECONCILIATION_PLAN.md` — unchanged, still the source of truth for the bucket model.
+
+### 11. PT-6 status: fully complete
+The 8-bucket reconciliation system ships end-to-end:
+- 8 typed buckets per row + 4 PARALLEL variance subtypes that never collapse into one number.
+- Confidence ladder honest across all 7 quantity buckets and 4 variance buckets.
+- Vendor shortage / cycle-count drift / process loss / unknown gap stay structurally + visually distinct.
+- Legacy v1 still available; v1 ↔ v2 cross-linked.
+- Pure helpers + read model + projector + UI all tested + verified on real staging data.
+
+### Known limitations (carried forward)
+- **QC scrap / rework live events** are deferred to the QC subsystem phase (per OP-1D decision). PT-6 surfaces SCRAPPED_OR_DAMAGED as MISSING with an explicit warning; no fake-zero rendering.
+- **PackTrack shortage recommendations** (PT-7) not part of PT-6. The reconciliation surface is read-only.
+- **Live Zoho sync** not part of PT-6.
+- **v1 reconciliation remains available** for comparison and back-compat.
+- **Event-driven incremental projection** deferred (see §8 above). Rebuild script is the canonical write path for now.
+- **No backfill of historical reconciliation snapshots** beyond what the rebuild produces from the existing event ledger.
+
+### Next unchecked phase per `docs/CLAUDE_BUILD_QUEUE.md`
+**H.x7 — Material panels (4 read-only).**
+
+---
+
 ## PT-6D — 8-bucket reconciliation UI (complete)
 - Date: 2026-05-09
 - Result: shipped + verified on staging. PT-6 queue checkbox stays `[ ]` until PT-6E ships.

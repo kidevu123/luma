@@ -217,7 +217,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 
 ---
 
-### [ ] PT-6 — 8-bucket reconciliation
+### [x] PT-6 — 8-bucket reconciliation
 **Objective.** Replace ad-hoc PO reconciliation with the canonical 8-bucket model: declared, received, counted, accepted, consumed, scrapped, on-hand, variance. Each bucket has source + confidence.
 
 **Files likely touched.**
