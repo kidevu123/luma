@@ -278,7 +278,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 **Sub-phases:**
 
 - [x] **QC-0** — plan doc only (`docs/QC_SUBSYSTEM_IMPLEMENTATION_PLAN.md`). 2026-05-12.
-- [ ] **QC-1** — migration `0026_qc_subsystem_foundation` + `lib/production/qc-events.ts` payload contracts + tests. _Code written 2026-05-12; checkbox stays open until `tsc`/`vitest`/`next build` verified and migration applied on staging (see `docs/CURRENT_PHASE_STATUS.md` QC-1 entry "Verification gap")._
+- [x] **QC-1** — migration `0026_qc_subsystem_foundation` + `lib/production/qc-events.ts` payload contracts + tests. Verified 2026-05-12: tsc clean / vitest 844/844 / next build clean / migration applied / 5 columns + 2 indexes on staging / auth-smoke 45/45 PASS.
 - [ ] **QC-2** — five server actions emitting through `projectEvent` with full OP-1 accountability + tests.
 - [ ] **QC-3** — floor QC quick-action panel + rework receiving surface.
 - [ ] **QC-4** — `/qc-review` admin page + correction modal + ad-hoc scrap modal.

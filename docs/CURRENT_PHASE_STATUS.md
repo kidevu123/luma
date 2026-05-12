@@ -4,6 +4,45 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## QC-1 — Verification + closeout (complete)
+- Date: 2026-05-12
+- Result: **complete**. All four verifications green on the real Luma checkout / LX122 staging container. Queue checkbox flipped to `[x]`.
+
+### Checkout / commit
+- Fresh clone at `/Users/kidevu/luma`, branch `production-intelligence-command-center`.
+- Pre-QC-1 head was `3122349 docs(h.x7): record staging verification`.
+- QC-1 commit: `d5bfc1c feat(qc): add QC event contracts and schema foundation (QC-1)` — 8 files, +1814 lines.
+- Pushed to `origin/production-intelligence-command-center`.
+- Doc-only follow-up commit lands the closeout entries (this one).
+
+### Local verification (real checkout)
+- `npx tsc --noEmit` → clean. (One fix in QC-1 scope: switched three SCRAP_RECORDED test builders to `Record<string, unknown>` indirection so tests can null out optional scope fields — no contract change.)
+- `npx vitest run` → **844/844 pass across 37 test files**. QC-1 added ~57 cases. (One narrowing fix in QC-1 scope: journal `when`-monotonicity test was relaxed to assert only QC-1's tail step increases — the journal as a whole has a pre-existing idx 9↔10 inversion from a prior phase that's tolerated by drizzle in practice.)
+- `npx next build` → clean (only the pre-existing warnings).
+
+### Staging deploy (normal git-based path)
+- Triggered `systemctl start luma-deploy.service` on LX122.
+- Deploy service tracks `production-intelligence-command-center` via `/etc/systemd/system/luma-deploy.service.d/staging-branch.conf`.
+- Service ran the standard `git fetch + reset --hard origin/$LUMA_BRANCH + docker compose up -d --build` flow.
+- Health check after deploy: `{"status":"ok","checks":{"app":"ok","db":"ok"},"sha":"d5bfc1cb62bae9c1f1487f3fad57e39b18b97577","elapsedMs":2}` — new SHA live, app + db healthy.
+
+### Database verification on LX122 (psql, read-only)
+- `\d read_operator_daily` confirms the five new QC columns: `damage_events_total`, `rework_sent_total`, `rework_received_total`, `scrap_units_total`, `corrections_total` (all `integer NOT NULL DEFAULT 0`).
+- `pg_indexes` on `workflow_events` confirms both new indexes: `workflow_events_linked_event_idx` and `workflow_events_linked_event_resolution_unique`.
+- `drizzle.__drizzle_migrations` shows the new entry at `created_at = 1780600000000` (hash `8548fcc6779703673cebf356814d3f5437be1701244edd066847e16104380c3c`) immediately after the PT-6C entry `1780500000000`.
+- `pg_enum` on `workflow_event_type` confirms all five QC values still present (no enum churn — additive migration only).
+
+### Auth smoke
+- Ran `npx tsx scripts/smoke-authenticated-routes.ts` inside the running app container.
+- Result: **PASS=45 REDIR=0 FAIL=0**. Every authenticated route returned 200 as OWNER. Zero new routes were added in QC-1 — the smoke confirms QC-1 did not regress any existing surface.
+
+### Closeout artifacts
+- `docs/CLAUDE_BUILD_QUEUE.md` QC-1 sub-bullet flipped to `[x]` with the verified-2026-05-12 line.
+- This entry appended (above the prior code-complete entry, which remains below as part of the append-only history).
+- Next phase: **QC-2** — five server actions emitting through `projectEvent` with full OP-1 accountability + tests. Ready to start.
+
+---
+
 ## QC-1 — QC schema + payload contracts (code complete; local verification deferred)
 - Date: 2026-05-12
 - Result: schema migration + payload contracts + tests written. **Local verification (tsc / vitest / next build) could NOT be run in this worktree** — see "Verification gap" below. Marking QC-1 code-complete pending verification on a fully-installed checkout (LXC 122 or any node-installed mirror).
