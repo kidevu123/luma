@@ -14,11 +14,12 @@ import {
   machines,
   qrCards,
   workflowBags,
+  workflowEvents,
   readBagState,
   readStationLive,
   products,
 } from "@/lib/db/schema";
-import { eq, and, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, sql, desc } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
 import { STATION_PICKUP_FROM_STAGE } from "@/lib/production/stage-progression";
@@ -29,6 +30,8 @@ import {
 import { OperatorSessionPanel } from "./operator-session-form";
 import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
+import { shouldRenderQcPanel } from "@/lib/production/qc-panel-helpers";
+import { QcPanel, type PendingReworkRow } from "./qc-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -289,6 +292,21 @@ export default async function FloorStationPage({
               currentStage={currentAtStation.state?.stage ?? null}
               isFinalized={currentAtStation.state?.isFinalized ?? false}
             />
+            {/* QC-3: quick QC issue panel. Only on packaging /
+             *  sealing / combined stations (per qc-panel-helpers).
+             *  Pending rework for this bag is fetched server-side
+             *  so the receive surface is one round-trip away. */}
+            {shouldRenderQcPanel(station.station.kind) ? (
+              <QcPanel
+                token={token}
+                stationId={station.station.id}
+                stationKind={station.station.kind}
+                workflowBagId={currentAtStation.bag.id}
+                currentOperatorName={activeSession?.employeeNameSnapshot ?? null}
+                accountabilitySource={activeSession?.accountabilitySource ?? null}
+                pendingRework={await loadPendingRework(currentAtStation.bag.id)}
+              />
+            ) : null}
           </div>
         )}
       </section>
@@ -313,6 +331,83 @@ const STATION_PREREQ_STAGE: Record<string, string> = {
   BOTTLE_CAP_SEAL: "BLISTERED",
   BOTTLE_STICKER: "SEALED",
 };
+
+/** QC-3 — pending REWORK_SENT events for the current bag that have
+ *  not yet been fully received. "Pending" today = any REWORK_SENT
+ *  for this bag with no paired REWORK_RECEIVED row (full or partial
+ *  doesn't matter — QC-3 only surfaces "Mark fully received"; partial
+ *  receive lands in QC-4). The receiving station's operator marks
+ *  them received from the QC panel. */
+async function loadPendingRework(workflowBagId: string): Promise<PendingReworkRow[]> {
+  const sent = await db
+    .select({
+      id: workflowEvents.id,
+      occurredAt: workflowEvents.occurredAt,
+      payload: workflowEvents.payload,
+      stationId: workflowEvents.stationId,
+    })
+    .from(workflowEvents)
+    .where(
+      and(
+        eq(workflowEvents.workflowBagId, workflowBagId),
+        eq(workflowEvents.eventType, "REWORK_SENT"),
+      ),
+    )
+    .orderBy(desc(workflowEvents.occurredAt));
+  if (sent.length === 0) return [];
+
+  // Any REWORK_SENT whose id appears in a REWORK_RECEIVED's
+  // payload->>linked_event_id is considered fully received for QC-3
+  // purposes. Partial receives that don't fully close the sent
+  // quantity are intentionally out of QC-3 scope — they'd show as
+  // "received" here even if a remainder remains. QC-4 surfaces the
+  // remainder math.
+  const receivedRows = (await db.execute(
+    sql`SELECT payload->>'linked_event_id' AS linked_id
+        FROM workflow_events
+        WHERE workflow_bag_id = ${workflowBagId}
+          AND event_type = 'REWORK_RECEIVED'
+          AND payload ? 'linked_event_id'`,
+  )) as unknown as Array<{ linked_id: string }>;
+  const receivedSet = new Set(receivedRows.map((r) => r.linked_id));
+
+  // Resolve from-station labels in one round trip.
+  const stationIds = Array.from(
+    new Set(sent.map((r) => r.stationId).filter((x): x is string => x != null)),
+  );
+  const stationRows =
+    stationIds.length === 0
+      ? []
+      : await db
+          .select({ id: stations.id, label: stations.label })
+          .from(stations)
+          .where(inArray(stations.id, stationIds));
+  const stationLabel = new Map(stationRows.map((s) => [s.id, s.label]));
+
+  return sent
+    .filter((row) => !receivedSet.has(row.id))
+    .map((row) => {
+      const p = (row.payload ?? {}) as Record<string, unknown>;
+      const qty = Number(p.quantity ?? 0);
+      const unit = typeof p.unit === "string" ? p.unit : "cards";
+      const reasonCode =
+        typeof p.reason_code === "string" ? p.reason_code : "OTHER";
+      const accountableEmployeeName =
+        typeof p.accountable_employee_name_snapshot === "string"
+          ? p.accountable_employee_name_snapshot
+          : null;
+      return {
+        id: row.id,
+        occurredAt: new Date(row.occurredAt as unknown as string).toISOString(),
+        quantity: qty,
+        unit,
+        reasonCode,
+        fromStationLabel:
+          row.stationId != null ? stationLabel.get(row.stationId) ?? null : null,
+        accountableEmployeeName,
+      };
+    });
+}
 
 function BagAdvancedBanner({
   token,
