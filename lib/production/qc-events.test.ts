@@ -126,6 +126,8 @@ function buildScrap() {
     scrap_quantity: 2,
     scrap_unit: "cards" as const,
     scrap_reason: "SCRAP_APPROVED" as const,
+    affects_raw_product: false,
+    affects_packaging_material: true,
     correction_actor_user_id: U.user,
     correction_actor_employee_id: U.employee,
     ...baseAccountability(),
@@ -380,6 +382,15 @@ describe("validateScrapRecordedPayload", () => {
     expect(
       validateScrapRecordedPayload({ ...buildScrap(), scrap_quantity: 0 }).ok,
     ).toBe(false);
+  });
+
+  it("rejects scrap with neither affects_raw_product nor affects_packaging_material", () => {
+    const r = validateScrapRecordedPayload({
+      ...buildScrap(),
+      affects_raw_product: false,
+      affects_packaging_material: false,
+    });
+    expect(r.ok).toBe(false);
   });
 });
 

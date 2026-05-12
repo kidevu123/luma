@@ -168,6 +168,14 @@ export const packagingDamageReturnPayloadSchema = sharedBaseSchema
       .enum(["SCRAP", "REWORK", "INSPECT"])
       .nullable()
       .optional(),
+    /** Which inventory ledger this damage touches. Packaging damage is
+     *  packaging-material loss by definition; raw-product loss is
+     *  optional and depends on whether pills were also lost when the
+     *  card/blister failed. QC-5 reads these flags to decide which
+     *  ledger to decrement (deferred until then; QC-2 captures the
+     *  signal honestly). */
+    affects_packaging_material: z.boolean().optional().default(true),
+    affects_raw_product: z.boolean().optional().default(false),
   })
   .superRefine((payload, ctx) => {
     otherNeedsNotes(payload, ctx);
@@ -276,6 +284,11 @@ export const scrapRecordedPayloadSchema = sharedBaseSchema
     scrap_quantity: z.number().int().positive(),
     scrap_unit: qcUnitSchema,
     scrap_reason: qcReasonCodeSchema,
+    /** Which inventory ledger this scrap moves. At least one must be
+     *  true (enforced in superRefine). QC-5 wires the actual material
+     *  decrement against these flags. */
+    affects_raw_product: z.boolean(),
+    affects_packaging_material: z.boolean(),
     /** Always populated by QC-2 actions — the supervisor's user id.
      *  Null only on synthesizer-emitted rows (legacy backfill). */
     correction_actor_user_id: uuidSchema.nullable().optional(),
@@ -300,6 +313,15 @@ export const scrapRecordedPayloadSchema = sharedBaseSchema
         path: ["bag_id"],
         message:
           "scrap requires at least one of bag_id, material_lot_id, packaging_lot_id",
+      });
+    }
+    // At least one ledger flag must be set.
+    if (!payload.affects_raw_product && !payload.affects_packaging_material) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["affects_packaging_material"],
+        message:
+          "scrap must affect raw product, packaging material, or both",
       });
     }
   });
