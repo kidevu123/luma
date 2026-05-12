@@ -4,6 +4,43 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## QC-2 — Live QC server actions (complete)
+- Date: 2026-05-12
+- Result: **complete**. Five live server actions emit QC events through `projectEvent` with full OP-1 accountability. Queue checkbox flipped to `[x]`.
+
+### Files added / changed
+- **NEW** `app/(floor)/floor/[token]/qc-actions.ts` — three floor actions: `reportPackagingDamageAction`, `reworkSentAction`, `reworkReceivedAction`. Each authorizes via the URL station scan token, resolves accountability via `resolveStationAccountability` (active operator session + supervisor override + LEGACY_TEXT fallback), validates via QC-1's payload schemas, then calls `projectEvent`. Damage refuses to fire when no accountability source resolves; rework with a `linked_event_id` takes a `SELECT ... FOR UPDATE` lock on the source row inside the tx so concurrent supervisors cannot both land scrap/rework against the same damage return.
+- **NEW** `app/(admin)/qc-review/actions.ts` — two admin actions: `scrapRecordedAction`, `submissionCorrectedAction`. Both `requireAdmin()`. Both preserve the linked event's accountable employee exactly — supervisor is `entered_by_user_id`, never `accountable_employee_id`. Ad-hoc scrap (no linked event) requires `overrideEmployeeId` so scrap is never accidentally pinned on the supervisor. Scrap returns `{ conflict: true }` if the source already has a SCRAP_RECORDED resolution; the DB partial-unique `workflow_events_linked_event_resolution_unique` is the backstop.
+- **NEW** `lib/production/qc-actions.test.ts` (16 cases) — per-action happy path, accountability propagation, missing-session refusal, duplicate-conversion conflict for scrap and rework, partial-vs-full receive math, accountable-employee preservation, JSON-payload rejection on correction, no-affected-scope refusal.
+- **MODIFIED** `lib/production/qc-events.ts` — adds two QC-0 fields that QC-1 omitted: `PackagingDamageReturnPayload` gains `affects_packaging_material` (default true) + `affects_raw_product` (default false); `ScrapRecordedPayload` gains the same pair (both required, at-least-one enforced in `superRefine`).
+- **MODIFIED** `lib/production/qc-events.test.ts` — `buildScrap()` populates the new flags; one new case covers both-flags-false rejection.
+
+### What does NOT happen here (per spec)
+- **No UI.** Floor and admin pages are not built. The actions are server-only; calling them today requires a form post from a future UI (QC-3 / QC-4) or a programmatic test fixture.
+- **No material inventory movement.** Even when `affects_packaging_material=true` and `material_lot_id` is named, QC-2 does not emit a paired `MATERIAL_SCRAPPED` event or decrement `read_material_lot_state`. That is deferred to QC-5 (per the QC-0 plan). The flags are captured honestly so QC-5 can wire the ledger without re-walking every QC event payload.
+- **No genealogy / operator-productivity / PT-6 UI changes.** Those land in QC-5.
+
+### Local verification (real checkout `/Users/kidevu/luma`)
+- `npx tsc --noEmit` → clean.
+- `npx vitest run` → **861/861 pass across 38 test files** (+17 new: 16 action tests + 1 new scrap-flag test).
+- `npx next build` → clean (only the pre-existing warnings).
+
+### Staging deploy (normal git-based path)
+- Commit: `0e36936 feat(qc-2): live QC server actions emitting through projectEvent`. 5 files, +1641 lines.
+- Pushed to `origin/production-intelligence-command-center`.
+- `systemctl start luma-deploy.service` on LX122 ran the standard pull + reset + `docker compose up -d --build`.
+- Health endpoint reports `sha=0e36936feeefbdf90b49e1d13d1ed30a31e2d7de`, `checks={app:ok,db:ok}`.
+
+### Auth smoke
+- `npx tsx scripts/smoke-authenticated-routes.ts` inside the running app container: **PASS=45, REDIR=0, FAIL=0**. QC-2 introduced no new routes (the admin `/qc-review` directory has only `actions.ts`, no `page.tsx` — a request to that path will 404 until QC-4). No regression on any existing surface.
+
+### Closeout
+- `docs/CLAUDE_BUILD_QUEUE.md` QC-2 sub-bullet flipped to `[x]`.
+- This entry appended.
+- Next phase: **QC-3** — floor QC quick-action panel on packaging/sealing station overlays + a rework receiving surface. The actions are ready and tested; QC-3 only has to wire forms to them. Floor UI is the next unchecked sub-phase.
+
+---
+
 ## QC-1 — Verification + closeout (complete)
 - Date: 2026-05-12
 - Result: **complete**. All four verifications green on the real Luma checkout / LX122 staging container. Queue checkbox flipped to `[x]`.
