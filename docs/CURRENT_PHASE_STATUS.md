@@ -4,6 +4,81 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## QC-1 — QC schema + payload contracts (code complete; local verification deferred)
+- Date: 2026-05-12
+- Result: schema migration + payload contracts + tests written. **Local verification (tsc / vitest / next build) could NOT be run in this worktree** — see "Verification gap" below. Marking QC-1 code-complete pending verification on a fully-installed checkout (LXC 122 or any node-installed mirror).
+
+### Files added / changed
+- **NEW** `drizzle/0026_qc_subsystem_foundation.sql` — additive migration. Five `integer NOT NULL DEFAULT 0` columns on `read_operator_daily` (`damage_events_total`, `rework_sent_total`, `rework_received_total`, `scrap_units_total`, `corrections_total`). Expression index `workflow_events_linked_event_idx` on `(payload->>'linked_event_id')`. Partial unique `workflow_events_linked_event_resolution_unique` on `((payload->>'linked_event_id'), event_type) WHERE event_type IN ('SCRAP_RECORDED','REWORK_SENT')`.
+- **MODIFIED** `drizzle/meta/_journal.json` — appended `idx 26, when 1780600000000, tag 0026_qc_subsystem_foundation`. Strictly-increasing `when` confirmed against the prior entry (1780500000000).
+- **MODIFIED** `lib/db/schema.ts` — `readOperatorDaily` declares the five new counter columns (camelCase TS, snake_case SQL); `workflowEvents` table indexes block declares the two new QC indexes for introspection parity.
+- **NEW** `lib/production/qc-events.ts` — payload contracts. Zod schemas for all five QC event types, shared base with accountability fields, shared `QC_REASON_CODES` enum (14 codes, no DB enum), shared `QC_UNITS` enum, accountability mirror. Public validators: `validatePackagingDamageReturnPayload`, `validateReworkSentPayload`, `validateReworkReceivedPayload`, `validateScrapRecordedPayload`, `validateSubmissionCorrectedPayload`, `validateQcPayload(eventType, payload)`. Plus `payloadHasAccountability(payload)` invariant helper. Single dispatch table `qcPayloadSchemas`.
+- **NEW** `lib/production/qc-events.test.ts` — 40+ test cases covering: each event-type happy path, accountability rejection paths (missing source / name snapshot), quantity validation (zero / negative / non-integer), reason-code coherence (damage_type/rework_reason/scrap_reason must equal reason_code), unknown reason codes rejected, OTHER allowed only with non-empty notes, scope-required rule for scrap (bag/material_lot/packaging_lot all-null rejected), partial-vs-full receive math, correction preserves-original-accountable invariant (literal-true), correction requires entered_by_user_id, dispatch wiring, schema mirror, journal entry, migration SQL DDL grep.
+
+### Schema changes (exact)
+- `read_operator_daily` gains five `integer NOT NULL DEFAULT 0` columns. Legacy `damage_count_total` column kept untouched (deprecated in favor of `damage_events_total`, retired in QC-5 once read paths migrate).
+- `workflow_events` gains two indexes via SQL only — no new columns, no enum change. The five QC event types (`PACKAGING_DAMAGE_RETURN`, `REWORK_SENT`, `REWORK_RECEIVED`, `SCRAP_RECORDED`, `SUBMISSION_CORRECTED`) are already in `workflowEventTypeEnum` from prior phases (`lib/db/schema.ts:189-248`). **No enum migration needed**, avoiding the ALTER TYPE silent-rollback gotcha.
+
+### Event enum verification
+- `grep -E "PACKAGING_DAMAGE_RETURN|REWORK_SENT|REWORK_RECEIVED|SCRAP_RECORDED|SUBMISSION_CORRECTED" lib/db/schema.ts` → all five present.
+
+### Payload types created
+- `PackagingDamageReturnPayload`, `ReworkSentPayload`, `ReworkReceivedPayload`, `ScrapRecordedPayload`, `SubmissionCorrectedPayload`. Plus union `QCPayload`, dispatch tuple `QC_EVENT_TYPES`, reason-code union `QCReasonCode`, unit union `QCUnit`, accountability shape `QCAccountability`, result type `ValidateResult<T>`.
+
+### Validation rules enforced (per schema)
+- `quantity > 0`, integer, on every event with a quantity field.
+- `unit` and `reason_code` required on all four count-event types.
+- Accountability triad required on all events (`accountability_source` enum, `accountable_employee_name_snapshot` non-empty). `accountable_employee_id` nullable to allow free-text fallback. `entered_by_user_id` required on `SUBMISSION_CORRECTED` (refined separately).
+- `client_event_id` required (UUID) on every event for idempotency parity with floor-PWA paths.
+- `damage_type` / `rework_reason` / `scrap_reason` must equal the shared `reason_code` (one source of truth — refusal on mismatch).
+- `OTHER` reason_code permitted only when `notes` is a non-empty string.
+- `SUBMISSION_CORRECTED` requires `corrected_event_id` and the literal `preserves_original_accountable_employee: true` flag — the schema makes it impossible to land a correction without it.
+- `SCRAP_RECORDED` requires at least one of `bag_id` / `material_lot_id` / `packaging_lot_id` to be non-null.
+- `REWORK_RECEIVED` enforces partial-vs-full receive math: `partial=false` ⇒ received_quantity == quantity; `partial=true` ⇒ received_quantity < quantity.
+
+### Accountability rules preserved (OP-1 contract)
+- Every payload shape carries `accountable_employee_id` / `accountability_source` / `accountable_employee_name_snapshot` / `entered_by_user_id` — the QC-2 server actions cannot emit a QC event without supplying these.
+- `SUBMISSION_CORRECTED` contract bakes preservation in: the `preserves_original_accountable_employee` flag is a Zod literal `true` — flipping it to false is a schema error before the action ever runs.
+- `entered_by_user_id` is required (non-null) on `SUBMISSION_CORRECTED` via a refine — the supervisor is always identified.
+
+### Verification gap (read this)
+The `/private/tmp/luma-work` worktree this session worked from is **missing the npm install state required to run `tsc`, `vitest`, and `next build` locally**: `node_modules/typescript/bin/` is empty, `node_modules/vitest/vitest.mjs` and `node_modules/next/dist/bin/next` are absent, and the worktree has no `package.json` / `tsconfig.json` / `vitest.config.ts` / `next.config.js` at the top level. `npx tsc --noEmit` from the worktree errors with "This is not the tsc command you are looking for" — npx falls through and fails.
+- **What I did instead:** wrote the migration + schema delta + payload contracts + tests, and visually re-read for: enum membership of the five event types; journal `when` strictly-increasing; zod-v3-compatible API usage (`.extend`, `.superRefine`, `.safeParse`, `.literal(true)`); accountability triad presence on every event; no banned phrases. Tests are written to be self-contained — only `vitest`, `zod`, and the project's `@/lib/db/schema` import (already used by other tests in this directory).
+- **What still needs to run before QC-1 closeout:**
+  1. `npx tsc --noEmit` from the actual checkout (or `pnpm/npm run typecheck`).
+  2. `npx vitest run` — expecting +40 new test cases passing.
+  3. `npx next build` — clean.
+  4. Deploy the branch to LX122 and verify the migration applied via `psql` (`\d read_operator_daily` should show the five new columns; `\di workflow_events_linked*` should list both indexes).
+- **Not marking QC-1 complete in the queue** until the user (or a downstream agent with a complete checkout) reports the four verifications green. QC-1 box in `docs/CLAUDE_BUILD_QUEUE.md` stays `[ ]`.
+
+### Risks / open questions
+1. The `_journal.json` `when` step (+100_000_000_000 ms per phase) keeps the convention from prior migrations — no risk of out-of-order rollback per the drizzle-journal gotcha. Confirmed via diff vs idx 25.
+2. The partial-unique on `(payload->>'linked_event_id', event_type)` will not fire for `SUBMISSION_CORRECTED` (intentional — corrections can themselves be corrected). If QC-2 surfaces a need to ALSO prevent double-correction of the same source, a follow-up migration can extend the WHERE clause.
+3. The shared base `quantity` on `SCRAP_RECORDED` and `scrap_quantity` are deliberately separate. This lets unit conversions (e.g. cards at originating bag → kg at material ledger) live in the payload itself. QC-2 must enforce that they refer to compatible units at the action layer.
+4. Zod v4 is in node_modules alongside v3 — the repo's existing floor actions resolve to v3. If a v4 migration is in progress, the `.superRefine` API and `z.literal(true)` shapes are still v4-compatible, but a downstream typecheck on v4 may want stricter literal arrays. Risk: low.
+5. `disposition_suggestion` on `PackagingDamageReturnPayload` is operator-supplied ("SCRAP" / "REWORK" / "INSPECT"). Non-binding — supervisor reviews. Adds a useful UX hint without coupling supervisor decision to operator preference.
+
+### Next phase: QC-2 (server actions emitting through `projectEvent` with OP-1 accountability)
+Blocked only on QC-1 verification (tsc / vitest / build green + migration applied on staging). Once verified, QC-2 can begin: five server actions (one per event type), pulling the payload validators from this module and the accountability fields from `resolveStationAccountability` / `resolveAdminAccountability`.
+
+---
+
+## QC-0 — QC subsystem implementation plan (complete)
+- Date: 2026-05-12
+- Result: plan-only phase. Detailed implementation contract written to `docs/QC_SUBSYSTEM_IMPLEMENTATION_PLAN.md` (14 sections, ~520 lines). No code, no migrations.
+- Audit context confirmed before drafting:
+  - `workflowEventTypeEnum` (`lib/db/schema.ts:175-248`) already contains all five target event types: `PACKAGING_DAMAGE_RETURN`, `REWORK_SENT`, `REWORK_RECEIVED`, `SCRAP_RECORDED`, `SUBMISSION_CORRECTED`. No enum migration needed for QC-1.
+  - OP-1 accountability rails ready: `projectEvent` (`lib/projector/index.ts:111`) accepts `enteredByUserId` / `accountableEmployeeId` / `accountabilitySource` / `accountableEmployeeNameSnapshot`. Floor: `resolveStationAccountability` (`lib/production/station-operator-session.ts:103`). Admin: `resolveAdminAccountability` (`station-operator-session.ts:190`).
+  - PT-6 8-bucket read model `read_material_reconciliation_v2` already has `scrappedOrDamagedValue` / `consumptionVarianceValue` / `unknownVarianceValue` columns; QC feeds scrap into the existing bucket — no new buckets.
+  - Existing 0-hardcoded columns on `read_sku_daily` (`damages`, `rework`, `scrap`), `read_station_quality_daily` (`reject_units`, `scrap_units`, `rework_units`, `damaged_units`), and `read_operator_daily.damage_count_total` are ready to populate; one tiny `0024_qc_subsystem.sql` migration adds four columns to `read_operator_daily` plus two indexes on `workflow_events.payload->>'linked_event_id'`.
+- Sub-phase recommendation: QC-1 (schema + payload contracts) → QC-2 (5 server actions) → QC-3 (floor QC quick-action) → QC-4 (`/qc-review` admin) → QC-5 (read-model projectors + UI integration) → QC-6 (staging verify + closeout). Estimate ~10 working days end-to-end.
+- Hard rules baked into the plan: damage ≠ scrap; rework sent ≠ rework received; corrections preserve original accountable employee (`employee_id` from linked event); no overwrites — `SUBMISSION_CORRECTED` is additive with `linked_event_id`; variance subtypes never collapse (PT-6 four-bucket model preserved); every QC event carries full OP-1 accountability or the action refuses; no emoji.
+- Open questions logged in §13 (8 items, including: `REWORK_RESOLVED` deferred until experience proves need; photo upload path may slip to QC-3.5 if no helper exists; partial-receive semantics; concurrent-supervisor scrap race).
+- Build queue updated: `### [ ] QC subsystem` block now lists six sub-phases with `[x] QC-0` checked, the rest `[ ]`.
+- Next phase: QC-1 (migration 0024 + `lib/production/qc-events.ts` payload contracts + Zod + unit tests for accountability preservation rule).
+
+---
+
 ## H.x7 — Material panels (4 read-only) (complete)
 - Date: 2026-05-09
 - Result: **complete**. Queue checkbox flipped to `[x]`.

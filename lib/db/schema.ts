@@ -1027,6 +1027,19 @@ export const workflowEvents = pgTable(
     uniqueIndex("workflow_events_client_event_unique")
       .on(t.workflowBagId, t.eventType, t.clientEventId)
       .where(sql`client_event_id IS NOT NULL`),
+    // QC-1: fast lookup of QC chain events by linked_event_id.
+    // Lives in migration 0026; declared here so introspection /
+    // migration generation stays in sync.
+    index("workflow_events_linked_event_idx")
+      .on(sql`(payload->>'linked_event_id')`)
+      .where(sql`payload ? 'linked_event_id'`),
+    // QC-1: prevent double-resolving a source QC event into more
+    // than one scrap row OR more than one rework-sent row.
+    uniqueIndex("workflow_events_linked_event_resolution_unique")
+      .on(sql`(payload->>'linked_event_id')`, t.eventType)
+      .where(
+        sql`event_type IN ('SCRAP_RECORDED', 'REWORK_SENT') AND payload ? 'linked_event_id'`,
+      ),
   ],
 );
 
@@ -2291,7 +2304,21 @@ export const readOperatorDaily = pgTable(
     operatorCode: text("operator_code"),
     bagsFinalized: integer("bags_finalized").notNull().default(0),
     activeSecondsTotal: integer("active_seconds_total").notNull().default(0),
+    /** Legacy Phase A column. QC-1 adds the canonical QC counters
+     *  below; this stays for backward compatibility and will be
+     *  retired once no read path depends on it. */
     damageCountTotal: integer("damage_count_total").notNull().default(0),
+    /** QC-1 counters. damage_events_total counts PACKAGING_DAMAGE_RETURN
+     *  events (one per event, not per unit). rework_sent / received
+     *  count their respective events. scrap_units_total sums the
+     *  quantity field across SCRAP_RECORDED events. corrections_total
+     *  counts SUBMISSION_CORRECTED events whose linked event named
+     *  this employee as accountable. */
+    damageEventsTotal: integer("damage_events_total").notNull().default(0),
+    reworkSentTotal: integer("rework_sent_total").notNull().default(0),
+    reworkReceivedTotal: integer("rework_received_total").notNull().default(0),
+    scrapUnitsTotal: integer("scrap_units_total").notNull().default(0),
+    correctionsTotal: integer("corrections_total").notNull().default(0),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

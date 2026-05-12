@@ -275,6 +275,16 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 
 **Stop condition.** All five event types live. `/operator-productivity` columns populated. Tests + build green. Stop.
 
+**Sub-phases:**
+
+- [x] **QC-0** — plan doc only (`docs/QC_SUBSYSTEM_IMPLEMENTATION_PLAN.md`). 2026-05-12.
+- [ ] **QC-1** — migration `0026_qc_subsystem_foundation` + `lib/production/qc-events.ts` payload contracts + tests. _Code written 2026-05-12; checkbox stays open until `tsc`/`vitest`/`next build` verified and migration applied on staging (see `docs/CURRENT_PHASE_STATUS.md` QC-1 entry "Verification gap")._
+- [ ] **QC-2** — five server actions emitting through `projectEvent` with full OP-1 accountability + tests.
+- [ ] **QC-3** — floor QC quick-action panel + rework receiving surface.
+- [ ] **QC-4** — `/qc-review` admin page + correction modal + ad-hoc scrap modal.
+- [ ] **QC-5** — read-model projectors, genealogy / operator-productivity / material-reconciliation integration.
+- [ ] **QC-6** — staging verification + manual TEST D-QC + closeout.
+
 ---
 
 ### [ ] PackTrack shortage recommendations (PT-7)

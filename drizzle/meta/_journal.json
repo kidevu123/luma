@@ -183,6 +183,13 @@
       "when": 1780500000000,
       "tag": "0025_read_material_reconciliation_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1780600000000,
+      "tag": "0026_qc_subsystem_foundation",
+      "breakpoints": true
     }
   ]
 }
