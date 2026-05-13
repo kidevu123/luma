@@ -4,6 +4,57 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## QC-3 — Floor QC quick-action panel (complete)
+- Date: 2026-05-12
+- Result: **complete**. Floor PWA on PACKAGING / SEALING / COMBINED stations now ships a collapsible "Report QC issue" panel wired to the QC-2 actions. Queue checkbox flipped to `[x]`.
+
+### Files changed
+- **NEW** `lib/production/qc-panel-helpers.ts` — pure helpers in the `.test.ts` glob: `shouldRenderQcPanel(stationKind)` whitelists PACKAGING / SEALING / COMBINED; `QUICK_DAMAGE_ENTRIES` is the 5-button vocabulary cross-checked against `QC_REASON_CODES`; `reasonRequiresNotes` / `damageHasReworkShortcut` mirror the qc-events.ts refinements so the UI can refuse before the action layer does.
+- **NEW** `app/(floor)/floor/[token]/qc-panel.tsx` — client component. Collapsible `<details>` panel rendered inside the existing "Current bag" section when `shouldRenderQcPanel(stationKind) === true` AND a bag is at the station. Three sections:
+  - **Damage / count** — 5 quick-action buttons (Damaged packaging, Ripped card, Bad seal, Label issue, Count issue) plus an `Other…` collapsible (notes required). Each fires `reportPackagingDamageAction`. BAD_SEAL surfaces an inline "+ send to rework" chip that also fires `reworkSentAction`.
+  - **Send to rework** — standalone single-button section. Defaults reason to BAD_SEAL; fires `reworkSentAction` with no linked event (per QC-3 scope — supervisor links from /qc-review in QC-4).
+  - **Receive rework** — only renders when `pendingRework.length > 0`. Each row "Mark received" fires `reworkReceivedAction` with `received_quantity=sent_quantity`, `partial=false`. Partial-receive math is QC-4.
+- **MODIFIED** `app/(floor)/floor/[token]/page.tsx` — imports `shouldRenderQcPanel`, `QcPanel`, `PendingReworkRow`; adds `loadPendingRework(workflowBagId)` server-side helper that joins workflow_events for REWORK_SENT events on the current bag minus any REWORK_RECEIVED rows that name them via `linked_event_id`. Resolves from-station labels in one round trip. Renders `<QcPanel>` only when the station kind is in scope AND a bag is at the station.
+- **NEW** `lib/production/qc-panel-helpers.test.ts` (15 cases) — station-kind whitelist, 1:1 reason-code mapping, OTHER not in the quick list (it has its own gated form), notes-required rule, BAD_SEAL-only rework shortcut.
+
+### What does NOT happen here (per spec)
+- **No photo capture.** QC-2 accepts `photo_keys`, but the floor PWA has no upload helper yet. QC-3 ships text-notes-only with an explicit on-panel disclosure: *"Photo capture not yet wired on the floor — text notes only."* QC-3.5 (or QC-5) can layer photos without re-shaping the action contracts.
+- **No partial-receive math.** "Mark received" fires the full sent quantity. Partial receive lands in QC-4.
+- **No admin QC review page.** `/qc-review` still has only the actions file from QC-2; the page lands in QC-4.
+- **No genealogy / operator-productivity / PT-6 UI changes.** QC-5 territory.
+- **No material inventory movement.** Unchanged from QC-2 — material decrement on scrap is QC-5.
+
+### Accountability behavior
+- Panel reads `activeSession?.employeeNameSnapshot` and `activeSession?.accountabilitySource` from the page-level `getActiveStationSession(db, station.id)` call.
+- When `hasOperator === false`: all submit buttons are `disabled`, an amber banner reads *"No operator on shift. Open a shift on this station to enable QC reporting."*, and the QC-2 actions also refuse via `resolveStationAccountability` — defense-in-depth.
+- The op-session panel for opening a shift was already in place (OP-1C); QC-3 reuses it without modification.
+
+### Local verification (real checkout `/Users/kidevu/luma`)
+- `npx tsc --noEmit` → clean. (Fixed one TS5076 about mixed `??`/`||` in `effectiveNotes`.)
+- `npx vitest run` → **876/876 pass across 39 test files** (+15 new helper tests vs QC-2's 861).
+- `npx next build` → clean. `/floor/[token]` route bundle grew to 10.2 kB with the QC panel client code.
+
+### Staging deploy (normal git-based path)
+- QC-3 commit: `c0393da feat(qc-3): floor QC quick-action panel on packaging/sealing stations`. 4 files, +873 lines.
+- Pushed to `origin/production-intelligence-command-center`.
+- `systemctl start luma-deploy.service` ran the standard pull + `docker compose up -d --build`.
+- Health endpoint: `{"status":"ok","checks":{"app":"ok","db":"ok"},"sha":"c0393da98f5a0b1a6bf1176fb9e5e23f36761e8e"}`.
+
+### Floor verification (HTML grep against live container)
+- Packaging station `/floor/<token>` (kind=PACKAGING, label="Packaging Station") renders all four panel markers: `Report QC issue`, `Damage / count`, `Send to rework`, `No operator on shift`. The "No operator on shift" string is expected — staging has no live shift open.
+- Sealing station `/floor/<token>` (kind=SEALING, label="Sealing station 1") renders only `No operator on shift` because no bag is currently at sealing — the panel is correctly gated on `currentAtStation` (no bag = no QC target). Once a bag arrives there + a shift is open, the panel will render with the Receive-rework section.
+- Blister-only stations: panel correctly absent (whitelist filters them out).
+
+### Auth smoke
+- `npx tsx scripts/smoke-authenticated-routes.ts` inside the running app container: **PASS=45, REDIR=0, FAIL=0**. No new routes were added; QC-3 is purely a component injection inside `/floor/[token]`.
+
+### Closeout
+- `docs/CLAUDE_BUILD_QUEUE.md` QC-3 sub-bullet flipped to `[x]`.
+- This entry appended.
+- Next phase: **QC-4** — `/qc-review` admin page (pending damage list, rework in flight, recent events) + correction modal + ad-hoc scrap modal + partial-receive math for rework. The five server actions are already live; QC-4 is page + form components only.
+
+---
+
 ## QC-2 — Live QC server actions (complete)
 - Date: 2026-05-12
 - Result: **complete**. Five live server actions emit QC events through `projectEvent` with full OP-1 accountability. Queue checkbox flipped to `[x]`.

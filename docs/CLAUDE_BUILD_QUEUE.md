@@ -280,7 +280,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 - [x] **QC-0** — plan doc only (`docs/QC_SUBSYSTEM_IMPLEMENTATION_PLAN.md`). 2026-05-12.
 - [x] **QC-1** — migration `0026_qc_subsystem_foundation` + `lib/production/qc-events.ts` payload contracts + tests. Verified 2026-05-12: tsc clean / vitest 844/844 / next build clean / migration applied / 5 columns + 2 indexes on staging / auth-smoke 45/45 PASS.
 - [x] **QC-2** — five server actions emitting through `projectEvent` with full OP-1 accountability + tests. Verified 2026-05-12: tsc clean / vitest 861/861 / next build clean / staging live at SHA `0e36936` / auth-smoke 45/45 PASS.
-- [ ] **QC-3** — floor QC quick-action panel + rework receiving surface.
+- [x] **QC-3** — floor QC quick-action panel + rework receiving surface. Verified 2026-05-12: tsc clean / vitest 876/876 / next build clean / staging live at SHA `c0393da` / packaging floor page renders panel markers; auth-smoke 45/45 PASS.
 - [ ] **QC-4** — `/qc-review` admin page + correction modal + ad-hoc scrap modal.
 - [ ] **QC-5** — read-model projectors, genealogy / operator-productivity / material-reconciliation integration.
 - [ ] **QC-6** — staging verification + manual TEST D-QC + closeout.
