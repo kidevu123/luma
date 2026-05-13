@@ -4,6 +4,39 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-7C — Read model + rebuilder for shortage recommendations (complete)
+- Date: 2026-05-13
+- Result: persistence layer for PT-7B. Schema migration + projector + 15 stub-tx tests. Idempotent rebuild; operator state (acknowledged / dismissed / `recommendation_id`) preserved across runs. No PackTrack call, no UI change. PT-7D can now read from `read_material_recommendations`.
+- Files changed:
+  - **NEW** `drizzle/0029_packtrack_recommendations.sql` — adds 3 ordering columns to `packaging_materials` (`min_order_quantity`, `safety_buffer_percent`, `order_multiple`); creates `read_material_recommendations` with 23 columns, 1 unique on `recommendation_id`, 2 partial-uniques (active per-product + active material-wide), 7 lookup indexes. All nullable / `IF NOT EXISTS` — replayable.
+  - **NEW** `lib/projector/packtrack-recommendations.ts` (~565 lines) — exports `rebuildMaterialRecommendations(tx, opts)` returning `{scanned, written, deleted, preservedAcknowledged, skippedMachineConsumable}`. Walks active materials, skips machine consumables via `skipMaterialKindForPackTrackShortage`, derives scope from PBOM-2 `product_material_compatibility` (0 or 2+ products → material-wide; exactly 1 → product-scoped), hydrates from `read_material_lot_state` + `packaging_lots` + `read_material_burn` + `read_material_consumption_daily`, threads through PT-7B, upserts via Drizzle.
+  - **NEW** `lib/projector/packtrack-recommendations.test.ts` (~480 lines, 15 cases) — stub-tx pattern with phase-state-machine scope advance. Covers kind skip (PVC_ROLL / FOIL_ROLL / BLISTER_FOIL), scope inference (0 / 1 / 2+ compat rows), sendable gating (missing code → false, HIGH → true), MOQ + order_multiple flow through to `recommendedOrderQuantity`, noop / delete / preserve / update paths, jsonb shape of signals / missing / warnings.
+  - MOD `drizzle/meta/_journal.json` — entry idx 29 / `when 1780900000000`.
+  - MOD `lib/db/schema.ts` — 3 new fields on `packagingMaterials`; new `readMaterialRecommendations` pgTable with 9 indexes. Self-FK on `superseded_by` declared at SQL level (drizzle's typed self-ref is awkward).
+  - MOD `scripts/rebuild-read-models.ts` — imports `rebuildMaterialRecommendations`, adds `"read_material_recommendations"` to the `tables` array, calls the rebuilder inside the transaction with a result-log line.
+  - MOD `docs/CLAUDE_BUILD_QUEUE.md` — PT-7C sub-bullet flipped to `[x]` with verification log.
+- Rebuilder behavior:
+  - **Skip rule:** materials with kind ∈ {PVC_ROLL, FOIL_ROLL, BLISTER_FOIL} bumped into `skippedMachineConsumable` and never enter PT-7B. (Roll consumption routes through `roll-usage`, not PT-7.)
+  - **Scope rule (PT-7A §11.3):** 0 active compat rows → `product_id = null` material-wide; exactly 1 distinct product → `product_id = <that one>`; 2+ → material-wide row with multi-product context implicit in the input.
+  - **Hysteresis:** `hadActiveRecommendation` is computed per (material, product) by querying live state, so a deleted row from earlier in the rebuild doesn't accidentally feed PT-7B with stale "had active" = true.
+  - **Operator-state preservation:** when `deriveShortageRecommendation` returns `null` but an existing row has `acknowledged_at` or `dismissed_at` set, the row stays untouched (preserved); when it has neither, the row is deleted. When derive returns a recommendation and a row exists, the row is updated in place (preserving `recommendation_id`, `acknowledged_at`, `dismissed_at`, `last_send_error`). New rows get a fresh `recommendation_id` defaulted by Postgres.
+  - **Inventory source classification:** `allCounted` → `COUNTED`; else `anyImport` → `LEGACY_IMPORT`; else manual / packtrack → `SUPPLIER_DECLARED`; else `null`.
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1052/1052 pass across 47 test files** (+15 vs PT-7B's 1037; +1 test file).
+  - `npx next build` → clean.
+- Staging verification (LX122 / SHA `f004a1a`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `f004a1a9f8cd9e804bb93d92dfe343d38c5d6ec1`.
+  - Migration 0029 row present in `drizzle.__drizzle_migrations`.
+  - `\d read_material_recommendations` shows the table with all 23 columns + 2 partial-unique indexes + 7 hot-path indexes.
+  - `\d packaging_materials` shows the 3 new columns (`min_order_quantity` numeric(20,6), `safety_buffer_percent` numeric(6,2), `order_multiple` numeric(20,6)).
+  - Auth smoke 47/47 PASS (same as PT-7B baseline; no UI added in PT-7C so no new routes).
+  - `SELECT COUNT(*) FROM read_material_recommendations` returns 0 until a rebuild or first projector-on-event run; expected.
+- PT-7D readiness: the read model is the single source PT-7D needs to query for `/material-alerts`. No additional schema work required — PT-7D adds UI + acknowledge / dismiss server actions only.
+
+---
+
 ## PT-7B — Pure shortage recommendation helpers + tests (complete)
 - Date: 2026-05-13
 - Result: pure-math phase. Logic-only module + 59 fixture tests + banned-phrase scan. No DB, no PackTrack call, no UI change.
