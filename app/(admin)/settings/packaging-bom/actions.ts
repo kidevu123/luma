@@ -6,7 +6,13 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { compact } from "@/lib/db/compact";
 import { requireAdmin } from "@/lib/auth-guards";
-import { productPackagingSpecs } from "@/lib/db/schema";
+import { packagingMaterials, productPackagingSpecs } from "@/lib/db/schema";
+import {
+  describeRejection,
+  isKindAllowedAtScope,
+  type PackagingBomScope,
+  type PackagingMaterialKind,
+} from "@/lib/production/packaging-bom-kinds";
 
 const PER_SCOPES = ["UNIT", "DISPLAY", "CASE"] as const;
 
@@ -49,6 +55,23 @@ export async function savePackagingBomLineAction(
     ...rest,
     wasteAllowancePercent: String(wasteAllowancePercent),
   };
+  // PBOM-1: refuse machine consumables (PVC_ROLL / FOIL_ROLL /
+  // BLISTER_FOIL) and refuse cross-scope materials (e.g. DISPLAY at
+  // UNIT scope) at the server boundary. The UI also filters the
+  // dropdown, but this is the load-bearing guard — admins can
+  // bypass the UI filter via direct form submission.
+  const [matRow] = await db
+    .select({ kind: packagingMaterials.kind })
+    .from(packagingMaterials)
+    .where(eq(packagingMaterials.id, parsed.data.packagingMaterialId));
+  if (!matRow) {
+    return { error: "Packaging material not found." };
+  }
+  const kind = matRow.kind as PackagingMaterialKind;
+  const scope = parsed.data.perScope as PackagingBomScope;
+  if (!isKindAllowedAtScope(kind, scope)) {
+    return { error: describeRejection(kind, scope) };
+  }
   try {
     // Upsert on the composite PK (productId, packagingMaterialId, perScope).
     // Existing row's qtyPerUnit + waste get overwritten — admins use this

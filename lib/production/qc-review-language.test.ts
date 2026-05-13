@@ -29,6 +29,10 @@ const FILES = [
   "lib/projector/qc-events.ts",
   "app/(admin)/operator-productivity/page.tsx",
   "app/(admin)/genealogy/[bagId]/page.tsx",
+  // PBOM-1 surface — packaging BOM kind/scope helpers + page + action.
+  "lib/production/packaging-bom-kinds.ts",
+  "app/(admin)/settings/packaging-bom/page.tsx",
+  "app/(admin)/settings/packaging-bom/actions.ts",
 ];
 
 const BANNED = [

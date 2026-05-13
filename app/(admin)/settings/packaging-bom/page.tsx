@@ -14,6 +14,11 @@ import {
 import { requireAdmin } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
 import {
+  allowedKindsForScope,
+  type PackagingBomScope,
+  type PackagingMaterialKind,
+} from "@/lib/production/packaging-bom-kinds";
+import {
   savePackagingBomLineAction,
   deletePackagingBomLineAction,
 } from "./actions";
@@ -91,8 +96,41 @@ export default async function PackagingBomPage({
     <div className="space-y-5">
       <PageHeader
         title="Packaging BOM"
-        description="Configure required packaging materials per finished product. The metric API consumes these at packaging-complete time once Phase H.x3 wires the live projector hook."
+        description="Physical packaging consumed at each packaging level: per finished unit (card / bottle), per display, per master case. PVC and foil rolls are NOT configured here — they're machine consumables tracked under blister material standards + roll usage."
       />
+
+      <div className="rounded-md border border-sky-500/40 bg-sky-500/5 p-3 text-[12px] leading-relaxed text-sky-100">
+        <p className="font-semibold text-sky-100">How packaging BOM is structured:</p>
+        <ul className="mt-1 list-disc pl-5 space-y-0.5 text-sky-200/90">
+          <li>
+            <strong>Per finished unit</strong>: the printed card (CARD route) or
+            the bottle + cap + label + induction seal + desiccant (BOTTLE route).
+          </li>
+          <li>
+            <strong>Per display</strong>: 1 display box + any per-display
+            insert. A display contains N finished units (via product structure,
+            not BOM).
+          </li>
+          <li>
+            <strong>Per master case</strong>: 1 case box + any case label /
+            insert. A case contains N displays (via product structure).
+          </li>
+        </ul>
+        <p className="mt-2 text-sky-200/80">
+          PVC / foil / blister-foil rolls are calculated from{" "}
+          <Link
+            href="/settings/blister-standards"
+            className="underline hover:text-sky-50"
+          >
+            blister material standards
+          </Link>
+          {" + "}
+          <Link href="/roll-variance" className="underline hover:text-sky-50">
+            roll usage
+          </Link>
+          , not from this page.
+        </p>
+      </div>
 
       {/* Product picker */}
       <form
@@ -166,67 +204,25 @@ export default async function PackagingBomPage({
             </p>
           </div>
 
-          {/* New / update line form */}
-          <form
-            action={async (fd) => {
-              "use server";
-              await savePackagingBomLineAction(fd);
-            }}
-            className="rounded-md border border-slate-700/60 bg-slate-900/60 p-4 grid grid-cols-1 md:grid-cols-4 gap-3"
-          >
-            <input type="hidden" name="productId" value={product.id} />
-            <h3 className="md:col-span-4 text-sm font-semibold text-slate-100">
-              Add / update BOM line
-            </h3>
-            <SelectField
-              name="packagingMaterialId"
-              label="Material"
-              required
-              options={materialList.map((m) => ({
-                value: m.id,
-                label: `${m.sku} — ${m.name} (${m.kind} · ${m.uom})`,
-              }))}
-            />
-            <SelectField
-              name="perScope"
-              label="Per"
-              required
-              options={[
-                { value: "UNIT", label: "per finished unit (card / bottle)" },
-                { value: "DISPLAY", label: "per display" },
-                { value: "CASE", label: "per master case" },
-              ]}
-            />
-            <Field
-              name="qtyPerUnit"
-              label="Quantity"
-              type="number"
-              min={1}
-              required
-            />
-            <Field
-              name="wasteAllowancePercent"
-              label="Waste %"
-              type="number"
-              min={0}
-              max={100}
-              step="0.01"
-              defaultValue="0"
-            />
-            <Field
-              name="notes"
-              label="Notes (optional)"
-              placeholder="any context…"
-            />
-            <div className="md:col-span-4 flex justify-end">
-              <button
-                type="submit"
-                className="h-9 px-4 rounded-md bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 text-sm font-medium"
-              >
-                Save line
-              </button>
-            </div>
-          </form>
+          {/* Three scope-specific forms — each shows only materials
+              whose kind is valid at that scope. Server still
+              re-validates via lib/production/packaging-bom-kinds. */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            {(["UNIT", "DISPLAY", "CASE"] as const).map((scope) => {
+              const allowedKinds = allowedKindsForScope(scope) as ReadonlyArray<string>;
+              const scopeMaterials = materialList.filter((m) =>
+                allowedKinds.includes(m.kind as PackagingMaterialKind),
+              );
+              return (
+                <ScopeBomForm
+                  key={scope}
+                  scope={scope}
+                  productId={product.id}
+                  materials={scopeMaterials}
+                />
+              );
+            })}
+          </div>
 
           {/* Existing rows */}
           <div className="rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
@@ -293,6 +289,105 @@ export default async function PackagingBomPage({
         </>
       )}
     </div>
+  );
+}
+
+function ScopeBomForm({
+  scope,
+  productId,
+  materials,
+}: {
+  scope: PackagingBomScope;
+  productId: string;
+  materials: ReadonlyArray<{
+    id: string;
+    sku: string;
+    name: string;
+    kind: string;
+    uom: string;
+  }>;
+}) {
+  const labels: Record<PackagingBomScope, { title: string; hint: string }> = {
+    UNIT: {
+      title: "Per finished unit",
+      hint: "Materials consumed per card (CARD route) or bottle (BOTTLE route).",
+    },
+    DISPLAY: {
+      title: "Per display",
+      hint: "1 display box + any per-display insert. Card count per display comes from product structure, not here.",
+    },
+    CASE: {
+      title: "Per master case",
+      hint: "1 case box + any case label / insert. Displays per case comes from product structure, not here.",
+    },
+  };
+  return (
+    <form
+      action={async (fd) => {
+        "use server";
+        await savePackagingBomLineAction(fd);
+      }}
+      className="rounded-md border border-slate-700/60 bg-slate-900/60 p-4 space-y-3"
+    >
+      <input type="hidden" name="productId" value={productId} />
+      <input type="hidden" name="perScope" value={scope} />
+      <h3 className="text-sm font-semibold text-slate-100">
+        {labels[scope].title}
+      </h3>
+      <p className="text-[11px] text-slate-400">{labels[scope].hint}</p>
+      {materials.length === 0 ? (
+        <p className="text-[12px] text-amber-300">
+          No active materials of a kind valid for {scope}. Add the right
+          packaging-material kind under{" "}
+          <Link
+            href="/settings/materials"
+            className="underline hover:text-amber-200"
+          >
+            materials
+          </Link>{" "}
+          first.
+        </p>
+      ) : (
+        <>
+          <SelectField
+            name="packagingMaterialId"
+            label="Material"
+            required
+            options={materials.map((m) => ({
+              value: m.id,
+              label: `${m.sku} — ${m.name} (${m.kind} · ${m.uom})`,
+            }))}
+          />
+          <Field
+            name="qtyPerUnit"
+            label={`Quantity per ${scope.toLowerCase()}`}
+            type="number"
+            min={1}
+            required
+          />
+          <Field
+            name="wasteAllowancePercent"
+            label="Waste %"
+            type="number"
+            min={0}
+            max={100}
+            step="0.01"
+            defaultValue="0"
+          />
+          <Field
+            name="notes"
+            label="Notes (optional)"
+            placeholder="any context…"
+          />
+          <button
+            type="submit"
+            className="h-9 px-4 rounded-md bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 text-sm font-medium"
+          >
+            Save {scope.toLowerCase()} line
+          </button>
+        </>
+      )}
+    </form>
   );
 }
 
