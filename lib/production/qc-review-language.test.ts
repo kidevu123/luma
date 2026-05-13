@@ -39,6 +39,11 @@ const FILES = [
   "app/(admin)/settings/product-material-compatibility/actions.ts",
   // PT-7B surface — pure shortage recommendation math.
   "lib/production/packtrack-shortage.ts",
+  // PT-7D surface — material-alerts recommendation panel + actions + loader.
+  "app/(admin)/material-alerts/page.tsx",
+  "app/(admin)/material-alerts/_recommendations-panel.tsx",
+  "app/(admin)/material-alerts/actions.ts",
+  "lib/db/queries/material-recommendations.ts",
 ];
 
 const BANNED = [

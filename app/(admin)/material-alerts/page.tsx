@@ -1,4 +1,5 @@
-// Phase H.x7 — Material alerts panel.
+// Phase H.x7 — Material alerts panel. PT-7D — extended with shortage
+// recommendations section reading from read_material_recommendations.
 
 import { requireAdmin } from "@/lib/auth-guards";
 import { loadMaterialAlertsPanel } from "@/lib/production/material-panels";
@@ -6,12 +7,17 @@ import { VARIANCE_LABELS } from "@/lib/production/reconciliation-v2-loader";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
+import { loadMaterialRecommendations } from "@/lib/db/queries/material-recommendations";
+import { ShortageRecommendationsPanel } from "./_recommendations-panel";
 
 export const dynamic = "force-dynamic";
 
 export default async function MaterialAlertsPage() {
   await requireAdmin();
-  const panel = await loadMaterialAlertsPanel();
+  const [panel, recommendations] = await Promise.all([
+    loadMaterialAlertsPanel(),
+    loadMaterialRecommendations({ status: "ALL" }),
+  ]);
   const totalAlerts =
     panel.shortages.length +
     panel.runouts.length +
@@ -35,6 +41,8 @@ export default async function MaterialAlertsPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <ShortageRecommendationsPanel rows={recommendations} />
 
       <Card>
         <CardHeader>
