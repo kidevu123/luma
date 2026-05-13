@@ -511,8 +511,17 @@ export const shipments = pgTable(
     shippedAt: timestamp("shipped_at", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     deliveryPhotoPath: text("delivery_photo_path"),
+    /** LOT-1B — customer this shipment is bound for. Nullable for
+     *  legacy / unrouted shipments. FK defined in SQL (forward ref
+     *  to customers table declared below). */
+    customerId: uuid("customer_id"),
   },
-  (t) => [index("shipments_po_idx").on(t.poId)],
+  (t) => [
+    index("shipments_po_idx").on(t.poId),
+    index("shipments_customer_idx")
+      .on(t.customerId)
+      .where(sql`customer_id IS NOT NULL`),
+  ],
 );
 
 export const receives = pgTable(
@@ -579,12 +588,30 @@ export const inventoryBags = pgTable(
     reservedForBottles: boolean("reserved_for_bottles").notNull().default(false),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     notes: text("notes"),
+    /** LOT-1B — Luma-issued QR string printed at intake. Distinct
+     *  from vendorBarcode (manufacturer's own sticker) and distinct
+     *  from qr_cards.scan_token (production badge). Nullable until
+     *  intake UI generates one. */
+    bagQrCode: text("bag_qr_code"),
+    /** LOT-1B — internal receipt-pad identifier. Typically built from
+     *  receives.receive_name + small_box.box_number + bag_number; stored
+     *  explicitly so the value survives renames. */
+    internalReceiptNumber: text("internal_receipt_number"),
+    /** LOT-1B — supplier-declared count at intake. pillCount above is
+     *  the live working count post-adjustment; this is the original. */
+    declaredPillCount: integer("declared_pill_count"),
   },
   (t) => [
     index("inventory_bags_box_idx").on(t.smallBoxId),
     index("inventory_bags_batch_idx").on(t.batchId),
     index("inventory_bags_status_idx").on(t.status),
     uniqueIndex("inventory_bags_box_bagno_unique").on(t.smallBoxId, t.bagNumber),
+    uniqueIndex("inventory_bags_bag_qr_code_unique")
+      .on(t.bagQrCode)
+      .where(sql`bag_qr_code IS NOT NULL`),
+    index("inventory_bags_internal_receipt_idx")
+      .on(t.internalReceiptNumber)
+      .where(sql`internal_receipt_number IS NOT NULL`),
   ],
 );
 
@@ -969,11 +996,32 @@ export const finishedLots = pgTable(
     status: finishedLotStatusEnum("status").notNull().default("PENDING_QC"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** LOT-1B — customer-facing printed code. Single namespace for
+     *  recall lookup. Same value as finishedLotNumber for newly
+     *  created lots today, but distinct so they can diverge later
+     *  (e.g. customer-branded variants). */
+    traceCode: text("trace_code"),
+    /** LOT-1B — when the lot finished packing. expiryDate above is
+     *  date-typed; this is the precise timestamp. */
+    packedAt: timestamp("packed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** LOT-1B — optional secondary code printed for a specific
+     *  customer (e.g. their internal SKU). */
+    finishedLotCodeAlias: text("finished_lot_code_alias"),
   },
   (t) => [
     uniqueIndex("finished_lots_number_unique").on(t.finishedLotNumber),
     index("finished_lots_product_idx").on(t.productId),
     index("finished_lots_produced_idx").on(t.producedOn),
+    uniqueIndex("finished_lots_trace_code_unique")
+      .on(t.traceCode)
+      .where(sql`trace_code IS NOT NULL`),
+    index("finished_lots_alias_idx")
+      .on(t.finishedLotCodeAlias)
+      .where(sql`finished_lot_code_alias IS NOT NULL`),
+    index("finished_lots_packed_at_idx")
+      .on(t.packedAt)
+      .where(sql`packed_at IS NOT NULL`),
   ],
 );
 
@@ -2969,6 +3017,223 @@ export const readMaterialRecommendations = pgTable(
     index("read_material_recommendations_sent_idx")
       .on(t.sentAt)
       .where(sql`sent_at IS NOT NULL`),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOT-1B — Finished Lot / Recall Passport schema
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const customers = pgTable(
+  "customers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    customerCode: text("customer_code").notNull(),
+    name: text("name").notNull(),
+    zohoCustomerId: text("zoho_customer_id"),
+    nexusCustomerId: text("nexus_customer_id"),
+    supplierLotVisible: boolean("supplier_lot_visible")
+      .notNull()
+      .default(false),
+    active: boolean("active").notNull().default(true),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("customers_customer_code_unique").on(t.customerCode),
+    index("customers_zoho_idx")
+      .on(t.zohoCustomerId)
+      .where(sql`zoho_customer_id IS NOT NULL`),
+    index("customers_nexus_idx")
+      .on(t.nexusCustomerId)
+      .where(sql`nexus_customer_id IS NOT NULL`),
+    index("customers_active_idx")
+      .on(t.active)
+      .where(sql`active = true`),
+  ],
+);
+
+export const finishedLotRawBags = pgTable(
+  "finished_lot_raw_bags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    finishedLotId: uuid("finished_lot_id")
+      .notNull()
+      .references(() => finishedLots.id, { onDelete: "cascade" }),
+    inventoryBagId: uuid("inventory_bag_id")
+      .notNull()
+      .references(() => inventoryBags.id, { onDelete: "restrict" }),
+    workflowBagId: uuid("workflow_bag_id").references(() => workflowBags.id, {
+      onDelete: "set null",
+    }),
+    quantityConsumedPills: integer("quantity_consumed_pills"),
+    quantityConsumedWeight: numeric("quantity_consumed_weight", {
+      precision: 20,
+      scale: 6,
+    }),
+    weightUnit: text("weight_unit"),
+    confidence: text("confidence").notNull(),
+    source: text("source").notNull(),
+    derivedFromEventId: uuid("derived_from_event_id").references(
+      () => workflowEvents.id,
+      { onDelete: "set null" },
+    ),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("finished_lot_raw_bags_triple_unique").on(
+      t.finishedLotId,
+      t.inventoryBagId,
+      t.workflowBagId,
+    ),
+    index("finished_lot_raw_bags_lot_idx").on(t.finishedLotId),
+    index("finished_lot_raw_bags_bag_idx").on(t.inventoryBagId),
+    index("finished_lot_raw_bags_workflow_idx")
+      .on(t.workflowBagId)
+      .where(sql`workflow_bag_id IS NOT NULL`),
+    index("finished_lot_raw_bags_confidence_idx").on(t.confidence),
+  ],
+);
+
+export const finishedLotOutputs = pgTable(
+  "finished_lot_outputs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    finishedLotId: uuid("finished_lot_id")
+      .notNull()
+      .references(() => finishedLots.id, { onDelete: "cascade" }),
+    outputType: text("output_type").notNull(),
+    quantity: integer("quantity").notNull(),
+    unit: text("unit").notNull().default("each"),
+    traceCodePrinted: text("trace_code_printed"),
+    printPayload: jsonb("print_payload").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("finished_lot_outputs_lot_idx").on(t.finishedLotId),
+    index("finished_lot_outputs_type_idx").on(t.outputType),
+    index("finished_lot_outputs_trace_printed_idx")
+      .on(t.traceCodePrinted)
+      .where(sql`trace_code_printed IS NOT NULL`),
+  ],
+);
+
+export const finishedLotPackagingLots = pgTable(
+  "finished_lot_packaging_lots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    finishedLotId: uuid("finished_lot_id")
+      .notNull()
+      .references(() => finishedLots.id, { onDelete: "cascade" }),
+    packagingLotId: uuid("packaging_lot_id")
+      .notNull()
+      .references(() => packagingLots.id, { onDelete: "restrict" }),
+    materialId: uuid("material_id").references(() => packagingMaterials.id, {
+      onDelete: "set null",
+    }),
+    quantityUsed: numeric("quantity_used", { precision: 20, scale: 6 }),
+    unit: text("unit"),
+    confidence: text("confidence").notNull(),
+    source: text("source").notNull(),
+    firstUsedAt: timestamp("first_used_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("finished_lot_packaging_lots_unique").on(
+      t.finishedLotId,
+      t.packagingLotId,
+    ),
+    index("finished_lot_packaging_lots_lot_idx").on(t.finishedLotId),
+    index("finished_lot_packaging_lots_lot_pkg_idx").on(t.packagingLotId),
+    index("finished_lot_packaging_lots_material_idx")
+      .on(t.materialId)
+      .where(sql`material_id IS NOT NULL`),
+  ],
+);
+
+export const finishedLotQcEvents = pgTable(
+  "finished_lot_qc_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    finishedLotId: uuid("finished_lot_id")
+      .notNull()
+      .references(() => finishedLots.id, { onDelete: "cascade" }),
+    workflowEventId: uuid("workflow_event_id")
+      .notNull()
+      .references(() => workflowEvents.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("finished_lot_qc_events_pair_unique").on(
+      t.finishedLotId,
+      t.workflowEventId,
+    ),
+    index("finished_lot_qc_events_lot_idx").on(t.finishedLotId),
+    index("finished_lot_qc_events_type_idx").on(t.eventType),
+    index("finished_lot_qc_events_occurred_idx").on(t.occurredAt),
+  ],
+);
+
+export const shipmentFinishedLots = pgTable(
+  "shipment_finished_lots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    shipmentId: uuid("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    finishedLotId: uuid("finished_lot_id")
+      .notNull()
+      .references(() => finishedLots.id, { onDelete: "restrict" }),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    quantity: integer("quantity"),
+    unit: text("unit"),
+    shippedAt: timestamp("shipped_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("shipment_finished_lots_pair_unique").on(
+      t.shipmentId,
+      t.finishedLotId,
+    ),
+    index("shipment_finished_lots_shipment_idx").on(t.shipmentId),
+    index("shipment_finished_lots_lot_idx").on(t.finishedLotId),
+    index("shipment_finished_lots_customer_idx")
+      .on(t.customerId)
+      .where(sql`customer_id IS NOT NULL`),
   ],
 );
 

@@ -218,6 +218,13 @@
       "when": 1781000000000,
       "tag": "0030_packtrack_recommendation_send",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781100000000,
+      "tag": "0031_finished_lot_recall_passport",
+      "breakpoints": true
     }
   ]
 }

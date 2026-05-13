@@ -48,6 +48,8 @@ const FILES = [
   // PT-7E surface — outbound PackTrack recommendation client + extended action + settings status.
   "lib/integrations/packtrack/recommendations.ts",
   "app/(admin)/settings/integrations/packtrack/page.tsx",
+  // LOT-1B surface — receiving-bridge helpers for the finished-lot / recall passport.
+  "lib/production/recall-passport.ts",
 ];
 
 const BANNED = [
