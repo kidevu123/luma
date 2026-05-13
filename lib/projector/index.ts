@@ -39,6 +39,7 @@ import { refreshMaterialReconciliationForBag } from "./material-reconciliation";
 import { refreshStationDailyForBag } from "./station-daily";
 import { emitMaterialConsumedFromBlister } from "./material-consumption-hook";
 import { attributeFinalizedBag } from "./operator-daily-attribution";
+import { projectQcEvent, isQcEventType } from "./qc-events";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -388,6 +389,20 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
     await refreshSkuDailyForBag(tx, ev.workflowBagId);
     await refreshMaterialReconciliationForBag(tx, ev.workflowBagId);
     await refreshStationDailyForBag(tx, ev.workflowBagId);
+  }
+
+  // QC-5: project QC events into per-day rollups (operator, SKU,
+  // station-quality) and bag-state flags. Lives in a sibling module
+  // so the dispatch stays out of this already-large file.
+  if (isQcEventType(ev.eventType)) {
+    await projectQcEvent(tx, {
+      workflowBagId: ev.workflowBagId,
+      eventType: ev.eventType as Parameters<typeof projectQcEvent>[1]["eventType"],
+      occurredAt,
+      employeeId: ev.accountableEmployeeId ?? null,
+      stationId: ev.stationId ?? null,
+      payload: mergedPayload as Record<string, unknown>,
+    });
   }
 
   // Phase H.x3 — When a BLISTER_COMPLETE event lands and an active

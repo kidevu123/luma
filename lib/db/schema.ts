@@ -2188,6 +2188,16 @@ export const readBagState = pgTable(
      *  unlocks per-employee performance metrics. */
     currentOperatorCode: text("current_operator_code"),
     lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+    /** QC-5 flags. Set by lib/projector/qc-events.ts:
+     *   - rework_pending: true while an open REWORK_SENT on this bag
+     *     has not been fully closed by cumulative REWORK_RECEIVED.
+     *   - rework_received: sticky once any REWORK_RECEIVED has fired
+     *     for this bag.
+     *   - has_correction: sticky once any SUBMISSION_CORRECTED has
+     *     landed on any of this bag's events. */
+    reworkPending: boolean("rework_pending").notNull().default(false),
+    reworkReceived: boolean("rework_received").notNull().default(false),
+    hasCorrection: boolean("has_correction").notNull().default(false),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2196,6 +2206,9 @@ export const readBagState = pgTable(
     index("read_bag_state_stage_idx").on(t.stage),
     index("read_bag_state_finalized_idx").on(t.isFinalized),
     index("read_bag_state_paused_idx").on(t.isPaused),
+    index("read_bag_state_rework_pending_idx")
+      .on(t.reworkPending)
+      .where(sql`rework_pending = true`),
   ],
 );
 

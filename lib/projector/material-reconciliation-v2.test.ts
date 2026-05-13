@@ -112,6 +112,12 @@ function buildStubTx(fix: StubFixture) {
       }
       return chainBuilder(fix.latestAdjust ? [fix.latestAdjust as AnyRow] : []);
     },
+    // QC-5: the assembler now calls tx.execute() to pull
+    // SCRAP_RECORDED totals from workflow_events. The PT-6 test
+    // fixtures don't seed any scrap, so the stub returns the empty
+    // total — keeping the existing "scrap stays MISSING" contract
+    // these tests assert.
+    execute: async () => [{ total: 0 }] as unknown[],
     insert: () => ({
       values: (vals: unknown) => ({
         onConflictDoUpdate: ({ set }: { set: unknown }) => {

@@ -33,6 +33,10 @@ const STAGE_BADGES: Record<string, { label: string; cls: string }> = {
   BAG_FINALIZED: { label: "Finalized", cls: "bg-emerald-500/10 text-emerald-300 border-emerald-500/40" },
   CARD_FORCE_RELEASED: { label: "Force release", cls: "bg-rose-500/10 text-rose-300 border-rose-500/40" },
   PACKAGING_DAMAGE_RETURN: { label: "Damage", cls: "bg-rose-500/10 text-rose-300 border-rose-500/40" },
+  REWORK_SENT: { label: "Rework sent", cls: "bg-sky-500/10 text-sky-300 border-sky-500/40" },
+  REWORK_RECEIVED: { label: "Rework rec", cls: "bg-sky-500/10 text-sky-300 border-sky-500/40" },
+  SCRAP_RECORDED: { label: "Scrap", cls: "bg-rose-700/20 text-rose-200 border-rose-700/60" },
+  SUBMISSION_CORRECTED: { label: "Corrected", cls: "bg-amber-500/10 text-amber-200 border-amber-500/40" },
   FINISHED_GOODS_RELEASED: { label: "Released", cls: "bg-emerald-500/10 text-emerald-300 border-emerald-500/40" },
 };
 

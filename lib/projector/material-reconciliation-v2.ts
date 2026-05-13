@@ -18,6 +18,7 @@ import {
   packagingMaterials,
   readMaterialLotState,
   readMaterialReconciliationV2,
+  workflowEvents,
 } from "@/lib/db/schema";
 
 import {
@@ -248,10 +249,13 @@ export async function buildPackagingLotReconciliationInput(
       onHandSource,
       cycleCountActualRemaining,
     },
-    // Scrap remains MISSING until the QC subsystem ships explicit
-    // raw-material scrap events. The helper's missing-data branch
-    // pushes the QC-deferral warning into result.warnings.
-    scrap: null,
+    // QC-5: scrap comes from workflow_events of type SCRAP_RECORDED
+    // that name this packaging_lot_id (or its material_lot_id in
+    // events where the operator only entered the material lot). The
+    // sum is in the lot's native unit; the source label
+    // QC_SCRAP_EVENTS is recognised by reconciliation-v2 to land in
+    // the SCRAPPED_OR_DAMAGED bucket with HIGH confidence.
+    scrap: await loadScrapFromQcEvents(tx, lot.id),
   };
 
   const sourceSnapshot: Record<string, unknown> = {
@@ -515,4 +519,39 @@ async function upsertReconciliationV2Row(
         updatedAt: new Date(),
       },
     });
+}
+
+// ─── QC-5: scrap aggregation from workflow_events ──────────────────────
+//
+// SCRAP_RECORDED events name affects_packaging_material + a
+// material_lot_id or packaging_lot_id. We sum scrap_quantity across
+// every event that names THIS lot, in the lot's native unit. The
+// helper returns null when no scrap exists — reconciliation-v2's
+// quantityRow() then surfaces a MISSING bucket with the existing
+// "no scrap event today" explanation (preserves PT-6's data-honesty
+// surface). When scrap > 0, source is EXPLICIT_SCRAP_EVENT (HIGH
+// confidence), driving the scrappedOrDamaged bucket cleanly.
+async function loadScrapFromQcEvents(
+  tx: Tx,
+  lotId: string,
+): Promise<{ value: number; source: "EXPLICIT_SCRAP_EVENT" } | null> {
+  const rows = (await tx.execute(sql`
+    SELECT COALESCE(SUM(
+      COALESCE(
+        (payload->>'scrap_quantity')::numeric,
+        (payload->>'quantity')::numeric,
+        0
+      )
+    ), 0)::float AS total
+    FROM workflow_events
+    WHERE event_type = 'SCRAP_RECORDED'
+      AND (
+        payload->>'packaging_lot_id' = ${lotId}
+        OR payload->>'material_lot_id' = ${lotId}
+      )
+      AND COALESCE((payload->>'affects_packaging_material')::boolean, false) = true
+  `)) as unknown as Array<{ total: number | null }>;
+  const total = Number(rows[0]?.total ?? 0);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return { value: total, source: "EXPLICIT_SCRAP_EVENT" };
 }

@@ -65,9 +65,26 @@ export default async function OperatorProductivityPage() {
                 <th className="text-left px-3 py-2">Operator</th>
                 <th className="text-left px-3 py-2">Code</th>
                 <th className="text-right px-3 py-2">Bags finalized</th>
-                <th className="text-right px-3 py-2">Active minutes</th>
-                <th className="text-right px-3 py-2">Bags / hour</th>
-                <th className="text-right px-3 py-2">Damages</th>
+                <th className="text-right px-3 py-2">Active min</th>
+                <th className="text-right px-3 py-2">Bags / hr</th>
+                <th className="text-right px-3 py-2" title="Phase-A damages: damaged_packaging + ripped_cards on PACKAGING_COMPLETE">
+                  Pkg dmg
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: count of PACKAGING_DAMAGE_RETURN events">
+                  QC dmg
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: count of REWORK_SENT events accountable to this operator">
+                  Rework sent
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: count of REWORK_RECEIVED events accountable to this operator">
+                  Rework rec
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: SUM(scrap_quantity) across SCRAP_RECORDED events linked to this operator">
+                  Scrap units
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: count of SUBMISSION_CORRECTED events linked to an event this operator was accountable for">
+                  Corrections
+                </th>
                 <th className="text-right px-3 py-2">Labor cost</th>
                 <th className="text-left px-3 py-2">Confidence</th>
               </tr>
@@ -106,6 +123,21 @@ export default async function OperatorProductivityPage() {
                     <td className="px-3 py-2 text-right text-slate-300 font-mono">
                       {r.damages.toLocaleString()}
                     </td>
+                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                      {r.damageEvents > 0 ? r.damageEvents.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                      {r.reworkSent > 0 ? r.reworkSent.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                      {r.reworkReceived > 0 ? r.reworkReceived.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                      {r.scrapUnits > 0 ? r.scrapUnits.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                      {r.corrections > 0 ? r.corrections.toLocaleString() : "—"}
+                    </td>
                     <td className="px-3 py-2 text-right">
                       {hasLaborRates ? (
                         <span className="text-slate-500 italic text-[11px]">
@@ -132,8 +164,11 @@ export default async function OperatorProductivityPage() {
           rows marked <em>legacy code only</em> were attributed by typed
           operator code without a stable employee match — typos can
           inflate the leaderboard. New rows post-OP-1B / OP-1C key on
-          employees.id directly. Rework / correction columns remain
-          gated on the QC subsystem phase.
+          employees.id directly. QC columns (QC dmg / Rework / Scrap /
+          Corrections) populate live from QC-5; "—" means no QC event
+          attributed to this operator in the window. Corrections are
+          tallied against the operator who typed the original entry,
+          not the supervisor who corrected it.
         </p>
       </div>
     </div>

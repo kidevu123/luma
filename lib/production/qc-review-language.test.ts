@@ -24,6 +24,11 @@ const FILES = [
   "app/(admin)/qc-review/_receive-rework-row.tsx",
   "app/(admin)/qc-review/_correction-trigger.tsx",
   "lib/production/qc-review-loaders.ts",
+  // QC-5 surface — projector + extended operator productivity page +
+  // genealogy badge map must stay clean.
+  "lib/projector/qc-events.ts",
+  "app/(admin)/operator-productivity/page.tsx",
+  "app/(admin)/genealogy/[bagId]/page.tsx",
 ];
 
 const BANNED = [

@@ -1025,6 +1025,15 @@ export type OperatorRow = {
   bagsFinalized: number;
   activeSeconds: number;
   damages: number;
+  /** QC-5 counters from read_operator_daily. All five sum across
+   *  the window. Zero rows for legacy code-only operators stay at 0
+   *  — QC events are only attributed when the resolver landed a
+   *  stable employee_id. */
+  damageEvents: number;
+  reworkSent: number;
+  reworkReceived: number;
+  scrapUnits: number;
+  corrections: number;
 };
 
 export async function deriveOperatorMetrics(
@@ -1071,6 +1080,11 @@ export async function deriveOperatorRows(
       bagsFinalized: sum(readOperatorDaily.bagsFinalized).mapWith(Number),
       activeSeconds: sum(readOperatorDaily.activeSecondsTotal).mapWith(Number),
       damages: sum(readOperatorDaily.damageCountTotal).mapWith(Number),
+      damageEvents: sum(readOperatorDaily.damageEventsTotal).mapWith(Number),
+      reworkSent: sum(readOperatorDaily.reworkSentTotal).mapWith(Number),
+      reworkReceived: sum(readOperatorDaily.reworkReceivedTotal).mapWith(Number),
+      scrapUnits: sum(readOperatorDaily.scrapUnitsTotal).mapWith(Number),
+      corrections: sum(readOperatorDaily.correctionsTotal).mapWith(Number),
     })
     .from(readOperatorDaily)
     .leftJoin(employees, eq(employees.id, readOperatorDaily.employeeId))
@@ -1107,6 +1121,11 @@ export async function deriveOperatorRows(
       bagsFinalized: Number(r.bagsFinalized ?? 0),
       activeSeconds: Number(r.activeSeconds ?? 0),
       damages: Number(r.damages ?? 0),
+      damageEvents: Number(r.damageEvents ?? 0),
+      reworkSent: Number(r.reworkSent ?? 0),
+      reworkReceived: Number(r.reworkReceived ?? 0),
+      scrapUnits: Number(r.scrapUnits ?? 0),
+      corrections: Number(r.corrections ?? 0),
     } satisfies OperatorRow;
   });
 }
