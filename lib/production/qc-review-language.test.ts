@@ -44,6 +44,7 @@ const FILES = [
   "app/(admin)/material-alerts/_recommendations-panel.tsx",
   "app/(admin)/material-alerts/actions.ts",
   "lib/db/queries/material-recommendations.ts",
+  "lib/production/material-recommendations-filter.ts",
 ];
 
 const BANNED = [

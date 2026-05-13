@@ -11,7 +11,7 @@ import {
   filterRecommendations,
   countRecommendations,
   type RecommendationRow,
-} from "./material-recommendations";
+} from "@/lib/production/material-recommendations-filter";
 import type {
   ShortageConfidence,
   ShortageSeverity,
