@@ -4,6 +4,72 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-7E — Luma outbound PackTrack recommendation handoff (complete)
+- Date: 2026-05-13
+- Result: outbound integration phase. Migration 0030 + outbound client + send action + UI button + settings status card. No automatic send — every send is operator-triggered from `/material-alerts`. No PO creation from Luma — PackTrack creates the PO after owner approval. PackTrack endpoint may not exist yet; the UI surfaces "PackTrack handoff not configured" honestly when env is missing, and the action short-circuits to `NOT_CONFIGURED` before any DB read.
+- Files changed:
+  - **NEW** `drizzle/0030_packtrack_recommendation_send.sql` — adds `sent_at timestamptz` + `last_sent_response jsonb` to `read_material_recommendations` (both nullable) + one new index `read_material_recommendations_sent_idx` (partial on `sent_at IS NOT NULL`). `last_send_error` was already shipped by PT-7C.
+  - **NEW** `lib/integrations/packtrack/recommendations.ts` (~280 lines) — exports `validatePackTrackRecommendationConfig`, `buildPackTrackRecommendationPayload`, `sendRecommendationToPackTrack`, `mapPackTrackRecommendationResponse`, env names `PACKTRACK_RECOMMENDATION_URL` + `PACKTRACK_RECOMMENDATION_SECRET`. Headers `x-luma-packtrack-secret` + `x-luma-recommendation-id`. AbortController-based 10s timeout. Defense-in-depth secret strip from any reflected response body.
+  - **NEW** `lib/integrations/packtrack/recommendations.test.ts` (~290 lines, 15 cases) — config validation, payload builder field-by-field, response mapper, NOT_CONFIGURED / BLOCKED_BY_CONFIDENCE / BLOCKED_BY_QUANTITY / HTTP_ERROR / NETWORK_ERROR / INVALID_RESPONSE / secret-redaction.
+  - **NEW** `app/(admin)/material-alerts/_recommendations-panel-helpers.test.ts` (~95 lines, 7 cases) — pure `deriveSendBlockReason` exercised across the gate priority ladder. (Missing config wins over other reasons because the operator can't act on anything else first.)
+  - MOD `app/(admin)/material-alerts/actions.ts` — new `sendMaterialRecommendationToPackTrackAction` (~120 lines). Loads the row outside the transaction (so a slow PackTrack doesn't hold a DB lock), gates by acknowledged / not-dismissed / sendable / confidence ≠ MISSING / qty > 0 / config present, calls the client, then opens a tx to persist either `{sent_at, last_sent_response, last_send_error: null}` + audit `material_recommendation.send`, OR `{last_send_error}` + audit `material_recommendation.send_failed`.
+  - MOD `app/(admin)/material-alerts/actions.test.ts` — 8 new send-action cases (NOT_CONFIGURED / NOT_ACKNOWLEDGED / DISMISSED / NOT_SENDABLE / BLOCKED_BY_CONFIDENCE / BLOCKED_BY_QUANTITY / HTTP_ERROR persist + audit / success persist + audit + idempotency header). Stub `db.select` extended to handle the top-level pre-tx read. Static scan repurposed: ack + dismiss bodies must NOT reference `sendRecommendationToPackTrack` or `fetch(`; full file must not contain `create PO` / `Luma ordered`.
+  - MOD `app/(admin)/material-alerts/_recommendations-panel.tsx` — new `Send to PackTrack` button when `deriveSendBlockReason(row, configured) === null`, "Send blocked: <reason>" chip when not, "Sent to PackTrack" pill after success. Header copy updated: "Sending creates a recommendation in PackTrack for owner approval. Luma does not create a PO." `deriveSendBlockReason` exported for pure-helper testing.
+  - MOD `app/(admin)/material-alerts/page.tsx` — passes `packtrackConfigured` from `validatePackTrackRecommendationConfig()` into the panel.
+  - MOD `app/(admin)/settings/integrations/packtrack/page.tsx` — new "Recommendation handoff (outbound)" card with rows for endpoint / secret / live-sending status. Missing-vars list shown when not configured. Secret values are never exposed.
+  - MOD `lib/db/schema.ts` — `sentAt` + `lastSentResponse` fields on `readMaterialRecommendations` + `read_material_recommendations_sent_idx` index.
+  - MOD `lib/production/material-recommendations-filter.ts` — `RecommendationRow` extended with `sentAt` / `lastSentResponse` / `lastSendError`.
+  - MOD `lib/db/queries/material-recommendations.ts` — loader maps the 3 new fields.
+  - MOD `lib/db/queries/material-recommendations.test.ts` — fixture default extended.
+  - MOD `lib/production/qc-review-language.test.ts` — banned-phrase scan extended to the 2 new files (client + settings page).
+  - MOD `drizzle/meta/_journal.json` — entry idx 30, `when=1781000000000`.
+  - MOD `docs/CLAUDE_BUILD_QUEUE.md` — PT-7E sub-bullet flipped to `[x]`.
+- Client behavior:
+  - **Config check** — `validatePackTrackRecommendationConfig` reads `PACKTRACK_RECOMMENDATION_URL` + `PACKTRACK_RECOMMENDATION_SECRET` (treats whitespace as missing); returns `{configured, endpointConfigured, secretConfigured, missing[]}`.
+  - **Payload** — `schema_version: "1.0"`, `source: "LUMA"`, every PT-7B / PT-7C field mapped 1:1 to a snake_case key, `luma_links.material_alerts` populated when `APP_URL` is set.
+  - **Send** — POST with `content-type: application/json`, `x-luma-packtrack-secret: <secret>`, `x-luma-recommendation-id: <recommendation_id>`. 10s AbortController timeout. Refuses MISSING confidence and qty ≤ 0 defensively.
+  - **Failure modes** — `NOT_CONFIGURED` / `BLOCKED_BY_CONFIDENCE` / `BLOCKED_BY_QUANTITY` / `HTTP_ERROR` (with status + bodySnippet) / `NETWORK_ERROR` / `INVALID_RESPONSE`. Response body snippet is capped at 500 chars and the secret is stripped before surfacing.
+  - **Response mapping** — `recommendation_id` (preferred) or `id` → `packtrack_recommendation_id`; `status` + `message` mapped through; full body kept under `raw`.
+- Send action behavior:
+  - `requireAdmin()` first.
+  - UUID validation second.
+  - Config check third (`NOT_CONFIGURED` short-circuit).
+  - DB read outside tx; row-existence check.
+  - Six gates in order: `NOT_ACKNOWLEDGED` / `DISMISSED` / `NOT_SENDABLE` / `BLOCKED_BY_CONFIDENCE` / `BLOCKED_BY_QUANTITY`.
+  - Outbound call.
+  - One tx that either persists success (`sent_at`, `last_sent_response`, `last_send_error: null`, audit `material_recommendation.send`) OR failure (`last_send_error`, audit `material_recommendation.send_failed`).
+  - `revalidatePath("/material-alerts")` at the end.
+- UI behavior:
+  - "Send to PackTrack" button rendered only when `deriveSendBlockReason(row, configured) === null` and the row hasn't been sent.
+  - Disabled-reason chip shows the human-readable block reason when not. Priority: missing config > dismissed > not acknowledged > not sendable > MISSING confidence > zero qty.
+  - "Sent to PackTrack" pill once `sent_at` is set.
+  - Card-level honesty copy: "Recommendation only. Sending creates a recommendation in PackTrack for owner approval. Luma does not create a PO."
+  - When `packtrackConfigured=false`, a "PackTrack handoff not configured" tag appears in the card header.
+- Config / env behavior:
+  - `PACKTRACK_RECOMMENDATION_URL` + `PACKTRACK_RECOMMENDATION_SECRET` are the two env vars.
+  - Whitespace-only values count as missing.
+  - Status surfaces at `/settings/integrations/packtrack` under "Recommendation handoff (outbound)": three rows (endpoint / secret / live-sending) — never the values, only yes/no. Missing var names listed in an amber banner.
+- Tests added:
+  - `lib/integrations/packtrack/recommendations.test.ts` — 15 cases (4 config / 2 payload / 3 mapper / 3 gates / 1 happy path / 4 failure modes incl. secret redaction).
+  - `app/(admin)/material-alerts/actions.test.ts` — +8 send-action cases (config gate, 5 row-state gates, HTTP failure persist+audit, success persist+audit+idempotency-header).
+  - `app/(admin)/material-alerts/_recommendations-panel-helpers.test.ts` — 7 cases for `deriveSendBlockReason` priority ladder.
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1093/1093 pass across 49 test files** (+19 vs PT-7D's 1074; +2 test files).
+  - `npx next build` → clean (only the pre-existing OpenTelemetry `@opentelemetry/exporter-jaeger` warning, unrelated).
+- Staging verification (LX122 / SHA `ef60c94`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `ef60c9494024dcde662a46c8bc06e385aa88970c`.
+  - Migration 0030 row present in `drizzle.__drizzle_migrations`.
+  - `\d read_material_recommendations` shows `sent_at timestamptz` + `last_sent_response jsonb` columns.
+  - `/material-alerts` returns 200 under admin auth. Empty state still honest (zero rows in `read_material_recommendations`; that's PT-7F's seed job).
+  - `/settings/integrations/packtrack` returns 200. PackTrack env intentionally unset on staging → "Live sending enabled: No — UI shows PackTrack handoff not configured."
+  - Auth smoke 47/47 PASS.
+  - No PackTrack POST attempted from Luma in this phase.
+- PT-7F readiness: ready. PT-7F seeds a real recommendation against staging data (rebuild + a CRITICAL/HIGH-confidence row), exercises the acknowledge → send flow end-to-end (either against a real PackTrack staging endpoint or with a mock receiver), verifies last_sent_response surfaces in the row's audit chain, and closes the queue item out.
+
+---
+
 ## PT-7D — Material-alerts recommendation UI + acknowledge/dismiss actions (complete)
 - Date: 2026-05-13
 - Result: UI + actions phase. `/material-alerts` now exposes the rows PT-7C persists; admins can acknowledge or dismiss without any PackTrack contact. PT-7E is the outbound integration; this phase is intentionally read-only against the recommendation table.
