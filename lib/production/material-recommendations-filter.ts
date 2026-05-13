@@ -55,6 +55,12 @@ export type RecommendationRow = {
   acknowledgedAt: Date | null;
   dismissedAt: Date | null;
   recommendedSupplierHint: string | null;
+  /** PT-7E — outbound bookkeeping. Null until a successful POST. */
+  sentAt: Date | null;
+  /** PT-7E — most recent PackTrack response, mapped down to a small
+   *  shape. Null until first send. */
+  lastSentResponse: unknown;
+  lastSendError: string | null;
 };
 
 export function filterRecommendations(

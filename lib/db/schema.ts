@@ -2923,6 +2923,10 @@ export const readMaterialRecommendations = pgTable(
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
     dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
     lastSendError: text("last_send_error"),
+    /** PT-7E — outbound bookkeeping. Populated by
+     *  sendMaterialRecommendationToPackTrackAction on success. */
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    lastSentResponse: jsonb("last_sent_response"),
     /** Self-FK applied via SQL — drizzle's typed builder can't
      *  express the self-reference cleanly here. Index below. */
     supersededBy: uuid("superseded_by"),
@@ -2962,6 +2966,9 @@ export const readMaterialRecommendations = pgTable(
     index("read_material_recommendations_expires_idx")
       .on(t.expiresAt)
       .where(sql`expires_at IS NOT NULL`),
+    index("read_material_recommendations_sent_idx")
+      .on(t.sentAt)
+      .where(sql`sent_at IS NOT NULL`),
   ],
 );
 

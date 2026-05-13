@@ -45,6 +45,9 @@ const FILES = [
   "app/(admin)/material-alerts/actions.ts",
   "lib/db/queries/material-recommendations.ts",
   "lib/production/material-recommendations-filter.ts",
+  // PT-7E surface — outbound PackTrack recommendation client + extended action + settings status.
+  "lib/integrations/packtrack/recommendations.ts",
+  "app/(admin)/settings/integrations/packtrack/page.tsx",
 ];
 
 const BANNED = [

@@ -20,6 +20,7 @@ import {
   createPacktrackMappingAction,
   deactivatePacktrackMappingAction,
 } from "./actions";
+import { validatePackTrackRecommendationConfig } from "@/lib/integrations/packtrack/recommendations";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +83,7 @@ export default async function PacktrackMappingPage() {
     .orderBy(asc(packagingMaterials.sku));
 
   const webhookConfigured = Boolean(process.env.PACKTRACK_INTEGRATION_SECRET);
+  const recommendationConfig = validatePackTrackRecommendationConfig();
 
   return (
     <div className="space-y-5">
@@ -119,6 +121,49 @@ export default async function PacktrackMappingPage() {
                 }
               />
             </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recommendation handoff (outbound)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-xs text-text-muted">
+            Operator-triggered handoff of shortage recommendations from
+            Luma to PackTrack. Sending creates a recommendation in
+            PackTrack for owner approval. Luma does not create a PO.
+          </p>
+          <Row
+            label="Endpoint configured"
+            value={
+              recommendationConfig.endpointConfigured
+                ? "PACKTRACK_RECOMMENDATION_URL is set"
+                : "PACKTRACK_RECOMMENDATION_URL is NOT set"
+            }
+          />
+          <Row
+            label="Secret configured"
+            value={
+              recommendationConfig.secretConfigured
+                ? "PACKTRACK_RECOMMENDATION_SECRET is set"
+                : "PACKTRACK_RECOMMENDATION_SECRET is NOT set"
+            }
+          />
+          <Row
+            label="Live sending enabled"
+            value={
+              recommendationConfig.configured
+                ? "Yes — admins can send acknowledged recommendations"
+                : "No — UI shows PackTrack handoff not configured"
+            }
+          />
+          {!recommendationConfig.configured && (
+            <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Missing: {recommendationConfig.missing.join(", ")}. Set in
+              the LXC env (do not commit secret values).
+            </div>
           )}
         </CardContent>
       </Card>

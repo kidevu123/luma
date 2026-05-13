@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { loadMaterialRecommendations } from "@/lib/db/queries/material-recommendations";
+import { validatePackTrackRecommendationConfig } from "@/lib/integrations/packtrack/recommendations";
 import { ShortageRecommendationsPanel } from "./_recommendations-panel";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export default async function MaterialAlertsPage() {
     loadMaterialAlertsPanel(),
     loadMaterialRecommendations({ status: "ALL" }),
   ]);
+  const packtrackConfig = validatePackTrackRecommendationConfig();
   const totalAlerts =
     panel.shortages.length +
     panel.runouts.length +
@@ -42,7 +44,10 @@ export default async function MaterialAlertsPage() {
         </Card>
       ) : null}
 
-      <ShortageRecommendationsPanel rows={recommendations} />
+      <ShortageRecommendationsPanel
+        rows={recommendations}
+        packtrackConfigured={packtrackConfig.configured}
+      />
 
       <Card>
         <CardHeader>

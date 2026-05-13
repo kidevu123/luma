@@ -46,6 +46,9 @@ function row(over: Partial<RecommendationRow> = {}): RecommendationRow {
     acknowledgedAt: over.acknowledgedAt ?? null,
     dismissedAt: over.dismissedAt ?? null,
     recommendedSupplierHint: over.recommendedSupplierHint ?? null,
+    sentAt: over.sentAt ?? null,
+    lastSentResponse: over.lastSentResponse ?? null,
+    lastSendError: over.lastSendError ?? null,
   };
 }
 

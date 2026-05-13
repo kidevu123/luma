@@ -90,6 +90,9 @@ export async function loadMaterialRecommendations(
     acknowledgedAt: d.acknowledgedAt,
     dismissedAt: d.dismissedAt,
     recommendedSupplierHint: d.recommendedSupplierHint,
+    sentAt: d.sentAt,
+    lastSentResponse: d.lastSentResponse,
+    lastSendError: d.lastSendError,
   }));
 
   return filterRecommendations(mapped, filters);

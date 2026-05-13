@@ -12,6 +12,7 @@ import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import {
   acknowledgeMaterialRecommendationAction,
   dismissMaterialRecommendationAction,
+  sendMaterialRecommendationToPackTrackAction,
 } from "./actions";
 import {
   filterRecommendations,
@@ -60,7 +61,35 @@ type ActionStatus =
   | { kind: "ok" }
   | { kind: "error"; message: string };
 
-function ActionButtons({ row }: { row: RecommendationRow }) {
+/** Pure helper: derive the reason a send button must be disabled for a
+ *  given row + config. Returns null when the row is ready to send.
+ *  Exported alongside the panel so the action-test can grep its
+ *  behavior without having to mount React. */
+export function deriveSendBlockReason(
+  row: RecommendationRow,
+  packtrackConfigured: boolean,
+): string | null {
+  if (!packtrackConfigured) return "PackTrack handoff not configured";
+  if (row.dismissedAt != null) return "Dismissed";
+  if (row.acknowledgedAt == null) return "Not acknowledged";
+  if (!row.sendableToPackTrack) return "Not sendable";
+  if (row.confidence === "MISSING") return "Missing configuration";
+  if (
+    row.recommendedOrderQuantity == null ||
+    row.recommendedOrderQuantity <= 0
+  ) {
+    return "No recommended quantity";
+  }
+  return null;
+}
+
+function ActionButtons({
+  row,
+  packtrackConfigured,
+}: {
+  row: RecommendationRow;
+  packtrackConfigured: boolean;
+}) {
   const [ackStatus, setAckStatus] = React.useState<ActionStatus>({
     kind: "idle",
   });
@@ -70,9 +99,14 @@ function ActionButtons({ row }: { row: RecommendationRow }) {
   const [dismissStatus, setDismissStatus] = React.useState<ActionStatus>({
     kind: "idle",
   });
+  const [sendStatus, setSendStatus] = React.useState<ActionStatus>({
+    kind: "idle",
+  });
 
   const alreadyAcked = row.acknowledgedAt != null;
   const alreadyDismissed = row.dismissedAt != null;
+  const alreadySent = row.sentAt != null;
+  const sendBlockReason = deriveSendBlockReason(row, packtrackConfigured);
 
   async function onAck() {
     setAckStatus({ kind: "pending" });
@@ -97,6 +131,15 @@ function ActionButtons({ row }: { row: RecommendationRow }) {
     }
   }
 
+  async function onSend() {
+    setSendStatus({ kind: "pending" });
+    const fd = new FormData();
+    fd.set("recommendationId", row.id);
+    const r = await sendMaterialRecommendationToPackTrackAction(fd);
+    if ("error" in r) setSendStatus({ kind: "error", message: r.error });
+    else setSendStatus({ kind: "ok" });
+  }
+
   return (
     <div className="flex flex-col gap-1 items-end">
       <div className="flex gap-1">
@@ -119,7 +162,39 @@ function ActionButtons({ row }: { row: RecommendationRow }) {
             Dismiss
           </button>
         )}
+        {sendBlockReason == null && !alreadySent && (
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={sendStatus.kind === "pending"}
+            title="Sending creates a recommendation in PackTrack for owner approval. Luma does not create a PO."
+            className="rounded border border-indigo-500 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
+          >
+            {sendStatus.kind === "pending" ? "…" : "Send to PackTrack"}
+          </button>
+        )}
+        {sendBlockReason != null && !alreadySent && (
+          <span
+            title="Sending creates a recommendation in PackTrack for owner approval. Luma does not create a PO."
+            className="inline-flex items-center rounded border border-slate-300 bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-500"
+          >
+            Send blocked: {sendBlockReason}
+          </span>
+        )}
+        {alreadySent && (
+          <span className="inline-flex items-center rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-900">
+            Sent to PackTrack
+          </span>
+        )}
       </div>
+      {sendStatus.kind === "error" && (
+        <p className="text-[10px] text-red-700">{sendStatus.message}</p>
+      )}
+      {sendStatus.kind === "ok" && (
+        <p className="text-[10px] text-emerald-700">
+          Sent. Refresh to see the recorded timestamp.
+        </p>
+      )}
       {ackStatus.kind === "error" && (
         <p className="text-[10px] text-red-700">{ackStatus.message}</p>
       )}
@@ -202,8 +277,10 @@ function SendableBadge({ sendable }: { sendable: boolean }) {
 
 export function ShortageRecommendationsPanel({
   rows,
+  packtrackConfigured,
 }: {
   rows: RecommendationRow[];
+  packtrackConfigured: boolean;
 }) {
   const [statusFilter, setStatusFilter] =
     React.useState<RecommendationStatusFilter>("ACTIVE");
@@ -279,8 +356,13 @@ export function ShortageRecommendationsPanel({
           PackTrack shortage recommendations ({filtered.length})
         </CardTitle>
         <p className="text-[11px] text-text-muted mt-1">
-          Recommendation only. Not sent to PackTrack yet. Owner approval
-          required in PackTrack before any purchase order is created.
+          Recommendation only. Sending creates a recommendation in
+          PackTrack for owner approval. Luma does not create a PO.
+          {packtrackConfigured ? null : (
+            <span className="ml-1 inline-flex items-center rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-900">
+              PackTrack handoff not configured
+            </span>
+          )}
         </p>
       </CardHeader>
       <CardContent>
@@ -458,7 +540,10 @@ export function ShortageRecommendationsPanel({
                     )}
                     <p className="mt-1 text-[12px]">{r.reason}</p>
                   </div>
-                  <ActionButtons row={r} />
+                  <ActionButtons
+                    row={r}
+                    packtrackConfigured={packtrackConfigured}
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3 text-[11px]">

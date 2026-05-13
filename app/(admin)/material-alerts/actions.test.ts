@@ -20,6 +20,14 @@ const txState: {
 
 vi.mock("@/lib/db", () => ({
   db: {
+    // Top-level read used by the send action before opening a tx.
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => txState.rows,
+        }),
+      }),
+    }),
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
       const tx = {
         select: () => ({
@@ -63,7 +71,12 @@ vi.mock("next/cache", () => ({
 import {
   acknowledgeMaterialRecommendationAction,
   dismissMaterialRecommendationAction,
+  sendMaterialRecommendationToPackTrackAction,
 } from "./actions";
+import {
+  PACKTRACK_RECOMMENDATION_SECRET_ENV,
+  PACKTRACK_RECOMMENDATION_URL_ENV,
+} from "@/lib/integrations/packtrack/recommendations";
 
 const VALID_ID = "11111111-1111-1111-1111-111111111111";
 
@@ -208,14 +221,11 @@ describe("dismissMaterialRecommendationAction", () => {
   });
 });
 
-describe("no PackTrack outbound from PT-7D", () => {
-  it("the actions module does not import any PackTrack client", () => {
-    // Static import scan: the actions source must not reference the
-    // PackTrack outbound module (which doesn't even exist yet — PT-7E
-    // will add it). We do this as a string scan against the source
-    // file rather than runtime, so adding the import later trips this
-    // even if the action never executes.
-    // Resolved relative to this test file.
+describe("PackTrack discipline in actions.ts", () => {
+  it("acknowledge and dismiss never call the outbound client", () => {
+    // Static scan: only sendMaterialRecommendationToPackTrackAction is
+    // allowed to mention sendRecommendationToPackTrack. The
+    // acknowledge / dismiss helpers must not.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
@@ -223,7 +233,227 @@ describe("no PackTrack outbound from PT-7D", () => {
       path.resolve(__dirname, "actions.ts"),
       "utf8",
     );
-    expect(src).not.toMatch(/packtrack-client|packtrack-outbound|packtrack\/send/i);
-    expect(src).not.toMatch(/fetch\s*\(/);
+    // Find acknowledge + dismiss function bodies; both should be free
+    // of any send-side identifiers.
+    const ackIdx = src.indexOf(
+      "export async function acknowledgeMaterialRecommendationAction",
+    );
+    const dismissIdx = src.indexOf(
+      "export async function dismissMaterialRecommendationAction",
+    );
+    const sendIdx = src.indexOf(
+      "export async function sendMaterialRecommendationToPackTrackAction",
+    );
+    expect(ackIdx).toBeGreaterThan(-1);
+    expect(dismissIdx).toBeGreaterThan(-1);
+    expect(sendIdx).toBeGreaterThan(-1);
+    // ack function body ends where the next export begins
+    const ackEnd = Math.min(dismissIdx, sendIdx);
+    const ackBody = src.slice(ackIdx, ackEnd);
+    expect(ackBody).not.toContain("sendRecommendationToPackTrack");
+    expect(ackBody).not.toContain("fetch(");
+    const dismissEnd = Math.max(dismissIdx, sendIdx) === dismissIdx
+      ? src.length
+      : Math.max(dismissIdx, sendIdx);
+    const dismissBody = src.slice(dismissIdx, dismissEnd);
+    expect(dismissBody).not.toContain("sendRecommendationToPackTrack");
+    expect(dismissBody).not.toContain("fetch(");
+  });
+
+  it("actions.ts does not contain PO-creation language", () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = require("node:path") as typeof import("node:path");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "actions.ts"),
+      "utf8",
+    );
+    expect(src).not.toMatch(/create\s+po|createPO\b|createPurchaseOrder/i);
+    expect(src).not.toMatch(/luma ordered/i);
+  });
+});
+
+describe("sendMaterialRecommendationToPackTrackAction", () => {
+  function seedSendableRow(over: Record<string, unknown> = {}) {
+    txState.rows = [
+      {
+        id: VALID_ID,
+        recommendationId: "rec-1",
+        materialCode: "LBL-001",
+        materialName: "Bottle Label",
+        productId: null,
+        productName: null,
+        productSku: null,
+        compatibilityRole: null,
+        currentOnHand: "0",
+        acceptedInventory: "0",
+        projectedDemand: "350",
+        projectedShortageQuantity: "350",
+        recommendedOrderQuantity: "420",
+        neededByDate: "2026-05-20",
+        confidence: "HIGH",
+        severity: "CRITICAL",
+        reason: "Runs out 2026-05-13",
+        sourceSignals: [],
+        missingInputs: [],
+        warnings: [],
+        sendableToPackTrack: true,
+        generatedAt: new Date("2026-05-13T10:00:00Z"),
+        expiresAt: null,
+        acknowledgedAt: new Date("2026-05-13T09:00:00Z"),
+        dismissedAt: null,
+        recommendedSupplierHint: null,
+        lastSendError: null,
+        sentAt: null,
+        lastSentResponse: null,
+        ...over,
+      },
+    ];
+    txState.updates = [];
+    txState.audits = [];
+  }
+
+  function withConfig(fn: () => Promise<void>) {
+    const prevUrl = process.env[PACKTRACK_RECOMMENDATION_URL_ENV];
+    const prevSecret = process.env[PACKTRACK_RECOMMENDATION_SECRET_ENV];
+    process.env[PACKTRACK_RECOMMENDATION_URL_ENV] =
+      "https://packtrack.example/recs";
+    process.env[PACKTRACK_RECOMMENDATION_SECRET_ENV] = "shh";
+    return fn().finally(() => {
+      if (prevUrl === undefined)
+        delete process.env[PACKTRACK_RECOMMENDATION_URL_ENV];
+      else process.env[PACKTRACK_RECOMMENDATION_URL_ENV] = prevUrl;
+      if (prevSecret === undefined)
+        delete process.env[PACKTRACK_RECOMMENDATION_SECRET_ENV];
+      else process.env[PACKTRACK_RECOMMENDATION_SECRET_ENV] = prevSecret;
+    });
+  }
+
+  it("refuses when env is not configured", async () => {
+    seedSendableRow();
+    // env explicitly cleared
+    delete process.env[PACKTRACK_RECOMMENDATION_URL_ENV];
+    delete process.env[PACKTRACK_RECOMMENDATION_SECRET_ENV];
+    const fd = new FormData();
+    fd.set("recommendationId", VALID_ID);
+    const r = await sendMaterialRecommendationToPackTrackAction(fd);
+    expect("error" in r ? r.code : null).toBe("NOT_CONFIGURED");
+    expect(txState.updates).toEqual([]);
+  });
+
+  it("refuses when not acknowledged", async () => {
+    await withConfig(async () => {
+      seedSendableRow({ acknowledgedAt: null });
+      const fd = new FormData();
+      fd.set("recommendationId", VALID_ID);
+      const r = await sendMaterialRecommendationToPackTrackAction(fd);
+      expect("error" in r ? r.code : null).toBe("NOT_ACKNOWLEDGED");
+      expect(txState.updates).toEqual([]);
+    });
+  });
+
+  it("refuses when dismissed", async () => {
+    await withConfig(async () => {
+      seedSendableRow({ dismissedAt: new Date() });
+      const fd = new FormData();
+      fd.set("recommendationId", VALID_ID);
+      const r = await sendMaterialRecommendationToPackTrackAction(fd);
+      expect("error" in r ? r.code : null).toBe("DISMISSED");
+    });
+  });
+
+  it("refuses when sendable_to_packtrack=false", async () => {
+    await withConfig(async () => {
+      seedSendableRow({ sendableToPackTrack: false });
+      const fd = new FormData();
+      fd.set("recommendationId", VALID_ID);
+      const r = await sendMaterialRecommendationToPackTrackAction(fd);
+      expect("error" in r ? r.code : null).toBe("NOT_SENDABLE");
+    });
+  });
+
+  it("refuses MISSING confidence", async () => {
+    await withConfig(async () => {
+      seedSendableRow({ confidence: "MISSING" });
+      const fd = new FormData();
+      fd.set("recommendationId", VALID_ID);
+      const r = await sendMaterialRecommendationToPackTrackAction(fd);
+      expect("error" in r ? r.code : null).toBe("BLOCKED_BY_CONFIDENCE");
+    });
+  });
+
+  it("refuses recommended_order_quantity <= 0", async () => {
+    await withConfig(async () => {
+      seedSendableRow({ recommendedOrderQuantity: "0" });
+      const fd = new FormData();
+      fd.set("recommendationId", VALID_ID);
+      const r = await sendMaterialRecommendationToPackTrackAction(fd);
+      expect("error" in r ? r.code : null).toBe("BLOCKED_BY_QUANTITY");
+    });
+  });
+
+  it("on HTTP failure writes last_send_error and audits send_failed", async () => {
+    await withConfig(async () => {
+      seedSendableRow();
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () =>
+        new Response("rejected", { status: 422 })) as typeof fetch;
+      try {
+        const fd = new FormData();
+        fd.set("recommendationId", VALID_ID);
+        const r = await sendMaterialRecommendationToPackTrackAction(fd);
+        expect("error" in r ? r.code : null).toBe("HTTP_ERROR");
+        expect(txState.updates).toHaveLength(1);
+        expect(txState.updates[0]!.set.lastSendError).toContain("HTTP 422");
+        expect(txState.updates[0]!.set.sentAt).toBeUndefined();
+        expect(txState.audits).toEqual([
+          {
+            action: "material_recommendation.send_failed",
+            targetId: VALID_ID,
+          },
+        ]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  it("on success writes sent_at + last_sent_response and audits send", async () => {
+    await withConfig(async () => {
+      seedSendableRow();
+      const originalFetch = globalThis.fetch;
+      const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+      globalThis.fetch = (async (
+        url: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        calls.push({ url: String(url), init });
+        return new Response(
+          JSON.stringify({ recommendation_id: "pt-1", status: "queued" }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as unknown as typeof fetch;
+      try {
+        const fd = new FormData();
+        fd.set("recommendationId", VALID_ID);
+        const r = await sendMaterialRecommendationToPackTrackAction(fd);
+        expect("ok" in r ? r.ok : false).toBe(true);
+        // recommendation_id is used as the idempotency header
+        const headers = new Headers(calls[0]!.init?.headers as HeadersInit);
+        expect(headers.get("x-luma-recommendation-id")).toBe("rec-1");
+        expect(headers.get("x-luma-packtrack-secret")).toBe("shh");
+        expect(txState.updates).toHaveLength(1);
+        expect(txState.updates[0]!.set.sentAt).toBeInstanceOf(Date);
+        expect(txState.updates[0]!.set.lastSendError).toBeNull();
+        expect(txState.audits).toEqual([
+          {
+            action: "material_recommendation.send",
+            targetId: VALID_ID,
+          },
+        ]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 });
