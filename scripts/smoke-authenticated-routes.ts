@@ -98,6 +98,7 @@ const ROUTES: ReadonlyArray<{ path: string; group: string }> = [
   { group: "System",       path: "/settings" },
   { group: "System",       path: "/settings/materials" },
   { group: "System",       path: "/settings/packaging-bom" },
+  { group: "System",       path: "/settings/product-material-compatibility" },
   { group: "System",       path: "/settings/blister-standards" },
   { group: "System",       path: "/settings/product-structure" },
   { group: "System",       path: "/settings/raw-item-weights" },

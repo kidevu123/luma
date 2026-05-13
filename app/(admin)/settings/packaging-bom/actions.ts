@@ -13,6 +13,7 @@ import {
   type PackagingBomScope,
   type PackagingMaterialKind,
 } from "@/lib/production/packaging-bom-kinds";
+import { validateProductBomMaterial } from "@/lib/production/product-material-compatibility";
 
 const PER_SCOPES = ["UNIT", "DISPLAY", "CASE"] as const;
 
@@ -71,6 +72,20 @@ export async function savePackagingBomLineAction(
   const scope = parsed.data.perScope as PackagingBomScope;
   if (!isKindAllowedAtScope(kind, scope)) {
     return { error: describeRejection(kind, scope) };
+  }
+  // PBOM-2: enforce product-specific compatibility on top of the
+  // kind filter. PBOM-1 prevents PVC at DISPLAY scope (kind axis);
+  // this prevents Blue Raz's printed card from landing on Mango
+  // Peach's BOM (product axis). The validator also handles empty-
+  // matrix gracefully ("Compatibility missing").
+  const compat = await validateProductBomMaterial(db, {
+    productId: parsed.data.productId,
+    routeId: null,
+    materialId: parsed.data.packagingMaterialId,
+    scope,
+  });
+  if (!compat.ok) {
+    return { error: compat.reason };
   }
   try {
     // Upsert on the composite PK (productId, packagingMaterialId, perScope).

@@ -640,6 +640,61 @@ export const productPackagingSpecs = pgTable(
   (t) => [primaryKey({ columns: [t.productId, t.packagingMaterialId, t.perScope] })],
 );
 
+/** PBOM-2 — Product ↔ packaging-material compatibility matrix.
+ *  Gates the BOM page's material dropdown by product + route +
+ *  scope + role. PBOM-1 filters by material kind; PBOM-2 narrows
+ *  further so Mango Peach only sees its own approved printed
+ *  cards / display boxes / master cases. Empty matrix = empty
+ *  dropdown (no silent fallback to "all materials"). */
+export const productMaterialCompatibility = pgTable(
+  "product_material_compatibility",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    routeId: uuid("route_id").references(() => productionRoutes.id, {
+      onDelete: "set null",
+    }),
+    materialId: uuid("material_id")
+      .notNull()
+      .references(() => packagingMaterials.id, { onDelete: "cascade" }),
+    /** "UNIT" | "DISPLAY" | "CASE" — mirrors product_packaging_specs. */
+    scope: text("scope").notNull(),
+    /** "CARD_MATERIAL" | "DISPLAY_BOX" | "MASTER_CASE" | "BOTTLE" |
+     *  "CAP" | "LABEL" | "INDUCTION_SEAL" | "INSERT" | "SHRINK_BAND"
+     *  | "OTHER". Stored as text for forward-compat; validated in
+     *  lib/production/product-material-compatibility. */
+    compatibilityRole: text("compatibility_role").notNull(),
+    required: boolean("required").notNull().default(false),
+    defaultForProduct: boolean("default_for_product").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    effectiveTo: timestamp("effective_to", { withTimezone: true }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("product_material_compatibility_lookup_idx")
+      .on(t.productId, t.scope, t.active)
+      .where(sql`active = true`),
+    uniqueIndex("product_material_compatibility_default_unique")
+      .on(t.productId, t.routeId, t.scope, t.compatibilityRole)
+      .where(sql`default_for_product = true AND active = true`),
+    uniqueIndex("product_material_compatibility_no_dupe")
+      .on(t.productId, t.routeId, t.materialId, t.scope)
+      .where(sql`active = true`),
+    index("product_material_compatibility_role_idx").on(t.compatibilityRole),
+  ],
+);
+
 /** Each shipment / lot of a packaging material we receive. Each lot
  *  has its own batch (kind=PACKAGING) for genealogy.
  *

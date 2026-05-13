@@ -33,6 +33,10 @@ const FILES = [
   "lib/production/packaging-bom-kinds.ts",
   "app/(admin)/settings/packaging-bom/page.tsx",
   "app/(admin)/settings/packaging-bom/actions.ts",
+  // PBOM-2 surface — compatibility helpers + admin page + actions.
+  "lib/production/product-material-compatibility.ts",
+  "app/(admin)/settings/product-material-compatibility/page.tsx",
+  "app/(admin)/settings/product-material-compatibility/actions.ts",
 ];
 
 const BANNED = [

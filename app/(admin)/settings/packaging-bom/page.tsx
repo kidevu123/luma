@@ -14,10 +14,9 @@ import {
 import { requireAdmin } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
 import {
-  allowedKindsForScope,
   type PackagingBomScope,
-  type PackagingMaterialKind,
 } from "@/lib/production/packaging-bom-kinds";
+import { getCompatibleMaterialsForProduct } from "@/lib/production/product-material-compatibility";
 import {
   savePackagingBomLineAction,
   deletePackagingBomLineAction,
@@ -32,24 +31,14 @@ export default async function PackagingBomPage({
 }) {
   await requireAdmin();
   const sp = await searchParams;
-  const [productList, materialList] = await Promise.all([
-    db
-      .select({ id: products.id, sku: products.sku, name: products.name, kind: products.kind })
-      .from(products)
-      .where(eq(products.isActive, true))
-      .orderBy(asc(products.name)),
-    db
-      .select({
-        id: packagingMaterials.id,
-        sku: packagingMaterials.sku,
-        name: packagingMaterials.name,
-        kind: packagingMaterials.kind,
-        uom: packagingMaterials.uom,
-      })
-      .from(packagingMaterials)
-      .where(eq(packagingMaterials.isActive, true))
-      .orderBy(asc(packagingMaterials.name)),
-  ]);
+  // PBOM-2: only load the product list here. The per-scope material
+  // dropdowns come from the compatibility matrix, not the global
+  // packaging_materials table — see ScopeBomForm below.
+  const productList = await db
+    .select({ id: products.id, sku: products.sku, name: products.name, kind: products.kind })
+    .from(products)
+    .where(eq(products.isActive, true))
+    .orderBy(asc(products.name));
 
   const productId = sp.product;
   const product = productId
@@ -204,24 +193,38 @@ export default async function PackagingBomPage({
             </p>
           </div>
 
-          {/* Three scope-specific forms — each shows only materials
-              whose kind is valid at that scope. Server still
-              re-validates via lib/production/packaging-bom-kinds. */}
+          {/* Three scope-specific forms. PBOM-2: the material dropdown
+              for each scope is filtered by the
+              product_material_compatibility table, not by packaging-
+              material kind alone. Empty matrix → empty dropdown +
+              clear "Compatibility missing" message + a link to the
+              admin compatibility page. */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            {(["UNIT", "DISPLAY", "CASE"] as const).map((scope) => {
-              const allowedKinds = allowedKindsForScope(scope) as ReadonlyArray<string>;
-              const scopeMaterials = materialList.filter((m) =>
-                allowedKinds.includes(m.kind as PackagingMaterialKind),
-              );
-              return (
-                <ScopeBomForm
-                  key={scope}
-                  scope={scope}
-                  productId={product.id}
-                  materials={scopeMaterials}
-                />
-              );
-            })}
+            {await Promise.all(
+              (["UNIT", "DISPLAY", "CASE"] as const).map(async (scope) => {
+                const compatibleRows = await getCompatibleMaterialsForProduct(
+                  db,
+                  product.id,
+                  null,
+                  scope,
+                );
+                return (
+                  <ScopeBomForm
+                    key={scope}
+                    scope={scope}
+                    productId={product.id}
+                    materials={compatibleRows.map((r) => ({
+                      id: r.materialId,
+                      sku: r.materialSku,
+                      name: r.materialName,
+                      kind: r.materialKind,
+                      uom: r.uom,
+                      defaultForProduct: r.defaultForProduct,
+                    }))}
+                  />
+                );
+              }),
+            )}
           </div>
 
           {/* Existing rows */}
@@ -305,6 +308,7 @@ function ScopeBomForm({
     name: string;
     kind: string;
     uom: string;
+    defaultForProduct: boolean;
   }>;
 }) {
   const labels: Record<PackagingBomScope, { title: string; hint: string }> = {
@@ -336,16 +340,16 @@ function ScopeBomForm({
       </h3>
       <p className="text-[11px] text-slate-400">{labels[scope].hint}</p>
       {materials.length === 0 ? (
-        <p className="text-[12px] text-amber-300">
-          No active materials of a kind valid for {scope}. Add the right
-          packaging-material kind under{" "}
+        <p className="text-[12px] text-amber-300 leading-relaxed">
+          <strong>Product material compatibility missing</strong> for {scope} scope.
+          No materials are approved for this product yet — configure them under{" "}
           <Link
-            href="/settings/materials"
+            href={`/settings/product-material-compatibility?product=${productId}`}
             className="underline hover:text-amber-200"
           >
-            materials
+            product material compatibility
           </Link>{" "}
-          first.
+          first. The BOM page will not fall back to the global material list.
         </p>
       ) : (
         <>
