@@ -4,6 +4,52 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-7 closeout — Full PackTrack shortage-recommendations block complete
+- Date: 2026-05-13
+- Result: PT-7A through PT-7F closed. End-to-end Luma side of the loop is live on staging: read-model + projector + UI + acknowledge/dismiss + outbound client + send-action + final staging verification. No PackTrack-side work touched. No PO creation from Luma. Owner approval still lives in PackTrack.
+- What got built across PT-7A → PT-7F:
+  - **PT-7A** — plan doc (`docs/PACKTRACK_SHORTAGE_RECOMMENDATIONS_PLAN.md`).
+  - **PT-7B** — pure shortage math (`lib/production/packtrack-shortage.ts`) + 59 fixture tests.
+  - **PT-7C** — migration 0029 (`read_material_recommendations` table + 3 ordering columns on `packaging_materials`) + `lib/projector/packtrack-recommendations.ts` rebuilder + 15 tests; wired into `scripts/rebuild-read-models.ts`.
+  - **PT-7D** — `/material-alerts` panel reading `read_material_recommendations`, with severity / confidence / sendable / missing-config / product / material / status filters. Acknowledge + dismiss server actions (idempotent, audit-logged). 23 tests.
+  - **PT-7E** — migration 0030 (`sent_at` + `last_sent_response`) + `lib/integrations/packtrack/recommendations.ts` outbound client + `sendMaterialRecommendationToPackTrackAction` + UI "Send to PackTrack" button with disabled-reason chip. Settings status card. 30 tests.
+  - **PT-7F** — `scripts/verify-pt7f.ts` end-to-end harness; staging verified at SHA `9923c2c`.
+- Staging verification (PT-7F):
+  - SHA `9923c2c` live on LX122.
+  - `verify-pt7f.ts` executed inside the container via `./node_modules/.bin/tsx scripts/verify-pt7f.ts`. **All 32 in-script assertions passed.** The harness:
+    1. Picked the existing `QA_TEST_DISPLAY_BOX` packaging material (so no production-facing fixture pollution).
+    2. Seeded a fresh QA row with a unique random `recommendation_id` (id `f80099a7-…` for the verification run — already cleaned up).
+    3. Confirmed the loader returns the row, with `acknowledged_at=null`, `dismissed_at=null`, `sendable_to_packtrack=true`, `confidence='HIGH'`.
+    4. Acknowledged the row (`UPDATE … set acknowledged_at` + `auditLog material_recommendation.acknowledge` in one tx).
+    5. Spun up an in-process Node `http` mock receiver on `127.0.0.1:<ephemeral>`.
+    6. Called `sendRecommendationToPackTrack` with `config: {url, secret}` override (no env mutation, no app restart).
+    7. Mock captured: `content-type: application/json`, `x-luma-packtrack-secret: STAGING_QA_SECRET`, `x-luma-recommendation-id: <id>` (== payload `recommendation_id`), JSON body with `schema_version='1.0'`, `source='LUMA'`, `material_code='QA_TEST_DISPLAY_BOX'`, `recommended_order_quantity=420`, `confidence='HIGH'`, non-empty `supporting_signals`.
+    8. Send returned `ok` with mapped `{packtrack_recommendation_id:'MOCK-PT-001', status:'received'}`.
+    9. Persisted success branch: `sent_at` populated, `last_sent_response` populated, `last_send_error` cleared, audit row `material_recommendation.send` written.
+    10. Spun up a second mock returning `HTTP 500`. Send returned `ok=false, code='HTTP_ERROR'`. Persisted failure branch: `last_send_error` populated, `sent_at` **preserved** (so a transient retry doesn't blow away the prior successful send), audit row `material_recommendation.send_failed` written.
+    11. Verified defensive client-side gates still hold: MISSING-confidence input refused with `BLOCKED_BY_CONFIDENCE`; recommended_qty=0 refused with `BLOCKED_BY_QUANTITY`.
+    12. Confirmed audit chain captured all three lifecycle events: `acknowledge`, `send`, `send_failed`.
+    13. Confirmed `buildPackTrackRecommendationPayload` roundtrips `recommendation_id` / `schema_version='1.0'` / `source='LUMA'`.
+    14. Cleanup: deleted the QA row (audit chain stays in `audit_log` for forensic history).
+  - Auth smoke 47/47 PASS.
+  - `read_material_recommendations` row count back to 0 (matching prior state) after cleanup.
+- Build / test results (final):
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1093/1093 pass across 49 files**.
+  - `npx next build` → clean (only the pre-existing OpenTelemetry `@opentelemetry/exporter-jaeger` warning, unrelated).
+- Known limitations (carry-forward into PT-7E ops doc):
+  1. **The real PackTrack endpoint is not yet implemented or hooked up.** PT-7F verified the loop using an in-process mock receiver. The Luma side is contract-stable; PackTrack-side work is the inverse phase.
+  2. **Luma does not create PackTrack POs.** Sending a recommendation creates a *recommendation* in PackTrack; the owner approves it in PackTrack and PackTrack creates the PO.
+  3. **Owner approval remains in PackTrack.** Luma has no approve / reject affordance — that's intentional and shouldn't be added here.
+  4. **Recommendation quality depends on upstream data quality**: BOM (PBOM-1, PBOM-2), product↔material compatibility, inventory state, and `read_material_burn` usage rates. When any of these are MISSING, the recommendation surfaces as MISSING-confidence and the UI explicitly refuses to send.
+  5. **PVC / FOIL / BLISTER_FOIL rolls are excluded by `skipMaterialKindForPackTrackShortage`** — those route through roll-usage / `/roll-variance`, not the PT-7 path.
+  6. **Hysteresis is upstream-only** (PT-7B). PT-7E does not gate on hysteresis — that's a rebuilder concern. The acknowledged/dismissed state in PT-7C/D is the operator-facing dedup; PT-7B's `hadActiveRecommendation` keeps the rebuilder from flapping.
+  7. **No automatic retry on transient failures.** The action persists `last_send_error`; the operator re-clicks "Send to PackTrack" to retry. This is intentional — silent retries hide real upstream problems.
+  8. **No rate-limiting** in PT-7E. PackTrack is expected to dedup on `recommendation_id` (same value Luma uses as `x-luma-recommendation-id` header). If a flood scenario emerges later, rate-limiting goes in the action, not the client.
+- Next unchecked phase in `docs/CLAUDE_BUILD_QUEUE.md`: **LOT-1B** — Finished Lot / Recall Passport: schema migration + receiving bridge (raw-bag QR labels, `finished_lot_raw_bags`, `finished_lot_outputs`, `finished_lot_packaging_lots`, `finished_lot_qc_events`, `customers`, `shipment_finished_lots`). Plan doc was shipped in LOT-1A (`docs/FINISHED_LOT_RECALL_PASSPORT_PLAN.md`); the next step needs operator answers to open questions §7 #3 (print policy) and §7 #6 (customer-key direction). After LOT-1, queued: command-center visual polish / Zoho live sync / Nexus-QIP batch-complaint integration.
+
+---
+
 ## PT-7E — Luma outbound PackTrack recommendation handoff (complete)
 - Date: 2026-05-13
 - Result: outbound integration phase. Migration 0030 + outbound client + send action + UI button + settings status card. No automatic send — every send is operator-triggered from `/material-alerts`. No PO creation from Luma — PackTrack creates the PO after owner approval. PackTrack endpoint may not exist yet; the UI surfaces "PackTrack handoff not configured" honestly when env is missing, and the action short-circuits to `NOT_CONFIGURED` before any DB read.
