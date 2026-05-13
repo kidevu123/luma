@@ -4,6 +4,58 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## QC-4 — Admin QC review page (complete)
+- Date: 2026-05-12
+- Result: **complete**. `/qc-review` ships with three sections + three supervisor forms + partial-rework receive support. Queue checkbox flipped to `[x]`.
+
+### Files changed
+- **NEW** `app/(admin)/qc-review/page.tsx` — server component. `requireAdmin()` gate. Three sections rendered in parallel: Pending QC actions, Rework in flight, Recent QC events. Each event row shows accountable employee and entered-by separately; missing data renders as "—" or "unattributed" without fabrication.
+- **NEW** `app/(admin)/qc-review/_damage-actions-row.tsx` — per-row Send-to-rework + Record-scrap collapsibles on pending damage events. Scrap form requires picking at least one of affects_raw_product / affects_packaging_material; client-side refusal mirrors the qc-events.ts `superRefine`. Conflict and error states surface with distinct copy ("someone else may have already converted this row — refresh").
+- **NEW** `app/(admin)/qc-review/_receive-rework-row.tsx` — full-remaining and partial receive on rework-in-flight rows. Client-side `isPartialReceiveValid(sent, thisReceive, priorSum)` refuses bad input before round-tripping; server-side `qc-events.ts` partial-receive math is the backstop. Multiple partials stack via the loader's SUM.
+- **NEW** `app/(admin)/qc-review/_correction-trigger.tsx` — collapsible correction form on every recent-event row. Posts to existing `submissionCorrectedAction`; original event stays untouched; original accountable employee preserved.
+- **MODIFIED** `app/(admin)/qc-review/actions.ts` — adds `adminReworkSentFromDamageAction` and `adminReworkReceivedAction`. Both require admin and preserve the linked event's accountable employee (supervisor is `entered_by_user_id`). `adminReworkSentFromDamage` honors the partial-unique `workflow_events_linked_event_resolution_unique` via FOR UPDATE + `hasExistingResolution` pre-check; second conversion returns `{ conflict: true }`. `adminReworkReceived` pulls the linked REWORK_SENT under FOR UPDATE for partial-receive math.
+- **NEW** `lib/production/qc-review-loaders.ts` — three loaders (`loadPendingDamage`, `loadReworkInFlight`, `loadRecentQcEvents`) plus pure math helpers `computeReworkRemainder` + `isPartialReceiveValid`. SQL uses the existing `workflow_events_linked_event_idx` from migration 0026 for the NOT EXISTS and the rework-in-flight CTE.
+- **MODIFIED** `components/admin/sidebar.tsx` — `/qc-review` added under "Production intelligence" between Bag genealogy and Material recon; `ShieldAlert` icon added to the lucide imports.
+- **MODIFIED** `scripts/smoke-authenticated-routes.ts` — `/qc-review` added under Production. Smoke list now totals 46 routes.
+- **NEW** `lib/production/qc-review-loaders.test.ts` (14 cases) — row mapping for all three loaders + partial-receive math edges (zero / negative / non-integer / over-receive / full closure / stacked partials).
+- **NEW** `components/admin/sidebar.test.ts` (4 cases) — sidebar text-scan: `/qc-review` exists, label is "QC review", entry sits inside Production intelligence (before Materials heading), no banned phrases.
+- **NEW** `lib/production/qc-review-language.test.ts` (6 cases) — banned-phrase scan over all six new QC-4 source files for `production loss`, `supplier shortage`, `known_loss`. Catches data-honesty drift early.
+
+### Page behavior
+- **Pending QC actions** — Server-side `loadPendingDamage(db, { limit: 200 })`. SQL `WHERE event_type='PACKAGING_DAMAGE_RETURN' AND NOT EXISTS (SELECT 1 FROM workflow_events r WHERE r.event_type IN ('SCRAP_RECORDED','REWORK_SENT') AND r.payload->>'linked_event_id' = e.id::text)`. Per-row "Send to rework" / "Record scrap" actions; once a row resolves, the page revalidates and the row drops out of pending. Empty state: friendly "No pending QC actions" card.
+- **Rework in flight** — Server-side `loadReworkInFlight(db, { limit: 200 })`. SQL CTE: `sent` is the REWORK_SENT rows; `received` sums `(payload->>'received_quantity')::int` across linked REWORK_RECEIVED rows. WHERE `received < sent`. Per-row "Receive full remaining (N)" or "Partial…". Partial-receive form validates client-side (`isPartialReceiveValid`) before posting. Stacked partials sum on next page load. Empty state: "No rework in flight".
+- **Recent QC events** — Server-side `loadRecentQcEvents(db, { limit: 50 })`. Table with columns When / Event / Bag / Qty / Reason / Accountable / Entered by / Linked / Actions. Event type → coloured `StatusPill`. Every row has a "Correct" trigger that opens an inline form. Empty state: "No QC events yet".
+
+### Accountability behavior
+- Every row renders accountable employee (`employees.full_name` joined on `workflow_events.employee_id`) AND entered-by user (`users.email` joined on `workflow_events.user_id`) in distinct columns/lines. Phrasing: *"By {accountable}" · "entered by {entered_by_email}"*.
+- Scrap and correction inside this surface preserve the linked event's `employee_id` exactly — the supervisor lands on `correction_actor_user_id` (in payload) and on `workflow_events.user_id`. Operator metrics roll up against the operator who typed wrong, not the supervisor reviewing it.
+- Ad-hoc scrap (no linked event) is intentionally not exposed in QC-4 — the existing `scrapRecordedAction` would refuse without an explicit `overrideEmployeeId` picker, which QC-4 chose not to ship (avoids accidental mis-attribution). Documented as a small deferral; supervisor can still ad-hoc scrap programmatically.
+
+### Local verification
+- `npx tsc --noEmit` → clean.
+- `npx vitest run` → **901/901 pass across 42 test files** (+25 new vs QC-3's 876).
+- `npx next build` → clean. `/qc-review` route bundle = 4.39 kB.
+
+### Staging deploy
+- Pushed `93f5bd5 feat(qc-4): admin QC review page` to `origin/production-intelligence-command-center`. 11 files, +1860 lines.
+- `systemctl start luma-deploy.service` ran the standard `git fetch + reset --hard + docker compose up -d --build`.
+- Initial smoke run hit "Connection reset by peer" because the container was mid-rebuild — re-polled until `/api/health` returned 200, then ran auth smoke clean.
+- Health: `{"status":"ok","checks":{"app":"ok","db":"ok"},"sha":"93f5bd5341e5bbd1932f79aa7531753869dfc5bb"}`.
+- `/qc-review` HTTP status without auth: 307 (login redirect — expected).
+
+### Auth smoke
+- `npx tsx scripts/smoke-authenticated-routes.ts` inside the running app container: **PASS=46, REDIR=0, FAIL=0**. The new `/qc-review` route specifically: `PASS 200 /qc-review` as OWNER.
+
+### Test data — intentionally not created
+- The instructions allowed "If safe, create one test damage event… record scrap… verify duplicate scrap is rejected." Decision: skipped. Staging has no open operator session right now, and creating one to fire a damage event would write a real `PACKAGING_DAMAGE_RETURN` row that this QC-4 surface can't fully clean up (no admin "delete" path — events are append-only, and a corrective `SUBMISSION_CORRECTED` would just add a third row). The conflict path is covered by `qc-actions.test.ts` unit tests (scrap dup → `{ conflict: true }`); the loader logic by `qc-review-loaders.test.ts`. Live end-to-end exercise comes naturally once operators report real damage.
+
+### Closeout
+- `docs/CLAUDE_BUILD_QUEUE.md` QC-4 sub-bullet flipped to `[x]`.
+- This entry appended.
+- Next phase: **QC-5** — read-model projectors (populate `read_sku_daily.damages/rework/scrap`, `read_operator_daily` QC counters, `read_station_quality_daily`, `read_material_reconciliation_v2.scrappedOrDamaged` feed, `read_material_lot_state` decrement on scrap with named material_lot_id, `read_bag_state.rework_pending/received` flags) + genealogy / operator-productivity / PT-6 UI integration. QC-2 actions, QC-3 floor UI, and QC-4 admin UI are all live; QC-5 is the layer that makes existing dashboards reflect QC events without a manual rebuild.
+
+---
+
 ## QC-3 — Floor QC quick-action panel (complete)
 - Date: 2026-05-12
 - Result: **complete**. Floor PWA on PACKAGING / SEALING / COMBINED stations now ships a collapsible "Report QC issue" panel wired to the QC-2 actions. Queue checkbox flipped to `[x]`.
