@@ -312,6 +312,35 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 
 ---
 
+### [ ] Finished Lot / Recall Passport (LOT-1)
+**Objective.** End-to-end recall surface that ties a supplier lot, an internal receipt number, a raw-bag QR, a finished lot trace code, a product+date, and (later) a customer/shipment into one queryable passport. Every link bidirectional. Honest-data confidence ladder reused from PT-6 / PT-7.
+
+**Files likely touched.**
+- `lib/db/schema.ts` — extend `inventory_bags`, `finished_lots`, `shipments`; new `finished_lot_raw_bags`, `finished_lot_outputs`, `finished_lot_packaging_lots`, `finished_lot_qc_events`, `customers`, `shipment_finished_lots`.
+- `drizzle/0030_finished_lot_recall_passport.sql` (or split per LOT-1B vs LOT-1C).
+- `lib/projector/finished-lot-passport.ts` (new) — rebuilder for the two projection tables.
+- `app/(admin)/recall/page.tsx` (new) or extension of `/genealogy`.
+- Raw-bag intake UI (`/inbound` extension or new sub-page).
+- New plan doc.
+
+**Acceptance criteria.** All six search axes (supplier lot / receipt # / raw QR / finished lot code / product+date / customer) resolve to the same passport. Forward trace from supplier-lot recall to affected customers. Confidence ladder visible in UI. No banned phrases.
+
+**Tests required.** Pure-helper tests for QR-code generation + label payload + passport assembly; stub-tx tests for the projector; route smoke for the new pages.
+
+**Stop condition.** Live on staging. Real seeded recall scenario walked end-to-end. Stop.
+
+**Sub-phases:**
+
+- [x] **LOT-1A** — plan doc only (`docs/FINISHED_LOT_RECALL_PASSPORT_PLAN.md`). 2026-05-13.
+- [ ] **LOT-1B** — schema migration + receiving bridge. `inventory_bags` gains `bag_qr_code` / `internal_receipt_number` / `declared_pill_count`; creates `finished_lot_raw_bags` + `finished_lot_outputs` + `finished_lot_packaging_lots` + `finished_lot_qc_events` + `customers` + `shipment_finished_lots`; extends `finished_lots` with `trace_code` / `packed_at` / `expires_at` / `finished_lot_code_alias`. Receiving UI prints raw-bag QR labels at intake.
+- [ ] **LOT-1C** — production finalisation projector. `BAG_FINALIZED` writes the finished-lot row + raw-bag links + outputs; rebuilder backfills the packaging-lot + QC-event projection tables. Wired into `scripts/rebuild-read-models.ts`.
+- [ ] **LOT-1D** — `/recall` search UI + `getRecallPassport` / `getForwardTrace` server actions. Six search axes.
+- [ ] **LOT-1E** — print-label / export. Per-output `print_payload` snapshot; customer-alias template; CSV export of recall passport.
+- [ ] **LOT-1F** — Nexus / QIP outbound handoff contract. Permissioned supplier-lot visibility.
+- [ ] **LOT-1G** — staging verification + closeout. Seeded recall scenario across multiple raw bags + multiple customers.
+
+---
+
 ### [ ] Command center visual polish
 **Objective.** Density / brand pass on `/floor-board`, `/genealogy`, `/operator-productivity`, `/packaging-output` per `docs/FLOOR_UI_POLISH_REQUIREMENTS.md`. No data-model changes; no new event types; no honest-data drift.
 
