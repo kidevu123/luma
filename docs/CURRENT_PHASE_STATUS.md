@@ -4,6 +4,68 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## QC-5 — Read-model + UI integration of QC events (complete)
+- Date: 2026-05-13
+- Result: **complete**. Live QC events from QC-2/3/4 now move the existing read models and surface in `/operator-productivity`, `/genealogy/[bagId]`, and the PT-6 reconciliation scrap bucket. Queue checkbox flipped to `[x]`.
+
+### Files changed
+- **NEW** `drizzle/0027_qc_bag_state_flags.sql` — `read_bag_state` gains `rework_pending`, `rework_received`, `has_correction` booleans + partial index on `rework_pending = true`. Journal entry `idx 27, when 1780700000000`.
+- **NEW** `lib/projector/qc-events.ts` — projector dispatch for the five QC event types. Idempotent (upstream conflict gate handles retries). Touches `read_operator_daily` (5 QC counters by accountable employee), `read_sku_daily` (damages/rework/scrap by bag.product_id), `read_station_quality_daily` (reject/scrap/rework/damaged units by machine+product+output_unit), `read_bag_state` (the three flags), `read_material_lot_state` (decrement on SCRAP_RECORDED with packaging-material scope only).
+- **NEW** `lib/projector/qc-events.test.ts` (15 cases) — operator-daily attribution (skip when no employee, scrap by `scrap_quantity` not 1), bag-state flag flips, rework_pending recompute branch, material-lot decrement guards (no decrement without `material_lot_id` or without `affects_packaging_material=true`), SKU + station-quality dispatch with/without product/station.
+- **MODIFIED** `lib/projector/index.ts` — calls `projectQcEvent` after the existing read-model writes when `isQcEventType(ev.eventType)`.
+- **MODIFIED** `lib/projector/material-reconciliation-v2.ts` — `loadScrapFromQcEvents(tx, lotId)` pulls `SUM(scrap_quantity)` from `workflow_events` of type `SCRAP_RECORDED` matching `payload->>'packaging_lot_id' = lotId OR payload->>'material_lot_id' = lotId` AND `affects_packaging_material=true`. Replaces the QC-deferral `null`. Source label `EXPLICIT_SCRAP_EVENT` → reconciliation-v2's existing `scrappedOrDamaged` bucket lights up at HIGH confidence.
+- **MODIFIED** `lib/projector/material-reconciliation-v2.test.ts` — `tx.execute` stub returns `[{total: 0}]` so existing tests preserve their "scrap stays MISSING" assertion under the new query.
+- **MODIFIED** `lib/db/schema.ts` — mirrors the three new `read_bag_state` columns and the partial index.
+- **MODIFIED** `lib/production/metrics.ts` — `OperatorRow` gains `damageEvents`, `reworkSent`, `reworkReceived`, `scrapUnits`, `corrections`. `deriveOperatorRows` SUMs the matching columns from `read_operator_daily`.
+- **MODIFIED** `app/(admin)/operator-productivity/page.tsx` — five new columns. "—" renders for rows with no QC activity in the window (no fabricated zeros for legacy code-only operators).
+- **MODIFIED** `app/(admin)/genealogy/[bagId]/page.tsx` — adds badges for `REWORK_SENT`, `REWORK_RECEIVED`, `SCRAP_RECORDED`, `SUBMISSION_CORRECTED`. Existing `PACKAGING_DAMAGE_RETURN` badge unchanged.
+- **MODIFIED** `lib/production/qc-review-language.test.ts` — banned-phrase scan extended to cover the three new QC-5 source files.
+
+### Read-model behavior
+- **read_operator_daily** — 5 new counter columns from migration 0026 now fill from QC events. Grouped by *accountable employee* (never by supervisor user_id). PACKAGING_DAMAGE_RETURN, REWORK_SENT, REWORK_RECEIVED, SUBMISSION_CORRECTED each bump their respective counter by 1; SCRAP_RECORDED bumps `scrap_units_total` by `scrap_quantity` (so 7 units lost on one event reads as 7, not 1).
+- **read_sku_daily** — `damages`, `rework`, `scrap` columns (previously hardcoded `0` at finalize time) now bump live per event. Bag must have a `product_id` for the row to land; un-product bags are skipped, no fabrication.
+- **read_station_quality_daily** — `reject_units` + `damaged_units` (damage events), `scrap_units` (scrap events), `rework_units` (sent+received). Skipped when station has no machine_id or bag has no product_id.
+- **read_bag_state** — `rework_pending = true` on REWORK_SENT; recomputed (true/false) on REWORK_RECEIVED via an open-rework SUM query (partial receives keep it true; full receives clear). `rework_received` sticky once any RECEIVED fires. `has_correction` sticky once any SUBMISSION_CORRECTED lands.
+- **read_material_lot_state** — `qty_on_hand = GREATEST(qty_on_hand - scrap_quantity, 0)` on SCRAP_RECORDED with `affects_packaging_material=true` AND named lot id. Confidence drops HIGH→MEDIUM on the decrement. Raw-product scrap is intentionally NOT materialised as a lot-state delta (no fake material burn for raw inventory; QC-6 audits this gap).
+- **read_material_reconciliation_v2** — `scrappedOrDamagedValue` reads SCRAP_RECORDED totals via `loadScrapFromQcEvents`; source `EXPLICIT_SCRAP_EVENT` → HIGH confidence per existing PT-6B branch. **PT-6 8-bucket formula unchanged.** No QC events feed `receipt_variance` or `cycle_count_variance`. Rework pending is not a reconciliation bucket — it's surfaced separately by the QC-4 `/qc-review` page.
+
+### Genealogy behavior
+- Existing timeline iterates every workflow_event; QC-5 only added coloured badges for the four previously-unstyled QC types.
+- Each event row shows: time, sequence #, event-type badge, machine/station, employee name (from `workflow_events.employee_id`), notes, expandable JSON payload. Linked-event ID, quantity, reason code, and disposition surface inside the payload accordion — no field hidden. Corrections sit as their own row; the original event is NOT mutated (per QC-0 §4).
+
+### Operator productivity behavior
+- Page header still describes "last 7 days" window. Table now has 5 new columns: QC dmg, Rework sent, Rework rec, Scrap units, Corrections. Each renders "—" when the operator has no events in the window — no fabricated zeros.
+- Disclosure text updated: *"Corrections are tallied against the operator who typed the original entry, not the supervisor who corrected it."*
+
+### Material reconciliation behavior
+- `read_material_reconciliation_v2.scrappedOrDamagedValue` now reflects real scrap totals per lot. The PT-6 8-bucket formula (`derived from reconciliation-v2.ts`) is untouched; it just sees a non-null `scrap` value where before it saw `null`. Source label `EXPLICIT_SCRAP_EVENT` keeps the existing HIGH-confidence path. Receipt variance and cycle-count variance are NOT affected — QC events never feed those buckets.
+- Rework pending stays out of the 8-bucket math (per QC-0 plan §6.5: "Rework pending (WIP) is an informational row, not a variance bucket"). QC-4's `/qc-review` page surfaces it.
+
+### Local verification
+- `npx tsc --noEmit` → clean.
+- `npx vitest run` → **919/919 pass across 43 test files** (+18 new vs QC-4's 901).
+- `npx next build` → clean.
+
+### Staging deploy
+- Commit `aee76f3 feat(qc-5): project QC events into read models + dashboards`. 12 files, +975 lines.
+- `systemctl start luma-deploy.service` ran the standard pull + `docker compose up -d --build`.
+- Health: `{"status":"ok","checks":{"app":"ok","db":"ok"},"sha":"aee76f314ec6a03ab99076ef8451d079f7f0ea79"}`.
+- Migration `1780700000000` (hash `48915624…`) recorded in `drizzle.__drizzle_migrations` directly after PT-6/QC-1 entries.
+- `\d read_bag_state` confirms three new columns + partial index `read_bag_state_rework_pending_idx` live.
+
+### Auth smoke
+- **PASS=46, REDIR=0, FAIL=0**. All existing routes (including `/qc-review`, `/operator-productivity`, `/genealogy`, `/po-reconciliation-v2`) return 200 under OWNER auth. No regression.
+
+### Test data on staging
+- Skipped per the "do not create messy append-only test data" instruction. QC events on bags can only be cleared by emitting more QC events (the chain is append-only). The projector logic is covered by `qc-events.test.ts` (15 cases) and the SQL itself by the migration applying cleanly + auth-smoke. Live exercise comes when operators report real damage.
+
+### Closeout
+- `docs/CLAUDE_BUILD_QUEUE.md` QC-5 sub-bullet flipped to `[x]`.
+- This entry appended.
+- Next phase: **QC-6** — final verification + closeout. The five QC events fire from the floor, flow through to admin review, and now reach every dashboard. QC-6 is the end-to-end test packet + the cutover-blocker sign-off.
+
+---
+
 ## QC-4 — Admin QC review page (complete)
 - Date: 2026-05-12
 - Result: **complete**. `/qc-review` ships with three sections + three supervisor forms + partial-rework receive support. Queue checkbox flipped to `[x]`.
