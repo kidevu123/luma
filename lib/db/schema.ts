@@ -603,6 +603,12 @@ export const packagingMaterials = pgTable(
     uom: text("uom").notNull().default("each"),
     /** Reorder threshold; below this we alert. */
     parLevel: integer("par_level"),
+    /** PT-7C — quantity-formula knobs read by the shortage projector.
+     *  All nullable; PT-7B applies sensible defaults when missing
+     *  (20% safety buffer; no min order; no multiple rounding). */
+    minOrderQuantity: numeric("min_order_quantity", { precision: 20, scale: 6 }),
+    safetyBufferPercent: numeric("safety_buffer_percent", { precision: 6, scale: 2 }),
+    orderMultiple: numeric("order_multiple", { precision: 20, scale: 6 }),
     zohoItemId: text("zoho_item_id"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2869,6 +2875,93 @@ export const auditLog = pgTable(
     index("audit_log_target_idx").on(t.targetType, t.targetId),
     index("audit_log_action_idx").on(t.action),
     index("audit_log_created_idx").on(t.createdAt),
+  ],
+);
+
+/** PT-7C — PackTrack shortage recommendations read model.
+ *  One row per (material × product-or-shared). Rebuilt by
+ *  lib/projector/packtrack-recommendations.ts using the PT-7B
+ *  pure helpers. PT-7D's /material-alerts page reads this; PT-7E
+ *  may eventually post sendable rows to PackTrack's inbox. */
+export const readMaterialRecommendations = pgTable(
+  "read_material_recommendations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    recommendationId: uuid("recommendation_id").notNull().defaultRandom(),
+    materialId: uuid("material_id")
+      .notNull()
+      .references(() => packagingMaterials.id, { onDelete: "cascade" }),
+    materialCode: text("material_code").notNull(),
+    materialName: text("material_name").notNull(),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    productName: text("product_name"),
+    productSku: text("product_sku"),
+    compatibilityRole: text("compatibility_role"),
+    currentOnHand: numeric("current_on_hand", { precision: 20, scale: 6 }),
+    acceptedInventory: numeric("accepted_inventory", { precision: 20, scale: 6 }),
+    projectedDemand: numeric("projected_demand", { precision: 20, scale: 6 }),
+    projectedShortageQuantity: numeric("projected_shortage_quantity", {
+      precision: 20,
+      scale: 6,
+    }),
+    recommendedOrderQuantity: numeric("recommended_order_quantity", {
+      precision: 20,
+      scale: 6,
+    }),
+    neededByDate: date("needed_by_date"),
+    confidence: text("confidence").notNull(),
+    severity: text("severity").notNull(),
+    reason: text("reason").notNull(),
+    sourceSignals: jsonb("source_signals").notNull().default(sql`'[]'::jsonb`),
+    missingInputs: jsonb("missing_inputs").notNull().default(sql`'[]'::jsonb`),
+    warnings: jsonb("warnings").notNull().default(sql`'[]'::jsonb`),
+    sendableToPackTrack: boolean("sendable_to_packtrack").notNull().default(false),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+    lastSendError: text("last_send_error"),
+    /** Self-FK applied via SQL — drizzle's typed builder can't
+     *  express the self-reference cleanly here. Index below. */
+    supersededBy: uuid("superseded_by"),
+    recommendedSupplierHint: text("recommended_supplier_hint"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("read_material_recommendations_recommendation_id_unique").on(
+      t.recommendationId,
+    ),
+    uniqueIndex("read_material_recommendations_active_product_unique")
+      .on(t.materialId, t.productId)
+      .where(
+        sql`product_id IS NOT NULL AND acknowledged_at IS NULL AND dismissed_at IS NULL AND superseded_by IS NULL`,
+      ),
+    uniqueIndex("read_material_recommendations_active_material_unique")
+      .on(t.materialId)
+      .where(
+        sql`product_id IS NULL AND acknowledged_at IS NULL AND dismissed_at IS NULL AND superseded_by IS NULL`,
+      ),
+    index("read_material_recommendations_material_idx").on(t.materialId),
+    index("read_material_recommendations_product_idx")
+      .on(t.productId)
+      .where(sql`product_id IS NOT NULL`),
+    index("read_material_recommendations_material_code_idx").on(t.materialCode),
+    index("read_material_recommendations_confidence_idx").on(t.confidence),
+    index("read_material_recommendations_severity_idx").on(t.severity),
+    index("read_material_recommendations_sendable_idx")
+      .on(t.sendableToPackTrack)
+      .where(sql`sendable_to_packtrack = true`),
+    index("read_material_recommendations_generated_idx").on(t.generatedAt),
+    index("read_material_recommendations_expires_idx")
+      .on(t.expiresAt)
+      .where(sql`expires_at IS NOT NULL`),
   ],
 );
 
