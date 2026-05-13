@@ -4,6 +4,86 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## LOT-1B — Finished lot / recall passport schema + receiving bridge (complete)
+- Date: 2026-05-13
+- Result: schema phase. Migration 0031 + receiving-bridge pure helpers. No UI, no projector — those are LOT-1C and LOT-1D respectively. The DB now answers every shape the LOT-1A plan called for, including the bag-level M:N that batch-level `finished_lot_inputs` can't express.
+- Operator-decided open questions from LOT-1A baked in:
+  - **§7 #3 print policy** → `finished_lots.trace_code` is the customer-facing printed code (prefixed `FL-`). `internal_receipt_number` is internal-only and stays inside Luma. The current receipt-number workflow is supported by `inventory_bags.internal_receipt_number` and exposed through `getRawBagReceiptIdentity`.
+  - **§7 #6 customer key** → `customers.customer_code` is the canonical key. `zoho_customer_id` + `nexus_customer_id` are nullable external IDs. Nexus does not own customer identity.
+- Audit findings (pre-migration):
+  - `receives.receive_name text NOT NULL UNIQUE` already holds the receipt-event identifier (`PO123-R1`). No dedicated "receipt-pad" column existed.
+  - `batches.vendor_lot_number text` holds the manufacturer's lot. No supplier-lot column existed on `inventory_bags` directly.
+  - `inventory_bags.bag_number int NOT NULL` is the per-box bag sequence. `vendor_barcode` was the manufacturer's scan target — distinct from any Luma-issued QR. No `bag_qr_code` / `internal_receipt_number` / `declared_pill_count` columns existed.
+  - `qr_cards` are pre-printed production badges assigned to workflow bags at production start; **distinct namespace** from raw-bag QRs.
+  - `workflow_bags.inventory_bag_id uuid` is nullable; relying on it alone for the raw→workflow link is unsafe (legacy / synthesised bags exist with it null).
+  - `finished_lots` has `finished_lot_number text UNIQUE`, `produced_on date NOT NULL`, `expiry_date date NOT NULL`, `units_produced/displays_produced/cases_produced int`, `workflow_bag_id uuid` (nullable FK). No `trace_code`, no `packed_at`, no `expires_at` timestamptz, no alias column.
+  - `finished_lot_inputs` resolves at `batches` level only — cannot express "which specific inventory_bag of this batch went into this finished lot."
+  - `shipments` had `carrier`, `tracking_number`, `shipped_at`, `delivered_at`, `po_id`. No `customer_id` and no `customers` table existed.
+  - No QC-event projection per finished lot existed; QC payloads point at `workflow_bag_id`.
+- Migration number: **0031** (`when=1781100000000`).
+- Files changed:
+  - **NEW** `drizzle/0031_finished_lot_recall_passport.sql` (~240 lines) — additive, `IF NOT EXISTS` throughout, replay-safe. Six new tables, three column extensions, partial-unique indexes on `inventory_bags.bag_qr_code` + `finished_lots.trace_code` (NULL allowed for legacy rows). `finished_lot_raw_bags_triple_unique` uses `NULLS NOT DISTINCT` so duplicate (lot, bag, NULL) legacy inferences are still caught.
+  - **NEW** `lib/production/recall-passport.ts` (~265 lines) — 9 pure helpers. No DB import.
+  - **NEW** `lib/production/recall-passport.test.ts` (~280 lines, 33 cases) — every helper, edge cases for trim/normalisation, namespace-distinctness of BAG-/FL- prefixes, confidence rollup, partial-bag / multi-lot relationship.
+  - MOD `lib/db/schema.ts` — column additions on `inventoryBags` + `finishedLots` + `shipments`; six new `pgTable` exports at the end. Self-FK between `customers` and `shipments.customerId` declared in SQL (the drizzle type-mirror doesn't carry it; `shipment_finished_lots.customer_id` carries a proper FK).
+  - MOD `drizzle/meta/_journal.json` — entry idx 31.
+  - MOD `lib/production/qc-review-language.test.ts` — banned-phrase scan extended to `lib/production/recall-passport.ts`.
+- Schema added / extended (12 changes total):
+  1. `inventory_bags.bag_qr_code text` (unique partial index where not null)
+  2. `inventory_bags.internal_receipt_number text` (indexed)
+  3. `inventory_bags.declared_pill_count int`
+  4. `finished_lots.trace_code text` (unique partial index where not null)
+  5. `finished_lots.packed_at timestamptz` (indexed where not null)
+  6. `finished_lots.expires_at timestamptz`
+  7. `finished_lots.finished_lot_code_alias text` (indexed where not null)
+  8. `shipments.customer_id uuid` (FK to `customers`, indexed where not null)
+  9. **NEW** `customers` (customer_code UNIQUE, zoho_customer_id + nexus_customer_id nullable externals, supplier_lot_visible default false)
+  10. **NEW** `finished_lot_raw_bags` (bag-level M:N, confidence HIGH/MEDIUM/LOW/MISSING, source PROJECTOR/BACKFILL/MANUAL/LEGACY_IMPORT, triple-unique with NULLS NOT DISTINCT)
+  11. **NEW** `finished_lot_outputs` (per display/master_case/loose_unit/pallet/other with `print_payload jsonb` snapshot)
+  12. **NEW** `finished_lot_packaging_lots` (projection-friendly, unique on (lot, packaging_lot))
+  13. **NEW** `finished_lot_qc_events` (one row per QC event per finished lot, unique on pair)
+  14. **NEW** `shipment_finished_lots` (M:N shipments × finished_lots with denormalised customer_id, unique on pair)
+- Receiving-bridge behavior (pure helpers, exported from `lib/production/recall-passport.ts`):
+  - **`buildInternalReceiptNumber({receiveName, boxNumber, bagNumber})`** — returns `"<receive_name>[-B<box>]-<bag>"`. Trims, requires receive name + bag number; returns null when either is missing (no guessing for legacy data).
+  - **`validateInternalReceiptNumber(value)`** — accepts current receipt-pad formats (alphanumeric + dash/underscore, 3–82 chars); trims before checking; rejects whitespace / slashes / unsafe characters.
+  - **`normalizeSupplierLotNumber(value)`** — trims, collapses internal whitespace, uppercases. Returns null for empty/null input.
+  - **`buildRawBagQrPayload({inventoryBagId, internalReceiptNumber, bagSequence})`** — returns `BAG-<uuid>`. Throws on missing inputs.
+  - **`buildRawBagQrPayloadJson(...)`** — structured JSON envelope with `schema_version='1.0'`, `kind='RAW_BAG'`, bag id, receipt, supplier lot, product hint, bag sequence. For printer drivers that encode richer QR contents.
+  - **`getRawBagReceiptIdentity({inventoryBagId, receiveName?, boxNumber?, bagNumber, supplierLotNumber?, productHint?})`** — convenience: returns `{bagQrCode, internalReceiptNumber, supplierLotNumber, qrPayloadJson}` in one shot, ready for an INSERT. Honours nullable receive_name (legacy bag → null internal receipt, but bag_qr_code still valid).
+  - **`buildFinishedLotTraceCode({finishedLotNumber, suffix?})`** — `FL-` prefix, idempotent on already-prefixed inputs, optional suffix.
+  - **`validateTraceCode(value)`** — must start with FL-, alphanumeric + dash, 6–84 chars. Rejects whitespace, slashes, customer-unsafe chars.
+  - **`rollupRecallConfidence(values[])`** — MIN across the chain (same ladder as PT-6/PT-7/PBOM). Empty chain → MISSING.
+  - **`shouldExposeSupplierLot({customerSupplierLotVisible})`** — defaults to false; supplier lot is hidden unless customer explicitly opts in.
+  - **Namespace discipline:** `BAG-` raw-bag QRs and `FL-` finished-lot trace codes are distinct prefixes; the scanner can route without a DB lookup. Tests assert prefixes never collide.
+  - **Receiving UI:** intentionally **not changed in this phase**. LOT-1B is backend-only. UI work deferred to LOT-1C (intake form) and LOT-1D (recall lookup page). Per prompt: "If receiving UI is too risky for LOT-1B, add backend support + document UI deferred to LOT-1C/LOT-1D."
+- Tests added (33 cases, all pass):
+  - `buildInternalReceiptNumber` — 5 cases (build / no-box / missing bag / empty name / whitespace trim).
+  - `validateInternalReceiptNumber` — 4 cases (canonical, legacy, unsafe-char reject, non-string reject, trim).
+  - `normalizeSupplierLotNumber` — 4 cases (uppercase+trim, internal whitespace collapse, empty handling).
+  - `buildRawBagQrPayload`/`Json` — 4 cases (BAG- prefix, JSON envelope, namespace distinct from FL-, input validation).
+  - `getRawBagReceiptIdentity` — 2 cases (full identity, legacy-no-receive variant).
+  - `buildFinishedLotTraceCode`/`validateTraceCode` — 7 cases (prefix, idempotent, suffix, throws empty, accept canonical, reject no-prefix, reject unsafe chars, reject non-string).
+  - `shouldExposeSupplierLot` — 2 cases (default false, opt-in true).
+  - `rollupRecallConfidence` — 2 cases (empty=MISSING, MIN-across-chain).
+  - partial-bag / multi-lot relationship — 1 case (one raw bag can produce multiple QRs; one bag → multiple finished lots is supported by the schema).
+  - banned-language scan — `recall-passport.ts` added to the gate.
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1126/1126 pass across 50 test files** (+33 vs PT-7E's 1093; +1 test file).
+  - `npx next build` → clean (only the pre-existing OpenTelemetry `@opentelemetry/exporter-jaeger` warning, unrelated).
+- Staging verification (LX122 / SHA `a9d6fb9`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `a9d6fb91f31d7f718770f02a8c1ad6a80da38008`.
+  - Migration 0031 row present in `drizzle.__drizzle_migrations` at `when=1781100000000`.
+  - `\d inventory_bags` shows `bag_qr_code text` + `internal_receipt_number text` + `declared_pill_count integer`.
+  - `\d finished_lots` shows `trace_code text` + `packed_at timestamptz` + `expires_at timestamptz` + `finished_lot_code_alias text`.
+  - `\d shipments` shows `customer_id uuid` FK.
+  - All six new tables exist with the unique + lookup indexes documented above.
+  - Auth smoke 47/47 PASS.
+- LOT-1C readiness: ready. The next phase wires `BAG_FINALIZED` projector emissions into `finished_lot_raw_bags` / `finished_lot_outputs` / `finished_lot_packaging_lots` / `finished_lot_qc_events`, plus the rebuilder script. Schema is in place; pure helpers are ready; no further migrations needed unless LOT-1C uncovers a gap.
+
+---
+
 ## PT-7 closeout — Full PackTrack shortage-recommendations block complete
 - Date: 2026-05-13
 - Result: PT-7A through PT-7F closed. End-to-end Luma side of the loop is live on staging: read-model + projector + UI + acknowledge/dismiss + outbound client + send-action + final staging verification. No PackTrack-side work touched. No PO creation from Luma. Owner approval still lives in PackTrack.
