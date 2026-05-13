@@ -257,7 +257,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 
 ---
 
-### [ ] QC subsystem — Damages / rework / scrap / supervisor-correction live
+### [x] QC subsystem — Damages / rework / scrap / supervisor-correction live
 **Objective.** Build the live emission paths for `PACKAGING_DAMAGE_RETURN`, `REWORK_SENT`, `REWORK_RECEIVED`, `SCRAP_RECORDED`, `SUBMISSION_CORRECTED`. Every emission carries OP-1 accountability.
 
 **Files likely touched.**
@@ -283,7 +283,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 - [x] **QC-3** — floor QC quick-action panel + rework receiving surface. Verified 2026-05-12: tsc clean / vitest 876/876 / next build clean / staging live at SHA `c0393da` / packaging floor page renders panel markers; auth-smoke 45/45 PASS.
 - [x] **QC-4** — `/qc-review` admin page + correction modal + ad-hoc scrap modal + partial-rework receive. Verified 2026-05-12: tsc clean / vitest 901/901 / next build clean / staging live at SHA `93f5bd5` / `/qc-review` returns 200 under admin auth; auth-smoke 46/46 PASS (was 45 + the new route).
 - [x] **QC-5** — read-model projectors, genealogy / operator-productivity / material-reconciliation integration. Verified 2026-05-13: migration 0027 applied (3 new read_bag_state flags + partial index live) / tsc clean / vitest 919/919 / next build clean / staging live at SHA `aee76f3` / auth-smoke 46/46 PASS.
-- [ ] **QC-6** — staging verification + manual TEST D-QC + closeout.
+- [x] **QC-6** — final QC subsystem verification + closeout. Verified 2026-05-13: tsc clean / vitest 919/919 (123/123 across QC-touched files) / next build clean / staging live at SHA `aee76f3` / migration 0027 applied / read_bag_state QC flags + read_operator_daily QC counters + workflow_events QC indexes all present / all five QC enum types still in workflowEventTypeEnum / auth-smoke 46/46 PASS / `/qc-review`, `/operator-productivity`, `/genealogy/[bagId]`, `/po-reconciliation-v2`, `/material-alerts` all return 200 / live damage/rework/scrap event counts = 0 (no production damage on staging yet — expected); 460 legacy SUBMISSION_CORRECTED events present from pre-QC-5 synthesizer (forward-only projector is a documented limitation, not a bug).
 
 ---
 

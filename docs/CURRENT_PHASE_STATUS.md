@@ -4,6 +4,96 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## QC-6 — Final QC subsystem verification + closeout (complete)
+- Date: 2026-05-13
+- Result: **QC subsystem complete**. Main queue checkbox flipped to `[x]`. Sub-phases QC-0 through QC-6 all closed. No new code shipped in QC-6; this is verification-only.
+
+### Local checks
+- `npx tsc --noEmit` → clean.
+- `npx vitest run` → **919 / 919 pass across 43 test files** (no regressions from QC-5).
+- `npx next build` → clean.
+- Focused QC-suite subset (`qc-events`, `qc-actions`, `qc-review-loaders`, `qc-review-language`, `qc-panel-helpers`, `sidebar`) → **123 / 123 pass** across 7 files.
+
+### Staging verification (LX122)
+- Head on disk: `5972da4 docs(qc-5): record verification + flip checkbox` (docs-only since QC-5).
+- Container live SHA: `aee76f314ec6a03ab99076ef8451d079f7f0ea79` (the QC-5 code commit — health endpoint confirmed). The docs-only commit does not change the build artifact.
+- `drizzle.__drizzle_migrations` shows the last four entries with strictly-increasing `created_at`: idx 24 (`1780400000000`), 25 (`1780500000000`, PT-6C), 26 (`1780600000000`, QC-1), 27 (`1780700000000`, QC-5).
+- `\d read_bag_state` confirms `rework_pending`, `rework_received`, `has_correction` columns (all `boolean NOT NULL DEFAULT false`) + partial index `read_bag_state_rework_pending_idx` on `rework_pending = true`.
+- `\d read_operator_daily` confirms five new QC counters: `damage_events_total`, `rework_sent_total`, `rework_received_total`, `scrap_units_total`, `corrections_total` (all `integer NOT NULL DEFAULT 0`).
+- `pg_indexes` for `workflow_events`: `workflow_events_linked_event_idx` and `workflow_events_linked_event_resolution_unique` present.
+- `pg_enum` confirms all five QC values present in `workflow_event_type`: `PACKAGING_DAMAGE_RETURN`, `REWORK_SENT`, `REWORK_RECEIVED`, `SCRAP_RECORDED`, `SUBMISSION_CORRECTED`.
+
+### Live QC event counts on staging
+- `PACKAGING_DAMAGE_RETURN`: **0**
+- `REWORK_SENT`: **0**
+- `REWORK_RECEIVED`: **0**
+- `SCRAP_RECORDED`: **0**
+- `SUBMISSION_CORRECTED`: **460** (legacy synthesizer; pre-QC-5).
+- This is the expected staging state: no real damage has been reported through the new QC-3 floor panel yet, and supervisor scrap/rework actions through the new QC-4 admin page haven't been used live. The four operator-emitted event types accrue only from real production traffic.
+
+### Read-model invariant check (live data)
+- `read_bag_state.has_correction = true` count: **0**. Distinct bags with `SUBMISSION_CORRECTED` in `workflow_events`: **45**. Difference is expected — the legacy SUBMISSION_CORRECTED rows pre-date QC-5's projector, and neither `scripts/rebuild-read-models.ts` nor `scripts/replay-workflow-events.ts` re-aggregate QC flags from raw events. See "Known limitations" §1 below.
+- `rework_pending = true` count: 0. `rework_received = true` count: 0. Consistent with zero live REWORK events.
+
+### UI surface verification (auth smoke + curl)
+- `auth-smoke (npx tsx scripts/smoke-authenticated-routes.ts)` inside the running container: **PASS = 46, REDIR = 0, FAIL = 0**.
+- All five QC-relevant routes return 200 under OWNER auth:
+  - `/qc-review`
+  - `/operator-productivity`
+  - `/genealogy` (and `/genealogy/<bagId>` curl on a real bag with corrections returns 307 unauthenticated — auth redirect correct)
+  - `/po-reconciliation-v2`
+  - `/material-alerts`
+
+### Event-flow verification
+- **PACKAGING_DAMAGE_RETURN** — floor action `reportPackagingDamageAction` (QC-2) writes through `projectEvent` with full OP-1 accountability (employee_id from station session, user_id null on floor PWA, source = STATION_OPERATOR_SESSION, name snapshot frozen). QC-5 projector bumps `read_operator_daily.damage_events_total`, `read_sku_daily.damages`, `read_station_quality_daily.{reject_units, damaged_units}`. Pending damage surfaced on `/qc-review` via `loadPendingDamage` (NOT EXISTS against SCRAP/REWORK_SENT resolutions). Genealogy renders the rose badge. — Server-side path covered by unit tests; staging count = 0 awaiting real production traffic.
+- **REWORK_SENT** — floor action `reworkSentAction` writes the event + sets `read_bag_state.rework_pending = true` via QC-5 projector. Admin `adminReworkSentFromDamageAction` (QC-4) preserves linked event's accountable employee, supervisor → entered_by_user_id, conflict-guarded by partial-unique on `(payload->>'linked_event_id', event_type)`. Surfaced on `/qc-review` "Rework in flight" via `loadReworkInFlight` CTE.
+- **REWORK_RECEIVED** — floor `reworkReceivedAction` + admin `adminReworkReceivedAction` (supports partial). QC-5 projector recomputes `rework_pending` from open-rework SUM query (partial keeps it true, full clears it) and sets `rework_received = true` sticky. Partial receives stack via the loader's SUM; loader test pins the math.
+- **SCRAP_RECORDED** — admin `scrapRecordedAction` (QC-2) preserves linked event's accountable employee (FOR UPDATE on source row), supervisor → entered_by + `correction_actor_user_id` in payload, conflict-guarded for second-conversion. QC-5 projector bumps `read_operator_daily.scrap_units_total` by `scrap_quantity`, `read_sku_daily.scrap`, `read_station_quality_daily.scrap_units`. `read_material_lot_state.qty_on_hand` decrements only when `affects_packaging_material=true` AND `material_lot_id` named (HIGH→MEDIUM confidence step on the decrement). `read_material_reconciliation_v2.scrappedOrDamagedValue` reads SCRAP_RECORDED totals via `loadScrapFromQcEvents` → source `EXPLICIT_SCRAP_EVENT`, HIGH confidence. **PT-6 8-bucket formula untouched.**
+- **SUBMISSION_CORRECTED** — admin `submissionCorrectedAction` writes the event without mutating the original; preserves linked event's `employee_id`; supervisor → `entered_by_user_id`; `correction_actor_user_id` in payload. Original event remains in workflow_events. QC-5 projector sets `read_bag_state.has_correction = true` and bumps `read_operator_daily.corrections_total` against the original accountable employee. Surfaced on `/qc-review` Recent events table with inline "Correct" trigger.
+
+### TEST-D-QC packet result
+**Skipped on staging by design.** Creating one PACKAGING_DAMAGE_RETURN + REWORK_SENT + REWORK_RECEIVED + SCRAP_RECORDED + SUBMISSION_CORRECTED chain through the live actions would write five append-only rows that cannot be cleanly removed (events are append-only; correcting a test correction just adds another row; partial-receive math means the rows would persist indefinitely on `/qc-review`). The "no messy test data" instruction takes precedence. The full happy-path event flow is covered by:
+- `lib/production/qc-actions.test.ts` (16 cases) — per-action emit + accountability propagation + conflict-guard branches.
+- `lib/projector/qc-events.test.ts` (15 cases) — projector dispatch matrix per event type + bag-state flag flips + rework_pending recompute + material lot decrement guards.
+- `lib/production/qc-events.test.ts` (49 cases) — payload validators (QC-1).
+- `lib/production/qc-review-loaders.test.ts` (15 cases) — pending damage / rework-in-flight / partial-receive math.
+- `lib/production/qc-panel-helpers.test.ts` (15 cases) — floor panel station whitelist + reason-code coherence.
+
+The end-to-end exercise will happen naturally as operators encounter real damage on the floor.
+
+### Honest-language verification
+- `lib/production/qc-review-language.test.ts` scans the QC-3/4/5 surface files (`qc-review/page.tsx`, all three QC-review form components, `qc-review/actions.ts`, `qc-review-loaders.ts`, `qc-events.ts` projector, `operator-productivity/page.tsx`, `genealogy/[bagId]/page.tsx`) for the banned phrases `production loss`, `supplier shortage`, `known_loss`. **9/9 files pass.** Sidebar test (`components/admin/sidebar.test.ts`) also passes the banned-phrase scan.
+- PT-6 8-bucket model preserved: QC events feed only `scrappedOrDamaged` (and indirectly `consumptionVariance`); never `receiptVariance` or `cycleCountVariance`. Rework pending stays informational on `/qc-review`, not in the bucket math.
+
+### Replay / rebuild verification
+- `scripts/rebuild-read-models.ts` rebuilds: `read_queue_state`, `read_sku_daily`, `read_material_reconciliation` (v1), `read_material_reconciliation_v2`, `read_station_quality_daily`, `read_material_lot_state`, `read_material_consumption_daily`, `read_roll_usage`, `read_material_usage_learning`. **Does NOT rebuild `read_bag_state` QC flags or `read_operator_daily` QC counters from workflow_events.** See limitation §1.
+- `scripts/replay-workflow-events.ts` walks `workflow_events` for finalized bags, backfills `workflow_bags.finalized_at`, and rebuilds the read models above. **Does NOT call `projectQcEvent` per event** — same forward-only limitation.
+- The QC-5 projector is idempotent at the per-event layer: the upstream `workflow_events_client_event_unique` partial-unique on `(workflow_bag_id, event_type, client_event_id)` makes `projectEvent` bail before touching read models on retry. So if a future backfill script calls `projectEvent` for each historical QC event, it will be safe (no double-count).
+- PT-6 reconciliation v2's `rebuildMaterialReconciliationV2` still works — the existing test suite (15 cases in `material-reconciliation-v2.test.ts`) passes with the new `loadScrapFromQcEvents` query returning `[{total: 0}]` from the test's execute stub, preserving the "scrap MISSING" assertion.
+
+### Files changed in QC-6
+- `docs/CLAUDE_BUILD_QUEUE.md` — main QC subsystem block flipped to `[x]`; QC-6 sub-bullet flipped to `[x]` with verification summary.
+- `docs/CURRENT_PHASE_STATUS.md` — this entry appended.
+- **No source code changes.** QC-6 is verification-only.
+
+### Known limitations (documented, not blocking sign-off)
+1. **Forward-only QC projection.** `projectQcEvent` is invoked from `projectEvent` at event-emit time. Neither `scripts/rebuild-read-models.ts` nor `scripts/replay-workflow-events.ts` re-aggregate QC counters from `workflow_events`, so legacy events that pre-date QC-5 (the 460 SUBMISSION_CORRECTED rows from the synthesizer; 0 of the other four types) won't retroactively set flags or bump counters. The new QC flow is the canonical source going forward; a future backfill script can replay historical events through `projectEvent` if needed — its idempotency guard makes that safe.
+2. **No photo capture on the floor.** QC-2 actions accept `photo_keys`, but there's no upload helper wired on the floor PWA. QC-3 ships text-notes-only with an explicit on-panel disclosure. QC-3.5 (or QC-7) can add photos without re-shaping the action contracts.
+3. **Raw-product scrap doesn't move inventory.** SCRAP_RECORDED with `affects_raw_product=true` is captured in workflow_events but does NOT decrement any raw-product inventory ledger today — the codebase has no per-bag raw-material ledger yet. Packaging-material scrap with a named lot DOES decrement `read_material_lot_state.qty_on_hand`. Raw-product accounting comes when a raw-tablet ledger lands (post-cutover).
+4. **Ad-hoc scrap (no linked event) intentionally not exposed in QC-4 UI.** The existing `scrapRecordedAction` requires `overrideEmployeeId` for ad-hoc scrap to enforce explicit operator attribution. QC-4 chose not to ship that picker UI to avoid mis-attribution; programmatic ad-hoc scrap remains available.
+5. **Nexus / QIP customer complaint integration is out of scope.** The QC-0 plan reserves the genealogy trace forever (`accountable_employee_name_snapshot` in payload, reason-code vocabulary stable), but the customer-facing complaint surface is not built and not planned in this queue.
+6. **PackTrack shortage recommendations (PT-7) deferred.** Separate queue item.
+7. **TEST-D-QC manual packet skipped on staging.** Event store is append-only; cannot cleanly clean up test rows. End-to-end test coverage is in vitest (123/123 across QC-touched suites). Real-world exercise will happen as operators use the floor panel.
+8. **The cutover-blocker checklist in `docs/QC_REWORK_DAMAGE_AND_COUNT_CONFIDENCE_PLAN.md`** is satisfied for code-path completeness. The "manual review required" surface (Phase QC-5's reconciliation v2 line) is honest about its inputs. Real production traffic will determine whether any wire is loose; until then, the contract is complete.
+
+### Closeout
+- `docs/CLAUDE_BUILD_QUEUE.md` main QC subsystem block: `[x]`.
+- All six sub-phase checkboxes (QC-0..QC-6) in the queue's QC sub-block: `[x]`.
+- Next unchecked phase in the queue: **PackTrack shortage recommendations (PT-7)** at `docs/CLAUDE_BUILD_QUEUE.md` line 290 (per the current ordering).
+- Per the instruction, **not starting any later phase**.
+
+---
+
 ## QC-5 — Read-model + UI integration of QC events (complete)
 - Date: 2026-05-13
 - Result: **complete**. Live QC events from QC-2/3/4 now move the existing read models and surface in `/operator-productivity`, `/genealogy/[bagId]`, and the PT-6 reconciliation scrap bucket. Queue checkbox flipped to `[x]`.
