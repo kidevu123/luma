@@ -4,6 +4,51 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-7D — Material-alerts recommendation UI + acknowledge/dismiss actions (complete)
+- Date: 2026-05-13
+- Result: UI + actions phase. `/material-alerts` now exposes the rows PT-7C persists; admins can acknowledge or dismiss without any PackTrack contact. PT-7E is the outbound integration; this phase is intentionally read-only against the recommendation table.
+- Files changed:
+  - **NEW** `lib/db/queries/material-recommendations.ts` (~265 lines) — exports `loadMaterialRecommendations`, `filterRecommendations` (pure in-memory), `countRecommendations`, types. SQL pushes only the `status` axis (so the partial-unique index path stays hot); other filters apply in memory.
+  - **NEW** `lib/db/queries/material-recommendations.test.ts` (~225 lines, 16 cases) — status, severity, confidence, sendable, missing-config, product, material filters + interactions (acknowledged-still-visible, MISSING-row-stays-unless-sendable-only) + counters.
+  - **NEW** `app/(admin)/material-alerts/actions.ts` (~165 lines) — `acknowledgeMaterialRecommendationAction` + `dismissMaterialRecommendationAction`. Both `requireAdmin`, idempotent (second call on already-set timestamp is a noop), write `audit_log` inside the same transaction. Dismiss accepts optional `reason` + `notes`; appended to `warnings[]` as `[dismissed: reason — notes]` so the UI surfaces history without a new column.
+  - **NEW** `app/(admin)/material-alerts/actions.test.ts` (~210 lines, 11 cases) — stub-tx pattern. Verifies set/append/audit semantics, idempotency, validation-before-write, no fetch / no PackTrack import (static string scan against actions.ts).
+  - **NEW** `app/(admin)/material-alerts/_recommendations-panel.tsx` (~410 lines) — client component. Filter chips for status (ACTIVE / ACKNOWLEDGED / DISMISSED / ALL) + severity + confidence; checkboxes for sendable-only + missing-config-only; selects for product (with "Material-wide only" option) + material. Per-row badges: severity / confidence / Sendable | Not sendable / Required: <role> / Missing configuration / Acknowledged / Dismissed. Honesty copy in card header + per-row footer: "Recommendation only — Luma has not ordered anything. Not sent to PackTrack yet."
+  - MOD `app/(admin)/material-alerts/page.tsx` — fetches recommendations in parallel with the existing panel; renders `<ShortageRecommendationsPanel rows={...} />` above the existing alert cards.
+  - MOD `lib/production/qc-review-language.test.ts` — 4 PT-7D files added to the banned-phrase scan.
+  - MOD `docs/CLAUDE_BUILD_QUEUE.md` — PT-7D sub-bullet flipped to `[x]` with verification log.
+- Filters added (UI):
+  - **Status**: ACTIVE (default — hides `dismissed_at`-set rows but keeps acknowledged) / ACKNOWLEDGED / DISMISSED / ALL.
+  - **Severity**: subset of CRITICAL / HIGH / MEDIUM / WATCH (multi-select).
+  - **Confidence**: subset of HIGH / MEDIUM / LOW / MISSING (multi-select).
+  - **Sendable only**: drops rows with `sendable_to_packtrack=false`.
+  - **Missing config only**: keeps rows with non-empty `missing_inputs[]`.
+  - **Product**: dropdown (with "Material-wide only" option to keep only rows where `product_id IS NULL`).
+  - **Material**: dropdown across distinct materials in the current row set.
+- Actions added (server):
+  - `acknowledgeMaterialRecommendationAction(formData{ recommendationId })` → sets `acknowledged_at = now()` (only if currently NULL); writes audit entry `material_recommendation.acknowledge`; revalidates `/material-alerts`.
+  - `dismissMaterialRecommendationAction(formData{ recommendationId, reason?, notes? })` → sets `dismissed_at = now()` (only if currently NULL); appends a `[dismissed: ...]` tag to `warnings[]`; writes audit entry `material_recommendation.dismiss`; revalidates.
+  - Both refuse non-UUID input before touching the tx; both refuse if the row doesn't exist; both noop (return `ok:true`) on a row that's already in the target state — operator can click twice without harm.
+- Data-honesty discipline (verified):
+  - Card header explicitly says "Recommendation only. Not sent to PackTrack yet. Owner approval required in PackTrack before any purchase order is created."
+  - MISSING-confidence rows persist `sendable_to_packtrack=false` (by PT-7B); UI surfaces a "Not sendable" badge + "Missing configuration" tag.
+  - Per-row footer: "Recommendation only — Luma has not ordered anything. Not sent to PackTrack yet."
+  - `actions.ts` has no `fetch(` and no PackTrack-client import (the test scans for this statically).
+  - Banned-language test extended to all 4 new files; tests pass (no "production loss" / "supplier shortage" / "known_loss" strings present).
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1074/1074 pass across 48 test files** (+22 vs PT-7C's 1052; +2 test files).
+  - `npx next build` → clean.
+- Staging verification (LX122 / SHA `e56812f`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `e56812f819e37d7fe126065162091a6e439f0b26`.
+  - `/material-alerts` returns 200 under admin auth.
+  - Recommendation section renders the empty-state copy ("No shortage recommendations yet. Run material recommendation rebuild.") — staging has zero rows in `read_material_recommendations` (a real rebuild against staging data is PT-7F's job, not PT-7D's).
+  - Auth smoke 47/47 PASS (same routes as PT-7C baseline).
+  - No noisy fake recommendations introduced — empty state is the honest render.
+- PT-7E readiness: ready to start. PT-7E adds the outbound PackTrack client + settings panel under `/settings/integrations/packtrack`. The actions in PT-7D already write to `read_material_recommendations.acknowledged_at` — PT-7E only needs to add a send step that reads back from this table and posts to PackTrack, with the existing `recommendation_id` as the idempotency key.
+
+---
+
 ## PT-7C — Read model + rebuilder for shortage recommendations (complete)
 - Date: 2026-05-13
 - Result: persistence layer for PT-7B. Schema migration + projector + 15 stub-tx tests. Idempotent rebuild; operator state (acknowledged / dismissed / `recommendation_id`) preserved across runs. No PackTrack call, no UI change. PT-7D can now read from `read_material_recommendations`.
