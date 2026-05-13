@@ -19,6 +19,7 @@ import {
   Scale,
   Users,
   Package,
+  ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,7 @@ const SECTIONS: { heading: string; items: NavItem[] }[] = [
     heading: "Production intelligence",
     items: [
       { href: "/genealogy", label: "Bag genealogy", icon: History },
+      { href: "/qc-review", label: "QC review", icon: ShieldAlert },
       { href: "/material-reconciliation", label: "Material recon", icon: Scale },
       { href: "/operator-productivity", label: "Operator productivity", icon: Users },
       { href: "/packaging-output", label: "Packaging output", icon: Package },
