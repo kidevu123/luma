@@ -37,6 +37,8 @@ const FILES = [
   "lib/production/product-material-compatibility.ts",
   "app/(admin)/settings/product-material-compatibility/page.tsx",
   "app/(admin)/settings/product-material-compatibility/actions.ts",
+  // PT-7B surface — pure shortage recommendation math.
+  "lib/production/packtrack-shortage.ts",
 ];
 
 const BANNED = [

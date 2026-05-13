@@ -304,7 +304,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 **Sub-phases:**
 
 - [x] **PT-7A** — plan doc only (`docs/PACKTRACK_SHORTAGE_RECOMMENDATIONS_PLAN.md`). 2026-05-13.
-- [ ] **PT-7B** — pure shortage calculation helpers (`lib/production/packtrack-shortage.ts`) + fixture matrix tests. No DB.
+- [x] **PT-7B** — pure shortage calculation helpers (`lib/production/packtrack-shortage.ts`) + 59 fixture tests. No DB. Verified 2026-05-13: tsc clean / vitest 1036/1036 / next build clean.
 - [ ] **PT-7C** — migration 0029 `read_material_recommendations` table + `packaging_materials.min_order_quantity / safety_buffer_percent`. Projector/rebuilder. Hysteresis rule.
 - [ ] **PT-7D** — `/material-alerts` recommendation table + acknowledge / dismiss admin actions. No PackTrack call yet.
 - [ ] **PT-7E** — outbound PackTrack API client (idempotent on `recommendation_id`). Config under `/settings/integrations/packtrack`.

@@ -4,6 +4,63 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## PT-7B — Pure shortage recommendation helpers + tests (complete)
+- Date: 2026-05-13
+- Result: pure-math phase. Logic-only module + 59 fixture tests + banned-phrase scan. No DB, no PackTrack call, no UI change.
+- Files changed:
+  - **NEW** `lib/production/packtrack-shortage.ts` (~545 lines) — typed input/output models, 11 exported pure helpers.
+  - **NEW** `lib/production/packtrack-shortage.test.ts` (~600 lines, 59 cases).
+  - MOD `lib/production/qc-review-language.test.ts` — banned-phrase scan extended to the new helper file.
+  - MOD `docs/CLAUDE_BUILD_QUEUE.md` — PT-7B sub-bullet flipped to `[x]`.
+- Helpers exported (11):
+  - `deriveShortageRecommendation(input)` — main entry; returns the full recommendation row or `null` (skipped machine consumable, or no-shortage non-required material).
+  - `deriveShortageRecommendations(inputs)` — batch wrapper that filters nulls.
+  - `calculateRunoutDate(input)` — on_hand / rate days from `generatedAt`; null when rate is null/0; today when on_hand already 0.
+  - `calculateProjectedShortage(input)` — returns `{projectedDemand, projectedShortage}`. Demand = max(rate × leadTime, productionTargetDemand). Shortage = max(demand − accepted, 0).
+  - `calculateRecommendedOrderQuantity(shortage, opts)` — applies safety buffer (default 20%), respects `minOrderQuantity`, rounds up to `orderMultiple`; never negative.
+  - `classifyShortageConfidence(input)` — HIGH/MEDIUM/LOW/MISSING from gap count (see "Confidence behavior" below).
+  - `classifyShortageSeverity(input, ctx)` — CRITICAL / HIGH / MEDIUM / WATCH from runout date vs. lead time + required flag + par level.
+  - `deriveShortageSignals(input)` — builds the typed signal array; never empty when confidence ≠ MISSING; emits `MISSING_CONFIG` entries for each gap.
+  - `isRecommendationSendableToPackTrack(rec)` — true only when confidence ≠ MISSING AND `materialCode` non-empty AND `recommendedOrderQuantity > 0`.
+  - `shouldKeepExistingRecommendation(input, ctx)` — 1.2× hysteresis predicate (keep active rec until on-hand exceeds 1.2× trigger threshold).
+  - `skipMaterialKindForPackTrackShortage(kind)` — gate for PVC_ROLL / FOIL_ROLL / BLISTER_FOIL.
+
+### Confidence behavior
+HIGH when every input is at its strongest: `inventorySource = COUNTED|WEIGH_BACK_DERIVED`, BOM line present (when product-scoped), ≥7-day consumption history, PBOM-2 compatibility row present, lead time live from PackTrack. Each gap adds one count toward MEDIUM (1 gap) / LOW (2+ gaps). Hard-MISSING inputs (`material_code`, `inventory_source`, `usage_history` when neither source nor production target supplied, `bom_configured` for product-scoped, `compatibility` for product-scoped, `lead_time`, `inventory_confidence=MISSING`) force overall MISSING. `inventoryConfidence` is treated as metadata that mirrors `inventorySource` — counted both would double-count the same gap; only MISSING band still escalates here.
+
+### Severity behavior
+CRITICAL: required + accepted=0; OR required + productionTargetDemand > accepted; OR runout already passed/today. HIGH: runout < lead time; OR projected shortage + production target present. MEDIUM: runout < 1.5× lead time; OR below par with non-zero daily rate; OR positive projected shortage without target context. WATCH: below par without usage rate, OR no shortage at all (helper returns `null` instead of WATCH when there's nothing actionable to surface).
+
+### Quantity formula
+`shortage × (1 + safety_buffer_percent/100)` → if `< minOrderQuantity` lift to `minOrderQuantity` → round up to `orderMultiple` when provided, else `Math.ceil`. Defaults: 20% buffer, no min, no multiple. Never negative; returns `null` when `confidence=MISSING` (cannot quote a number).
+
+### Tests (59 cases, all pass)
+1-3 kind skip (PVC / FOIL / BLISTER_FOIL); 4 required + zero → CRITICAL; 5 missing material_code → MISSING + not sendable; 6-9 confidence ladder (HIGH/MEDIUM/LOW/MISSING for inventory + BOM + compatibility + usage); 10-13 severity timing (CRITICAL today, HIGH within lead, MEDIUM within 1.5× lead, WATCH/MEDIUM below par); 14-17 quantity formula (default buffer 20%, custom buffer, min override, order multiple, both, never negative, null shortage → null qty); 18-19 signal invariants (non-empty when confidence ≠ MISSING; MISSING_CONFIG present on missing inputs; window_days metadata on DAILY_USAGE_RATE); 20 compatibility.required raises severity; 21 hysteresis 1.2× rule (keep when in shortage, keep at 1.15× clear, withdraw at 1.25× clear); 22 supplier hint from MANUAL_LUMA receipt vs. null when no receipt; 23 batch processing (skips machine consumables; emits one rec per input); 24-25 production target vs. rate-based demand; 26 short window → MEDIUM, zero-day window → MISSING; 27-28 sendableToPackTrack (false for MISSING, true for HIGH/MEDIUM/LOW with code + qty, false when qty=0); 29 reason is a single human-readable sentence terminating with a period and naming the material + runout date; 30 banned-language scan over reason / signals / warnings; MISSING path uses "manual review required" phrasing (no silent zero).
+
+### Formula decisions documented in code
+- `DEFAULT_SAFETY_BUFFER_PERCENT = 20`.
+- `DEFAULT_EXPIRES_HOURS = 24` (recommendation freshness window).
+- `HYSTERESIS_MULTIPLIER = 1.2` (when an active rec is held).
+- `MEDIUM` band threshold for runout: `< 1.5 × leadTimeDays`.
+- Severity rule for required materials: CRITICAL even when accepted > 0 *if* `productionTargetDemand > accepted` (the "we can't hit the plan" case).
+- `recommendedOrderQuantity = null` when `confidence = MISSING` — never quote a number we can't justify.
+- `deriveShortageRecommendation` returns `null` (no rec emitted) when there's no shortage AND not below par AND not required — surfacing "nothing to do" rather than a noise row.
+
+### Local verification
+- `npx tsc --noEmit` → clean.
+- `npx vitest run` → **1036/1036 pass across 46 test files** (+59 vs PT-7A's 977).
+- `npx next build` → clean.
+
+### Risks / open questions still open from PT-7A
+- Lead-time data still config-default — PT-7E swaps to live PackTrack values.
+- 7-day usage window may need 28-day fallback for sporadically-used materials. Helper accepts arbitrary windows; the projector (PT-7C) decides which to feed.
+- Hysteresis tested against `parLevel` as trigger threshold; the projector can pass a different threshold (e.g. computed reorder point) per call.
+
+### Next phase
+**PT-7C** — schema migration 0029 (`read_material_recommendations` table + `packaging_materials.min_order_quantity / safety_buffer_percent` columns) + projector that hydrates `ShortageRecommendationInput` from live read models and persists results. The helper is frozen and stable; PT-7C only has to thread inputs through it.
+
+---
+
 ## PT-7A — PackTrack shortage recommendations plan (complete)
 - Date: 2026-05-13
 - Result: plan-only phase. Detailed implementation contract written to `docs/PACKTRACK_SHORTAGE_RECOMMENDATIONS_PLAN.md` (~330 lines, 12 sections). No code, no migrations, no PackTrack call.
