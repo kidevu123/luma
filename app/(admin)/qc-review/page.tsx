@@ -23,6 +23,7 @@
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth-guards";
 import { PageHeader, EmptyState, StatusPill } from "@/components/ui/page-header";
+import { ProductionSection } from "@/components/production/ui";
 import { ShieldAlert, Inbox, Activity } from "lucide-react";
 import {
   loadPendingDamage,
@@ -67,15 +68,12 @@ export default async function QcReviewPage() {
         description="Unresolved damage, in-flight rework, and recent QC events. Convert damage to scrap or rework; correct any submission. Accountable employee on each event is preserved from the original; supervisor is recorded separately."
       />
 
-      <section className="mb-8">
-        <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-base font-semibold tracking-tight">
-            Pending QC actions
-          </h2>
-          <span className="text-xs text-text-muted">
-            {pending.length} unresolved damage event{pending.length === 1 ? "" : "s"}
-          </span>
-        </div>
+      <ProductionSection
+        title="Pending QC actions"
+        subtitle={`${pending.length} unresolved damage event${pending.length === 1 ? "" : "s"}`}
+        tone={pending.length > 0 ? "WARN" : "MUTED"}
+        className="mb-8"
+      >
         {pending.length === 0 ? (
           <EmptyState
             icon={ShieldAlert}
@@ -140,15 +138,14 @@ export default async function QcReviewPage() {
             ))}
           </ul>
         )}
-      </section>
+      </ProductionSection>
 
-      <section className="mb-8">
-        <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-base font-semibold tracking-tight">Rework in flight</h2>
-          <span className="text-xs text-text-muted">
-            {reworkInFlight.length} open rework{reworkInFlight.length === 1 ? "" : "s"}
-          </span>
-        </div>
+      <ProductionSection
+        title="Rework in flight"
+        subtitle={`${reworkInFlight.length} open rework${reworkInFlight.length === 1 ? "" : "s"}`}
+        tone={reworkInFlight.length > 0 ? "INFO" : "MUTED"}
+        className="mb-8"
+      >
         {reworkInFlight.length === 0 ? (
           <EmptyState
             icon={Inbox}
@@ -203,13 +200,13 @@ export default async function QcReviewPage() {
             ))}
           </ul>
         )}
-      </section>
+      </ProductionSection>
 
-      <section className="mb-8">
-        <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-base font-semibold tracking-tight">Recent QC events</h2>
-          <span className="text-xs text-text-muted">last {recent.length}</span>
-        </div>
+      <ProductionSection
+        title="Recent QC events"
+        subtitle={`last ${recent.length}`}
+        className="mb-8"
+      >
         {recent.length === 0 ? (
           <EmptyState
             icon={Activity}
@@ -277,7 +274,7 @@ export default async function QcReviewPage() {
             </table>
           </div>
         )}
-      </section>
+      </ProductionSection>
 
       <p className="text-[11px] text-text-subtle">
         Material decrement on scrap (with affects_packaging_material + material_lot_id)

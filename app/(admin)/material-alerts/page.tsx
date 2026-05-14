@@ -7,6 +7,7 @@ import { VARIANCE_LABELS } from "@/lib/production/reconciliation-v2-loader";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
+import { ProductionEmptyState } from "@/components/production/ui";
 import { loadMaterialRecommendations } from "@/lib/db/queries/material-recommendations";
 import { validatePackTrackRecommendationConfig } from "@/lib/integrations/packtrack/recommendations";
 import { ShortageRecommendationsPanel } from "./_recommendations-panel";
@@ -35,13 +36,11 @@ export default async function MaterialAlertsPage() {
       />
 
       {totalAlerts === 0 ? (
-        <Card>
-          <CardContent>
-            <p className="text-sm text-text-muted py-8 text-center">
-              No alerts. Inventory is above par, no low remaining rolls, and no PT-6 variance rows currently require attention.
-            </p>
-          </CardContent>
-        </Card>
+        <ProductionEmptyState
+          title="No active alerts"
+          description="Inventory is above par, no low remaining rolls, and no PT-6 variance rows currently require attention."
+          hint="materials · packaging_lots · read_material_reconciliation"
+        />
       ) : null}
 
       <ShortageRecommendationsPanel

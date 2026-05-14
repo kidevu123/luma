@@ -23,6 +23,7 @@ import {
 } from "@/lib/production/recall-passport-loaders";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { ProductionEmptyState, ProductionIdentityBlock, type IdentityRow } from "@/components/production/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -144,24 +145,16 @@ export default async function RecallPage({
       )}
 
       {!input ? (
-        <Card>
-          <CardContent>
-            <p className="text-sm text-text-muted py-8 text-center">
-              Pick a search kind above and enter a value. The passport will
-              surface every linked raw bag, finished lot, packaging lot,
-              QC event, and shipment in one view.
-            </p>
-          </CardContent>
-        </Card>
+        <ProductionEmptyState
+          title="Start a recall lookup"
+          description="Pick a search kind above and enter a value. The passport will surface every linked raw bag, finished lot, packaging lot, QC event, and shipment in one view."
+          hint="six axes · supplier_lot · receipt_number · bag_qr · trace_code · product/date · customer/date"
+        />
       ) : passport == null || (passport.rawBags.length === 0 && passport.finishedLots.length === 0) ? (
-        <Card>
-          <CardContent>
-            <p className="text-sm text-text-muted py-8 text-center">
-              No matches for the supplied input. Confirm the spelling and
-              try a partial match.
-            </p>
-          </CardContent>
-        </Card>
+        <ProductionEmptyState
+          title="No matches"
+          description="No raw bags or finished lots match the supplied input. Confirm the spelling and try a partial match."
+        />
       ) : (
         <RecallPassportView passport={passport} />
       )}
@@ -434,34 +427,22 @@ function Summary({ passport }: { passport: RecallPassport }) {
           </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-        <Stat label="Finished lots" value={String(lotCount)} />
-        <Stat label="Raw bags" value={String(bagCount)} />
-        <Stat
-          label="Supplier lots"
-          value={supplierLots.length > 0 ? supplierLots.join(", ") : "—"}
+      <CardContent>
+        <ProductionIdentityBlock
+          columns={4}
+          rows={[
+            { label: "Finished lots", value: lotCount, mono: true },
+            { label: "Raw bags", value: bagCount, mono: true },
+            { label: "Supplier lots", value: supplierLots.length > 0 ? supplierLots.join(", ") : null, mono: true },
+            { label: "Trace code", value: lot?.traceCode ?? lot?.finishedLotNumber ?? null, mono: true },
+            { label: "Product", value: lot?.productName ?? null },
+            { label: "Packed at", value: lot?.packedAt ? formatDate(lot.packedAt) : null, mono: true },
+            { label: "Shipments", value: passport.shipmentLinks.length, mono: true },
+            { label: "QC events", value: passport.qcEvents.length, mono: true },
+          ] satisfies IdentityRow[]}
         />
-        <Stat
-          label="Trace code"
-          value={lot?.traceCode ?? lot?.finishedLotNumber ?? "—"}
-        />
-        <Stat label="Product" value={lot?.productName ?? "—"} />
-        <Stat label="Packed at" value={formatDate(lot?.packedAt)} />
-        <Stat label="Shipments" value={String(passport.shipmentLinks.length)} />
-        <Stat label="QC events" value={String(passport.qcEvents.length)} />
       </CardContent>
     </Card>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border border-border bg-surface px-2 py-1.5">
-      <div className="text-[10px] uppercase tracking-wider text-text-muted">
-        {label}
-      </div>
-      <div className="text-sm font-medium tabular-nums">{value}</div>
-    </div>
   );
 }
 

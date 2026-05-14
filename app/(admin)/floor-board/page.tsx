@@ -39,6 +39,7 @@ import { todayRange } from "@/lib/production/time";
 import { MetricCard } from "@/components/production/metric-card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { MissingState } from "@/components/production/missing-state";
+import { ProductionAlertCard, ProductionEmptyState } from "@/components/production/ui";
 import { LiveRefresh } from "./live-refresh";
 import {
   type StageKey,
@@ -245,32 +246,31 @@ export default async function FloorBoardPage() {
       </section>
 
       {/* WHY ARE METRICS EMPTY? — only shows when activity exists
-          but no bags have finalized. This is a diagnostic, not a
-          status report. The wording is intentionally direct. */}
+          but no bags have finalized. */}
       {health.totalEvents > 0 && health.finalizedBags === 0 && (
-        <section
-          aria-label="Why are metrics empty"
-          className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3"
-        >
-          <h2 className="text-[11px] uppercase tracking-[0.10em] text-amber-300 font-semibold">
-            Why are output metrics empty?
-          </h2>
-          <p className="mt-1.5 text-[13px] text-amber-100 leading-relaxed">
-            Production activity exists ({health.totalEvents} events across{" "}
-            {health.totalBags} bags), but <strong>no bags have reached BAG_FINALIZED</strong>.
-            Output metrics (good units, displays, cases, yield, OEE,
-            material reconciliation) are blocked until bags are finalized
-            on the floor or until legacy activity is mapped into canonical
-            completion states via the legacy synthesizer.
-          </p>
-          <p className="mt-1.5 text-[12px] text-amber-200/80">
-            Action: complete the full floor flow on the station —{" "}
-            <span className="font-mono">CARD_ASSIGNED → BLISTER_COMPLETE → SEALING_COMPLETE → PACKAGING_COMPLETE → BAG_FINALIZED</span>.
-            The Finalize button on the packaging station fires
-            BAG_FINALIZED, which writes read_bag_metrics and unlocks
-            every output KPI.
-          </p>
-        </section>
+        <ProductionAlertCard
+          tone="WARN"
+          title="Why are output metrics empty?"
+          body={
+            <>
+              <p className="leading-relaxed">
+                Production activity exists ({health.totalEvents} events across{" "}
+                {health.totalBags} bags), but <strong>no bags have reached BAG_FINALIZED</strong>.
+                Output metrics (good units, displays, cases, yield, OEE,
+                material reconciliation) are blocked until bags are finalized
+                on the floor or until legacy activity is mapped into canonical
+                completion states via the legacy synthesizer.
+              </p>
+              <p className="mt-1.5">
+                Action: complete the full floor flow on the station —{" "}
+                <span className="font-mono">CARD_ASSIGNED → BLISTER_COMPLETE → SEALING_COMPLETE → PACKAGING_COMPLETE → BAG_FINALIZED</span>.
+                The Finalize button on the packaging station fires
+                BAG_FINALIZED, which writes read_bag_metrics and unlocks
+                every output KPI.
+              </p>
+            </>
+          }
+        />
       )}
 
       {/* BLOCKED METRICS — list every blocked KPI, why, and what to do. */}
@@ -395,17 +395,11 @@ export default async function FloorBoardPage() {
         {bottleLaneHasActivity(queues) ? (
           <LaneRow lane="BOTTLE" label="Bottle route" stages={BOTTLE_LANE} queues={queues} />
         ) : (
-          <div className="rounded-md border border-dashed border-slate-700 bg-slate-900/40 px-3 py-2.5 flex items-center gap-3 text-[12px]">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500" />
-            <span className="font-medium text-slate-200">Bottle line</span>
-            <span className="text-slate-500">·</span>
-            <span className="text-slate-400">
-              no bottle-route activity captured in the current window.
-            </span>
-            <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">
-              idle
-            </span>
-          </div>
+          <ProductionEmptyState
+            title="Bottle line idle"
+            description="No bottle-route activity captured in the current window."
+            hint="read_queue_state · BOTTLE_*_QUEUE"
+          />
         )}
       </section>
 

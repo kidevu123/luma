@@ -27,6 +27,10 @@ const POLISHED_PAGES = [
   "app/(admin)/genealogy/[bagId]/page.tsx",
   "app/(admin)/operator-productivity/page.tsx",
   "app/(admin)/packaging-output/page.tsx",
+  "app/(admin)/material-alerts/page.tsx",
+  "app/(admin)/qc-review/page.tsx",
+  "app/(admin)/recall/page.tsx",
+  "components/production/ui.tsx",
 ];
 
 // Conservative emoji regex covering the common Unicode emoji blocks.
