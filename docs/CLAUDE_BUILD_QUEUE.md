@@ -341,7 +341,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 
 ---
 
-### [ ] Command center visual polish
+### [x] Command center visual polish
 **Objective.** Density / brand pass on `/floor-board`, `/genealogy`, `/operator-productivity`, `/packaging-output` per `docs/FLOOR_UI_POLISH_REQUIREMENTS.md`. No data-model changes; no new event types; no honest-data drift.
 
 **Files likely touched.**
@@ -356,6 +356,14 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 **Tests required.** Visual regression is out of scope; existing test suite must remain green.
 
 **Stop condition.** Polish doc requirements met. Build green. Stop.
+
+**Closeout (2026-05-14, SHA `41fa733`):** Polished 4 pages with minimal-diff edits, presentation-only:
+- `/packaging-output` — promoted "Damage rate" + "On-time completion" from inline prose to first-class `MetricCard`s; new local `SectionTitle` (eyebrow + heading + inline subtitle + hairline divider).
+- `/operator-productivity` — added a subtle "QC activity" pill next to operator names when damages + rework + scrap + corrections > 0; uses the same aesthetic as the existing "legacy code only" pill; no row-wide coloring.
+- `/genealogy/[bagId]` — unmapped event types now render as a real default badge (slate border + slate-800 fill, same h-5 / px-1.5 rhythm as styled badges) with a `title` attr labelling them generic.
+- `/floor-board` — bottle-line empty state now uses a status dot + horizontal layout + right-aligned `idle` tag, matching LaneRow rhythm; replaces the weak dashed-box prose.
+
+No business-logic, loader, projector, migration, or formula changes anywhere. ConfidenceBadge / MetricCard primitives untouched. Dead `app/(admin)/floor-board/_components/` directory left in place for a separate cleanup phase. New `lib/production/command-center-polish.test.ts` adds 17 static guards (emoji regex against Unicode pictograph / dingbat blocks, banned-phrase scan, ConfidenceBadge presence). Verified 2026-05-14: tsc clean / vitest 1225/1225 / next build clean / staging live at SHA `41fa733` / all 4 polished routes return 200 / auth-smoke 47/47 PASS.
 
 ---
 

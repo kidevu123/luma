@@ -4,6 +4,51 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## Command center visual polish (complete)
+- Date: 2026-05-14
+- Result: presentation-only pass on the 4 production-floor pages. No business-logic, loader, projector, migration, or formula changes. Tested via static-guard regex sweeps; live verification confirms the routes still return 200.
+- Files changed (1 commit):
+  - **NEW** `lib/production/command-center-polish.test.ts` (~75 lines, 17 cases).
+  - MOD `app/(admin)/packaging-output/page.tsx` — promoted 2 prose KPIs to MetricCards + new local `SectionTitle` (eyebrow/heading/subtitle/divider).
+  - MOD `app/(admin)/operator-productivity/page.tsx` — added subtle "QC activity" pill in the operator-name cell when QC counters > 0.
+  - MOD `app/(admin)/genealogy/[bagId]/page.tsx` — default badge style for unmapped event types.
+  - MOD `app/(admin)/floor-board/page.tsx` — better bottle-lane empty state (status dot + horizontal layout + idle tag).
+- Pages polished:
+  - `/packaging-output` — every output type is now its own MetricCard (cases / displays / loose / damaged units / ripped / bags finalised / damage rate / on-time completion / pending QC / released lots/units/cases/displays). One column per unit type; no aggregation. Confidence badge per card.
+  - `/operator-productivity` — table density unchanged; new visual cue + the existing "legacy code only" tag now coexist. Title attr on the new pill explains what triggers it.
+  - `/genealogy/[bagId]` — timeline aesthetic unchanged; only the unmapped-event fallback got proper badge styling.
+  - `/floor-board` — bottle-lane empty state polished. Machine wall, KPI strip, process map otherwise unchanged.
+- Visual system changes:
+  - One new local component: `SectionTitle` in `packaging-output/page.tsx`. Not extracted to `components/ui` — only one consumer today; promote if a second page needs it.
+  - No new global tokens, no new icons, no new colors. All polish is rearrangement of existing primitives (`MetricCard`, `ConfidenceBadge`, `Card`, `PageHeader`) plus the LaneRow / badge-pill aesthetic that was already in the codebase.
+- Data honesty protections (enforced by the new test file):
+  - **Emoji ban**: `EMOJI_RE` regex covers Unicode pictograph (1F300-1F6FF), supplemental symbols (1F900-1F9FF), miscellaneous symbols & arrows (2600-27BF), card / mahjong / domino blocks (1F000-1F02F), playing cards (1F0A0-1F0FF), regional indicators (1F100-1F1FF, 1F200-1F2FF), supplemental symbols & pictographs (1FA70-1FAFF). Tested against all 4 polished sources.
+  - **Banned-phrase ban**: same scan as the QC-4 surface — "production loss" / "supplier shortage" / "known_loss" — applied to the 4 polished pages.
+  - **ConfidenceBadge presence**: at least one of the polished pages must import it, so the HIGH/MEDIUM/LOW/MISSING rendering contract stays single-sourced.
+- Tests added (17 cases):
+  - 4 emoji-presence guards (one per polished page).
+  - 12 banned-phrase guards (3 patterns × 4 pages).
+  - 1 ConfidenceBadge-presence assertion.
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1225 / 1225 PASS across 55 files** (+17 vs LOT-1G's 1208; +1 test file).
+  - `npx next build` → clean; all 4 polished routes present (`/floor-board` 752 B / 106 kB, `/genealogy/[bagId]` 232 B / 106 kB, `/operator-productivity` 232 B / 106 kB, `/packaging-output` 201 B / 102 kB).
+- Staging verification (LX122 / SHA `41fa733`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `41fa7336edc9071d827cee8dcbd3f85d36b54238`.
+  - All 4 polished routes return 200 under admin auth (smoke list).
+  - Auth smoke **47 / 47 PASS**.
+  - No emoji glyphs visible on any polished page (enforced both by the regex test and the live render).
+  - No fake data introduced.
+- Remaining UI gaps (deferred):
+  - Dead `app/(admin)/floor-board/_components/` directory (9 unused files, noted in the floor-board page.tsx comment). Not deleted in this phase — pure cleanup, scope-adjacent.
+  - `<table>` headers on `/operator-productivity` and other admin tables don't yet have sticky positioning for long scrolls; not in the polish brief.
+  - The 4 polished pages still use server-rendered date strings (ISO snippets); a global "render dates in the company timezone via a shared helper" pass would be a follow-up.
+  - QC reason-code chips on the floor-board QC alert panel could read directly from the QC-1 enum rather than free-text; tracked elsewhere.
+- Next unchecked phase in `docs/CLAUDE_BUILD_QUEUE.md`: **Zoho live sync** — replace the H.x0.5 stub with a live Zoho item sync (read + write, idempotent, reconciles against Luma `products` and `tablet_types`).
+
+---
+
 ## LOT-1 closeout — Full Finished Lot / Recall Passport block complete
 - Date: 2026-05-14
 - Result: LOT-1A through LOT-1G closed. End-to-end Luma side of the recall-passport loop is live on staging: plan → schema → projector → search UI → labels → CSV → Nexus contract → send persistence with full QA verification.
