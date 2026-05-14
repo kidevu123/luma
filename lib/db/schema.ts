@@ -3217,6 +3217,11 @@ export const shipmentFinishedLots = pgTable(
     unit: text("unit"),
     shippedAt: timestamp("shipped_at", { withTimezone: true }),
     notes: text("notes"),
+    /** LOT-1G — Nexus send-state. Populated by
+     *  sendFinishedLotToNexusAction. */
+    nexusSentAt: timestamp("nexus_sent_at", { withTimezone: true }),
+    nexusLastSentResponse: jsonb("nexus_last_sent_response"),
+    nexusLastSendError: text("nexus_last_send_error"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -3234,6 +3239,9 @@ export const shipmentFinishedLots = pgTable(
     index("shipment_finished_lots_customer_idx")
       .on(t.customerId)
       .where(sql`customer_id IS NOT NULL`),
+    index("shipment_finished_lots_nexus_sent_at_idx")
+      .on(t.nexusSentAt)
+      .where(sql`nexus_sent_at IS NOT NULL`),
   ],
 );
 

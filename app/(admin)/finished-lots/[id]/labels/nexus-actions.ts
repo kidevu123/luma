@@ -1,15 +1,18 @@
 "use server";
 
-// LOT-1F — admin server action that POSTs a finished-lot handoff to
-// Nexus. Contract-only this phase: the action returns the outbound
-// result for the operator to inspect but does NOT persist sent_at /
-// last_sent_response / last_send_error on shipment_finished_lots.
-// LOT-1G picks up persistence after deciding which fields to add.
+// LOT-1F shipped this action contract-only; LOT-1G wires
+// persistence + audit. On success the action sets
+// shipment_finished_lots.nexus_sent_at + nexus_last_sent_response
+// and clears nexus_last_send_error. On failure it writes
+// nexus_last_send_error while preserving any prior nexus_sent_at
+// (so a transient retry doesn't erase the last good send).
 
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth-guards";
+import { writeAudit } from "@/lib/db/audit";
 import {
   customers,
   finishedLotOutputs,
@@ -44,7 +47,7 @@ type ActionResult =
 export async function sendFinishedLotToNexusAction(
   formData: FormData,
 ): Promise<ActionResult> {
-  await requireAdmin();
+  const user = await requireAdmin();
   const finishedLotId = z
     .string()
     .regex(UUID_RE)
@@ -160,8 +163,7 @@ export async function sendFinishedLotToNexusAction(
     .where(eq(finishedLotQcEvents.finishedLotId, finishedLotId.data));
 
   // Representative supplier lot (one customer-visible lot is enough;
-  // multi-bag lots can disclose more under LOT-1G if needed). Pulled
-  // only for the payload builder's exposure decision.
+  // payload builder decides whether to expose).
   const [supplierLotRow] = await db
     .select({ supplierLotNumber: batches.vendorLotNumber })
     .from(finishedLotRawBags)
@@ -170,11 +172,7 @@ export async function sendFinishedLotToNexusAction(
       eq(finishedLotRawBags.inventoryBagId, inventoryBags.id),
     )
     .leftJoin(batches, eq(inventoryBags.batchId, batches.id))
-    .where(
-      and(
-        eq(finishedLotRawBags.finishedLotId, finishedLotId.data),
-      ),
-    );
+    .where(eq(finishedLotRawBags.finishedLotId, finishedLotId.data));
 
   // ── Build + send ─────────────────────────────────────────────
   let payload;
@@ -225,6 +223,79 @@ export async function sendFinishedLotToNexusAction(
   }
 
   const result = await sendFinishedLotToNexus(payload);
+
+  // ── Persist send state on shipment_finished_lots ──────────────
+  // Failure path preserves nexus_sent_at (the prior successful send
+  // stays as the operator-visible "last good handoff" timestamp);
+  // success path clears nexus_last_send_error and stamps both
+  // nexus_sent_at and nexus_last_sent_response.
+  const now = new Date();
+  try {
+    await db.transaction(async (tx) => {
+      if (result.ok) {
+        await tx
+          .update(shipmentFinishedLots)
+          .set({
+            nexusSentAt: now,
+            nexusLastSentResponse: (result.rawBody ?? {
+              status: "ok",
+              message: result.message,
+            }) as unknown as object,
+            nexusLastSendError: null,
+            updatedAt: now,
+          })
+          .where(eq(shipmentFinishedLots.id, shipmentLink.shipmentFinishedLotId));
+        await writeAudit(
+          {
+            actorId: user.id,
+            actorRole: user.role,
+            action: "nexus.finished_lot.send",
+            targetType: "shipment_finished_lots",
+            targetId: shipmentLink.shipmentFinishedLotId,
+            after: {
+              nexusSentAt: now,
+              traceCode: lot.traceCode,
+              customerCode: customerRow.customerCode,
+              status: result.status,
+            },
+          },
+          tx,
+        );
+      } else {
+        await tx
+          .update(shipmentFinishedLots)
+          .set({
+            nexusLastSendError: result.reason,
+            updatedAt: now,
+          })
+          .where(eq(shipmentFinishedLots.id, shipmentLink.shipmentFinishedLotId));
+        await writeAudit(
+          {
+            actorId: user.id,
+            actorRole: user.role,
+            action: "nexus.finished_lot.send_failed",
+            targetType: "shipment_finished_lots",
+            targetId: shipmentLink.shipmentFinishedLotId,
+            after: {
+              code: result.code,
+              reason: result.reason,
+              status: "status" in result ? result.status : null,
+              traceCode: lot.traceCode,
+              customerCode: customerRow.customerCode,
+            },
+          },
+          tx,
+        );
+      }
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Persist failed",
+    };
+  }
+
+  revalidatePath(`/finished-lots/${finishedLotId.data}/labels`);
   if (!result.ok) {
     return { ok: false, error: result.reason, code: result.code };
   }

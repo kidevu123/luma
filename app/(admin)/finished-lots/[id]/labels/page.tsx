@@ -38,6 +38,7 @@ import {
 } from "@/lib/db/schema";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SendToNexusButton } from "./_send-button";
 
 export const dynamic = "force-dynamic";
 
@@ -173,11 +174,13 @@ export default async function FinishedLotLabelsPage({
     buildFinishedLotLabelPayload({ template: "INTERNAL", ...baseArgs, output: o }),
   );
 
-  // ── Nexus handoff status (read-only; LOT-1F contract-only) ──
+  // ── Nexus handoff status ──────────────────────────────────────
   const [shipmentLink] = await db
     .select({
       shipmentFinishedLotId: shipmentFinishedLots.id,
       customerId: shipmentFinishedLots.customerId,
+      nexusSentAt: shipmentFinishedLots.nexusSentAt,
+      nexusLastSendError: shipmentFinishedLots.nexusLastSendError,
     })
     .from(shipmentFinishedLots)
     .where(eq(shipmentFinishedLots.finishedLotId, id));
@@ -242,6 +245,13 @@ export default async function FinishedLotLabelsPage({
             traceCode={lotRow.traceCode}
             customer={customerRow}
             nexusConfigured={nexusConfig.configured}
+            finishedLotId={lotRow.id}
+            alreadySentAt={
+              shipmentLink?.nexusSentAt
+                ? shipmentLink.nexusSentAt.toISOString()
+                : null
+            }
+            lastSendError={shipmentLink?.nexusLastSendError ?? null}
           />
           <Section title="Customer-facing labels">
             <LabelGrid labels={customerLabels} />
@@ -260,6 +270,9 @@ function NexusStatusCard({
   traceCode,
   customer,
   nexusConfigured,
+  finishedLotId,
+  alreadySentAt,
+  lastSendError,
 }: {
   sendability: { sendable: boolean; reasons: string[] };
   traceCode: string | null;
@@ -272,6 +285,9 @@ function NexusStatusCard({
       }
     | null;
   nexusConfigured: boolean;
+  finishedLotId: string;
+  alreadySentAt: string | null;
+  lastSendError: string | null;
 }) {
   return (
     <Card>
@@ -328,6 +344,14 @@ function NexusStatusCard({
             Blocked: {sendability.reasons.join("; ")}
           </div>
         )}
+        <div className="col-span-2 md:col-span-3 pt-2 border-t border-border">
+          <SendToNexusButton
+            finishedLotId={finishedLotId}
+            sendable={sendability.sendable}
+            alreadySentAt={alreadySentAt}
+            lastSendError={lastSendError}
+          />
+        </div>
       </CardContent>
     </Card>
   );

@@ -225,6 +225,13 @@
       "when": 1781100000000,
       "tag": "0031_finished_lot_recall_passport",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781200000000,
+      "tag": "0032_nexus_send_persistence",
+      "breakpoints": true
     }
   ]
 }
