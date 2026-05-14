@@ -98,6 +98,12 @@ export default async function OperatorProductivityPage() {
                         (r.bagsFinalized / r.activeSeconds) * 3600,
                       )
                     : 0;
+                const qcActivity =
+                  r.damageEvents +
+                  r.reworkSent +
+                  r.reworkReceived +
+                  r.scrapUnits +
+                  r.corrections;
                 return (
                   <tr key={r.groupKey} className="border-t border-slate-800">
                     <td className="px-3 py-2">
@@ -105,6 +111,14 @@ export default async function OperatorProductivityPage() {
                       {r.confidence === "LOW" && (
                         <span className="ml-2 rounded bg-amber-900/40 text-amber-200 border border-amber-700/40 px-1.5 py-0.5 text-[10px]">
                           legacy code only
+                        </span>
+                      )}
+                      {qcActivity > 0 && (
+                        <span
+                          className="ml-2 rounded bg-orange-900/40 text-orange-200 border border-orange-700/40 px-1.5 py-0.5 text-[10px]"
+                          title="One or more QC events attributed to this operator in the window."
+                        >
+                          QC activity
                         </span>
                       )}
                     </td>

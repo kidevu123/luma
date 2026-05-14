@@ -395,9 +395,16 @@ export default async function FloorBoardPage() {
         {bottleLaneHasActivity(queues) ? (
           <LaneRow lane="BOTTLE" label="Bottle route" stages={BOTTLE_LANE} queues={queues} />
         ) : (
-          <div className="rounded-md border border-dashed border-slate-700 bg-slate-900/40 p-3 text-[12px] text-slate-400">
-            <span className="font-medium text-slate-300">Bottle line</span> ·
-            no bottle activity captured.
+          <div className="rounded-md border border-dashed border-slate-700 bg-slate-900/40 px-3 py-2.5 flex items-center gap-3 text-[12px]">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500" />
+            <span className="font-medium text-slate-200">Bottle line</span>
+            <span className="text-slate-500">·</span>
+            <span className="text-slate-400">
+              no bottle-route activity captured in the current window.
+            </span>
+            <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">
+              idle
+            </span>
           </div>
         )}
       </section>

@@ -165,7 +165,10 @@ export default async function BagGenealogyPage({
                       {badge.label}
                     </span>
                   ) : (
-                    <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">
+                    <span
+                      className="inline-flex items-center h-5 px-1.5 rounded-sm border text-[10px] font-medium uppercase tracking-wider border-slate-700 bg-slate-800/60 text-slate-300 font-mono"
+                      title="Generic workflow event — no styled badge mapped."
+                    >
                       {e.eventType}
                     </span>
                   )}

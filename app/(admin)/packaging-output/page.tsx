@@ -31,46 +31,42 @@ export default async function PackagingOutputPage() {
       />
 
       <section aria-label="Packaging output by unit">
-        <h2 className="text-[11px] uppercase tracking-[0.10em] text-slate-300 font-semibold mb-2">
-          Packaging output (per-bag rollup)
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <SectionTitle
+          eyebrow="Packaging output"
+          title="Per-bag rollup"
+          subtitle="One column per unit type. No aggregation across cases / displays / loose."
+        />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
           <MetricCard label="Cases" metric={packaging.masterCases ?? FALLBACK} />
           <MetricCard label="Displays" metric={packaging.displaysMade ?? FALLBACK} />
           <MetricCard label="Loose cards" metric={packaging.looseCards ?? FALLBACK} />
           <MetricCard label="Damaged units" metric={packaging.damagedPackaging ?? FALLBACK} />
           <MetricCard label="Ripped cards" metric={packaging.rippedCards ?? FALLBACK} />
           <MetricCard label="Bags finalised" metric={packaging.bagsFinalised ?? FALLBACK} />
-        </div>
-        <div className="mt-2 text-[11px] text-slate-500">
-          Damage rate ={" "}
-          <span className="font-mono text-slate-300">
-            {packaging.damageRatePct?.value != null
-              ? `${packaging.damageRatePct.value}%`
-              : packaging.damageRatePct?.label ?? "—"}
-          </span>{" "}
-          ((damaged + ripped) / (cases + displays + loose))
+          <MetricCard
+            label="Damage rate"
+            metric={packaging.damageRatePct ?? FALLBACK}
+            hint="(damaged + ripped) / (cases + displays + loose)"
+          />
         </div>
       </section>
 
       <section aria-label="Finished-lot release">
-        <h2 className="text-[11px] uppercase tracking-[0.10em] text-slate-300 font-semibold mb-2">
-          Finished goods release
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <SectionTitle
+          eyebrow="Finished goods"
+          title="Release status"
+          subtitle="Released = lot status RELEASED. Pending QC = lot held for QA review. On-time = packed by due date."
+        />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           <MetricCard label="Released lots" metric={finished.releasedLots ?? FALLBACK} />
           <MetricCard label="Released units" metric={finished.releasedUnits ?? FALLBACK} />
           <MetricCard label="Released cases" metric={finished.releasedCases ?? FALLBACK} />
           <MetricCard label="Released displays" metric={finished.releasedDisplays ?? FALLBACK} />
           <MetricCard label="Pending QC" metric={finished.pendingQcLots ?? FALLBACK} />
-        </div>
-        <div className="mt-2 text-[11px] text-slate-500">
-          On-time completion ={" "}
-          <span className="font-mono text-slate-300">
-            {finished.onTimeCompletionPct?.value != null
-              ? `${finished.onTimeCompletionPct.value}%`
-              : finished.onTimeCompletionPct?.label ?? "—"}
-          </span>
+          <MetricCard
+            label="On-time completion"
+            metric={finished.onTimeCompletionPct ?? FALLBACK}
+          />
         </div>
       </section>
 
@@ -94,3 +90,29 @@ const FALLBACK = {
   missingInputs: ["metric_api"],
   label: "No data",
 };
+
+function SectionTitle({
+  eyebrow,
+  title,
+  subtitle,
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className="mb-3 flex items-baseline justify-between gap-3 border-b border-border/40 pb-2">
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.14em] text-text-muted font-semibold">
+          {eyebrow}
+        </div>
+        <h2 className="text-sm font-semibold text-text">{title}</h2>
+      </div>
+      {subtitle && (
+        <p className="text-[11px] text-text-muted max-w-md text-right">
+          {subtitle}
+        </p>
+      )}
+    </div>
+  );
+}
