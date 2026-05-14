@@ -4,6 +4,80 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## LOT-1C — Finished-lot projector + recall-passport projection wiring (complete)
+- Date: 2026-05-14
+- Result: projector phase. The DB now auto-populates the four recall-passport child tables whenever a finished_lots row is created (operator-triggered) OR when BAG_FINALIZED fires for a bag that already has a finished_lots row. No automatic finished_lots row creation — that stays in operator hands. Full rebuilder wired into the standard rebuild script.
+- Audit findings (pre-projector):
+  - **Canonical finalization event:** `BAG_FINALIZED`, emitted by `app/(floor)/floor/[token]/actions.ts:913` via `finalizeBagAction()` (sets `workflow_bags.finalizedAt`). Dispatch lives in `lib/projector/index.ts:208-219, 329-339, 388-392`.
+  - **Counts** (`displaysProduced` / `casesProduced` / `unitsProduced`) live on `finished_lots` (`lib/db/schema.ts:993-995`). NOT on the BAG_FINALIZED event payload. No per-output detail field on the event.
+  - **finished_lots is NOT auto-created today.** `lib/db/queries/finished-lots.ts:92 createFinishedLot()` is the only path — manually invoked from admin UI.
+  - **finished_lot_inputs is batch-level only** (`lib/db/queries/finished-lots.ts:158-167`). Writes happen inside `createFinishedLot()`.
+  - **`workflow_bag.inventory_bag_id` is unreliable** — nullable, set only for single-source tablet workflows; bottle / variety-pack flows leave it null per design.
+  - **`material_inventory_events` carries both `workflow_bag_id` + `packaging_lot_id`** but the pair is reliably populated **only when an emission code (e.g. roll handoff) explicitly stamps both**. Not auto-tied on every label/bottle consume.
+  - **QC events** carry `workflow_bag_id` as a top-level FK on `workflow_events`; payload `bag_id` mirrors it. The 5 types: `PACKAGING_DAMAGE_RETURN`, `REWORK_SENT`, `REWORK_RECEIVED`, `SCRAP_RECORDED`, `SUBMISSION_CORRECTED`.
+  - **rebuild-read-models.ts** is one async main with a single `db.transaction()` that calls 10 rebuilders sequentially, logs scanned/written counts, then logs post-rebuild row counts.
+- Design decision (driven by the audit): **enrich, don't auto-create.** The projector only enriches finished_lots that the operator has already created. This avoids fabricating finished_lots rows with no count data on every BAG_FINALIZED — which would otherwise pollute the table.
+- Files changed:
+  - **NEW** `lib/projector/finished-lot-passport.ts` (~580 lines) — `rebuildFinishedLotPassport`, `projectFinishedLotForFinalizedBag`, `projectFinishedLotPassportForLot`, pure helpers `deriveTraceCodeForLot` / `buildPrintPayload` / `deriveOutputRows` / `deriveContributingBags` / `summarizePassportConfidence`. Sub-projection helpers (private): `runRawBagProjection` / `runOutputsProjection` / `runPackagingLotsProjection` / `runQcEventsProjection`.
+  - **NEW** `lib/projector/finished-lot-passport.test.ts` (~295 lines, 22 cases) — trace-code preservation (4), print_payload shape (4 incl. no-supplier-lot guard), output-row derivation (5 incl. skip-zero / skip-null), contributing-bag confidence (5 incl. HIGH-not-downgraded, multi-bag fan-out), confidence summary (2), partial-bag / multi-lot relationship (1), banned-language file added (1 implicit via qc-review-language scan).
+  - MOD `lib/projector/index.ts` — import `projectFinishedLotForFinalizedBag`; one new call in the BAG_FINALIZED block (after `refreshStationDailyForBag`).
+  - MOD `lib/db/queries/finished-lots.ts` — import `projectFinishedLotPassportForLot`; call after audit insert in `createFinishedLot()` (same tx).
+  - MOD `scripts/rebuild-read-models.ts` — import + 4 table-name entries in the row-count loop + the rebuilder call inside the transaction (after `rebuildMaterialRecommendations`).
+  - MOD `lib/production/qc-review-language.test.ts` — banned-phrase scan extended to `lib/projector/finished-lot-passport.ts`.
+- Receiving bridge behavior: **backend only in this phase.** The pure helpers from LOT-1B (`getRawBagReceiptIdentity` / `buildRawBagQrPayload` / `buildInternalReceiptNumber` / `normalizeSupplierLotNumber` in `lib/production/recall-passport.ts`) are ready to drive an intake form. LOT-1D will add the form fields on `/inbound` to call them. Rationale (per LOT-1B's documented carve-out): the existing receiving form is non-trivial and wiring it cleanly is a UI-shaped task, not a backend one. No production receiving rows are stamped with `bag_qr_code` / `internal_receipt_number` / `declared_pill_count` until LOT-1D ships the form.
+- Finished-lot projector behavior:
+  - Looks up the `finished_lots` row.
+  - If `trace_code` is null, sets it to `buildFinishedLotTraceCode({finishedLotNumber: lot.finishedLotNumber})` → `FL-<number>`. Preserves any existing trace_code (operator may have hand-edited).
+  - On the BAG_FINALIZED path, sets `packed_at` to the event's `occurred_at` IF currently null. Never overwrites an operator-set timestamp.
+  - Calls the four sub-projections.
+- Raw-bag projection behavior:
+  - **HIGH confidence**: `workflow_bag.inventory_bag_id` directly identifies the raw bag. `source = 'PROJECTOR'`, `quantity_consumed_pills = workflow_bag's inventory_bag.pill_count`.
+  - **LOW confidence**: only `finished_lot_inputs` exists (batch level). For each batch, fan out to every `inventory_bag` in that batch. `source = 'LEGACY_IMPORT'`, `quantity_consumed_pills = null` (we deliberately don't split qty across bags).
+  - **MISSING**: neither chain yields anything → skip. Never guess.
+  - Triple-unique on `(finished_lot_id, inventory_bag_id, workflow_bag_id)` with `NULLS NOT DISTINCT` (Postgres 15+) — uses raw `INSERT … ON CONFLICT … DO UPDATE`. Drizzle's `onConflict` doesn't carry NULLS NOT DISTINCT semantics, hence raw SQL.
+  - HIGH never downgrades to LOW: when the same `(inventory_bag, workflow_bag)` appears in both paths, HIGH wins via a dedup `Set` in `deriveContributingBags`.
+- Output projection behavior:
+  - DELETE PROJECTOR-source rows first (`WHERE print_payload->>'source' = 'PROJECTOR'`), then INSERT current counts. Operator-added rows with a different source marker are preserved.
+  - One row per non-zero count: `LOOSE_UNIT` (unitsProduced), `DISPLAY` (displaysProduced), `MASTER_CASE` (casesProduced). Zero / null → row not emitted (never fabricated).
+  - `trace_code_printed = traceCode` on every projected row.
+  - `print_payload` snapshot: `{source: 'PROJECTOR', schema_version: '1.0', trace_code, product_name, product_sku, packed_at, expires_at, customer_alias?}`. **No `supplier_lot_number`** — test enforces.
+- Packaging-lot projection behavior:
+  - Query `material_inventory_events` filtered by `workflow_bag_id IN (contributing) AND packaging_lot_id IS NOT NULL`.
+  - Aggregate per `packaging_lot_id`: SUM(quantity_units), MIN(occurred_at), MAX(occurred_at), denormalised material_id.
+  - Upsert by `(finished_lot_id, packaging_lot_id)` unique. `LEAST(...)` / `GREATEST(...)` preserve first/last used across rebuilds.
+  - When no events found → 0 rows. Never guesses.
+- QC-event projection behavior:
+  - One INSERT … SELECT … ON CONFLICT DO NOTHING. Filters by `workflow_bag_id = ANY(...)` AND `event_type = ANY('{PACKAGING_DAMAGE_RETURN,REWORK_SENT,REWORK_RECEIVED,SCRAP_RECORDED,SUBMISSION_CORRECTED}')`.
+  - Original corrected events stay; SUBMISSION_CORRECTED is additive (QC-2 / QC-5 invariant).
+  - Stores `(finished_lot_id, workflow_event_id, event_type, occurred_at)`. Unique on the pair.
+- Rebuilder behavior:
+  - `rebuildFinishedLotPassport(tx)` walks every `finished_lots` row, calls `projectFinishedLotPassportForLot`, reports `{scanned, projected, skipped, totalRawBags, totalOutputs, totalPackagingLots, totalQcEvents}`.
+  - Idempotent: re-running on the same data produces the same row set. Output rebuild uses DELETE+INSERT (PROJECTOR-source only). Other tables use upsert on natural keys.
+  - Wired into `scripts/rebuild-read-models.ts` after the PT-7C recommendation rebuilder.
+- Tests added (22 cases, all pass):
+  - `deriveTraceCodeForLot`: preserves existing (including non-FL-prefixed operator overrides), treats whitespace-only as missing, builds FL- prefix from finishedLotNumber.
+  - `buildPrintPayload`: every expected field present, omits customer_alias when null, NEVER contains supplier_lot.
+  - `deriveOutputRows`: emits LOOSE/DISPLAY/MASTER_CASE for non-zero, skips zero/null, returns empty for incomplete lot, stamps trace_code_printed everywhere.
+  - `deriveContributingBags`: HIGH path, LOW fan-out, no-downgrade rule, MISSING returns [], multi-bag fan-out.
+  - `summarizePassportConfidence`: MIN across, empty → MISSING.
+  - Partial-bag / multi-lot: one raw bag can produce multiple links across distinct workflow_bag_ids.
+  - Banned-language scan extended to the new file.
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1148/1148 pass across 51 test files** (+22 vs LOT-1B's 1126; +1 test file).
+  - `npx next build` → clean (only the pre-existing OpenTelemetry warning).
+- Staging verification (LX122 / SHA `61795d3`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `61795d3b97733491c126717cebdc32a20ceaefbe`.
+  - Ran the rebuild script inside the container end-to-end: scanned 0 finished_lots → projected 0, skipped 0, no rows written. No fake data created (correct behaviour given no finished_lots exist).
+  - All four projection tables (`finished_lot_raw_bags`, `finished_lot_outputs`, `finished_lot_packaging_lots`, `finished_lot_qc_events`) remain empty post-rebuild, as expected.
+  - Auth smoke 47/47 PASS.
+  - No noisy fake production data introduced.
+  - **Drive-by fix in the same phase:** the rebuild script's first end-to-end run on real staging data surfaced a latent PT-7C bug — the recommendation projector queried `qty_on_hand` from `read_material_lot_state`, but that column only exists on `packaging_lots`; the read-model column is `current_quantity_estimate`. The PT-7C stub-tx tests returned canned data so the bad column name was undetected. One-line fix (commit `61795d3`) replaced `qty_on_hand` with `current_quantity_estimate`. PT-7C tests still 15/15. After the fix, the recommendation projector now produces 6 real recommendations from staging packaging materials (was 0 before the fix), which is a side benefit beyond LOT-1C's scope.
+- LOT-1D readiness: ready. The next phase builds (a) the receiving UI fields on `/inbound` to call `getRawBagReceiptIdentity`, and (b) the `/recall` search page with the six search axes (supplier lot, internal receipt #, raw QR, finished lot trace code, product+date, customer). All upstream data plumbing is in place — LOT-1D is purely UI + a thin `getRecallPassport` / `getForwardTrace` server-action layer that reads from the existing tables.
+
+---
+
 ## LOT-1B — Finished lot / recall passport schema + receiving bridge (complete)
 - Date: 2026-05-13
 - Result: schema phase. Migration 0031 + receiving-bridge pure helpers. No UI, no projector — those are LOT-1C and LOT-1D respectively. The DB now answers every shape the LOT-1A plan called for, including the bag-level M:N that batch-level `finished_lot_inputs` can't express.
