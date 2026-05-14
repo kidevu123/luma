@@ -4,6 +4,59 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## LOT-1E — Finished-lot labels + recall passport CSV export (complete)
+- Date: 2026-05-14
+- Result: print/export surfaces on top of the existing data model. Two label templates (CUSTOMER, INTERNAL), CSV export with customer-safe defaults, both wired into existing pages. No QR-graphic pipeline yet — payload text is exposed for external encoders.
+- Files changed:
+  - **NEW** `lib/production/finished-lot-labels.ts` (~310 lines) — 6 exported helpers, no DB import.
+  - **NEW** `lib/production/finished-lot-labels.test.ts` (~340 lines, 23 cases).
+  - **NEW** `app/(admin)/finished-lots/[id]/labels/page.tsx` (~225 lines) — admin labels view.
+  - **NEW** `app/(admin)/recall/export.csv/route.ts` (~75 lines) — GET handler for CSV stream.
+  - MOD `app/(admin)/recall/page.tsx` — Export bar above the results.
+  - MOD `app/(admin)/finished-lots/[id]/page.tsx` — "Print labels" header button.
+  - MOD `lib/production/qc-review-language.test.ts` — banned-phrase scan extended.
+- Label payload behavior:
+  - `buildFinishedLotLabelPayload({template, ...})` and `buildCustomerSafeLabelPayload({...})` produce a typed shape with: `traceCode`, `traceAlias`, `productName/Sku`, `outputType`, `quantity/unit`, `packedAt`, `expiresAt`, `printPayloadSnapshot`, `qrPayloadText`, and an `internalFields` block (alias, source raw-bag count, supplier_lot, confidence, warnings, missing-links).
+  - **trace_code is canonical**: `formatTraceCodeForPrint(traceCode, alias)` prefers a non-blank alias, falls back to `traceCode`, renders `"MISSING TRACE CODE"` when both are blank (never silently blank).
+  - **supplier_lot hidden by default**: `shouldExposeSupplierLotForCustomer` returns false unless `customerSupplierLotVisible === true`. Customer template populates `internalFields.supplierLotNumber = null` when hidden. Internal template always carries the raw value.
+  - **print_payload is a snapshot**: the helper copies `output.printPayload` straight onto `printPayloadSnapshot` (LOT-1C projector populated this); when null, the page renders an explicit "projector hasn't snapshotted this output yet" note rather than fabricating data.
+  - **QR namespace**: `qrPayloadText` is always the trace code (`FL-` prefix) — never the raw-bag `BAG-` prefix. Tested.
+- Print route behavior:
+  - `/finished-lots/[id]/labels` renders two cards per output: CUSTOMER (slate / white) and INTERNAL (amber-tinted). Each card shows product, SKU, large trace code, quantity / unit, packed / expires, output type. Internal cards also show: internal receipt alias, source raw-bag count, supplier lot (or "hidden"), confidence.
+  - Falls back to deriving outputs from the finished_lots row counts (`unitsProduced` / `displaysProduced` / `casesProduced`) when `finished_lot_outputs` is empty — so operators can preview labels for lots the projector hasn't enriched yet.
+  - Empty state when every count is zero: "No outputs to render. The projector emits one row per non-zero count — when every count is zero or null the finished lot has nothing to print."
+  - No print stylesheet beyond default — operators trigger browser print directly.
+- Customer-safe behavior:
+  - Helpers + page default to template='CUSTOMER' with `customerSupplierLotVisible=false`. LOT-1F will flip the flag per `customers.supplier_lot_visible` when generating per-customer label batches.
+  - Customer template renderer ignores `internalFields` (the page only renders that block for INTERNAL cards).
+  - CSV defaults to hiding supplier_lot — internal exports require the explicit `?customer_supplier_lot_visible=true` URL param.
+- CSV export behavior:
+  - `buildRecallPassportCsv(passport, opts)` returns text/csv with a deterministic header row (27 columns) + 1 summary row + N rows per section: raw_bag / output / packaging_lot / qc_event / shipment. Each row repeats `search_kind`, `search_value`, `confidence`, `warnings`, `missing_links` so the file is self-describing.
+  - Empty passport still emits the header + a summary row — never silent, never invents data, no "undefined" or "null" strings leak.
+  - `/recall/export.csv` route: same searchParams contract as the `/recall` page, requires session, sets `content-disposition: attachment; filename="recall-<kind>-<slug>.csv"`, returns 400 on missing/invalid input.
+  - Recall page renders two buttons: "Export CSV (customer-safe; supplier lot hidden)" and "Export CSV (internal: supplier lot included)" — operator chooses the audience.
+- Tests added (23 cases):
+  - `shouldExposeSupplierLotForCustomer`: default false × 3, explicit-true.
+  - `formatTraceCodeForPrint`: prefer alias, fall-back, MISSING TRACE CODE × 2.
+  - Customer-safe label: supplier hidden by default, supplier visible on opt-in, trace_code as QR (FL- not BAG-), print_payload snapshot, MISSING TRACE CODE render, null print_payload preserved.
+  - Internal label: internal receipt alias preserved, supplier_lot always present regardless of customer flag.
+  - CSV: header contract, row count (header + summary + 5 sections × 1), supplier_lot hidden by default, supplier_lot visible on opt-in, every section's column populated, empty-passport contract (header + summary only, no undefined / null), FL- namespace on output rows (not BAG-).
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1180 / 1180 PASS across 53 files** (+22 vs LOT-1D's 1158; +1 test file).
+  - `npx next build` → clean; new routes present (`/finished-lots/[id]/labels` at 235 B / 106 kB; `/recall/export.csv` at 201 B / 102 kB).
+- Staging verification (LX122 / SHA `1493cbf`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `1493cbf09d565e3aff776b32bcbf586c09ce5970`.
+  - `/recall` still returns 200 with the new Export bar (only renders when results exist; current staging has 0 finished_lots so it stays hidden — honest empty state).
+  - `/finished-lots/[id]/labels` exists as a route; with 0 finished_lots on staging there's no real id to navigate to (`/finished-lots/[id]` 404s would be expected on direct hit). Builds cleanly.
+  - `/recall/export.csv` exists as a route (returns 400 on no input — expected). Not in the auth-smoke route list (it's a GET handler, not a page).
+  - Auth smoke **47/47 PASS** (unchanged — no new routes in the smoke set).
+  - No fake finished_lots created.
+- LOT-1F readiness: ready. Next phase is the Nexus / QIP outbound contract — taking the same CSV/passport payloads and POSTing them to Nexus per-customer, gated on `customers.supplier_lot_visible` and `customers.nexus_customer_id`. All upstream data is in place; LOT-1F is an integration-layer + outbound queue task on top of `getRecallPassport` + `buildRecallPassportCsv`.
+
+---
+
 ## LOT-1D — Receiving UI bridge + Recall Passport search page (complete)
 - Date: 2026-05-14
 - Result: operator-facing surfaces for both ends of the chain. New raw bags get Luma-issued QR + internal receipt at intake (no UI change required — the form already collects everything; the backend now stamps the new fields). The `/recall` page is fully rewritten with the six-axis search engine.
