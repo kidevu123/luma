@@ -4,6 +4,84 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## LOT-1F — Nexus / QIP finished-lot handoff contract (complete)
+- Date: 2026-05-14
+- Result: contract phase. Client + payload builder + admin send action exist; no DB persistence yet (sent_at / last_sent_response / last_send_error on `shipment_finished_lots` is LOT-1G's call). UI status card on the labels page shows operators whether a finished lot is Nexus-sendable, without offering a send button.
+- Files changed:
+  - **NEW** `lib/integrations/nexus/finished-lots.ts` (~340 lines) — 6 exported helpers, no DB import.
+  - **NEW** `lib/integrations/nexus/finished-lots.test.ts` (~290 lines, 28 cases).
+  - **NEW** `app/(admin)/finished-lots/[id]/labels/nexus-actions.ts` (~165 lines) — `sendFinishedLotToNexusAction` (contract-only, no DB persistence).
+  - MOD `app/(admin)/finished-lots/[id]/labels/page.tsx` — Nexus status card with 4 readiness checks + visibility flag.
+  - MOD `lib/production/qc-review-language.test.ts` — banned-phrase scan extended.
+- Nexus payload behavior:
+  - `schema_version: "1.0"`, `source: "LUMA"`. Locked at the type level (literal string types).
+  - Required-field guards in `buildNexusFinishedLotPayload`: throws when `trace_code` / `nexus_customer_id` / `shipment` is missing.
+  - **Never** carries `internal_receipt_number` — payload schema doesn't even contain the field. Tested by string-search.
+  - `recall_passport.confidence` / `warnings` / `missing_links` / `qc_summary` carried through faithfully from the LOT-1C / LOT-1D pipeline.
+  - `links.luma_recall_url` + `links.luma_finished_lot_url` populated only when `APP_URL` is set; omitted otherwise.
+- Customer-safe visibility behavior:
+  - **supplier_lot hidden by default**: `recall_passport.supplier_lot_visible = false`, no `supplier_lot_number` field at all.
+  - **supplier_lot exposed** only when `customer.supplierLotVisible === true` **AND** a non-empty `supplierLotNumber` exists. When the customer opts in but no value is present, the field stays omitted (never null / undefined).
+  - Reuses `shouldExposeSupplierLotForCustomer` from LOT-1E so the rule is single-sourced.
+  - Tested:
+    - default-hidden: no `supplier_lot_number` field present.
+    - opt-in-with-value: field present with the real lot.
+    - opt-in-without-value: field still omitted.
+    - JSON.stringify scan: `internal_receipt_number` never appears.
+- Config / env behavior:
+  - Env vars: `NEXUS_FINISHED_LOT_URL` + `NEXUS_FINISHED_LOT_SECRET`. Whitespace-only treated as missing.
+  - `validateNexusConfig()` returns `{configured, endpointConfigured, secretConfigured, missing[]}`.
+  - Headers when sending: `content-type: application/json`, `x-luma-nexus-secret: <secret>`, `x-luma-finished-lot-id: <id>`, `x-luma-trace-code: <FL-…>`.
+  - `stripNexusSecret(text, secret)` replaces every occurrence with `[REDACTED]` before reflected response text reaches operators.
+- Send / client behavior:
+  - `sendFinishedLotToNexus(payload, opts)` accepts a config override (tests pass `{url, secret}`) or falls back to env.
+  - 5 failure codes: `NOT_CONFIGURED` / `NOT_SENDABLE` / `HTTP_ERROR` (with status + bodySnippet ≤500 chars) / `NETWORK_ERROR` / `INVALID_RESPONSE`.
+  - 10-second `AbortController` timeout.
+  - Admin action `sendFinishedLotToNexusAction` order:
+    1. `requireAdmin()`.
+    2. UUID validation.
+    3. Config gate (`NOT_CONFIGURED` short-circuit).
+    4. Load finished lot + customer + shipment + outputs + QC summary + representative supplier_lot.
+    5. `isFinishedLotSendableToNexus` gate (typed reasons).
+    6. Build payload (throws on missing required fields — caught and returned as `NOT_SENDABLE`).
+    7. Call `sendFinishedLotToNexus`.
+    8. Return result. **No DB write** in this phase.
+- UI status card on `/finished-lots/[id]/labels`:
+  - 4 readiness rows: trace code present, customer linkage, nexus_customer_id, endpoint+secret configured.
+  - 1 visibility row: supplier_lot opt-in flag.
+  - Overall "sendable" / "not sendable" badge.
+  - Blocked-reasons line when any check fails.
+  - **No send button** rendered — pure status. LOT-1G will add the persistence layer + an actionable send button once that schema is decided.
+- Tests added (28 cases):
+  - `validateNexusConfig` × 3 (both missing, both present, whitespace as missing).
+  - `isFinishedLotSendableToNexus` × 3 (all 4 reasons, all-present passes, whitespace handling).
+  - Payload happy-path × 3 (every block populated, luma_links populated when appBaseUrl set, links omitted when not).
+  - Payload customer-safe × 5 (supplier hidden by default; exposed with value on opt-in; opt-in without value still omitted; internal_receipt_number string-search guard; warnings/confidence/missing_links pass-through).
+  - Payload required-field guards × 3 (null trace_code, null nexus_customer_id, null shipment).
+  - Batch builder × 1.
+  - `stripNexusSecret` × 2 (replaces all occurrences; no-op with empty secret).
+  - `sendFinishedLotToNexus` × 8 (NOT_CONFIGURED, happy path with header capture, HTTP_ERROR with bodySnippet, INVALID_RESPONSE, NETWORK_ERROR, secret redaction in reflected body).
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1208/1208 pass across 54 test files** (+28 vs LOT-1E's 1180; +1 test file).
+  - `npx next build` → clean.
+- Staging verification (LX122 / SHA `d5efb66`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `d5efb6632d60d275d40ebc02cc4e13ff92a0f6f5`.
+  - Nexus env intentionally unset on staging — `validateNexusConfig()` returns `{configured: false, missing: [NEXUS_FINISHED_LOT_URL, NEXUS_FINISHED_LOT_SECRET]}`. Status card would render "Nexus endpoint / secret: NEXUS_FINISHED_LOT_URL / _SECRET unset" honestly.
+  - No real Nexus POST attempted from staging.
+  - `/recall` + `/finished-lots/[id]/labels` continue to return / build (labels page needs a real finished_lot id; staging has 0, so we don't navigate there — the route compiles cleanly).
+  - Auth smoke **47/47 PASS**.
+  - No customer data created.
+- LOT-1G readiness: ready. Final verification phase needs to:
+  1. Decide and migrate persistence fields (`sent_at` / `last_sent_response` / `last_send_error` on `shipment_finished_lots` — same pattern as PT-7E's migration 0030 on recommendations).
+  2. Wire `sendFinishedLotToNexusAction` to persist + audit on success / failure.
+  3. Add a "Send to Nexus" button on the labels page (gated on the status card's "sendable" state).
+  4. Seed a QA finished-lot end-to-end against a mock Nexus receiver (same pattern as `scripts/verify-pt7f.ts`) and exercise the full chain: receive → finalise → project → label → send → audit.
+  5. Final closeout for the LOT-1 block.
+
+---
+
 ## LOT-1E — Finished-lot labels + recall passport CSV export (complete)
 - Date: 2026-05-14
 - Result: print/export surfaces on top of the existing data model. Two label templates (CUSTOMER, INTERNAL), CSV export with customer-safe defaults, both wired into existing pages. No QR-graphic pipeline yet — payload text is exposed for external encoders.
