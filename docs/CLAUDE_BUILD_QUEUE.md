@@ -388,25 +388,83 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 
 ---
 
-### [ ] Zoho live sync
-**Objective.** Replace the H.x0.5 stub with a live Zoho item sync. Read + write. Reconcile against Luma `products` and `tablet_types`. Idempotent. Operator-friendly admin UI.
+### [x] ZOHO-0 — Zoho live sync audit + plan
+**Objective.** Audit existing Zoho code (lib/zoho/client.ts, lib/integrations/zoho/items.ts, /settings/zoho, /settings/integrations/zoho-items, schema columns, env vars). Define ownership boundaries (Zoho / Luma / PackTrack). Map objects in/out. Phase the implementation. No code, no schema, no live writes.
+
+**Stop condition.** `docs/ZOHO_LIVE_SYNC_PLAN.md` committed. Owner reviews.
+
+**Closeout (2026-05-14, SHA `5b30b7f`):** 443-line plan doc landed at `docs/ZOHO_LIVE_SYNC_PLAN.md`. Findings: Luma writes zero data to Zoho today (`createPurchaseReceive` declared but never called). `lib/zoho/client.ts` does direct OAuth — contradicts CLAUDE.md's "go through the gateway" guidance. `ZOHO_INTEGRATION_URL` env var is plumbed but unread. Ownership: Zoho owns item / customer / SO / PO masters; Luma owns workflow / genealogy / QC / trace codes; PackTrack owns packaging PO workflow. Top open question for ZOHO-1: gateway vs direct-OAuth path.
+
+---
+
+### [x] ZOHO-1 — Zoho gateway config + status page + connectivity check
+**Objective.** Wire Luma to the LXC Zoho integration gateway. Status / connectivity only — no item / customer / sales-order / PO sync. Connectivity probe writes one `zoho_sync_runs` row with `sync_type='CONNECTIVITY_CHECK'`. No live Zoho writes.
+
+**Owner decisions baked in.**
+- Gateway path locked in: `ZOHO_INTEGRATION_URL` (default `http://192.168.1.190:9503`). Direct OAuth path (`lib/zoho/client.ts`) stays for legacy `/settings/zoho` Test-connection button only.
+- Optional shared secret via `ZOHO_INTEGRATION_SECRET` — sent as `x-luma-zoho-secret` header, never logged, never displayed.
+- Luma stores zero Zoho tokens — the gateway owns them.
+
+**Files touched.**
+- `drizzle/0033_zoho_gateway_sync_runs.sql` — new enums `zoho_sync_kind` + `zoho_sync_run_status`; new tables `zoho_sync_runs` + `zoho_sync_state`.
+- `lib/integrations/zoho/gateway.ts` — gateway client (validate / health / orgs / headers / strip-secret / map-error).
+- `lib/integrations/zoho/gateway.test.ts` — 49 unit tests including static guards forbidding any POST/PUT/DELETE/PATCH and any direct-OAuth import.
+- `app/(admin)/settings/integrations/zoho/{page,actions,test-connection-button}.tsx` — admin status page + connectivity-check action.
+- `lib/db/schema.ts`, `drizzle/meta/_journal.json`, `scripts/smoke-authenticated-routes.ts` — schema + journal + auth smoke route.
+
+**Stop condition.** New page reachable. Test connection button writes one CONNECTIVITY_CHECK row honestly. Build / vitest / auth smoke green. Stop. Do not start item / customer sync.
+
+**Closeout (2026-05-14, SHA `1a6d09f`):** Connectivity-only Zoho gateway phase landed. Migration 0033 applied on staging; both enums + both tables present in psql; `zoho_sync_runs` count = 0 (no probe clicked yet). Gateway-on-`9503` does NOT currently listen on Proxmox — settings page will honestly surface `UNREACHABLE` until the gateway is brought up. Deploy initially hit the silent-fail-then-skip trap; recovered manually via `docker compose up -d --build` per the documented pattern. tsc clean / vitest 1290/1290 (+49 vs UI-2's 1241; +1 test file) / next build clean / staging live at SHA `1a6d09f` / `/settings/integrations/zoho` returns 200 / auth-smoke 48/48 PASS (up from 47). No Zoho writes anywhere; no items / customers / SO / PO sync attempted.
+
+---
+
+### [ ] ZOHO-2 — Item + customer read sync, dry-run mode only
+**Objective.** Implement `listZohoItems()` and customer-list helpers via the gateway. Add pg-boss handlers `zoho.items.sync` + `zoho.customers.sync` in DRY-RUN mode only (no writes outside `zoho_sync_runs`). Surface the proposed diff on `/settings/integrations/zoho-items`.
+
+**Prerequisites.**
+- The integration gateway on LXC port 9503 must be running (currently not listening as of ZOHO-1 closeout).
+- Owner names the canonical Zoho `organization_id` (single-org case) OR picks from the `NEEDS_SELECTION` list on the gateway page.
 
 **Files likely touched.**
-- `lib/integrations/zoho/*` — new.
-- `app/(admin)/settings/integrations/zoho/*` — extend the existing page.
-- Background pg-boss job.
-- Plan doc cross-referencing `docs/ZOHO_ITEM_SYNC_PLAN.md` (already drafted).
+- `lib/integrations/zoho/items.ts` — replace stubs with live gateway-backed calls.
+- `lib/integrations/zoho/customers.ts` — new.
+- `lib/jobs/handlers/zoho-items-sync.ts`, `zoho-customers-sync.ts` — new.
+- `app/(admin)/settings/integrations/zoho-items/page.tsx` — extend to render dry-run diff.
 
 **Acceptance criteria.**
-- Zoho item read works against staging credentials.
-- Write path is gated behind an explicit "Push to Zoho" admin action — never automatic.
-- Conflict resolution surfaces in UI; operator chooses.
+- Dry-run sync produces an honest "Would create N / update M / leave K unchanged" diff against a real Zoho org.
+- No writes outside `zoho_sync_runs` (kind=ITEMS / CUSTOMERS, status reflecting the run).
+- Idempotency: re-running with no Zoho changes produces an identical diff.
 
 **Tests required.**
-- Mocked Zoho client tests.
-- Integration test against the Zoho sandbox if available.
+- Mocked gateway responses for items + customers.
+- Diff computation tests (overwrite-protection, no-op detection).
 
-**Stop condition.** Manual end-to-end sync verified on staging. Stop.
+**Stop condition.** Dry-run produces a sensible diff against a real Zoho org. Owner reviews and signs off before ZOHO-3 flips the write switch.
+
+---
+
+### [ ] ZOHO-3 — Apply item + customer sync with mapping review
+
+(See `docs/ZOHO_LIVE_SYNC_PLAN.md` §8.)
+
+---
+
+### [ ] ZOHO-4 — Sales order + purchase order read sync
+
+(See `docs/ZOHO_LIVE_SYNC_PLAN.md` §8.)
+
+---
+
+### [ ] ZOHO-5 — Optional finished-lot write-back (purchase_receives + attachment)
+
+(See `docs/ZOHO_LIVE_SYNC_PLAN.md` §8.)
+
+---
+
+### [ ] ZOHO-6 — Staging verification + closeout
+
+(See `docs/ZOHO_LIVE_SYNC_PLAN.md` §8.)
 
 ---
 

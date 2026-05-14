@@ -4,6 +4,52 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## ZOHO-1: gateway config + connectivity status page (complete)
+- Date: 2026-05-14
+- Result: connectivity-only Zoho gateway phase landed. New gateway client + settings page + sync_runs/sync_state tables. No items / customers / sales orders / POs synced. No live Zoho writes anywhere.
+- Owner decision applied: live Zoho sync routes through the LXC integration gateway (env `ZOHO_INTEGRATION_URL`, default `http://192.168.1.190:9503`). Luma never holds Zoho OAuth refresh / access tokens — the gateway owns them. Optional shared secret via `ZOHO_INTEGRATION_SECRET` is sent as `x-luma-zoho-secret` header (never logged, never displayed).
+- Gateway audit finding (the load-bearing surprise): port `9503` does NOT currently listen on the Proxmox host (`ss -tlnp` shows zero matches) and probes from inside LXC 122 (`curl http://192.168.1.190:9503/health`) fail with `ECONNREFUSED`. The `ZOHO_INTEGRATION_URL` env var is plumbed through docker-compose but the service it points at is not running. ZOHO-1 ships honestly: the settings page will surface `UNREACHABLE` until the gateway is brought up. This is the right outcome — fake connectivity would have hidden the gap.
+- Migration 0033 (`drizzle/0033_zoho_gateway_sync_runs.sql`) — additive only:
+  - new enum `zoho_sync_kind` — `CONNECTIVITY_CHECK / ITEMS / CUSTOMERS / SALES_ORDERS / PURCHASE_ORDERS / FINISHED_LOT_PUSH`.
+  - new enum `zoho_sync_run_status` — `STARTED / SUCCESS / PARTIAL / FAILED`.
+  - new table `zoho_sync_runs` — every sync + dry-run + connectivity check writes a row. ZOHO-1 only writes `CONNECTIVITY_CHECK` kind. Carries `dry_run` (default `true`), `summary jsonb`, `error text`, `created_by_user_id`.
+  - new table `zoho_sync_state` — per-object `(object_type, external_id)` state for future ITEMS / CUSTOMERS / SO / PO sync. Not written in ZOHO-1; created in preparation for ZOHO-2 onward.
+- Files added:
+  - **NEW** `lib/integrations/zoho/gateway.ts` — `validateZohoGatewayConfig`, `buildZohoGatewayHeaders`, `stripZohoSecret`, `mapZohoGatewayError`, `checkZohoGatewayHealth`, `fetchZohoOrganizations`, `extractOrganizations`, `isNonBlank`. Whitespace-only env values read as missing. No direct OAuth, no refresh-token handling, no Zoho writes. Static guards in the test file forbid `from "@/lib/zoho/client"` imports and any `method: "POST" / "PUT" / "DELETE" / "PATCH"`. Probe paths `/health → /status → /api/health → /api/status` for health; `/organizations → /api/organizations → /zoho/organizations` for orgs.
+  - **NEW** `lib/integrations/zoho/gateway.test.ts` — 49 test cases covering: config validation (missing / whitespace / empty / non-URL / unsupported protocol / well-formed / trailing slashes / secret-detection), header construction + secret redaction + non-leakage in other headers, error mapping (ECONNREFUSED / ENOTFOUND / ETIMEDOUT → UNREACHABLE; 5xx → ERROR; 2xx → CONNECTED), health probe (NOT_CONFIGURED / CONNECTED / UNREACHABLE / ERROR / probe-order / secret header send + omission), organization fetch (OK / NEEDS_SELECTION / NONE_RETURNED / GATEWAY_LACKS_ENDPOINT / UNREACHABLE / ERROR / NOT_CONFIGURED), shape tolerance ([...] / {organizations:[...]} / {data:[...]}). Static guards on the source ensure no direct-OAuth coupling and no Zoho-write methods.
+  - **NEW** `app/(admin)/settings/integrations/zoho/page.tsx` — admin-only page showing gateway config (URL / secret configured yes-no; secret value never rendered), the last `CONNECTIVITY_CHECK` run row, a "Test gateway connection" button, and a legacy direct-OAuth notice pointing at `/settings/zoho`.
+  - **NEW** `app/(admin)/settings/integrations/zoho/test-connection-button.tsx` — client component for the test button. Surfaces structured result inline.
+  - **NEW** `app/(admin)/settings/integrations/zoho/actions.ts` — server action `runConnectivityCheckAction`. Probes health + organizations (orgs probe skipped if health ≠ CONNECTED), writes one `zoho_sync_runs` row + one `audit_log` entry (`zoho.gateway.connectivity_check`) in a single transaction. Decides `runStatus`: CONNECTED + (OK | SKIPPED) → SUCCESS; CONNECTED + multi-org / no endpoint / empty → PARTIAL; everything else → FAILED. Returns structured `ConnectivityCheckResult`.
+- Files modified:
+  - MOD `lib/db/schema.ts` — added `zohoSyncKindEnum`, `zohoSyncRunStatusEnum`, `zohoSyncRuns`, `zohoSyncState`. Existing `zoho_credentials` + `zoho_pushes` tables untouched; legacy direct-OAuth path stays in place.
+  - MOD `drizzle/meta/_journal.json` — registered migration idx 33 with `when = 1781300000000`.
+  - MOD `scripts/smoke-authenticated-routes.ts` — added `/settings/integrations/zoho` (auth smoke now 48 routes, up from 47).
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1290 / 1290 PASS across 56 files** (+49 vs UI-2's 1241; +1 test file).
+  - `npx next build` → clean; `/settings/integrations/zoho` 2.52 kB / 108 kB.
+- Staging verification (LX122 / SHA `1a6d09f`):
+  - Deploy timer ran but did NOT rebuild the container — silent-fail-then-skip trap (the recovery pattern in user memory). The container kept running at the prior SHA `5b30b7f` while git HEAD on the LXC moved to `1a6d09f`. Recovered manually via `cd /opt/luma && BUILD_GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build`. After cleanup of an orphaned container name, the new image is live and `/api/health` reports `sha = 1a6d09f0e4c69ecccbfa28f77180dcd559f39b7c`.
+  - Migration 0033 applied — `psql` confirms `zoho_sync_runs` + `zoho_sync_state` tables present, both enums (`zoho_sync_kind`, `zoho_sync_run_status`) with the expected labels, `zoho_sync_runs` rowcount = 0.
+  - `/settings/integrations/zoho` returns 200 under admin auth.
+  - Auth smoke **48 / 48 PASS** (up from 47, new route inserted).
+- Connectivity probe behaviour on this staging:
+  - Settings page surfaces "Gateway URL configured: yes" + "Secret configured: no (optional)" because `ZOHO_INTEGRATION_URL` is set in `/etc/luma/.env`.
+  - The "Test gateway connection" button has not been clicked through the UI yet (deferred to first owner click); the next click will write a row with `gateway.status = UNREACHABLE` because port 9503 has no listener. The page is built to display that honestly.
+- Architectural separation enforced:
+  - The gateway client does NOT import from `@/lib/zoho/client` (test asserts this via regex scan of the source).
+  - No `refresh_token` / `access_token` strings appear in the gateway client source (test asserts).
+  - No `method: "POST" / "PUT" / "DELETE" / "PATCH"` strings appear in the gateway client source (test asserts).
+  - Legacy direct-OAuth path (`lib/zoho/client.ts` + `/settings/zoho` credentials form + the `zoho_credentials` table) is untouched and clearly labelled "legacy" on the new gateway settings page.
+- Deferred to ZOHO-2 (per the prompt):
+  - Item read sync (live `listZohoItems` against the gateway).
+  - Customer read sync.
+  - Mapping UI on `/settings/integrations/zoho-items`.
+  - Dry-run / live-write toggle.
+- Next unchecked phase in `docs/CLAUDE_BUILD_QUEUE.md`: **ZOHO-2** — item + customer read sync, dry-run mode only. Bring the gateway online on port 9503 first; until it is, ZOHO-2 cannot exercise the live read path.
+
+---
+
 ## UI-2: Command center design system (complete)
 - Date: 2026-05-14
 - Result: 5-primitive design system landed at `components/production/ui.tsx` and applied minimal-diff across 4 production-floor pages. No business-logic, loader, projector, migration, or formula changes. Pure presentation.
