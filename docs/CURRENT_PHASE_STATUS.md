@@ -4,6 +4,50 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## UI-2: Command center design system (complete)
+- Date: 2026-05-14
+- Result: 5-primitive design system landed at `components/production/ui.tsx` and applied minimal-diff across 4 production-floor pages. No business-logic, loader, projector, migration, or formula changes. Pure presentation.
+- Files changed (1 commit, SHA `ac5994c`):
+  - **NEW** `components/production/ui.tsx` (~250 lines, 5 components + Tone vocabulary).
+  - MOD `app/(admin)/floor-board/page.tsx` — bottle-lane idle row → `ProductionEmptyState`; "why metrics empty" amber section → `ProductionAlertCard tone="WARN"`.
+  - MOD `app/(admin)/material-alerts/page.tsx` — zero-alert card → `ProductionEmptyState`.
+  - MOD `app/(admin)/qc-review/page.tsx` — three section blocks (pending / rework / recent) → `ProductionSection` with tone-driven rails.
+  - MOD `app/(admin)/recall/page.tsx` — passport summary stats → `ProductionIdentityBlock`; two zero-state Cards → `ProductionEmptyState`.
+  - MOD `lib/production/command-center-polish.test.ts` — added `/material-alerts`, `/qc-review`, `/recall`, and `components/production/ui.tsx` to the emoji + banned-phrase scan list.
+- Design system surface:
+  - **Tone vocabulary** (single source for the four polished pages): `GOOD` emerald · `WARN` amber · `CRITICAL` red · `INFO` cyan · `MUTED` slate. Three tone-map records (`TONE_RAIL` / `TONE_BORDER` / `TONE_BG`) keep the rail / border / bg colors consistent.
+  - **`ProductionStatusRail`** — 3-px vertical color rail anchored to a card's left edge.
+  - **`ProductionSection`** — page section with eyebrow + title + subtitle + actions slot + tone rail.
+  - **`ProductionAlertCard`** — inline alert / banner with title + body + optional action slot; tone drives the rail + border + bg.
+  - **`ProductionEmptyState`** — honest empty-state block (title + description + optional `hint` for the data source).
+  - **`ProductionIdentityBlock`** — compact label-value list; null / undefined / empty values render as literal "missing" in muted italic.
+  - Imports only `cn` from `@/lib/utils`. No DB imports, no server-only imports.
+- Tests added (16 cases on top of v1's 17):
+  - 7 emoji-presence guards (one per page in the scan list — was 4, now 7 + 1 for the design-system file).
+  - 24 banned-phrase guards (3 patterns × 8 scanned files = original 12 + 12 new).
+  - ConfidenceBadge-presence assertion unchanged.
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1241 / 1241 PASS across 55 files** (+16 vs polish v1's 1225).
+  - `npx next build` → clean; all four edited routes present (`/floor-board` 752 B / 106 kB, `/material-alerts` 4.53 kB / 107 kB, `/qc-review` 4.39 kB / 107 kB, `/recall` 232 B / 106 kB).
+- Staging verification (LX122 / SHA `ac5994c`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `ac5994c477100cf2ca47e3c088945f504133846f`.
+  - All 4 edited routes return 200 under admin auth.
+  - Auth smoke **47 / 47 PASS**.
+  - No emoji glyphs and no banned-phrase tokens on any scanned source.
+- Architectural notes:
+  - The design system is a **composition layer**, not a replacement layer. `Card` / `MetricCard` / `ConfidenceBadge` continue to render their own surfaces; the new primitives sit alongside, not on top of, them.
+  - Tone rails are opt-in — `ProductionSection` without a tone renders as a plain section with no left edge marker. This keeps neutral / informational sections clean.
+  - Future pages opt into the system by importing from `@/components/production/ui` and using whichever primitives fit; no required prefab layout.
+- Remaining UI gaps (deferred):
+  - The four pages still use a mix of local `Panel`, `Card`, and the new `ProductionSection`. A future sweep could consolidate, but bumping more sections risks scope creep.
+  - Dead `app/(admin)/floor-board/_components/` directory still present (noted in polish v1 closeout).
+  - Six-axis Stat helper deleted from `/recall` — `ProductionIdentityBlock` is now the only summary-stat renderer there.
+- Next unchecked phase in `docs/CLAUDE_BUILD_QUEUE.md`: **Zoho live sync** — replace the H.x0.5 stub with a live Zoho item sync (read + write, idempotent, reconciles against Luma `products` and `tablet_types`).
+
+---
+
 ## Command center visual polish (complete)
 - Date: 2026-05-14
 - Result: presentation-only pass on the 4 production-floor pages. No business-logic, loader, projector, migration, or formula changes. Tested via static-guard regex sweeps; live verification confirms the routes still return 200.

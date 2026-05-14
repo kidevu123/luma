@@ -367,6 +367,27 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 
 ---
 
+### [x] UI-2 — Command center design system
+**Objective.** Codify the 5-tone visual vocabulary from the polish v1 work into a reusable component layer under `components/production/ui.tsx`, then apply it minimal-diff across 4 production-floor pages (`/floor-board`, `/material-alerts`, `/qc-review`, `/recall`).
+
+**Files likely touched.**
+- `components/production/ui.tsx` — new.
+- The four target pages — section wrappers, alert callouts, empty states, identity blocks.
+- `lib/production/command-center-polish.test.ts` — extend banned-phrase + emoji scan.
+
+**Acceptance criteria.**
+- 5 primitives (`ProductionStatusRail` / `ProductionSection` / `ProductionAlertCard` / `ProductionEmptyState` / `ProductionIdentityBlock`) plus a 5-tone vocabulary (`GOOD` / `WARN` / `CRITICAL` / `INFO` / `MUTED`).
+- Imports only `cn` from `@/lib/utils` — no DB imports, no server-only imports.
+- Minimal-diff application — no business-logic, loader, projector, migration, or formula changes.
+
+**Tests required.** Static-guard scan extended; existing suite stays green.
+
+**Stop condition.** Design system landed and applied on all 4 pages. Build green. Stop.
+
+**Closeout (2026-05-14, SHA `ac5994c`):** 5-primitive design system landed and applied minimal-diff across `/floor-board` (bottle-lane idle row + "why metrics empty" amber section), `/material-alerts` (zero-alert empty state), `/qc-review` (three sections gain tone-driven rails), `/recall` (passport summary stats via `ProductionIdentityBlock`; two zero-state Cards via `ProductionEmptyState`). Polish test file grows from 4 to 8 scanned sources (added the three new pages + the design-system file itself); test count goes from 1225 → **1241 / 1241 PASS across 55 files**. Tone-rail vocabulary stays consistent (`TONE_RAIL` / `TONE_BORDER` / `TONE_BG` records). Six-axis `Stat` helper removed from `/recall` — `ProductionIdentityBlock` is now the only summary-stat renderer there. Verified 2026-05-14: tsc clean / vitest 1241/1241 / next build clean / staging live at SHA `ac5994c` / all 4 edited routes return 200 / auth-smoke 47/47 PASS.
+
+---
+
 ### [ ] Zoho live sync
 **Objective.** Replace the H.x0.5 stub with a live Zoho item sync. Read + write. Reconcile against Luma `products` and `tablet_types`. Idempotent. Operator-friendly admin UI.
 
