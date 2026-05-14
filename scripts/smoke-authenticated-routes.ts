@@ -103,6 +103,7 @@ const ROUTES: ReadonlyArray<{ path: string; group: string }> = [
   { group: "System",       path: "/settings/product-structure" },
   { group: "System",       path: "/settings/raw-item-weights" },
   { group: "System",       path: "/settings/integrations/zoho-items" },
+  { group: "System",       path: "/settings/integrations/zoho" },
   { group: "System",       path: "/settings/zoho" },
   { group: "System",       path: "/settings/danger-zone" },
   { group: "System",       path: "/settings/legacy-import" },

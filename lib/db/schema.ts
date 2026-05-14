@@ -262,6 +262,24 @@ export const zohoPushStatusEnum = pgEnum("zoho_push_status", [
   "PARTIAL",
 ]);
 
+// ZOHO-1 — sync kind / status enums. CONNECTIVITY_CHECK is the only
+// kind ZOHO-1 actually writes; the others land in ZOHO-2..5.
+export const zohoSyncKindEnum = pgEnum("zoho_sync_kind", [
+  "CONNECTIVITY_CHECK",
+  "ITEMS",
+  "CUSTOMERS",
+  "SALES_ORDERS",
+  "PURCHASE_ORDERS",
+  "FINISHED_LOT_PUSH",
+]);
+
+export const zohoSyncRunStatusEnum = pgEnum("zoho_sync_run_status", [
+  "STARTED",
+  "SUCCESS",
+  "PARTIAL",
+  "FAILED",
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth + tenancy (single-tenant for v1, columns ready for multi)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1203,6 +1221,76 @@ export const zohoPushes = pgTable(
   (t) => [
     index("zoho_pushes_lot_idx").on(t.finishedLotId),
     index("zoho_pushes_status_idx").on(t.status),
+  ],
+);
+
+// ZOHO-1 — gateway connectivity / sync audit. Every gateway call,
+// dry-run, and live sync writes a row here. ZOHO-1 only writes
+// CONNECTIVITY_CHECK kind; items / customers / SO / PO / push land in
+// ZOHO-2..5.
+export const zohoSyncRuns = pgTable(
+  "zoho_sync_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    syncType: zohoSyncKindEnum("sync_type").notNull(),
+    status: zohoSyncRunStatusEnum("status").notNull().default("STARTED"),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** Free-text: 'manual' for admin-button-triggered runs, 'pg_boss'
+     *  for scheduled handlers in later phases. No enum so future sources
+     *  land without an ALTER TYPE. */
+    source: text("source").notNull().default("manual"),
+    /** Defaults to true. Live writes flip this in later phases. */
+    dryRun: boolean("dry_run").notNull().default(true),
+    /** Structured outcome — rowsSeen / rowsWritten / unmatched / per-
+     *  sync-kind payload. Kept jsonb so the schema doesn't ossify. */
+    summary: jsonb("summary").notNull().default({}),
+    error: text("error"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (t) => [
+    index("zoho_sync_runs_type_started_idx").on(t.syncType, t.startedAt),
+    index("zoho_sync_runs_status_idx").on(t.status),
+  ],
+);
+
+// ZOHO-1 — per-object Zoho-side state. ZOHO-1 does not write here; the
+// table is created in preparation for ZOHO-2/ZOHO-3. (object_type,
+// external_id) is the natural key. object_type is free-text so future
+// kinds land without an enum migration.
+export const zohoSyncState = pgTable(
+  "zoho_sync_state",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    objectType: text("object_type").notNull(),
+    externalId: text("external_id").notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    /** SHA256 of the verbatim Zoho payload (or a stable subset) so future
+     *  syncs detect "no change" without diffing every field. */
+    sourceHash: text("source_hash"),
+    status: text("status").notNull().default("SEEN"),
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("zoho_sync_state_object_external_unique").on(
+      t.objectType,
+      t.externalId,
+    ),
+    index("zoho_sync_state_last_seen_idx").on(t.lastSeenAt),
+    index("zoho_sync_state_status_idx").on(t.status),
   ],
 );
 
