@@ -35,7 +35,12 @@ services:
       OTEL_DEPLOYMENT_ENVIRONMENT: ${OTEL_DEPLOYMENT_ENVIRONMENT:-production}
       OTEL_PROMETHEUS_PORT: "9464"
       OTEL_PROMETHEUS_HOST: "0.0.0.0"
-      ZOHO_INTEGRATION_URL: ${ZOHO_INTEGRATION_URL:-http://192.168.1.190:9503}
+      # ZOHO-GW-1: gateway lives on LXC 9503 (zoho-integration-service)
+      # at 192.168.1.205:8000. The optional shared secret is read by
+      # lib/integrations/zoho/gateway.ts and sent as x-luma-zoho-secret;
+      # also sent as X-Internal-Token to match the gateway's auth.
+      ZOHO_INTEGRATION_URL: ${ZOHO_INTEGRATION_URL:-http://192.168.1.205:8000}
+      ZOHO_INTEGRATION_SECRET: ${ZOHO_INTEGRATION_SECRET:-}
       AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER:-}
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
