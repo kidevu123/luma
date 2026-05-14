@@ -182,11 +182,16 @@ async function hydrateInput(
   const { now, material, productId, compatRows, leadTimeDefault } = args;
 
   // Inventory state — sum across all active lots for this material.
+  // The column on read_material_lot_state is `current_quantity_estimate`
+  // (not `qty_on_hand` — that name only exists on packaging_lots).
+  // Fixed during LOT-1C verification; the PT-7C stub-test never hit
+  // a real read_material_lot_state so the typo went undetected until
+  // staging had real materials to scan.
   const lotAgg = (await tx.execute(sql`
     SELECT
-      COALESCE(SUM(qty_on_hand), 0)::float AS "onHand",
-      MAX(confidence)                       AS "maxConfidence",
-      MIN(confidence)                       AS "minConfidence"
+      COALESCE(SUM(current_quantity_estimate), 0)::float AS "onHand",
+      MAX(confidence)                                     AS "maxConfidence",
+      MIN(confidence)                                     AS "minConfidence"
     FROM read_material_lot_state
     WHERE packaging_lot_id IN (
       SELECT id FROM packaging_lots WHERE packaging_material_id = ${material.id}
