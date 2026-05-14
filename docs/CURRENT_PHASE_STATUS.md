@@ -4,6 +4,78 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## LOT-1D — Receiving UI bridge + Recall Passport search page (complete)
+- Date: 2026-05-14
+- Result: operator-facing surfaces for both ends of the chain. New raw bags get Luma-issued QR + internal receipt at intake (no UI change required — the form already collects everything; the backend now stamps the new fields). The `/recall` page is fully rewritten with the six-axis search engine.
+- Audit findings (pre-implementation):
+  - Receiving form lives at `app/(admin)/inbound/new/receive-wizard.tsx` + action `createReceiveAndRedirect` → `createReceiveWithBoxes()` at `lib/db/queries/receives.ts:73`. Each box auto-generates N inventory_bags via one batched INSERT (no per-bag RETURNING).
+  - Sidebar entry `{ href: "/recall", label: "Recall lookup", icon: Search }` was already declared in `components/admin/sidebar.tsx` from prior work — no sidebar edit needed.
+  - Existing `/recall` was a simple `lookupByBatchSearch` page; replaced wholesale.
+  - No surfaces.ts / RBAC allowlist file — auth uses `requireSession()` / `requireRole()` only.
+- Files changed:
+  - **NEW** `lib/production/recall-passport-loaders.ts` (~520 lines) — `getRecallPassport(input)` and `getForwardTrace({supplierLotNumber})`.
+  - **NEW** `lib/production/recall-passport-loaders.test.ts` (~155 lines, 6 cases) — return-shape contract, confidence rollup, six-axis discriminator, data-honesty invariants (missing shipments → missingLinks note; null bag_qr_code → warning).
+  - MOD `app/(admin)/recall/page.tsx` — fully rewritten (~580 lines): search panel + 8 passport sections. Replaces the previous batch-search page wholesale; the simple flow is subsumed by the new `supplier_lot` axis.
+  - MOD `app/(admin)/inbound/new/receive-wizard.tsx` — adds a live `<receive-name>-B<box>-1` preview line under the bag-count input and a one-sentence explainer about the Luma QR vs vendor barcode.
+  - MOD `lib/db/queries/receives.ts createReceiveWithBoxes()` — imports `buildInternalReceiptNumber` / `buildRawBagQrPayload` and `randomUUID`; pre-allocates bag UUIDs; stamps `id`, `bagQrCode`, `internalReceiptNumber`, `declaredPillCount` on every new inventory_bag row in one batched INSERT. Vendor barcode untouched.
+  - MOD `lib/production/qc-review-language.test.ts` — banned-phrase scan extended to the new loader + recall page.
+- Receiving UI behavior:
+  - Wizard remains a single-page form — no extra fields required from the operator. `pillCountPerBag` doubles as both `pill_count` and `declared_pill_count`.
+  - Live preview shows the internal-receipt-number format that will be stamped (`PO123-R1-B1-1`).
+  - Backend: each bag in a box gets a fresh UUID, then `bag_qr_code = BAG-<uuid>` and `internal_receipt_number = <receiveName>-B<boxNum>-<bagNum>`. No guessed QR codes for legacy rows — the stamping happens at INSERT time only. `vendor_barcode` is never touched.
+- Recall loader behavior:
+  - Six search kinds with discriminated-union typing:
+    1. `supplier_lot` → resolve via `batches.vendor_lot_number` (exact + ilike fallback) → bag ids.
+    2. `internal_receipt_number` → `inventory_bags.internal_receipt_number` (exact + ilike).
+    3. `raw_bag_qr` → `inventory_bags.bag_qr_code` (exact).
+    4. `finished_lot_trace_code` → `finished_lots.{trace_code, finished_lot_number, finished_lot_code_alias}` (exact across all three).
+    5. `product_date_range` → `finished_lots WHERE product_id = ? AND produced_on BETWEEN ? AND ?`.
+    6. `customer_date_range` → `shipment_finished_lots WHERE customer_id = ? AND shipped_at BETWEEN ? AND ?`.
+  - Bidirectional expansion: input bag ids fan out to all contributing finished_lots (via `finished_lot_raw_bags`), and input finished_lot ids fan out to all contributing raw bags.
+  - Parallel fetches: raw bags / lots / workflow bags / outputs / packaging lots / QC events / shipments — one Promise.all batch.
+  - Confidence rollup: `rollupRecallConfidence` over all observed edges (lot↔bag confidence + packaging-lot confidence). Empty chain → MISSING.
+  - Warnings and missingLinks: surfaces "raw-bag QR missing" warnings for legacy bags; surfaces "no shipment / customer linkage recorded yet" / "no raw-bag linkage" missing-link notes when chains are incomplete. Never injects fake data.
+  - `getForwardTrace({supplierLotNumber})` returns the same shape filtered to the supplier-lot scope with deduped customers.
+- Recall page behavior:
+  - Search panel with kind selector (six axes), context-appropriate inputs (text for the four free-form kinds; product+date pickers; customer+date pickers), inline hint per axis.
+  - Empty state when no input: "Pick a search kind above and enter a value…"
+  - Empty-result state: "No matches for the supplied input. Confirm the spelling and try a partial match."
+  - Result view: 8 cards:
+    1. **Summary** — finished-lot count, raw-bag count, supplier lots (CSV), trace code, product, packed-at, shipment count, QC-event count, plus a confidence badge.
+    2. **Warnings / missing links** — amber section that only renders when the loader reports anything.
+    3. **Raw material / receiving** — table of internal receipt / bag QR / vendor barcode / supplier lot / receive / declared / current / weight / received timestamp.
+    4. **Production genealogy** — workflow bags with started/finalized timestamps and a "Open genealogy" link to `/genealogy/<bagId>`.
+    5. **Finished output** — projector-emitted rows (LOOSE / DISPLAY / MASTER_CASE) with trace_code_printed + print_payload preview.
+    6. **Packaging / material** — projector-emitted rows with material name + kind + roll # + qty + unit + confidence badge + source.
+    7. **QC events** — projector-emitted rows with event_type + occurred_at + workflow_event_id preview.
+    8. **Shipments / customers** — customer code/name + carrier + tracking + qty + unit + shipped_at. Empty state: "No shipment / customer linkage recorded yet."
+- Sidebar / search behavior: existing "Recall lookup" entry under Operations remains; no edit needed.
+- Data-honesty invariants enforced:
+  - Missing `bag_qr_code` → warning ("legacy / raw-bag QR missing"), not silence.
+  - Missing shipment linkage → missingLinks note, not fake row.
+  - Supplier lot **never** surfaced in `print_payload` snapshots (LOT-1C contract).
+  - `print_payload` exposed on the page is the literal `JSON.stringify` snippet — operators see what the carton would say without invention.
+  - No banned phrases ("production loss" / "supplier shortage" / "known_loss") in loader or page.
+- Tests added (10 cases, all pass):
+  - Loader return-shape contract.
+  - Confidence rollup HIGH×HIGH = HIGH; HIGH×LOW = LOW; HIGH×MISSING = MISSING; empty = MISSING.
+  - Six-axis discriminator preserves all `kind` values (no type-narrowing collapse).
+  - Data-honesty contracts: empty shipments → missingLinks note; null bag_qr_code → warnings populated.
+- Build / test results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1158/1158 pass across 52 test files** (+10 vs LOT-1C's 1148; +1 test file).
+  - `npx next build` → clean; `/recall` route present at 232 B / 106 kB First Load JS.
+- Staging verification (LX122 / SHA `3f26707`):
+  - Deploy via `systemctl start luma-deploy.service` succeeded.
+  - `/api/health` flipped to `3f26707e6a4830f5c69b82a0a987f93ae4641df1`.
+  - `/recall` returns 200 under admin auth.
+  - Search panel renders all 6 kinds. With staging's empty finished_lots, "Pick a search kind…" empty state shows on first load; submitting any value returns "No matches" honestly.
+  - No noisy fake production data introduced.
+  - Auth smoke 47/47 PASS.
+- LOT-1E readiness: ready. The next phase adds print-label / export — generating actual carton labels (HTML→PDF or HTML→png pipeline), per-customer template support keyed on `customers.zoho_customer_id` / `nexus_customer_id` / `supplier_lot_visible`, and CSV export of the recall passport for regulatory filings. All data plumbing is in place — LOT-1E is purely UI + a print/export service layer.
+
+---
+
 ## LOT-1C — Finished-lot projector + recall-passport projection wiring (complete)
 - Date: 2026-05-14
 - Result: projector phase. The DB now auto-populates the four recall-passport child tables whenever a finished_lots row is created (operator-triggered) OR when BAG_FINALIZED fires for a bag that already has a finished_lots row. No automatic finished_lots row creation — that stays in operator hands. Full rebuilder wired into the standard rebuild script.
