@@ -18,10 +18,6 @@ import {
   safeMultiply,
 } from "./product-structure";
 import { missing, ok } from "./confidence";
-import {
-  ZohoNotConfiguredError,
-  mapZohoItemToLumaItem,
-} from "@/lib/integrations/zoho/items";
 
 describe("safeMultiply", () => {
   it("multiplies positive finite numbers", () => {
@@ -236,66 +232,6 @@ describe("missing-state vocabulary for the helpers", () => {
   });
 });
 
-// ─── Zoho stubs ──────────────────────────────────────────────────
-
-describe("Zoho stubs", () => {
-  it("listZohoItems throws ZohoNotConfiguredError until live sync lands", async () => {
-    const { listZohoItems } = await import("@/lib/integrations/zoho/items");
-    await expect(listZohoItems()).rejects.toBeInstanceOf(ZohoNotConfiguredError);
-  });
-  it("listZohoInventorySnapshots throws ZohoNotConfiguredError until live sync lands", async () => {
-    const { listZohoInventorySnapshots } = await import("@/lib/integrations/zoho/items");
-    await expect(listZohoInventorySnapshots()).rejects.toBeInstanceOf(ZohoNotConfiguredError);
-  });
-
-  it("mapZohoItemToLumaItem (pure) classifies inventory+sales as SELLABLE_SKU", () => {
-    expect(
-      mapZohoItemToLumaItem({
-        externalItemId: "z1",
-        externalItemCode: "BTL-30",
-        externalItemName: "Bottle 30",
-        unitOfMeasure: "each",
-        itemType: "inventory_sales",
-        raw: {},
-      }),
-    ).toBe("SELLABLE_SKU");
-  });
-  it("classifies generic inventory item as FINISHED_GOOD", () => {
-    expect(
-      mapZohoItemToLumaItem({
-        externalItemId: "z2",
-        externalItemCode: "X",
-        externalItemName: "X",
-        unitOfMeasure: "each",
-        itemType: "inventory",
-        raw: {},
-      }),
-    ).toBe("FINISHED_GOOD");
-  });
-  it("classifies packaging item as PACKAGING_MATERIAL", () => {
-    expect(
-      mapZohoItemToLumaItem({
-        externalItemId: "z3",
-        externalItemCode: "X",
-        externalItemName: "X",
-        unitOfMeasure: "each",
-        itemType: "packaging",
-        raw: {},
-      }),
-    ).toBe("PACKAGING_MATERIAL");
-  });
-  it("returns UNKNOWN for ambiguous Zoho items — admin must confirm", () => {
-    expect(
-      mapZohoItemToLumaItem({
-        externalItemId: "z4",
-        externalItemCode: "X",
-        externalItemName: "X",
-        unitOfMeasure: "each",
-        raw: {},
-      }),
-    ).toBe("UNKNOWN");
-  });
-});
 
 describe("seed-data shape contracts (Zoho foundation)", () => {
   // Every external_systems row seeded by 0014. If a seed is renamed

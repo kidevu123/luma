@@ -41,6 +41,7 @@ import {
   ZOHO_GATEWAY_URL_ENV,
 } from "@/lib/integrations/zoho/gateway";
 import { TestConnectionButton } from "./test-connection-button";
+import { DryRunButton } from "./dry-run-button";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,36 @@ export default async function ZohoGatewayPage() {
     })
     .from(zohoSyncRuns)
     .where(eq(zohoSyncRuns.syncType, "CONNECTIVITY_CHECK"))
+    .orderBy(desc(zohoSyncRuns.startedAt))
+    .limit(1);
+
+  const [lastItemsDryRun] = await db
+    .select({
+      id: zohoSyncRuns.id,
+      status: zohoSyncRuns.status,
+      startedAt: zohoSyncRuns.startedAt,
+      finishedAt: zohoSyncRuns.finishedAt,
+      source: zohoSyncRuns.source,
+      summary: zohoSyncRuns.summary,
+      error: zohoSyncRuns.error,
+    })
+    .from(zohoSyncRuns)
+    .where(eq(zohoSyncRuns.syncType, "ITEMS"))
+    .orderBy(desc(zohoSyncRuns.startedAt))
+    .limit(1);
+
+  const [lastCustomersDryRun] = await db
+    .select({
+      id: zohoSyncRuns.id,
+      status: zohoSyncRuns.status,
+      startedAt: zohoSyncRuns.startedAt,
+      finishedAt: zohoSyncRuns.finishedAt,
+      source: zohoSyncRuns.source,
+      summary: zohoSyncRuns.summary,
+      error: zohoSyncRuns.error,
+    })
+    .from(zohoSyncRuns)
+    .where(eq(zohoSyncRuns.syncType, "CUSTOMERS"))
     .orderBy(desc(zohoSyncRuns.startedAt))
     .limit(1);
 
@@ -293,6 +324,86 @@ export default async function ZohoGatewayPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <ProductionSection
+        title="Dry-run item / customer sync (ZOHO-2A)"
+        subtitle="Read-only diff against Luma master tables. Never writes products / customers / materials."
+        tone={
+          readiness === "READY_FOR_DRY_RUN"
+            ? "GOOD"
+            : readiness === "NEEDS_REAUTH" || readiness === "NEEDS_SELECTION"
+              ? "WARN"
+              : "MUTED"
+        }
+      >
+        {readiness === "NEEDS_REAUTH" ? (
+          <div className="mb-3">
+            <ProductionAlertCard
+              tone="WARN"
+              title="Dry-run blocked — Zoho tokens expired"
+              body="Zoho gateway is reachable, but haute_brands tokens must be re-authorized before live dry-run can fetch items / customers. The button below is enabled so an operator can still capture a blocked-state audit row; clicking it does NOT call /items or /contacts_inv."
+            />
+          </div>
+        ) : null}
+        <ProductionIdentityBlock
+          columns={2}
+          rows={[
+            { label: "Readiness", value: readiness },
+            { label: "Selected brand", value: cfg.brand ?? null, mono: true },
+            {
+              label: "Last items dry-run",
+              value: lastItemsDryRun
+                ? `${lastItemsDryRun.status} · ${fmtDate(lastItemsDryRun.startedAt)}`
+                : "Never run",
+            },
+            {
+              label: "Last customers dry-run",
+              value: lastCustomersDryRun
+                ? `${lastCustomersDryRun.status} · ${fmtDate(lastCustomersDryRun.startedAt)}`
+                : "Never run",
+            },
+            {
+              label: "Items scanned (last run)",
+              value:
+                (lastItemsDryRun?.summary as { counts?: { scanned?: number } } | null)?.counts
+                  ?.scanned ?? null,
+              mono: true,
+            },
+            {
+              label: "Customers scanned (last run)",
+              value:
+                (lastCustomersDryRun?.summary as { counts?: { scanned?: number } } | null)?.counts
+                  ?.scanned ?? null,
+              mono: true,
+            },
+            {
+              label: "Items conflicts",
+              value:
+                (lastItemsDryRun?.summary as { counts?: { conflicts?: number } } | null)?.counts
+                  ?.conflicts ?? null,
+              mono: true,
+            },
+            {
+              label: "Customers conflicts",
+              value:
+                (lastCustomersDryRun?.summary as { counts?: { conflicts?: number } } | null)
+                  ?.counts?.conflicts ?? null,
+              mono: true,
+            },
+          ] satisfies IdentityRow[]}
+        />
+        <div className="mt-4 space-y-2 text-sm text-text-muted">
+          <p>
+            Click the button to probe Zoho readiness, fetch items + customers via the
+            gateway, normalize, and diff against the current Luma master snapshot.
+            Writes two <code>zoho_sync_runs</code> rows (one ITEMS, one CUSTOMERS)
+            with <code>dry_run=true</code>. If readiness is <em>not</em>{" "}
+            <code>READY_FOR_DRY_RUN</code>, a single PARTIAL ITEMS row is written and
+            no item / customer endpoint is called.
+          </p>
+          <DryRunButton disabled={!cfg.configured} />
+        </div>
+      </ProductionSection>
 
       <Card>
         <CardHeader>

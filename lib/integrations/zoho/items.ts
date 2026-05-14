@@ -1,203 +1,280 @@
-// Phase H.x0.5 — Zoho item / inventory foundation (stubs).
+// ZOHO-2A — Zoho Inventory items: dry-run client + normalizer.
 //
-// Defines the contract for the eventual Zoho item-catalog sync. No
-// live API calls. Each function throws ZohoNotConfiguredError until a
-// follow-up phase wires the real client.
+// Replaces the H.x0.5 stubs with a real read-only client that routes
+// through the LXC gateway (lib/integrations/zoho/gateway.ts). Strictly
+// dry-run: this module never writes back to Zoho and never mutates
+// Luma master tables. The diff engine in sync-dry-run.ts consumes the
+// normalized output of this module.
 //
-// Companion docs: docs/ZOHO_ITEM_SYNC_PLAN.md.
-//
-// Once implemented, calls go through lib/zoho/client.ts (which already
-// handles OAuth + per-company creds for the existing Zoho push flow).
+// Gateway route (audited 2026-05-14 against zoho_api_routes on LXC
+// 9504): service=items, action=list, method=GET, endpoint_template
+// /inventory/v1/items, product=inventory.
 
-import { eq, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
 import {
-  externalInventorySnapshots,
-  externalItemMappings,
-  externalSystems,
-} from "@/lib/db/schema";
+  buildZohoGatewayHeaders,
+  mapZohoGatewayError,
+  validateZohoGatewayConfig,
+  type ZohoGatewayHealthStatus,
+} from "./gateway";
 
-export class ZohoNotConfiguredError extends Error {
-  constructor(message = "Zoho API not configured.") {
-    super(message);
-    this.name = "ZohoNotConfiguredError";
+export const ZOHO_ITEMS_LIST_PATH = "/zoho/items/list";
+
+/** Stable shape Luma callers consume. Mirrors the spec in the
+ *  ZOHO-2A prompt — every Zoho-side variant must collapse here. */
+export type NormalizedZohoItem = {
+  zohoItemId: string;
+  name: string;
+  sku: string | null;
+  itemType: string | null;
+  active: boolean;
+  unit: string | null;
+  category: string | null;
+  rate: number | null;
+  purchaseRate: number | null;
+  inventoryAccount: string | null;
+  raw: Record<string, unknown>;
+};
+
+/** Suggested Luma destination. The diff engine decides the actual
+ *  diff Action; this is only a hint. UNKNOWN forces NEEDS_REVIEW. */
+export type LumaItemTarget =
+  | "PRODUCT"
+  | "TABLET_TYPE"
+  | "PACKAGING_MATERIAL"
+  | "UNKNOWN";
+
+export type FetchZohoItemsDryRunResult =
+  | {
+      kind: "OK";
+      items: readonly NormalizedZohoItem[];
+      raw: { count: number };
+    }
+  | {
+      kind: "NOT_CONFIGURED";
+      message: string;
+    }
+  | {
+      kind: "UNREACHABLE" | "ERROR";
+      message: string;
+    }
+  | {
+      kind: "UNAUTHORIZED";
+      httpStatus: number;
+      message: string;
+    };
+
+type FetchLike = typeof fetch;
+
+/** Pure: collapse one Zoho item payload into the Luma-normalized shape.
+ *  Accepts the verbatim Zoho Inventory item JSON
+ *  ({ item_id, name, sku, item_type, status, unit, category_name,
+ *     rate, purchase_rate, inventory_account_name, ... }). Tolerates
+ *  partials — missing fields become null. Never invents values. */
+export function normalizeZohoItem(input: unknown): NormalizedZohoItem | null {
+  if (!input || typeof input !== "object") return null;
+  const row = input as Record<string, unknown>;
+  const zohoItemId = pickString(row, "item_id") ?? pickString(row, "itemId");
+  if (!zohoItemId) return null;
+  const name =
+    pickString(row, "name") ??
+    pickString(row, "item_name") ??
+    "(unnamed)";
+  return {
+    zohoItemId,
+    name,
+    sku: pickString(row, "sku"),
+    itemType: pickString(row, "item_type") ?? pickString(row, "type"),
+    active: parseActive(row),
+    unit: pickString(row, "unit"),
+    category:
+      pickString(row, "category_name") ??
+      pickString(row, "category") ??
+      pickString(row, "group_name"),
+    rate: pickNumber(row, "rate"),
+    purchaseRate: pickNumber(row, "purchase_rate"),
+    inventoryAccount: pickString(row, "inventory_account_name"),
+    raw: row,
+  };
+}
+
+/** Pure: pick a default Luma destination from the normalized item.
+ *  Conservative — UNKNOWN unless the Zoho metadata is unambiguous.
+ *  An admin will confirm before any write. Never decides from name
+ *  alone when item_id / SKU exist. */
+export function deriveZohoItemLumaTarget(
+  item: NormalizedZohoItem,
+): LumaItemTarget {
+  const t = (item.itemType ?? "").toLowerCase();
+  const cat = (item.category ?? "").toLowerCase();
+  const account = (item.inventoryAccount ?? "").toLowerCase();
+  // Packaging-material signal (Zoho-side conventions used by the
+  // packaging team): "packaging", "packaging materials", "blister",
+  // "foil", "pvc", etc. Inventory_account often reads "Packaging
+  // Inventory" for these rows.
+  if (
+    cat.includes("packaging") ||
+    cat.includes("blister") ||
+    cat.includes("foil") ||
+    cat.includes("pvc") ||
+    cat.includes("shrink") ||
+    account.includes("packaging")
+  )
+    return "PACKAGING_MATERIAL";
+  // Raw-tablet signal: item_type marked "raw_material" or category
+  // names matching the tablet master.
+  if (t.includes("raw") || cat.includes("tablet") || cat.includes("bulk"))
+    return "TABLET_TYPE";
+  // Sales/finished-good signal: item_type marked sales/inventory_sales,
+  // or category matching a known finished-product channel.
+  if (t.includes("sales") || t === "inventory" || cat.includes("finished"))
+    return "PRODUCT";
+  return "UNKNOWN";
+}
+
+/** Live: fetch one page of Zoho Inventory items via the gateway. ZOHO-
+ *  2A only ever uses page=1 (small per-page cap) — full pagination
+ *  lands in ZOHO-3 when the apply-phase needs the whole set. Returns
+ *  a discriminated result the dry-run engine consumes; never throws
+ *  for transport-level failures. */
+export async function fetchZohoItemsDryRun(opts?: {
+  env?: Record<string, string | undefined>;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
+  path?: string;
+  perPage?: number;
+  page?: number;
+}): Promise<FetchZohoItemsDryRunResult> {
+  return fetchListViaGateway({
+    env: opts?.env ?? process.env,
+    fetchImpl: opts?.fetchImpl ?? fetch,
+    timeoutMs: opts?.timeoutMs ?? 12_000,
+    path: opts?.path ?? ZOHO_ITEMS_LIST_PATH,
+    perPage: opts?.perPage ?? 200,
+    page: opts?.page ?? 1,
+    collectionKey: "items",
+    normalizer: normalizeZohoItem,
+  });
+}
+
+// ─── Shared list-fetch helper ─────────────────────────────────────────────
+//
+// Items + customers share the same gateway protocol: GET /zoho/{service}/
+// {action}?per_page=N&page=K, response is either a bare array or
+// { <collection>: [...], page_context: {...} }. We keep the helper
+// generic and use it from both modules; living here keeps the import
+// graph clean (items.ts is loaded before customers.ts in dry-run).
+
+type ListFetchOpts<T> = {
+  env: Record<string, string | undefined>;
+  fetchImpl: FetchLike;
+  timeoutMs: number;
+  path: string;
+  perPage: number;
+  page: number;
+  collectionKey: string;
+  normalizer: (input: unknown) => T | null;
+};
+
+async function fetchListViaGateway<T>(
+  opts: ListFetchOpts<T>,
+): Promise<
+  | { kind: "OK"; items: T[]; raw: { count: number } }
+  | { kind: "NOT_CONFIGURED"; message: string }
+  | { kind: "UNREACHABLE" | "ERROR"; message: string }
+  | { kind: "UNAUTHORIZED"; httpStatus: number; message: string }
+> {
+  const cfg = validateZohoGatewayConfig(opts.env);
+  if (!cfg.configured) {
+    return { kind: "NOT_CONFIGURED", message: cfg.issues[0] ?? "Gateway not configured." };
+  }
+  const headers = buildZohoGatewayHeaders(opts.env);
+  const url = `${cfg.url}${opts.path}?per_page=${opts.perPage}&page=${opts.page}`;
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), opts.timeoutMs);
+  try {
+    const r = await opts.fetchImpl(url, {
+      method: "GET",
+      headers,
+      signal: ctrl.signal,
+    });
+    clearTimeout(tid);
+    if (r.status === 401 || r.status === 403) {
+      return {
+        kind: "UNAUTHORIZED",
+        httpStatus: r.status,
+        message: `Gateway rejected request with HTTP ${r.status}.`,
+      };
+    }
+    if (r.status < 200 || r.status >= 300) {
+      return {
+        kind: "ERROR",
+        message: `Gateway returned HTTP ${r.status} on ${opts.path}.`,
+      };
+    }
+    const body = (await r.json().catch(() => null)) as unknown;
+    const list = extractCollection(body, opts.collectionKey);
+    const normalized = list
+      .map((row) => opts.normalizer(row))
+      .filter((x): x is T => x != null);
+    return { kind: "OK", items: normalized, raw: { count: list.length } };
+  } catch (err) {
+    clearTimeout(tid);
+    const mapped = mapZohoGatewayError({ thrown: err });
+    const kind: ZohoGatewayHealthStatus = mapped.status;
+    return {
+      kind: kind === "UNREACHABLE" ? "UNREACHABLE" : "ERROR",
+      message: mapped.message,
+    };
   }
 }
 
-export type ZohoItemSummary = {
-  externalItemId: string;
-  externalItemCode: string;
-  externalItemName: string;
-  unitOfMeasure: string;
-  itemType?: string;
-  /** Raw Zoho payload preserved verbatim for downstream debugging. */
-  raw: Record<string, unknown>;
-};
-
-export type ZohoInventorySnapshot = {
-  externalItemId: string;
-  itemCode: string;
-  itemName: string;
-  quantityOnHand: number;
-  quantityAvailable: number;
-  unitOfMeasure: string;
-  warehouseName: string | null;
-  raw: Record<string, unknown>;
-};
-
-export type ExternalItemMappingType =
-  | "RAW_MATERIAL"
-  | "PACKAGING_MATERIAL"
-  | "COMPONENT"
-  | "INTERMEDIATE_GOOD"
-  | "FINISHED_GOOD"
-  | "SELLABLE_SKU"
-  | "UNKNOWN";
-
-// ── Live API stubs ─────────────────────────────────────────────────
-//
-// These call out to Zoho. In H.x0.5 they are deliberately stubs —
-// invoking them throws a structured "not configured" error so callers
-// can render a friendly setup hint. The eventual implementation will
-// reuse lib/zoho/client.ts patterns (per-company OAuth, retries).
-
-export async function listZohoItems(
-  _opts: { page?: number; perPage?: number } = {},
-): Promise<ZohoItemSummary[]> {
-  throw new ZohoNotConfiguredError(
-    "Zoho item sync not implemented yet. See docs/ZOHO_ITEM_SYNC_PLAN.md.",
-  );
+/** Pure: pluck the array of rows out of whatever shape the gateway
+ *  returns. Tolerates a bare array, { <key>: [...] }, { data: [...] },
+ *  and { <key>: [...], page_context: {...} } (Zoho's native shape). */
+export function extractCollection(body: unknown, key: string): unknown[] {
+  if (Array.isArray(body)) return body;
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    if (Array.isArray(obj[key])) return obj[key] as unknown[];
+    if (Array.isArray(obj.data)) return obj.data as unknown[];
+    if (Array.isArray(obj.items) && key !== "items") return obj.items as unknown[];
+  }
+  return [];
 }
 
-export async function listZohoInventorySnapshots(
-  _opts: { page?: number; perPage?: number } = {},
-): Promise<ZohoInventorySnapshot[]> {
-  throw new ZohoNotConfiguredError(
-    "Zoho inventory sync not implemented yet. See docs/ZOHO_ITEM_SYNC_PLAN.md.",
-  );
+// ─── Tiny pure helpers ────────────────────────────────────────────────────
+
+function pickString(row: Record<string, unknown>, key: string): string | null {
+  const v = row[key];
+  if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  return null;
 }
 
-// ── DB-backed mapping helpers (safe to call without Zoho creds) ────
-
-/** Resolve the external_systems.id for the ZOHO seeded row. Returns
- *  null if migration 0014 hasn't run. Pure DB lookup; safe in tests. */
-export async function getZohoSystemId(): Promise<string | null> {
-  const [row] = await db
-    .select({ id: externalSystems.id })
-    .from(externalSystems)
-    .where(eq(externalSystems.code, "ZOHO"))
-    .limit(1);
-  return row?.id ?? null;
+function pickNumber(row: Record<string, unknown>, key: string): number | null {
+  const v = row[key];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim().length > 0) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
-/** Upsert an external_item_mappings row. The (system_id, external_item_id)
- *  unique constraint takes care of duplicate detection. */
-export async function upsertExternalItemMapping(input: {
-  externalSystemCode: string;
-  externalItemId: string;
-  externalItemCode?: string;
-  externalItemName?: string;
-  lumaItemId?: string;
-  lumaProductId?: string;
-  materialItemId?: string;
-  mappingType?: ExternalItemMappingType;
-  payload?: Record<string, unknown>;
-}): Promise<{ id: string } | null> {
-  const [system] = await db
-    .select({ id: externalSystems.id })
-    .from(externalSystems)
-    .where(eq(externalSystems.code, input.externalSystemCode))
-    .limit(1);
-  if (!system) return null;
-
-  const result = await db.execute<{ id: string }>(sql`
-    INSERT INTO "external_item_mappings"
-      (external_system_id, external_item_id, external_item_code,
-       external_item_name, luma_item_id, luma_product_id, material_item_id,
-       mapping_type, payload, last_synced_at, updated_at)
-    VALUES (
-      ${system.id},
-      ${input.externalItemId},
-      ${input.externalItemCode ?? null},
-      ${input.externalItemName ?? null},
-      ${input.lumaItemId ?? null},
-      ${input.lumaProductId ?? null},
-      ${input.materialItemId ?? null},
-      ${input.mappingType ?? "UNKNOWN"},
-      ${sql.raw(`'${JSON.stringify(input.payload ?? {})}'::jsonb`)},
-      now(),
-      now()
-    )
-    ON CONFLICT (external_system_id, external_item_id)
-    DO UPDATE SET
-      external_item_code = EXCLUDED.external_item_code,
-      external_item_name = EXCLUDED.external_item_name,
-      luma_item_id       = COALESCE(EXCLUDED.luma_item_id, external_item_mappings.luma_item_id),
-      luma_product_id    = COALESCE(EXCLUDED.luma_product_id, external_item_mappings.luma_product_id),
-      material_item_id   = COALESCE(EXCLUDED.material_item_id, external_item_mappings.material_item_id),
-      mapping_type       = EXCLUDED.mapping_type,
-      payload            = EXCLUDED.payload,
-      last_synced_at     = EXCLUDED.last_synced_at,
-      updated_at         = EXCLUDED.updated_at
-    RETURNING id
-  `);
-  const list = result as unknown as Array<{ id: string }>;
-  return list[0] ?? null;
-}
-
-/** Append-only inventory snapshot. Used by sync job in a follow-up
- *  phase. Calling this never mutates Luma genealogy — it only stores
- *  what Zoho reported, with full payload. */
-export async function recordExternalInventorySnapshot(input: {
-  externalSystemCode: string;
-  externalItemId: string;
-  itemCode?: string;
-  itemName?: string;
-  quantityOnHand?: number | null;
-  quantityAvailable?: number | null;
-  unitOfMeasure?: string | null;
-  warehouseName?: string | null;
-  payload?: Record<string, unknown>;
-}): Promise<{ id: string } | null> {
-  const [system] = await db
-    .select({ id: externalSystems.id })
-    .from(externalSystems)
-    .where(eq(externalSystems.code, input.externalSystemCode))
-    .limit(1);
-  if (!system) return null;
-
-  const inserted = await db
-    .insert(externalInventorySnapshots)
-    .values({
-      externalSystemId: system.id,
-      externalItemId: input.externalItemId,
-      itemCode: input.itemCode ?? null,
-      itemName: input.itemName ?? null,
-      quantityOnHand:
-        input.quantityOnHand != null ? String(input.quantityOnHand) : null,
-      quantityAvailable:
-        input.quantityAvailable != null ? String(input.quantityAvailable) : null,
-      unitOfMeasure: input.unitOfMeasure ?? null,
-      warehouseName: input.warehouseName ?? null,
-      payload: input.payload ?? {},
-    })
-    .returning({ id: externalInventorySnapshots.id });
-  return inserted[0] ?? null;
-}
-
-/** Pure helper: classify a Zoho item summary into a Luma item_category
- *  suggestion. Conservative — returns UNKNOWN unless the Zoho item
- *  type is unambiguous. Admin must confirm before the mapping becomes
- *  authoritative. */
-export function mapZohoItemToLumaItem(
-  zohoItem: ZohoItemSummary,
-): ExternalItemMappingType {
-  const raw = (zohoItem.itemType ?? "").toLowerCase();
-  if (raw.includes("inventory") && raw.includes("sales")) return "SELLABLE_SKU";
-  if (raw.includes("inventory")) return "FINISHED_GOOD";
-  if (raw.includes("packaging")) return "PACKAGING_MATERIAL";
-  if (raw.includes("raw")) return "RAW_MATERIAL";
-  if (raw.includes("component")) return "COMPONENT";
-  if (raw.includes("intermediate")) return "INTERMEDIATE_GOOD";
-  return "UNKNOWN";
+function parseActive(row: Record<string, unknown>): boolean {
+  const raw =
+    row.status ??
+    row.is_active ??
+    row.active ??
+    row.isActive ??
+    null;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "string") {
+    const v = raw.trim().toLowerCase();
+    if (v === "active" || v === "true" || v === "yes" || v === "1") return true;
+    if (v === "inactive" || v === "false" || v === "no" || v === "0") return false;
+  }
+  // Default to active when Zoho doesn't say otherwise. Inactive must be
+  // explicit — operators rarely flip the flag both ways, so optimistic
+  // active is safer than silently dropping a real item.
+  return true;
 }

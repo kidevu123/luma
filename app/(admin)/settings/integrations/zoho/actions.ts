@@ -1,14 +1,21 @@
 "use server";
 
-// ZOHO-GW-2 — server action backing the "Test gateway connection"
-// button on /settings/integrations/zoho.
+// ZOHO-2A — server actions for the gateway settings page.
 //
-// Probes /health + /status, derives ZohoReadiness, persists one
-// zoho_sync_runs row + one audit row, returns a structured result.
+// runConnectivityCheckAction (ZOHO-GW-2) probes /health + /status,
+// derives ZohoReadiness, persists one zoho_sync_runs row + one audit
+// row. Does NOT call Zoho directly.
 //
-// Does NOT call Zoho directly. Does NOT touch zoho_credentials (legacy
-// direct-OAuth row). Does NOT sync items / customers / sales-orders /
-// purchase-orders. Does NOT write to Zoho.
+// runItemCustomerDryRunAction (NEW, ZOHO-2A) probes readiness; if
+// READY_FOR_DRY_RUN it fetches items + customers via the gateway,
+// normalizes, diffs against the current Luma master snapshot, and
+// writes one zoho_sync_runs row per kind (ITEMS + CUSTOMERS,
+// dry_run=true). If NEEDS_REAUTH (or any other non-READY readiness)
+// it writes ONE PARTIAL ITEMS row explaining the block and never
+// calls the item / customer endpoints.
+//
+// Neither action mutates products, tablet_types, packaging_materials,
+// or customers. ZOHO-3 replaces these with apply paths.
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
@@ -23,6 +30,11 @@ import {
   type ZohoBrandProductTokenStatus,
   type ZohoReadiness,
 } from "@/lib/integrations/zoho/gateway";
+import {
+  runZohoDryRunSync,
+  type DryRunResult,
+  type PersistRunInput,
+} from "@/lib/integrations/zoho/sync-dry-run";
 
 export type ConnectivityCheckResult =
   | {
@@ -194,5 +206,156 @@ export async function runConnectivityCheckAction(): Promise<ConnectivityCheckRes
     availableBrands,
     readiness,
     readinessMessage,
+  };
+}
+
+// ─── ZOHO-2A — item / customer dry-run action ─────────────────────────────
+
+export type ItemCustomerDryRunResult =
+  | {
+      kind: "blocked";
+      readiness: ZohoReadiness;
+      reason: string;
+      itemRunId: string | null;
+    }
+  | {
+      kind: "ok";
+      readiness: ZohoReadiness;
+      itemRunId: string;
+      customerRunId: string;
+      counts: {
+        items: {
+          scanned: number;
+          createCandidates: number;
+          updateCandidates: number;
+          noChange: number;
+          needsReview: number;
+          conflicts: number;
+        };
+        customers: {
+          scanned: number;
+          createCandidates: number;
+          updateCandidates: number;
+          noChange: number;
+          needsReview: number;
+          conflicts: number;
+        };
+      };
+      warnings: { items: string[]; customers: string[] };
+      preview: {
+        items: Array<{
+          action: string;
+          zohoItemId: string;
+          zohoName: string;
+          sku: string | null;
+          suggestedTarget: string;
+          reasons: string[];
+        }>;
+        customers: Array<{
+          action: string;
+          zohoCustomerId: string;
+          zohoName: string;
+          customerCodeSuggestion: string | null;
+          reasons: string[];
+        }>;
+      };
+    }
+  | { kind: "error"; message: string };
+
+export async function runItemCustomerDryRunAction(): Promise<ItemCustomerDryRunResult> {
+  const actor = await requireAdmin();
+
+  // Audit + persistence wrapper: writes the zoho_sync_runs row + audit
+  // entry, both in a single transaction. The orchestrator passes us
+  // each row's content; we just persist it. Never writes any other
+  // table.
+  const persistRun = async (input: PersistRunInput): Promise<string> => {
+    let id = "";
+    await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(zohoSyncRuns)
+        .values({
+          syncType: input.syncType,
+          status: input.status,
+          finishedAt: new Date(),
+          source: input.source,
+          dryRun: true,
+          summary: input.summary,
+          error: input.error,
+          createdByUserId: input.actorUserId,
+        })
+        .returning({ id: zohoSyncRuns.id });
+      id = inserted[0]?.id ?? "";
+      await writeAudit(
+        {
+          actorId: actor.id,
+          actorRole: actor.role,
+          action: "zoho.sync.dry_run",
+          targetType: "ZohoSyncRun",
+          targetId: id,
+          after: {
+            syncType: input.syncType,
+            status: input.status,
+            error: input.error,
+          },
+        },
+        tx,
+      );
+    });
+    return id;
+  };
+
+  const result: DryRunResult = await runZohoDryRunSync({
+    persistRun,
+    actorUserId: actor.id,
+    source: "manual",
+  });
+
+  revalidatePath("/settings/integrations/zoho");
+
+  if (result.kind === "BLOCKED") {
+    return {
+      kind: "blocked",
+      readiness: result.readiness,
+      reason: result.reason,
+      itemRunId: result.itemRunId,
+    };
+  }
+  if (result.kind === "ERROR") {
+    return { kind: "error", message: result.message };
+  }
+  // OK — strip the full preview down to a UI-friendly snapshot. Keep
+  // the first 25 rows of each kind. The full rows live in summary
+  // jsonb in zoho_sync_runs for forensic / future-export use.
+  return {
+    kind: "ok",
+    readiness: result.readiness,
+    itemRunId: result.itemRunId,
+    customerRunId: result.customerRunId,
+    counts: {
+      items: { ...result.items.counts },
+      customers: { ...result.customers.counts },
+    },
+    warnings: {
+      items: [...result.items.warnings],
+      customers: [...result.customers.warnings],
+    },
+    preview: {
+      items: result.items.rows.slice(0, 25).map((r) => ({
+        action: r.action,
+        zohoItemId: r.zohoItemId,
+        zohoName: r.zohoName,
+        sku: r.sku,
+        suggestedTarget: r.suggestedTarget,
+        reasons: [...r.reasons],
+      })),
+      customers: result.customers.rows.slice(0, 25).map((r) => ({
+        action: r.action,
+        zohoCustomerId: r.zohoCustomerId,
+        zohoName: r.zohoName,
+        customerCodeSuggestion: r.customerCodeSuggestion,
+        reasons: [...r.reasons],
+      })),
+    },
   };
 }
