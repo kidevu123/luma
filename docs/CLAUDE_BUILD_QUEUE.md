@@ -432,6 +432,20 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 
 ---
 
+### [x] ZOHO-GW-2 — Align Luma gateway client with real gateway contract
+**Objective.** Update Luma's Zoho gateway client to match the real gateway's protocol: X-Internal-Token auth, X-Brand multi-brand selection, /status-based brand discovery, per-product token-status reporting, ZohoReadiness model.
+
+**Files touched.**
+- `lib/integrations/zoho/gateway.ts` — rewrite. New env `ZOHO_BRAND`. Headers: `X-Internal-Token` + `X-Brand`. New `fetchZohoBrandStatus`, `extractBrands`, `resolveBrandSelection`, `deriveZohoReadiness`. Old `fetchZohoOrganizations` kept as shim.
+- `lib/integrations/zoho/gateway.test.ts` — 69 cases (up from 49). 3 static guards.
+- `app/(admin)/settings/integrations/zoho/{page,actions,test-connection-button}.tsx` — surface readiness, selected brand, Zoho org id, per-product token status.
+- `scripts/verify-zoho-gw-1.ts` — mirror new readiness path.
+- `docker-compose.yml` + `.env.example` + `deploy/lxc/install.sh` — plumb `ZOHO_BRAND=haute_brands`.
+
+**Closeout (2026-05-14, SHA `fdf7a63`):** Settings page shows `NEEDS_REAUTH` honestly because all `haute_brands` × {books, crm, expense, inventory} Zoho tokens are expired on the gateway side. tsc clean / vitest 1310/1310 / next build clean / auth smoke 48/48 PASS / verify-script exits 0 / `zoho_sync_runs` row `4432a636` persisted with status=PARTIAL. ZOHO-2 Luma-side ready; **blocked on operator re-authorizing the gateway's `haute_brands` Zoho refresh tokens (LXC 9503)**.
+
+---
+
 ### [ ] ZOHO-2 — Item + customer read sync, dry-run mode only
 **Objective.** Implement `listZohoItems()` and customer-list helpers via the gateway. Add pg-boss handlers `zoho.items.sync` + `zoho.customers.sync` in DRY-RUN mode only (no writes outside `zoho_sync_runs`). Surface the proposed diff on `/settings/integrations/zoho-items`.
 

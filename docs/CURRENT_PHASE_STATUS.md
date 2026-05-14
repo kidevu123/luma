@@ -4,6 +4,70 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## ZOHO-GW-2: align Luma gateway client with real gateway contract (complete)
+- Date: 2026-05-14
+- Result: Luma's Zoho gateway client now speaks the real gateway's protocol — `X-Internal-Token` auth + `X-Brand` selection + brand-list parsing from `/status` + per-product token-status surfacing + new `ZohoReadiness` label. Staging surfaces the honest `NEEDS_REAUTH` state because all `haute_brands` Zoho tokens are expired on the gateway side.
+- Files changed (1 commit, SHA `fdf7a63`):
+  - `lib/integrations/zoho/gateway.ts` — rewritten in place. New env `ZOHO_BRAND`. Headers switched from `x-luma-zoho-secret` to `X-Internal-Token`; added `X-Brand`. New `fetchZohoBrandStatus` replaces `fetchZohoOrganizations` for brand discovery (old function kept as a back-compat shim). New `extractBrands` parser handles the gateway's `brands: [{ name, zoho_org_id, region, status, products: [{ product, enabled, token_status, expires_at }] }]` shape. New `resolveBrandSelection` covers OK / NEEDS_REAUTH / NEEDS_SELECTION / BRAND_NOT_FOUND / NONE_RETURNED. New `deriveZohoReadiness(health, brand)` composes the two probes into a single label: `NOT_CONFIGURED · UNREACHABLE · ERROR · CONNECTED_HEALTH_ONLY · NEEDS_SELECTION · NEEDS_REAUTH · READY_FOR_DRY_RUN`. `stripZohoSecret` redacts `X-Internal-Token`, the legacy `x-luma-zoho-secret`, and `Authorization`.
+  - `lib/integrations/zoho/gateway.test.ts` — full rewrite. 69 cases (up from 49) covering: config validation w/ brand env, header construction (X-Internal-Token + X-Brand + no legacy x-luma-zoho-secret), secret redaction across all three header names, /status brand parsing against a realistic 3-brand payload, brand selection logic (OK / NEEDS_REAUTH / NEEDS_SELECTION / BRAND_NOT_FOUND / NONE_RETURNED / case-insensitive match), readiness derivation (healthy + expired tokens never reports READY_FOR_DRY_RUN), back-compat shim for the legacy `fetchZohoOrganizations`. Three static guards: no `@/lib/zoho/client` import, no Zoho-write HTTP methods, no item / customer / SO / PO paths in this file.
+  - `app/(admin)/settings/integrations/zoho/page.tsx` — surfaces gateway URL config / secret configured / brand configured / selected brand / Zoho org id / probed path / HTTP status / elapsed ms / available brands / per-product token status table / readiness banner with tone-mapped alert card. Secret value never displayed.
+  - `app/(admin)/settings/integrations/zoho/actions.ts` — server action `runConnectivityCheckAction` rewritten around `ZohoReadiness`. Persists one `zoho_sync_runs` row with `sync_type='CONNECTIVITY_CHECK'` + audit row. Run status decision: READY_FOR_DRY_RUN → SUCCESS; CONNECTED_HEALTH_ONLY / NEEDS_REAUTH / NEEDS_SELECTION → PARTIAL; everything else → FAILED.
+  - `app/(admin)/settings/integrations/zoho/test-connection-button.tsx` — surfaces readiness + brand + per-product token status inline with expiry timestamps.
+  - `scripts/verify-zoho-gw-1.ts` — updated harness mirrors the new readiness-based action.
+  - `docker-compose.yml` — `ZOHO_BRAND` now forwarded to the app container (same pattern as the other ZOHO_* vars).
+  - `.env.example` + `deploy/lxc/install.sh` — `ZOHO_BRAND=haute_brands` documented as the canonical default for Haute Nutrition.
+- Env / config behaviour:
+  - `ZOHO_INTEGRATION_URL` (default `http://192.168.1.205:8000`) — required; whitespace reads as missing.
+  - `ZOHO_INTEGRATION_SECRET` — required for protected gateway calls; sent as `X-Internal-Token`; whitespace = missing; never echoed.
+  - `ZOHO_BRAND` (new) — required for protected gateway calls; sent as `X-Brand`; whitespace = missing.
+- Header behaviour:
+  - `X-Internal-Token: <secret>` (always when secret configured).
+  - `X-Brand: <brand>` (always when brand configured).
+  - `accept: application/json`, `x-luma-source: luma`.
+  - Legacy `x-luma-zoho-secret` removed from outbound headers; still redacted by `stripZohoSecret` for any logs predating this commit.
+- `/status` brand parsing behaviour:
+  - Tolerates `{ brands: [...] }`, `{ data: [...] }`, and bare array shapes.
+  - Per-brand fields: `name|brand|brandKey` → brandKey; `zoho_org_id|org_id|organization_id` → organizationId; `region`; `status`.
+  - Per-product fields: `product|name`; `enabled` (strict-boolean true); `token_status|tokenStatus` → normalised to `valid|expired|missing|unknown`; `expires_at|expiresAt` preserved.
+  - Drops entries with no brandKey. Never invents values.
+- Token-expiry / readiness behaviour:
+  - With `ZOHO_BRAND` set + matching brand found + all products `valid` → `READY_FOR_DRY_RUN`.
+  - With brand found + any product `expired` → `NEEDS_REAUTH`. The settings page tone-maps this to amber and shows the per-product expiry.
+  - Without `ZOHO_BRAND` set + multiple brands → `NEEDS_SELECTION`.
+  - With `ZOHO_BRAND` set + brand not present → `NEEDS_SELECTION` (treated as "selection needed").
+  - Health unreachable / error / not configured → bubbles up directly; brand probe skipped.
+- Tests + build:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1310 / 1310 PASS across 56 files** (+20 vs ZOHO-1's 1290; +1 test file unchanged — gateway.test.ts grew from 49 → 69 cases).
+  - `npx next build` → clean.
+- Staging verification (LX122 / SHA `fdf7a63`):
+  - Deploy hit the same container-name-conflict trap; manually cleared (`docker rm -f`) + `docker compose up -d`. New image live at `fdf7a63`.
+  - `/etc/luma/.env` now carries `ZOHO_BRAND=haute_brands`. Inside container: `printenv ZOHO_BRAND` returns `haute_brands`.
+  - `scripts/verify-zoho-gw-1.ts` exit 0 with:
+    ```
+    config.configured=true  config.hasSecret=true  config.hasBrand=true  brand=haute_brands
+    health.status=CONNECTED  httpStatus=200  probedPath=/health  elapsedMs=55
+    brand.kind=NEEDS_REAUTH
+    readiness=NEEDS_REAUTH
+    selected.brandKey=haute_brands  org=883647111  region=us
+      books        expired  expires 2026-05-09 01:35:36 UTC
+      crm          expired  expires 2026-05-09 01:35:44 UTC
+      expense      expired  expires 2026-05-09 01:35:47 UTC
+      inventory    expired  expires 2026-05-14 16:03:58 UTC
+    persisted run id=4432a636  status=PARTIAL
+    ```
+  - Auth smoke **48 / 48 PASS** at SHA `fdf7a63`.
+- Exact operator action required to unblock ZOHO-2:
+  1. SSH to Proxmox host, `pct enter 9503`.
+  2. Re-authorize `haute_brands` Zoho refresh tokens for the four expired products (`books`, `crm`, `expense`, `inventory`). The gateway's onboarding flow is at `/opt/zoho-integration-service` — running its standard re-auth procedure for each product.
+  3. After re-auth, click "Test gateway connection" on Luma's `/settings/integrations/zoho`. Expected readiness: `READY_FOR_DRY_RUN`.
+  4. Only then does ZOHO-2 start.
+- Is ZOHO-2 ready?
+  - Luma side: **YES** — gateway client speaks the real protocol, brand selection works, expired-token detection works, settings page surfaces it honestly. No further Luma changes blocked on the gateway side.
+  - Gateway side: **NO** — `haute_brands` × {books, crm, expense, inventory} tokens still expired. ZOHO-2 will surface `NEEDS_REAUTH` on every test until the operator re-authorizes them on the gateway. **This is operator action on LXC 9503, not a Luma change.**
+
+---
+
 ## ZOHO-GW-1: locate + bring up the Zoho integration gateway (complete)
 - Date: 2026-05-14
 - Result: gateway located, configured into Luma, connectivity check writes a real `zoho_sync_runs` row. **Gateway reachable; orgs endpoint discovery partial — by design**.
