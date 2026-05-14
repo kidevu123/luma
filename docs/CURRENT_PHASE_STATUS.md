@@ -4,6 +4,77 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## ZOHO-2A: item / customer dry-run scaffolding (complete)
+- Date: 2026-05-14
+- Result: full dry-run engine (gateway clients + normalizers + diff engine + orchestrator + UI button) shipped. Staging blocks honestly because `haute_brands` Zoho tokens are still expired on the gateway. ZOHO-2B is now strictly an "after tokens are refreshed, re-run the same verify script" phase.
+- Gateway route audit (against `zoho_api_routes` on LXC 9504 / `zoho_integration` Postgres):
+  - **Items:** `service=items, action=list, method=GET, endpoint_template=/inventory/v1/items, product=inventory`. Luma URL: `GET /zoho/items/list?per_page=200&page=1`.
+  - **Customers:** `service=contacts_inv, action=list, method=GET, endpoint_template=/inventory/v1/contacts, product=inventory`. Luma URL: `GET /zoho/contacts_inv/list?per_page=200&page=1`.
+  - Both require `X-Internal-Token` + `X-Brand` (validated against the in-DB brand record). The generic proxy is `GET|POST /zoho/{service}/{action}` mounted at `/zoho` prefix, with `resolve_route` looking up the per-route Zoho endpoint template.
+  - Each service has the full CRUD action set (create / get / list / update / delete / search / mark_active / mark_inactive); ZOHO-2A uses only `list`. ZOHO-3 will add `get`.
+  - Pagination via `per_page` + `page` query params (Zoho's native shape).
+  - Transformers live in `app/clients/transformers.py` but only fire for write paths (`_transform_*_create`); list/get pass payload through unmodified.
+- Files changed (2 commits, SHAs `7c60dc9` + `203b3ac`):
+  - **NEW** `lib/integrations/zoho/items.ts` — replaces H.x0.5 stubs with `fetchZohoItemsDryRun` (GET only) + pure helpers `normalizeZohoItem` / `deriveZohoItemLumaTarget` / `extractCollection`. Tolerates `{ items: [...] }`, `{ data: [...] }`, and bare-array shapes.
+  - **NEW** `lib/integrations/zoho/customers.ts` — `fetchZohoCustomersDryRun` + `normalizeZohoCustomer` + `deriveCustomerCodeSuggestion` (sanitises to A-Z0-9-, clamped 32 chars) + `deriveZohoCustomerLumaTarget`.
+  - **NEW** `lib/integrations/zoho/sync-dry-run.ts` — pure diff engine (`diffZohoItemsAgainstLuma`, `diffZohoCustomersAgainstLuma`, `countDryRunRows`, `readinessBlockedMessage`) + orchestrator `runZohoDryRunSync` with full test seams (`probeReadiness`, `fetchItems`, `fetchCustomers`, `loadLumaItems`, `loadLumaCustomers`, `persistRun`).
+  - **NEW** `lib/integrations/zoho/{items,customers,sync-dry-run}.test.ts` — 73 cases across the three files (24 + 19 + 30) plus 4 cross-file static guards.
+  - **NEW** `app/(admin)/settings/integrations/zoho/dry-run-button.tsx` — client component for the new button.
+  - **NEW** `scripts/verify-zoho-2a.ts` — in-container harness mirrors the action, asserts the NEEDS_REAUTH path blocks fetch + writes exactly one PARTIAL ITEMS row.
+  - MOD `app/(admin)/settings/integrations/zoho/actions.ts` — added `runItemCustomerDryRunAction` (requireAdmin; wraps `runZohoDryRunSync` with a transactional persister that writes one row per kind to `zoho_sync_runs` + `audit_log`).
+  - MOD `app/(admin)/settings/integrations/zoho/page.tsx` — new "Dry-run item / customer sync (ZOHO-2A)" `ProductionSection` showing readiness + selected brand + last ITEMS / CUSTOMERS row + counts (scanned / conflicts), plus the `DryRunButton`. When readiness ≠ READY_FOR_DRY_RUN, a `ProductionAlertCard` explains the blocker.
+  - MOD `lib/production/product-structure.test.ts` — removed the legacy H.x0.5 "Zoho stubs" describe block (60 lines) — its assertions targeted now-deleted exports (`ZohoNotConfiguredError`, `listZohoItems` throwing, `mapZohoItemToLumaItem`); equivalent contracts now live in `items.test.ts` against the real `fetchZohoItemsDryRun` and `deriveZohoItemLumaTarget`.
+- Item / customer client behavior:
+  - `fetchZohoItemsDryRun` and `fetchZohoCustomersDryRun` validate config first (returns `NOT_CONFIGURED` when env empty; never opens a socket). Build URL with the configured gateway URL + path + per_page + page. Send `X-Internal-Token` + `X-Brand` headers. Map responses:
+    - 2xx + parseable body → `OK` with normalized rows + raw count
+    - 401 / 403 → `UNAUTHORIZED` (will fire when tokens expire mid-call)
+    - Other 4xx / 5xx → `ERROR`
+    - Connection failures → `UNREACHABLE` (via `mapZohoGatewayError`)
+  - Normalizers return `null` (silently drop) when the unique id is missing. Never invent fields. Preserve verbatim `raw` jsonb for forensics.
+  - Target derivation: `PACKAGING_MATERIAL` (category contains "packaging" / "blister" / "foil" / "pvc" / "shrink", or inventory_account contains "packaging"); `TABLET_TYPE` (item_type contains "raw" or category contains "tablet" / "bulk"); `PRODUCT` (item_type sales/inventory or category "finished"); else `UNKNOWN`. Conservative.
+- Readiness-block behavior (the load-bearing invariant):
+  - `runZohoDryRunSync` calls `probeReadiness` first. For any non-`READY_FOR_DRY_RUN` outcome it writes exactly ONE `zoho_sync_runs` row (`syncType=ITEMS`, `status=PARTIAL`, `source=manual`/`verify-script`, `dryRun=true`, error=human-readable reason from `readinessBlockedMessage`). The customers row is NOT written when blocked — there was no customers attempt to record.
+  - The fetchers are gated behind the readiness check — they are never invoked when blocked. The orchestrator test asserts this for every non-READY readiness state; the in-container verify harness asserts it on the real gateway against `NEEDS_REAUTH`.
+- Dry-run diff behavior:
+  - **Items** — `CREATE_CANDIDATE` (new + mappable), `UPDATE_CANDIDATE` (already mapped, name drifted), `NO_CHANGE` (already mapped, name matches), `NEEDS_REVIEW` (missing SKU / inactive in Zoho / Luma target unknown), `CONFLICT` (duplicate Zoho id within payload / duplicate SKU within payload). Reasons list captures all triggers per row.
+  - **Customers** — same action set but reasons differ: `missing_customer_code`, `customer_duplicate_in_zoho`, `inactive_in_zoho`, `luma_target_unknown`, `local_already_mapped`, `mapping_present_name_changed`. Customer match key is `zohoCustomerId` (never name).
+  - Idempotent: re-running with the same Zoho payload + Luma snapshot produces the same diff. Pure functions; no DB writes anywhere in the diff layer.
+  - Counts: `scanned / createCandidates / updateCandidates / noChange / needsReview / conflicts`. Conflicts > 0 → run status is `PARTIAL`; otherwise `SUCCESS`. Operator UI flags conflicts so an admin reviews before ZOHO-3 apply.
+- Admin UI behavior:
+  - `/settings/integrations/zoho` now has a "Dry-run item / customer sync (ZOHO-2A)" section between the connectivity-check card and the legacy-OAuth notice.
+  - Shows readiness + selected brand + per-product token table (already from ZOHO-GW-2) + last items dry-run + last customers dry-run + counts + the new "Run item / customer dry-run" button.
+  - When readiness is NEEDS_REAUTH: a `WARN`-toned `ProductionAlertCard` reads "Dry-run blocked — Zoho tokens expired" with the exact operator action.
+  - Button enabled whenever URL is configured (even when readiness is non-READY). Clicking it on a blocked readiness writes the audit row and surfaces "Blocked: NEEDS_REAUTH" with the same explanatory text. The orchestrator does NOT call /items or /contacts_inv in that case.
+  - Secret value never displayed (still redacted by `stripZohoSecret`).
+- Tests added (+67 over ZOHO-GW-2's 1310 → **1377 / 1377 PASS** across 59 files; +3 test files):
+  - `items.test.ts` 24 cases — normalization (complete / missing id / empty sku / inactive / boolean is_active / string-encoded number / preserves raw / non-object inputs), `deriveZohoItemLumaTarget` (packaging from category / inventory_account, tablet from category / item_type, product default, unknown), `extractCollection` (4 shape variants), `fetchZohoItemsDryRun` mocked (NOT_CONFIGURED / OK / X-Internal-Token + X-Brand header send / UNAUTHORIZED 401 / ERROR 500 / UNREACHABLE on ECONNREFUSED).
+  - `customers.test.ts` 19 cases — same shape for contacts including the `customerCodeSuggestion` priority chain (cf_customer_code → customer_code → contact_number → company_name fallback → null) and the sanitiser (uppercase, dash-collapsed, 32-char clamp).
+  - `sync-dry-run.test.ts` 30 cases — item diff matrix (CREATE_CANDIDATE / NEEDS_REVIEW × missing_sku / inactive / luma_target_unknown / CONFLICT × duplicate_zoho_id / duplicate_sku_in_zoho / NO_CHANGE on mapped match / UPDATE_CANDIDATE on name drift / packaging-material routing / readonly inputs), customer diff matrix (mirror), `countDryRunRows`, `readinessBlockedMessage` for all 7 readiness states, orchestrator BLOCKED path (NEEDS_REAUTH writes exactly one PARTIAL ITEMS row; fetchers never called for any non-READY readiness), orchestrator OK path writes both ITEMS + CUSTOMERS rows, orchestrator ERROR propagation. **4 static-source guards**: no `@/lib/zoho/client` import; no POST/PUT/DELETE/PATCH methods; no `.insert(products)` / `.update(customers)` etc. on any new module.
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1377 / 1377 PASS across 59 files**.
+  - `npx next build` → clean.
+  - Auth smoke → **48 / 48 PASS** at SHA `7c60dc9`.
+- Staging verification (LX122 / SHA `7c60dc9` for the feature + `203b3ac` for the verify harness):
+  - Deploy hit the standard container-name-conflict trap; cleared manually via `docker rm -f` then `docker compose up -d`.
+  - `verify-zoho-2a.ts` exits 0 with:
+    ```
+    result.kind= BLOCKED
+    readiness= NEEDS_REAUTH
+    reason= Zoho gateway is reachable, but haute_brands tokens must be re-authorized before live dry-run can fetch items/customers.
+    itemRunId= 36f64496-da88-46ac-a71c-356f5b6503a9
+    customerRunId= null
+    itemFetcherCalled= false
+    customerFetcherCalled= false
+    ```
+  - The recent `zoho_sync_runs` table now shows one PARTIAL ITEMS row from the verify script. No CUSTOMERS row was written — confirming the "block-and-record-only-the-head-row" pattern. No item / customer endpoint was hit on the gateway side (fetcher counters stayed at `false`).
+  - `/settings/integrations/zoho` now renders the ZOHO-2A section between the connectivity card and the legacy-OAuth notice. The blocked banner is visible because readiness is still NEEDS_REAUTH.
+- Is ZOHO-2B unblocked?
+  - **Luma side: YES.** All code paths exist and are tested. Once `haute_brands` Zoho tokens are refreshed on the gateway, readiness flips to `READY_FOR_DRY_RUN` and the same orchestrator + same verify script flow exercises the live read path. ZOHO-2B's only deliverable will be re-running the verify script and confirming non-zero `scanned` counts plus the row-shape conformance.
+  - **Gateway side: NO.** `haute_brands` × {books, crm, expense, inventory} tokens are still expired. **Operator action on LXC 9503**: re-authorize via the gateway's onboarding flow per the ZOHO-GW-2 closeout.
+
+---
+
 ## ZOHO-GW-2: align Luma gateway client with real gateway contract (complete)
 - Date: 2026-05-14
 - Result: Luma's Zoho gateway client now speaks the real gateway's protocol — `X-Internal-Token` auth + `X-Brand` selection + brand-list parsing from `/status` + per-product token-status surfacing + new `ZohoReadiness` label. Staging surfaces the honest `NEEDS_REAUTH` state because all `haute_brands` Zoho tokens are expired on the gateway side.

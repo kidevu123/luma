@@ -446,7 +446,33 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 
 ---
 
-### [ ] ZOHO-2 — Item + customer read sync, dry-run mode only
+### [x] ZOHO-2A — Item + customer dry-run scaffolding (mocked-gateway tests)
+**Objective.** Build the Luma-side dry-run engine and preview layer for item / customer sync. No live writes anywhere; mocked gateway responses in tests. When `haute_brands` tokens are refreshed, ZOHO-2B re-runs the same engine against live data.
+
+**Gateway audit:** `GET /zoho/items/list` → `/inventory/v1/items`; `GET /zoho/contacts_inv/list` → `/inventory/v1/contacts`. Both require `X-Internal-Token` + `X-Brand`.
+
+**Files touched.** `lib/integrations/zoho/items.ts` (replaces H.x0.5 stubs), `lib/integrations/zoho/customers.ts` (new), `lib/integrations/zoho/sync-dry-run.ts` (new — diff + orchestrator), 3 new test files, `app/(admin)/settings/integrations/zoho/{page,actions}.tsx` + new `dry-run-button.tsx`, `scripts/verify-zoho-2a.ts` (new), `lib/production/product-structure.test.ts` (removed H.x0.5 stub block).
+
+**Closeout (2026-05-14, SHA `7c60dc9`):** Orchestrator blocks fetch when readiness != READY_FOR_DRY_RUN; writes exactly one PARTIAL ITEMS row + zero CUSTOMERS rows in that case. Diff engine covers 11 reason codes × 5 action codes for items + customers. tsc clean / vitest **1377/1377** (+67 vs ZOHO-GW-2's 1310; +3 test files) / next build clean / auth smoke 48/48 PASS / staging verify exits 0 with `result.kind=BLOCKED, readiness=NEEDS_REAUTH, fetcher invoked=false`. ZOHO-2B unblocked Luma-side; **gateway-side blocked on operator re-authorizing `haute_brands` tokens on LXC 9503**.
+
+---
+
+### [ ] ZOHO-2B — Live dry-run verification after haute_brands tokens are refreshed
+**Objective.** Re-run `scripts/verify-zoho-2a.ts` against the live gateway after the gateway operator has re-authorized `haute_brands` × {books, crm, expense, inventory} Zoho refresh tokens. Confirm non-zero scanned counts and that the diff engine emits sensible CREATE_CANDIDATE / NEEDS_REVIEW / NO_CHANGE / UPDATE_CANDIDATE / CONFLICT rows against the real Zoho item + contact data.
+
+**Prerequisites.** Operator action on LXC 9503: run gateway's brand re-auth flow for `haute_brands` Zoho refresh tokens.
+
+**Acceptance criteria.**
+- Connectivity check on `/settings/integrations/zoho` reports `READY_FOR_DRY_RUN`.
+- `verify-zoho-2a.ts` exits 0 with `result.kind=OK` and `items.counts.scanned > 0` + `customers.counts.scanned > 0`.
+- Two `zoho_sync_runs` rows written (one ITEMS, one CUSTOMERS) with `status=SUCCESS` (or `status=PARTIAL` if Zoho-side duplicates produce conflicts).
+- No writes to products / customers / tablet_types / packaging_materials.
+
+**Stop condition.** Diff against real Zoho data captured + audit row visible. Owner reviews the preview rows before authorizing ZOHO-3 apply.
+
+---
+
+### [ ] ZOHO-3 — Apply item + customer sync with mapping review
 **Objective.** Implement `listZohoItems()` and customer-list helpers via the gateway. Add pg-boss handlers `zoho.items.sync` + `zoho.customers.sync` in DRY-RUN mode only (no writes outside `zoho_sync_runs`). Surface the proposed diff on `/settings/integrations/zoho-items`.
 
 **Prerequisites.**
@@ -469,12 +495,6 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 - Diff computation tests (overwrite-protection, no-op detection).
 
 **Stop condition.** Dry-run produces a sensible diff against a real Zoho org. Owner reviews and signs off before ZOHO-3 flips the write switch.
-
----
-
-### [ ] ZOHO-3 — Apply item + customer sync with mapping review
-
-(See `docs/ZOHO_LIVE_SYNC_PLAN.md` §8.)
 
 ---
 
