@@ -4,6 +4,59 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## LOT-1 closeout — Full Finished Lot / Recall Passport block complete
+- Date: 2026-05-14
+- Result: LOT-1A through LOT-1G closed. End-to-end Luma side of the recall-passport loop is live on staging: plan → schema → projector → search UI → labels → CSV → Nexus contract → send persistence with full QA verification.
+- What got built across LOT-1A → LOT-1G:
+  - **LOT-1A** — plan doc (`docs/FINISHED_LOT_RECALL_PASSPORT_PLAN.md`).
+  - **LOT-1B** — migration 0031 (8 schema additions across 4 tables, 6 new tables, all-additive) + `lib/production/recall-passport.ts` pure helpers + 33 tests.
+  - **LOT-1C** — `lib/projector/finished-lot-passport.ts` projector + 4 projection tables wired into BAG_FINALIZED, createFinishedLot, and the rebuild script + 22 pure-helper tests.
+  - **LOT-1D** — receiving bridge (`getRawBagReceiptIdentity` stamps inventory_bags on insert) + `lib/production/recall-passport-loaders.ts` six-axis search loader + `/recall` page fully rewritten + 10 tests.
+  - **LOT-1E** — `lib/production/finished-lot-labels.ts` (6 helpers: label payload builders, customer-safe visibility, trace-code formatter, CSV builder) + `/finished-lots/[id]/labels` page + `/recall/export.csv` route handler + 23 tests.
+  - **LOT-1F** — `lib/integrations/nexus/finished-lots.ts` Nexus client + payload builder + admin action (contract-only, no persistence) + UI status card + 28 tests.
+  - **LOT-1G** — migration 0032 (3 send-state columns on `shipment_finished_lots`) + persistence wired into the send action + "Send to Nexus" UI button + `scripts/verify-lot1g.ts` end-to-end harness.
+- Staging verification (LOT-1G):
+  - SHA `30d5f24` live on LX122.
+  - `verify-lot1g.ts` executed inside the container via `./node_modules/.bin/tsx scripts/verify-lot1g.ts`. **All 24 in-script assertions passed.** The harness:
+    1. Seeded QA customer (`LOT1G-QA-…` code, fresh `nexus_customer_id`), shipment, finished_lot (trace `FL-QA-…`), output, and shipment_finished_lots link — all clearly tagged "LOT-1G verification".
+    2. Confirmed the sendability gate returns `sendable=true` with no reasons.
+    3. Built the Nexus payload: `schema_version=1.0`, `source=LUMA`, trace_code populated, supplier_lot field OMITTED entirely (default hidden), `customer.nexus_customer_id` carried through.
+    4. Spun up an in-process Node `http` mock receiver on `127.0.0.1:<ephemeral>`.
+    5. POSTed and asserted the mock captured every required header: `x-luma-nexus-secret`, `x-luma-finished-lot-id`, `x-luma-trace-code`. JSON body re-parsed and `schema_version` + `customer.nexus_customer_id` matched.
+    6. Persisted success branch via the action's pattern: `nexus_sent_at` populated, `nexus_last_sent_response` populated, `nexus_last_send_error` cleared. Confirmed by re-reading the row.
+    7. Spun up a second mock returning HTTP 500. Send returned `ok=false, code='HTTP_ERROR'`. Persisted failure branch: `nexus_last_send_error` populated, `nexus_sent_at` **preserved** from the prior success.
+    8. Cleanup: deleted every QA row (audit log entries stay as forensic history).
+  - Migration 0032 (`when=1781200000000`) present in `drizzle.__drizzle_migrations`.
+  - All 3 nexus_* columns confirmed via `\d shipment_finished_lots`.
+  - Auth smoke 47/47 PASS.
+  - No real Nexus POST attempted on staging — env intentionally unset; harness used in-process mock receiver.
+- Build / test results (final):
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1208/1208 pass across 54 files** (LOT-1G adds the verification harness as a runtime script, not a vitest file; total unchanged from LOT-1F).
+  - `npx next build` → clean.
+- Recall / label / export verification:
+  - `/recall` continues to return 200; 6-axis search panel renders.
+  - `/recall/export.csv` route handler builds clean; customer-safe by default (supplier_lot blank); `?customer_supplier_lot_visible=true` toggles internal mode.
+  - `/finished-lots/[id]/labels` continues to render; gains the gated "Send to Nexus" button (LOT-1G).
+  - Customer-safe label hides supplier_lot by default (LOT-1E + LOT-1F + LOT-1G all enforce the rule end-to-end).
+  - Internal export includes supplier_lot only on explicit opt-in.
+  - Trace code is the single customer-facing printed code (FL- prefix); internal receipt number is internal/searchable only — never on customer payloads.
+  - Supplier lot never leaks: tested at three layers (label helper string-search, Nexus payload field omission, CSV column blanking).
+- Known limitations (carry-forward):
+  1. **Nexus real endpoint not implemented or used.** LOT-1G verified the loop with an in-process mock. Luma-side contract is stable.
+  2. **Customer portal dropdown rendering is Nexus-side work.** Luma posts customer-safe records; Nexus owns the dropdown UX.
+  3. **Real finished lots require production finalization data.** Staging is empty by design — verify against synthetic QA seeds (as `verify-lot1g.ts` does).
+  4. **Legacy data may have LOW / MISSING confidence** when raw-bag QR or bag-level linkage is absent. The projector marks these honestly (`finished_lot_raw_bags.confidence`), and the UI surfaces them with badges + warnings rather than hiding the gap.
+  5. **Supplier lot hidden by default.** Only `customers.supplier_lot_visible=true` flips the flag; the rule is single-sourced through `shouldExposeSupplierLotForCustomer`.
+  6. **No fake production data on staging.** Every QA verification script (`verify-pt7f.ts`, `verify-lot1g.ts`) seeds + tears down its own rows; audit log entries stay.
+  7. **One representative supplier lot per finished_lot** in the Nexus payload today. LOT-2 could refine to multi-lot disclosure when needed; not required by the current customer contract.
+  8. **`shipment_finished_lots` carries one link per (shipment, finished_lot) pair.** Multi-shipment finished lots will need a fan-out send loop in LOT-2; today the action handles the first link only.
+- Final state — LOT-1 fully complete?
+  - **Yes.** All 7 sub-phases (`LOT-1A` → `LOT-1G`) checked. Block-level checkbox in `docs/CLAUDE_BUILD_QUEUE.md` flipped to `[x]`. Two new migrations (0031, 0032), two new pages (`/recall` rewrite, `/finished-lots/[id]/labels`), one new route handler (`/recall/export.csv`), one new outbound integration (Nexus), one full verification harness shipped.
+- Next unchecked phase in `docs/CLAUDE_BUILD_QUEUE.md`: **Command center visual polish** — density + brand pass on `/floor-board`, `/genealogy`, `/operator-productivity`, `/packaging-output`. After that, queued items in order: **Zoho live sync** → **Nexus / QIP batch-complaint integration** (the customer-portal side; Luma side is LOT-1F+G complete).
+
+---
+
 ## LOT-1F — Nexus / QIP finished-lot handoff contract (complete)
 - Date: 2026-05-14
 - Result: contract phase. Client + payload builder + admin send action exist; no DB persistence yet (sent_at / last_sent_response / last_send_error on `shipment_finished_lots` is LOT-1G's call). UI status card on the labels page shows operators whether a finished lot is Nexus-sendable, without offering a send button.
