@@ -28,6 +28,14 @@ import {
   buildCustomerSafeLabelPayload,
   type FinishedLotLabelPayload,
 } from "@/lib/production/finished-lot-labels";
+import {
+  isFinishedLotSendableToNexus,
+  validateNexusConfig,
+} from "@/lib/integrations/nexus/finished-lots";
+import {
+  customers,
+  shipmentFinishedLots,
+} from "@/lib/db/schema";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -165,6 +173,42 @@ export default async function FinishedLotLabelsPage({
     buildFinishedLotLabelPayload({ template: "INTERNAL", ...baseArgs, output: o }),
   );
 
+  // ── Nexus handoff status (read-only; LOT-1F contract-only) ──
+  const [shipmentLink] = await db
+    .select({
+      shipmentFinishedLotId: shipmentFinishedLots.id,
+      customerId: shipmentFinishedLots.customerId,
+    })
+    .from(shipmentFinishedLots)
+    .where(eq(shipmentFinishedLots.finishedLotId, id));
+  let customerRow:
+    | {
+        customerCode: string;
+        name: string;
+        nexusCustomerId: string | null;
+        supplierLotVisible: boolean;
+      }
+    | null = null;
+  if (shipmentLink?.customerId) {
+    const [c] = await db
+      .select({
+        customerCode: customers.customerCode,
+        name: customers.name,
+        nexusCustomerId: customers.nexusCustomerId,
+        supplierLotVisible: customers.supplierLotVisible,
+      })
+      .from(customers)
+      .where(eq(customers.id, shipmentLink.customerId));
+    customerRow = c ?? null;
+  }
+  const nexusConfig = validateNexusConfig();
+  const sendability = isFinishedLotSendableToNexus({
+    traceCode: lotRow.traceCode,
+    nexusCustomerId: customerRow?.nexusCustomerId,
+    shipmentLinkPresent: !!shipmentLink,
+    configured: nexusConfig.configured,
+  });
+
   return (
     <div className="space-y-5">
       <div>
@@ -193,6 +237,12 @@ export default async function FinishedLotLabelsPage({
         </Card>
       ) : (
         <>
+          <NexusStatusCard
+            sendability={sendability}
+            traceCode={lotRow.traceCode}
+            customer={customerRow}
+            nexusConfigured={nexusConfig.configured}
+          />
           <Section title="Customer-facing labels">
             <LabelGrid labels={customerLabels} />
           </Section>
@@ -201,6 +251,109 @@ export default async function FinishedLotLabelsPage({
           </Section>
         </>
       )}
+    </div>
+  );
+}
+
+function NexusStatusCard({
+  sendability,
+  traceCode,
+  customer,
+  nexusConfigured,
+}: {
+  sendability: { sendable: boolean; reasons: string[] };
+  traceCode: string | null;
+  customer:
+    | {
+        customerCode: string;
+        name: string;
+        nexusCustomerId: string | null;
+        supplierLotVisible: boolean;
+      }
+    | null;
+  nexusConfigured: boolean;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          Nexus handoff status —{" "}
+          <span
+            className={`inline-flex items-center h-5 px-1.5 rounded-sm border text-[10px] font-semibold uppercase tracking-wider ${
+              sendability.sendable
+                ? "border-emerald-400 bg-emerald-50 text-emerald-900"
+                : "border-slate-300 bg-slate-100 text-slate-700"
+            }`}
+          >
+            {sendability.sendable ? "sendable" : "not sendable"}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[12px]">
+        <StatusRow
+          label="Trace code"
+          ok={!!(traceCode && traceCode.trim().length > 0)}
+          value={traceCode ?? "missing"}
+        />
+        <StatusRow
+          label="Customer linkage"
+          ok={!!customer}
+          value={
+            customer
+              ? `${customer.customerCode} · ${customer.name}`
+              : "no shipment / customer linked"
+          }
+        />
+        <StatusRow
+          label="Nexus customer id"
+          ok={!!customer?.nexusCustomerId}
+          value={customer?.nexusCustomerId ?? "missing"}
+        />
+        <StatusRow
+          label="Nexus endpoint / secret"
+          ok={nexusConfigured}
+          value={nexusConfigured ? "configured" : "NEXUS_FINISHED_LOT_URL / _SECRET unset"}
+        />
+        <StatusRow
+          label="Supplier lot visible to customer"
+          ok={true}
+          value={
+            customer?.supplierLotVisible
+              ? "yes (customer opted in)"
+              : "no (hidden by default)"
+          }
+        />
+        {!sendability.sendable && sendability.reasons.length > 0 && (
+          <div className="col-span-2 md:col-span-3 text-amber-800 text-[11px]">
+            Blocked: {sendability.reasons.join("; ")}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatusRow({
+  label,
+  ok,
+  value,
+}: {
+  label: string;
+  ok: boolean;
+  value: string;
+}) {
+  return (
+    <div className="rounded border border-border bg-surface px-2 py-1.5">
+      <div className="text-[10px] uppercase tracking-wider text-text-muted">
+        {label}
+      </div>
+      <div
+        className={`text-[12px] font-medium ${
+          ok ? "text-text" : "text-amber-800"
+        }`}
+      >
+        {value}
+      </div>
     </div>
   );
 }

@@ -59,6 +59,9 @@ const FILES = [
   "lib/production/finished-lot-labels.ts",
   "app/(admin)/finished-lots/[id]/labels/page.tsx",
   "app/(admin)/recall/export.csv/route.ts",
+  // LOT-1F surface — Nexus / QIP outbound contract + admin action.
+  "lib/integrations/nexus/finished-lots.ts",
+  "app/(admin)/finished-lots/[id]/labels/nexus-actions.ts",
 ];
 
 const BANNED = [
