@@ -250,6 +250,18 @@ export function ReceiveWizard({
                         {(Number(b.bagCount || 0) * Number(b.pillCountPerBag || 0)).toLocaleString()} pills
                       </span>
                     </p>
+                    {receiveName && b.bagCount > 0 && (
+                      <p className="text-[10px] text-text-subtle italic">
+                        Each bag will be issued an internal receipt
+                        number like{" "}
+                        <span className="font-mono text-text">
+                          {receiveName}-B{b.boxNumber}-1
+                        </span>{" "}
+                        and a Luma raw-bag QR (BAG-prefix). The vendor's
+                        own barcode on the bag sticker stays untouched.
+                        Declared pill count = pills/bag.
+                      </p>
+                    )}
                   </div>
                 ))
               )}

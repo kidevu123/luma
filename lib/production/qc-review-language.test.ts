@@ -52,6 +52,9 @@ const FILES = [
   "lib/production/recall-passport.ts",
   // LOT-1C surface — finished-lot projector wired into BAG_FINALIZED + createFinishedLot.
   "lib/projector/finished-lot-passport.ts",
+  // LOT-1D surface — recall passport search page + loader.
+  "lib/production/recall-passport-loaders.ts",
+  "app/(admin)/recall/page.tsx",
 ];
 
 const BANNED = [
