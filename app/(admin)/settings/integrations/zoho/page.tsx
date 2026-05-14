@@ -1,22 +1,24 @@
-// ZOHO-1 — Zoho gateway connectivity + status page.
+// ZOHO-GW-2 — Zoho gateway connectivity + readiness page.
 //
 // Owner decision: live Zoho sync routes through the LXC integration
-// gateway (env: ZOHO_INTEGRATION_URL). Luma never holds Zoho OAuth
-// refresh/access tokens; the gateway owns Zoho creds.
+// gateway (env: ZOHO_INTEGRATION_URL, default http://192.168.1.205:8000).
+// Luma never holds Zoho OAuth credentials directly; the gateway owns
+// them. Multi-brand gateway — Luma selects via ZOHO_BRAND.
 //
-// This page surfaces:
-//   - whether ZOHO_INTEGRATION_URL is configured
-//   - whether an optional ZOHO_INTEGRATION_SECRET is set
-//   - the most recent zoho_sync_runs row of kind CONNECTIVITY_CHECK
-//   - a "Test gateway connection" button (server action) that probes the
-//     gateway /health and /organizations endpoints and writes a new
-//     CONNECTIVITY_CHECK run row
-//   - a notice about the legacy direct-OAuth path (/settings/zoho)
-//     existing but not used by the live sync from ZOHO-2 onward
+// Surfaces:
+//   - URL configured · secret configured · brand configured
+//   - selected brand · Zoho org id · per-product token status (valid /
+//     expired / missing) with expiry timestamps
+//   - latest zoho_sync_runs CONNECTIVITY_CHECK row
+//   - "Test gateway connection" button (server action) that probes
+//     /health + /status and writes a fresh CONNECTIVITY_CHECK row
+//   - overall readiness:
+//       NOT_CONFIGURED · UNREACHABLE · ERROR · CONNECTED_HEALTH_ONLY ·
+//       NEEDS_SELECTION · NEEDS_REAUTH · READY_FOR_DRY_RUN
+//   - legacy direct-OAuth notice
 //
-// Does NOT show the secret value.
-// Does NOT initiate items/customers/sales-orders/POs sync.
-// Does NOT call Zoho directly.
+// Does NOT show secret values. Does NOT sync items / customers / SO /
+// PO. Does NOT call Zoho writes.
 
 import Link from "next/link";
 import { db } from "@/lib/db";
@@ -30,9 +32,11 @@ import {
   ProductionIdentityBlock,
   ProductionSection,
   type IdentityRow,
+  type Tone,
 } from "@/components/production/ui";
 import {
   validateZohoGatewayConfig,
+  ZOHO_GATEWAY_BRAND_ENV,
   ZOHO_GATEWAY_SECRET_ENV,
   ZOHO_GATEWAY_URL_ENV,
 } from "@/lib/integrations/zoho/gateway";
@@ -44,6 +48,16 @@ function fmtDate(d: Date | null | undefined): string {
   if (!d) return "Never";
   return d.toISOString().replace("T", " ").slice(0, 19) + " UTC";
 }
+
+const READINESS_TONE: Record<string, Tone> = {
+  READY_FOR_DRY_RUN: "GOOD",
+  CONNECTED_HEALTH_ONLY: "INFO",
+  NEEDS_REAUTH: "WARN",
+  NEEDS_SELECTION: "WARN",
+  UNREACHABLE: "CRITICAL",
+  ERROR: "CRITICAL",
+  NOT_CONFIGURED: "MUTED",
+};
 
 export default async function ZohoGatewayPage() {
   await requireAdmin();
@@ -72,53 +86,55 @@ export default async function ZohoGatewayPage() {
     .where(eq(externalSystems.code, "ZOHO"));
 
   const summary = (lastCheck?.summary ?? {}) as {
-    gateway?: { status?: string; httpStatus?: number | null; probedPath?: string | null; elapsedMs?: number | null };
-    organizations?: { kind?: string; count?: number; ids?: string[] };
+    gateway?: {
+      status?: string;
+      httpStatus?: number | null;
+      probedPath?: string | null;
+      elapsedMs?: number | null;
+      brand?: string | null;
+    };
+    brand?: {
+      kind?: string;
+      selectedBrandKey?: string | null;
+      selectedOrganizationId?: string | null;
+      availableBrandKeys?: string[];
+      tokenStatuses?: Array<{ product: string; tokenStatus: string }>;
+    };
+    readiness?: string;
   };
 
   const configRows: IdentityRow[] = [
-    {
-      label: "Gateway URL env",
-      value: ZOHO_GATEWAY_URL_ENV,
-      mono: true,
-    },
-    {
-      label: "Configured",
-      value: cfg.configured ? "yes" : "no",
-    },
-    {
-      label: "URL value",
-      // Render the URL itself but NEVER the secret. The URL is non-
-      // sensitive (LAN host:port).
-      value: cfg.configured ? cfg.url : null,
-      mono: true,
-    },
-    {
-      label: "Secret env",
-      value: ZOHO_GATEWAY_SECRET_ENV,
-      mono: true,
-    },
-    {
-      label: "Secret configured",
-      value: cfg.hasSecret ? "yes" : "no (optional)",
-    },
-    {
-      label: "External system row",
-      value: zohoSystem ? "registered" : "missing",
-    },
+    { label: "Gateway URL env", value: ZOHO_GATEWAY_URL_ENV, mono: true },
+    { label: "Configured", value: cfg.configured ? "yes" : "no" },
+    { label: "URL value", value: cfg.configured ? cfg.url : null, mono: true },
+    { label: "Secret env", value: ZOHO_GATEWAY_SECRET_ENV, mono: true },
+    { label: "Secret configured", value: cfg.hasSecret ? "yes" : "no" },
+    { label: "Brand env", value: ZOHO_GATEWAY_BRAND_ENV, mono: true },
+    { label: "Brand configured", value: cfg.hasBrand ? cfg.brand : "no" },
+    { label: "External system row", value: zohoSystem ? "registered" : "missing" },
   ];
+
+  const readiness = summary.readiness ?? "NOT_CONFIGURED";
+  const readinessTone: Tone = READINESS_TONE[readiness] ?? "MUTED";
+
+  const tokenStatuses = summary.brand?.tokenStatuses ?? [];
+  const tokenRows: IdentityRow[] = tokenStatuses.map((t) => ({
+    label: t.product,
+    value: t.tokenStatus,
+    mono: true,
+  }));
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Zoho gateway"
-        description="Connectivity + status for the Zoho integration gateway on LXC 9503. Luma never holds Zoho OAuth credentials directly — the gateway owns them. This phase is connectivity-check only; item / customer / sales-order / PO sync land in ZOHO-2 onward."
+        description={`Connectivity + brand readiness for the Zoho integration gateway. Luma never holds Zoho OAuth credentials directly — the gateway on LXC ${cfg.configured ? cfg.url : "9503"} owns them. This phase is connectivity-only; item / customer / sales-order / PO sync land in ZOHO-2 onward.`}
       />
 
       <ProductionSection
         title="Gateway configuration"
         subtitle="Environment variables — secret value never shown."
-        tone={cfg.configured ? "GOOD" : "WARN"}
+        tone={cfg.configured ? (cfg.hasSecret && cfg.hasBrand ? "GOOD" : "WARN") : "WARN"}
       >
         <ProductionIdentityBlock rows={configRows} columns={2} />
         {!cfg.configured && cfg.issues.length > 0 ? (
@@ -131,6 +147,15 @@ export default async function ZohoGatewayPage() {
                 body={m}
               />
             ))}
+          </div>
+        ) : null}
+        {cfg.configured && !cfg.hasBrand ? (
+          <div className="mt-3">
+            <ProductionAlertCard
+              tone="WARN"
+              title={`${ZOHO_GATEWAY_BRAND_ENV} not set`}
+              body="Required for protected gateway calls. Without it, the gateway returns NEEDS_SELECTION when multiple brands exist."
+            />
           </div>
         ) : null}
       </ProductionSection>
@@ -154,6 +179,7 @@ export default async function ZohoGatewayPage() {
               columns={2}
               rows={[
                 { label: "Run status", value: lastCheck.status },
+                { label: "Readiness", value: readiness },
                 { label: "Started", value: fmtDate(lastCheck.startedAt), mono: true },
                 { label: "Finished", value: fmtDate(lastCheck.finishedAt), mono: true },
                 { label: "Source", value: lastCheck.source },
@@ -178,16 +204,55 @@ export default async function ZohoGatewayPage() {
                   mono: true,
                 },
                 {
-                  label: "Orgs outcome",
-                  value: summary.organizations?.kind ?? null,
+                  label: "Brand outcome",
+                  value: summary.brand?.kind ?? null,
                 },
                 {
-                  label: "Orgs returned",
-                  value: summary.organizations?.count ?? null,
+                  label: "Selected brand",
+                  value: summary.brand?.selectedBrandKey ?? null,
+                  mono: true,
+                },
+                {
+                  label: "Zoho org id",
+                  value: summary.brand?.selectedOrganizationId ?? null,
+                  mono: true,
+                },
+                {
+                  label: "Available brands",
+                  value: summary.brand?.availableBrandKeys?.join(", ") ?? null,
                   mono: true,
                 },
               ] satisfies IdentityRow[]}
             />
+            <div className="mt-4">
+              <ProductionAlertCard
+                tone={readinessTone}
+                title={`Overall readiness: ${readiness}`}
+                body={
+                  readiness === "READY_FOR_DRY_RUN"
+                    ? "Gateway reachable, brand selected, all relevant Zoho tokens valid. ZOHO-2 dry-run can proceed."
+                    : readiness === "NEEDS_REAUTH"
+                      ? "Gateway reachable + brand selected, but one or more Zoho refresh tokens are expired on the gateway. ZOHO-2 cannot proceed until an operator re-authorizes them on the gateway side."
+                      : readiness === "NEEDS_SELECTION"
+                        ? "Gateway reachable, but multiple brands available and ZOHO_BRAND is not set (or does not match)."
+                        : readiness === "CONNECTED_HEALTH_ONLY"
+                          ? "Gateway /health reachable; /status did not return a brands list."
+                          : readiness === "UNREACHABLE"
+                            ? "Gateway connection refused / DNS failure / timeout."
+                            : readiness === "ERROR"
+                              ? "Gateway returned an error. See the run row above."
+                              : "Gateway not configured. Set ZOHO_INTEGRATION_URL on the LXC."
+                }
+              />
+            </div>
+            {tokenRows.length > 0 ? (
+              <div className="mt-4">
+                <p className="text-[11px] uppercase tracking-[0.10em] text-text-muted font-semibold mb-1">
+                  Per-product Zoho token status
+                </p>
+                <ProductionIdentityBlock rows={tokenRows} columns={4} />
+              </div>
+            ) : null}
             {lastCheck.error ? (
               <div className="mt-3">
                 <ProductionAlertCard
@@ -201,7 +266,8 @@ export default async function ZohoGatewayPage() {
         ) : (
           <p className="text-sm text-text-muted">
             Click <em>Test gateway connection</em> below to run the first check.
-            Nothing is sent to Zoho — the probe only hits the LXC gateway.
+            Nothing is sent to Zoho — the probe only hits the LXC gateway at{" "}
+            <code>{cfg.configured ? cfg.url : "(not configured)"}</code>.
           </p>
         )}
       </ProductionSection>
@@ -212,12 +278,12 @@ export default async function ZohoGatewayPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-text-muted">
           <p>
-            Probes the gateway <code>/health</code> + <code>/organizations</code> endpoints,
-            then writes a <code>zoho_sync_runs</code> row with{" "}
+            Probes the gateway <code>/health</code> + <code>/status</code> endpoints
+            with <code>X-Internal-Token</code> + <code>X-Brand</code> headers, then
+            writes a fresh <code>zoho_sync_runs</code> row with{" "}
             <code>sync_type = CONNECTIVITY_CHECK</code>. No items, customers,
             sales orders, or POs are touched. The shared secret (if configured)
-            is sent in an <code>x-luma-zoho-secret</code> header — never echoed
-            back in logs or UI.
+            is sent as <code>X-Internal-Token</code> — never echoed in logs or UI.
           </p>
           <TestConnectionButton disabled={!cfg.configured} />
           {!cfg.configured ? (
@@ -234,8 +300,8 @@ export default async function ZohoGatewayPage() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-text-muted">
           <p>
-            <code>lib/zoho/client.ts</code> exists and handles per-company OAuth
-            directly against Zoho. It backs the existing{" "}
+            <code>lib/zoho/client.ts</code> handles per-company OAuth directly
+            against Zoho. It backs the existing{" "}
             <Link href="/settings/zoho" className="underline">
               /settings/zoho
             </Link>{" "}

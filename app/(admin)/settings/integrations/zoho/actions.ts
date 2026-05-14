@@ -1,26 +1,27 @@
 "use server";
 
-// ZOHO-1 — server actions for the gateway settings page.
+// ZOHO-GW-2 — server action backing the "Test gateway connection"
+// button on /settings/integrations/zoho.
 //
-// Single action today: runConnectivityCheckAction. Probes the gateway
-// health endpoint and the organizations endpoint, persists one
-// zoho_sync_runs row with sync_type='CONNECTIVITY_CHECK', writes an
-// audit row, returns a structured result for the UI to render.
+// Probes /health + /status, derives ZohoReadiness, persists one
+// zoho_sync_runs row + one audit row, returns a structured result.
 //
-// Does NOT call Zoho directly. Does NOT touch zoho_credentials (the
-// legacy direct-OAuth row). Does NOT modify any item / customer /
-// sales-order / PO data.
+// Does NOT call Zoho directly. Does NOT touch zoho_credentials (legacy
+// direct-OAuth row). Does NOT sync items / customers / sales-orders /
+// purchase-orders. Does NOT write to Zoho.
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { zohoSyncRuns } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth-guards";
 import { writeAudit } from "@/lib/db/audit";
 import {
   checkZohoGatewayHealth,
-  fetchZohoOrganizations,
+  deriveZohoReadiness,
+  fetchZohoBrandStatus,
   validateZohoGatewayConfig,
+  type ZohoBrandProductTokenStatus,
+  type ZohoReadiness,
 } from "@/lib/integrations/zoho/gateway";
 
 export type ConnectivityCheckResult =
@@ -30,18 +31,28 @@ export type ConnectivityCheckResult =
       gatewayStatus: "CONNECTED" | "UNREACHABLE" | "ERROR" | "NOT_CONFIGURED";
       gatewayMessage: string;
       gatewayElapsedMs: number | null;
-      orgsKind:
+      brandKind:
         | "OK"
+        | "NEEDS_REAUTH"
         | "NEEDS_SELECTION"
+        | "BRAND_NOT_FOUND"
         | "NONE_RETURNED"
         | "GATEWAY_LACKS_ENDPOINT"
+        | "UNAUTHORIZED"
         | "UNREACHABLE"
         | "ERROR"
         | "NOT_CONFIGURED"
         | "SKIPPED";
-      orgsCount: number;
-      orgs: Array<{ id: string; name: string; state: string | null }>;
-      orgsMessage: string | null;
+      brandMessage: string | null;
+      selectedBrand: {
+        brandKey: string;
+        organizationId: string | null;
+        region: string | null;
+        products: Array<{ product: string; tokenStatus: ZohoBrandProductTokenStatus; expiresAt: string | null }>;
+      } | null;
+      availableBrands: Array<{ brandKey: string; organizationId: string | null }>;
+      readiness: ZohoReadiness;
+      readinessMessage: string;
     }
   | { kind: "error"; message: string };
 
@@ -51,59 +62,90 @@ export async function runConnectivityCheckAction(): Promise<ConnectivityCheckRes
   const cfg = validateZohoGatewayConfig(process.env);
   const health = await checkZohoGatewayHealth();
 
-  // Organisations probe — skip entirely if the gateway is not reachable.
-  // No point hitting /organizations when the connection is refused.
-  const shouldProbeOrgs = health.status === "CONNECTED";
-  const orgs = shouldProbeOrgs
-    ? await fetchZohoOrganizations()
-    : { kind: "SKIPPED" as const };
+  // Brand probe — skip entirely if the gateway is not reachable. No
+  // point hitting /status when the connection is refused.
+  const shouldProbeBrand = health.status === "CONNECTED";
+  const brand = shouldProbeBrand ? await fetchZohoBrandStatus() : null;
+  const { readiness, message: readinessMessage } = deriveZohoReadiness({
+    health,
+    brand,
+  });
+
+  const selectedBrand =
+    brand && (brand.kind === "OK" || brand.kind === "NEEDS_REAUTH")
+      ? {
+          brandKey: brand.brand.brandKey,
+          organizationId: brand.brand.organizationId,
+          region: brand.brand.region,
+          products: brand.brand.products.map((p) => ({
+            product: p.product,
+            tokenStatus: p.tokenStatus,
+            expiresAt: p.expiresAt,
+          })),
+        }
+      : null;
+
+  const availableBrands =
+    brand &&
+    (brand.kind === "OK" ||
+      brand.kind === "NEEDS_REAUTH" ||
+      brand.kind === "NEEDS_SELECTION" ||
+      brand.kind === "BRAND_NOT_FOUND")
+      ? brand.brands.map((b) => ({
+          brandKey: b.brandKey,
+          organizationId: b.organizationId,
+        }))
+      : [];
 
   const summary = {
     gateway: {
       configured: cfg.configured,
       hasSecret: cfg.hasSecret,
+      hasBrand: cfg.hasBrand,
+      brand: cfg.brand,
       status: health.status,
       httpStatus: health.httpStatus,
       probedPath: health.probedPath,
       elapsedMs: health.elapsedMs,
     },
-    organizations:
-      orgs.kind === "OK" || orgs.kind === "NEEDS_SELECTION"
-        ? {
-            kind: orgs.kind,
-            count: orgs.organizations.length,
-            ids: orgs.organizations.map((o) => o.organizationId),
-          }
-        : { kind: orgs.kind, count: 0 },
+    brand: brand
+      ? {
+          kind: brand.kind,
+          selectedBrandKey: selectedBrand?.brandKey ?? null,
+          selectedOrganizationId: selectedBrand?.organizationId ?? null,
+          availableBrandKeys: availableBrands.map((b) => b.brandKey),
+          tokenStatuses:
+            selectedBrand?.products.map((p) => ({
+              product: p.product,
+              tokenStatus: p.tokenStatus,
+            })) ?? [],
+        }
+      : { kind: "SKIPPED", reason: "gateway not reachable" },
+    readiness,
   };
 
-  // Decide the run status. CONNECTED + (OK | SKIPPED) → SUCCESS.
-  // CONNECTED + multi-org / no endpoint → PARTIAL. Anything else → FAILED
-  // (except NOT_CONFIGURED which is an honest "no creds" state, still
-  // FAILED for run-status purposes since the run produced no useful
-  // outcome).
+  // Run status: READY_FOR_DRY_RUN → SUCCESS; CONNECTED_HEALTH_ONLY
+  // or NEEDS_REAUTH or NEEDS_SELECTION → PARTIAL; everything else
+  // → FAILED. NEEDS_REAUTH is the honest "gateway healthy, but Zoho
+  // creds expired" state the operator must resolve before ZOHO-2.
   let runStatus: "SUCCESS" | "PARTIAL" | "FAILED";
-  if (health.status === "CONNECTED") {
-    if (orgs.kind === "OK" || orgs.kind === "SKIPPED") runStatus = "SUCCESS";
-    else if (orgs.kind === "NEEDS_SELECTION" || orgs.kind === "GATEWAY_LACKS_ENDPOINT" || orgs.kind === "NONE_RETURNED") runStatus = "PARTIAL";
-    else runStatus = "FAILED";
-  } else {
-    runStatus = "FAILED";
+  switch (readiness) {
+    case "READY_FOR_DRY_RUN":
+      runStatus = "SUCCESS";
+      break;
+    case "CONNECTED_HEALTH_ONLY":
+    case "NEEDS_REAUTH":
+    case "NEEDS_SELECTION":
+      runStatus = "PARTIAL";
+      break;
+    default:
+      runStatus = "FAILED";
   }
 
-  // Persist the run + audit row in a transaction so the operator-visible
-  // "last connectivity check" is consistent with the audit log.
+  const error =
+    readiness === "READY_FOR_DRY_RUN" ? null : readinessMessage;
+
   let runId = "";
-  let runErrorText: string | null = null;
-  if (health.status !== "CONNECTED") runErrorText = health.message;
-  else if (
-    orgs.kind !== "OK" &&
-    orgs.kind !== "NEEDS_SELECTION" &&
-    orgs.kind !== "SKIPPED"
-  ) {
-    runErrorText = orgsKindMessage(orgs);
-  }
-
   await db.transaction(async (tx) => {
     const inserted = await tx
       .insert(zohoSyncRuns)
@@ -114,7 +156,7 @@ export async function runConnectivityCheckAction(): Promise<ConnectivityCheckRes
         source: "manual",
         dryRun: true,
         summary,
-        error: runErrorText,
+        error,
         createdByUserId: actor.id,
       })
       .returning({ id: zohoSyncRuns.id });
@@ -128,8 +170,10 @@ export async function runConnectivityCheckAction(): Promise<ConnectivityCheckRes
         targetId: runId,
         after: {
           status: runStatus,
+          readiness,
           gatewayStatus: health.status,
-          orgsKind: orgs.kind,
+          brandKind: brand?.kind ?? "SKIPPED",
+          selectedBrand: selectedBrand?.brandKey ?? null,
         },
       },
       tx,
@@ -144,52 +188,11 @@ export async function runConnectivityCheckAction(): Promise<ConnectivityCheckRes
     gatewayStatus: health.status,
     gatewayMessage: health.message,
     gatewayElapsedMs: health.elapsedMs,
-    orgsKind: orgs.kind,
-    orgsCount:
-      orgs.kind === "OK" || orgs.kind === "NEEDS_SELECTION"
-        ? orgs.organizations.length
-        : 0,
-    orgs:
-      orgs.kind === "OK" || orgs.kind === "NEEDS_SELECTION"
-        ? orgs.organizations.map((o) => ({
-            id: o.organizationId,
-            name: o.organizationName,
-            state: o.state,
-          }))
-        : [],
-    orgsMessage: orgs.kind === "OK" || orgs.kind === "SKIPPED" ? null : orgsKindMessage(orgs),
+    brandKind: brand?.kind ?? "SKIPPED",
+    brandMessage: brand?.message ?? null,
+    selectedBrand,
+    availableBrands,
+    readiness,
+    readinessMessage,
   };
 }
-
-function orgsKindMessage(orgs: {
-  kind: string;
-  organizations?: readonly unknown[];
-  probedPaths?: readonly string[];
-  message?: string;
-}): string {
-  switch (orgs.kind) {
-    case "OK":
-      return `One organization available.`;
-    case "NEEDS_SELECTION":
-      return `Multiple organizations returned (${(orgs.organizations ?? []).length}). Pick one before live sync.`;
-    case "NONE_RETURNED":
-      return `Gateway exposes the endpoint but returned zero organizations.`;
-    case "GATEWAY_LACKS_ENDPOINT":
-      return `Gateway does not expose an organizations endpoint. Tried: ${(orgs.probedPaths ?? []).join(", ")}.`;
-    case "UNREACHABLE":
-      return orgs.message ?? "Gateway unreachable.";
-    case "ERROR":
-      return orgs.message ?? "Gateway error.";
-    case "NOT_CONFIGURED":
-      return orgs.message ?? "Gateway not configured.";
-    case "SKIPPED":
-      return "Skipped (gateway not reachable).";
-    default:
-      return `Unknown organizations outcome: ${orgs.kind}`;
-  }
-}
-
-// Quiet selector to keep the unused-import warning at bay if the audit
-// helper grows a different signature later.
-const _eq = eq;
-void _eq;

@@ -1,34 +1,34 @@
-// ZOHO-GW-1 — in-container verification harness.
+// ZOHO-GW-2 — in-container verification harness.
 //
 // Mirrors what runConnectivityCheckAction does from
 // app/(admin)/settings/integrations/zoho/actions.ts, minus the
-// requireAdmin() wrapper. Probes the gateway via the live
-// checkZohoGatewayHealth + fetchZohoOrganizations helpers, persists
-// one zoho_sync_runs row with sync_type=CONNECTIVITY_CHECK, then
-// reads it back and prints the structured outcome.
+// requireAdmin() wrapper. Probes /health + /status via
+// checkZohoGatewayHealth + fetchZohoBrandStatus, derives ZohoReadiness,
+// persists one zoho_sync_runs row with sync_type=CONNECTIVITY_CHECK
+// and source=verify-script, then reads back and prints the outcome.
 //
 // Run inside the staging app container:
-//   docker compose exec -T app \
-//     node --experimental-strip-types /app/scripts/verify-zoho-gw-1.ts
+//   docker compose exec -T app npx tsx /app/scripts/verify-zoho-gw-1.ts
 //
-// Does NOT run any item / customer / sales-order / PO sync.
-// Does NOT call any Zoho write endpoint.
-// Does NOT touch the legacy direct-OAuth code path.
+// Does NOT run any item / customer / SO / PO sync. Does NOT call any
+// Zoho write endpoint. Does NOT touch the legacy direct-OAuth path.
 
 import { db } from "@/lib/db";
 import { zohoSyncRuns } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
 import {
   checkZohoGatewayHealth,
-  fetchZohoOrganizations,
+  deriveZohoReadiness,
+  fetchZohoBrandStatus,
   validateZohoGatewayConfig,
 } from "@/lib/integrations/zoho/gateway";
 
 async function main() {
-  console.log("[zoho-gw-1] starting verify run");
+  console.log("[zoho-gw-2] starting verify run");
   const cfg = validateZohoGatewayConfig(process.env);
   console.log("  config.configured=", cfg.configured);
   console.log("  config.hasSecret=", cfg.hasSecret);
+  console.log("  config.hasBrand=", cfg.hasBrand, "brand=", cfg.brand);
 
   const health = await checkZohoGatewayHealth();
   console.log(
@@ -42,52 +42,98 @@ async function main() {
     health.elapsedMs,
   );
 
-  const shouldProbeOrgs = health.status === "CONNECTED";
-  const orgs = shouldProbeOrgs
-    ? await fetchZohoOrganizations()
-    : { kind: "SKIPPED" as const };
-  console.log("  orgs.kind=", orgs.kind);
+  const shouldProbeBrand = health.status === "CONNECTED";
+  const brand = shouldProbeBrand ? await fetchZohoBrandStatus() : null;
+  console.log("  brand.kind=", brand?.kind ?? "SKIPPED");
+
+  const { readiness, message: readinessMessage } = deriveZohoReadiness({
+    health,
+    brand,
+  });
+  console.log("  readiness=", readiness);
+  console.log("  readinessMessage=", readinessMessage);
+
+  const selectedBrand =
+    brand && (brand.kind === "OK" || brand.kind === "NEEDS_REAUTH")
+      ? {
+          brandKey: brand.brand.brandKey,
+          organizationId: brand.brand.organizationId,
+          region: brand.brand.region,
+          products: brand.brand.products.map((p) => ({
+            product: p.product,
+            tokenStatus: p.tokenStatus,
+            expiresAt: p.expiresAt,
+          })),
+        }
+      : null;
+
+  if (selectedBrand) {
+    console.log(
+      "  selected.brandKey=",
+      selectedBrand.brandKey,
+      "org=",
+      selectedBrand.organizationId,
+      "region=",
+      selectedBrand.region,
+    );
+    for (const p of selectedBrand.products) {
+      console.log(
+        `    ${p.product.padEnd(12)} ${p.tokenStatus}${p.expiresAt ? "  expires " + p.expiresAt : ""}`,
+      );
+    }
+  }
+
+  const availableBrands =
+    brand &&
+    (brand.kind === "OK" ||
+      brand.kind === "NEEDS_REAUTH" ||
+      brand.kind === "NEEDS_SELECTION" ||
+      brand.kind === "BRAND_NOT_FOUND")
+      ? brand.brands.map((b) => ({ brandKey: b.brandKey, organizationId: b.organizationId }))
+      : [];
 
   const summary = {
     gateway: {
       configured: cfg.configured,
       hasSecret: cfg.hasSecret,
+      hasBrand: cfg.hasBrand,
+      brand: cfg.brand,
       status: health.status,
       httpStatus: health.httpStatus,
       probedPath: health.probedPath,
       elapsedMs: health.elapsedMs,
     },
-    organizations:
-      orgs.kind === "OK" || orgs.kind === "NEEDS_SELECTION"
-        ? {
-            kind: orgs.kind,
-            count: orgs.organizations.length,
-            ids: orgs.organizations.map((o) => o.organizationId),
-          }
-        : { kind: orgs.kind, count: 0 },
+    brand: brand
+      ? {
+          kind: brand.kind,
+          selectedBrandKey: selectedBrand?.brandKey ?? null,
+          selectedOrganizationId: selectedBrand?.organizationId ?? null,
+          availableBrandKeys: availableBrands.map((b) => b.brandKey),
+          tokenStatuses:
+            selectedBrand?.products.map((p) => ({
+              product: p.product,
+              tokenStatus: p.tokenStatus,
+            })) ?? [],
+        }
+      : { kind: "SKIPPED", reason: "gateway not reachable" },
+    readiness,
     note: "verify-zoho-gw-1 harness — no Zoho writes; no item/customer sync.",
   };
 
   let runStatus: "SUCCESS" | "PARTIAL" | "FAILED";
-  if (health.status === "CONNECTED") {
-    if (orgs.kind === "OK" || orgs.kind === "SKIPPED") runStatus = "SUCCESS";
-    else if (
-      orgs.kind === "NEEDS_SELECTION" ||
-      orgs.kind === "GATEWAY_LACKS_ENDPOINT" ||
-      orgs.kind === "NONE_RETURNED"
-    )
+  switch (readiness) {
+    case "READY_FOR_DRY_RUN":
+      runStatus = "SUCCESS";
+      break;
+    case "CONNECTED_HEALTH_ONLY":
+    case "NEEDS_REAUTH":
+    case "NEEDS_SELECTION":
       runStatus = "PARTIAL";
-    else runStatus = "FAILED";
-  } else {
-    runStatus = "FAILED";
+      break;
+    default:
+      runStatus = "FAILED";
   }
-
-  const error =
-    health.status !== "CONNECTED"
-      ? health.message
-      : orgs.kind !== "OK" && orgs.kind !== "SKIPPED"
-        ? `orgs outcome: ${orgs.kind}`
-        : null;
+  const error = readiness === "READY_FOR_DRY_RUN" ? null : readinessMessage;
 
   const inserted = await db
     .insert(zohoSyncRuns)
@@ -127,11 +173,11 @@ async function main() {
     console.log(`    ${r.id.slice(0, 8)} ${r.status.padEnd(8)} ${r.source}`);
   }
 
-  console.log("[zoho-gw-1] verify OK");
+  console.log("[zoho-gw-2] verify OK");
   process.exit(0);
 }
 
 main().catch((err) => {
-  console.error("[zoho-gw-1] verify FAILED", err);
+  console.error("[zoho-gw-2] verify FAILED", err);
   process.exit(1);
 });

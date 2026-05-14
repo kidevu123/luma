@@ -41,6 +41,10 @@ services:
       # also sent as X-Internal-Token to match the gateway's auth.
       ZOHO_INTEGRATION_URL: ${ZOHO_INTEGRATION_URL:-http://192.168.1.205:8000}
       ZOHO_INTEGRATION_SECRET: ${ZOHO_INTEGRATION_SECRET:-}
+      # ZOHO-GW-2: multi-brand gateway. Pick which brand's Zoho creds
+      # the gateway should use on this Luma deployment. Sent on every
+      # protected call as X-Brand. Required for ZOHO-2 onward.
+      ZOHO_BRAND: ${ZOHO_BRAND:-}
       AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER:-}
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
