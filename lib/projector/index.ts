@@ -40,6 +40,7 @@ import { refreshStationDailyForBag } from "./station-daily";
 import { emitMaterialConsumedFromBlister } from "./material-consumption-hook";
 import { attributeFinalizedBag } from "./operator-daily-attribution";
 import { projectQcEvent, isQcEventType } from "./qc-events";
+import { projectFinishedLotForFinalizedBag } from "./finished-lot-passport";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -389,6 +390,11 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
     await refreshSkuDailyForBag(tx, ev.workflowBagId);
     await refreshMaterialReconciliationForBag(tx, ev.workflowBagId);
     await refreshStationDailyForBag(tx, ev.workflowBagId);
+    // LOT-1C — enrich the recall passport when a finished_lots row
+    // already names this workflow_bag. No-op when the operator hasn't
+    // created the finished_lots row yet — createFinishedLot() invokes
+    // the same projector at insert time.
+    await projectFinishedLotForFinalizedBag(tx, ev.workflowBagId, occurredAt);
   }
 
   // QC-5: project QC events into per-day rollups (operator, SKU,

@@ -15,6 +15,7 @@ import {
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
 import { projectEvent } from "@/lib/projector";
+import { projectFinishedLotPassportForLot } from "@/lib/projector/finished-lot-passport";
 
 export async function listFinishedLots() {
   return db
@@ -230,6 +231,11 @@ export async function createFinishedLot(
                       updated_at = NOW()
       `);
     }
+
+    // LOT-1C — project the recall passport (trace_code, raw-bag M:N,
+    // outputs, packaging-lot rollup, QC-event index) for this lot.
+    // Idempotent; safe to re-run via the rebuilder later.
+    await projectFinishedLotPassportForLot(tx, lot.id);
 
     return { lot, inputs: inputRows };
   });

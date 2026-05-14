@@ -50,6 +50,8 @@ const FILES = [
   "app/(admin)/settings/integrations/packtrack/page.tsx",
   // LOT-1B surface — receiving-bridge helpers for the finished-lot / recall passport.
   "lib/production/recall-passport.ts",
+  // LOT-1C surface — finished-lot projector wired into BAG_FINALIZED + createFinishedLot.
+  "lib/projector/finished-lot-passport.ts",
 ];
 
 const BANNED = [

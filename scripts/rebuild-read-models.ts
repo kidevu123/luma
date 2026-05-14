@@ -26,6 +26,7 @@ import { rebuildMaterialConsumptionDaily } from "@/lib/projector/material-consum
 import { rebuildRollUsage } from "@/lib/projector/roll-usage";
 import { rebuildMaterialUsageLearning } from "@/lib/projector/material-usage-learning";
 import { rebuildMaterialRecommendations } from "@/lib/projector/packtrack-recommendations";
+import { rebuildFinishedLotPassport } from "@/lib/projector/finished-lot-passport";
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -49,6 +50,10 @@ async function main() {
     "read_roll_usage",
     "read_material_usage_learning",
     "read_material_recommendations",
+    "finished_lot_raw_bags",
+    "finished_lot_outputs",
+    "finished_lot_packaging_lots",
+    "finished_lot_qc_events",
   ] as const;
 
   // Pre-rebuild row counts.
@@ -94,6 +99,11 @@ async function main() {
     const recResult = await rebuildMaterialRecommendations(tx);
     console.log(
       `[rebuild-read-models]   recs scanned=${recResult.scanned} written=${recResult.written} deleted=${recResult.deleted} preserved=${recResult.preservedAcknowledged} skipped(machine)=${recResult.skippedMachineConsumable}`,
+    );
+    console.log("[rebuild-read-models] rebuilding finished_lot_* passport tables…");
+    const passport = await rebuildFinishedLotPassport(tx);
+    console.log(
+      `[rebuild-read-models]   passport scanned=${passport.scanned} projected=${passport.projected} skipped=${passport.skipped} rawBags=${passport.totalRawBags} outputs=${passport.totalOutputs} packagingLots=${passport.totalPackagingLots} qcEvents=${passport.totalQcEvents}`,
     );
   });
 
