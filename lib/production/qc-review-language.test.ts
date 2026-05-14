@@ -55,6 +55,10 @@ const FILES = [
   // LOT-1D surface — recall passport search page + loader.
   "lib/production/recall-passport-loaders.ts",
   "app/(admin)/recall/page.tsx",
+  // LOT-1E surface — label payload helpers + CSV export + labels page.
+  "lib/production/finished-lot-labels.ts",
+  "app/(admin)/finished-lots/[id]/labels/page.tsx",
+  "app/(admin)/recall/export.csv/route.ts",
 ];
 
 const BANNED = [

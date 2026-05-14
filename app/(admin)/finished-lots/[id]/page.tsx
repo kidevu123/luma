@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText, Activity } from "lucide-react";
+import { ArrowLeft, FileText, Activity, Printer } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
 import { getFinishedLot } from "@/lib/db/queries/finished-lots";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
@@ -45,9 +45,17 @@ export default async function FinishedLotDetailPage({
               : "Manual lot — no product link"
           }
           actions={
-            <StatusPill kind={STATUS_KIND[lot.lot.status] ?? "neutral"}>
-              {lot.lot.status.replace("_", " ")}
-            </StatusPill>
+            <div className="flex items-center gap-2">
+              <StatusPill kind={STATUS_KIND[lot.lot.status] ?? "neutral"}>
+                {lot.lot.status.replace("_", " ")}
+              </StatusPill>
+              <Link
+                href={`/finished-lots/${lot.lot.id}/labels`}
+                className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-700 px-2 py-1 text-[12px] font-semibold text-white hover:bg-slate-800"
+              >
+                <Printer className="h-3.5 w-3.5" /> Print labels
+              </Link>
+            </div>
           }
         />
       </div>

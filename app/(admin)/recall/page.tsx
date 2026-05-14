@@ -10,7 +10,7 @@
 // missingLinks fields — never invented.
 
 import Link from "next/link";
-import { ArrowRight, Search, AlertTriangle } from "lucide-react";
+import { ArrowRight, Download, Printer, Search, AlertTriangle } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { customers, products } from "@/lib/db/schema";
@@ -138,6 +138,10 @@ export default async function RecallPage({
         products={productOptions}
         customers={customerOptions}
       />
+
+      {input && passport && passport.finishedLots.length > 0 && (
+        <ExportBar searchParams={sp} firstLotId={passport.finishedLots[0]!.id} />
+      )}
 
       {!input ? (
         <Card>
@@ -334,6 +338,45 @@ function SearchPanel({
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+function ExportBar({
+  searchParams,
+  firstLotId,
+}: {
+  searchParams: Record<string, string | undefined>;
+  firstLotId: string;
+}) {
+  // Preserve the query string of the current search for the CSV
+  // export. Drop empty entries.
+  const exportParams = new URLSearchParams();
+  for (const [k, v] of Object.entries(searchParams)) {
+    if (v && v.trim().length > 0) exportParams.set(k, v);
+  }
+  const exportHref = `/recall/export.csv?${exportParams.toString()}`;
+  const labelHref = `/finished-lots/${firstLotId}/labels`;
+  return (
+    <div className="flex gap-2 flex-wrap text-[12px]">
+      <Link
+        href={exportHref}
+        className="inline-flex items-center gap-1 rounded border border-slate-400 bg-white px-2 py-1 text-slate-700 hover:bg-slate-50"
+      >
+        <Download className="h-3.5 w-3.5" /> Export CSV (customer-safe; supplier lot hidden)
+      </Link>
+      <Link
+        href={`${exportHref}&customer_supplier_lot_visible=true`}
+        className="inline-flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-amber-900 hover:bg-amber-100"
+      >
+        <Download className="h-3.5 w-3.5" /> Export CSV (internal: supplier lot included)
+      </Link>
+      <Link
+        href={labelHref}
+        className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-700 px-2 py-1 text-white hover:bg-slate-800"
+      >
+        <Printer className="h-3.5 w-3.5" /> Print labels for first matched lot
+      </Link>
+    </div>
   );
 }
 
