@@ -418,6 +418,20 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 
 ---
 
+### [x] ZOHO-GW-1 — Locate + bring up the Zoho integration gateway
+**Objective.** Find the existing Zoho API gateway and make its read-only health endpoint reachable from Luma. Operational phase — no code that touches Luma sync logic, no migration, no Zoho writes.
+
+**Findings.** Gateway is LXC 9503 (`zoho-integration-service`) at `192.168.1.205:8000`. Auth via `X-Internal-Token`. Multi-brand (`boomin_brands` / **`haute_brands`** / `nirvana_kulture`). `/health` open, every other endpoint auth-protected. Orgs available via `/status` + `X-Brand`, NOT via a conventional `/organizations` path. `haute_brands` Zoho refresh tokens all currently expired.
+
+**Wiring changes.**
+- `docker-compose.yml` + `.env.example` + `deploy/lxc/install.sh` — flip `ZOHO_INTEGRATION_URL` default to real endpoint, plumb `ZOHO_INTEGRATION_SECRET` through compose explicit-env list.
+- `/etc/luma/.env` on LX122 — secret pasted, value never echoed.
+- `scripts/verify-zoho-gw-1.ts` — verification harness; mirrors `runConnectivityCheckAction` minus the auth wrapper.
+
+**Closeout (2026-05-14, SHA `3d37edd`):** Connectivity check writes a real `zoho_sync_runs` row on staging — id `35f97003`, status `PARTIAL` (health=CONNECTED, orgs=GATEWAY_LACKS_ENDPOINT). Auth smoke 48/48 PASS. ZOHO-2 network/auth layer ready; gateway still needs operator re-authorization of `haute_brands` Zoho refresh tokens before item/customer reads will succeed.
+
+---
+
 ### [ ] ZOHO-2 — Item + customer read sync, dry-run mode only
 **Objective.** Implement `listZohoItems()` and customer-list helpers via the gateway. Add pg-boss handlers `zoho.items.sync` + `zoho.customers.sync` in DRY-RUN mode only (no writes outside `zoho_sync_runs`). Surface the proposed diff on `/settings/integrations/zoho-items`.
 

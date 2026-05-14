@@ -4,6 +4,64 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## ZOHO-GW-1: locate + bring up the Zoho integration gateway (complete)
+- Date: 2026-05-14
+- Result: gateway located, configured into Luma, connectivity check writes a real `zoho_sync_runs` row. **Gateway reachable; orgs endpoint discovery partial — by design**.
+- Gateway location (discovered):
+  - LXC **9503** named `zoho-integration-service` at **192.168.1.205:8000** (uvicorn / FastAPI). The "9503" in the prior env was the LXC ID, not the port — the bogus default `http://192.168.1.190:9503` pointed nowhere and made ZOHO-1's connectivity probe surface UNREACHABLE.
+  - Companion LXC 9504 `zoho-service-db` is the gateway's own Postgres.
+  - Service unit `zoho-integration.service` (Active: running). Source at `/opt/zoho-integration-service`. Version 1.3.2.
+- Gateway endpoint shape (probed read-only):
+  - `GET /` → 200 (service metadata).
+  - `GET /health` → 200 (open; returns version + DB connectivity).
+  - `GET /status` → 401 without auth; returns multi-brand status with valid token.
+  - `GET /docs`, `GET /openapi.json` → 401 without auth.
+  - `GET /organizations`, `/api/organizations`, `/zoho/organizations` → all 404. Gateway exposes org info via `/status` (auth-required) keyed by brand, not via a conventional `/organizations` path.
+  - Generic proxy lives at `POST|GET /zoho/{service}/{action}`; e.g. `GET /zoho/inventory/organizations` works with `X-Internal-Token` + `X-Brand` headers.
+- Auth model:
+  - Shared secret in `INTERNAL_API_TOKEN` env on the gateway (36 chars). Required as `X-Internal-Token` on every endpoint except `/` and `/health`.
+  - Multi-brand: gateway holds Zoho creds for 3 brands — `boomin_brands` (org `842972986`), **`haute_brands` (org `883647111` — relevant for Luma)**, `nirvana_kulture` (org `710610434`). The `X-Brand` header selects which brand's tokens to use.
+  - Zoho refresh tokens for `haute_brands` are currently **all EXPIRED** (`books`, `crm`, `expense`, `inventory` per the `/status` snapshot). They must be re-authorized at the gateway side before ZOHO-2 can exercise any item / customer reads.
+- Luma-side wiring changes (no migration, no sync logic — just env plumbing):
+  - `docker-compose.yml` — default `ZOHO_INTEGRATION_URL` flipped from the bogus `http://192.168.1.190:9503` to the real `http://192.168.1.205:8000`. Added `ZOHO_INTEGRATION_SECRET` to the explicit env list so compose forwards it to the app container (without this line, putting the secret in `/etc/luma/.env` silently drops it because compose only forwards listed vars).
+  - `.env.example` — same URL change + new SECRET line + comment on the gateway's `X-Internal-Token` auth model.
+  - `deploy/lxc/install.sh` — same URL change + new SECRET line so fresh LXC installs no longer point at a dead default.
+  - `/etc/luma/.env` on LX122 — secret value pasted (36 chars; verified inside container via `printenv | wc -c`; never echoed to chat). Existing backup at `/etc/luma/.env.bak.zoho-gw-1`.
+- Verification (in-container) at SHA `3d37edd`:
+  - `scripts/verify-zoho-gw-1.ts` — new harness that mirrors `runConnectivityCheckAction` minus the auth wrapper. Calls `checkZohoGatewayHealth` + `fetchZohoOrganizations` from the existing ZOHO-1 gateway client, writes one `zoho_sync_runs` row with `sync_type='CONNECTIVITY_CHECK'` and `source='verify-script'`.
+  - Run outcome on staging:
+    ```
+    config.configured=true  config.hasSecret=true
+    health.status=CONNECTED httpStatus=200 probedPath=/health elapsedMs=81
+    orgs.kind=GATEWAY_LACKS_ENDPOINT
+    persisted run id=35f97003 status=PARTIAL
+    ```
+  - `PARTIAL` (not `SUCCESS`) is the correct outcome — health is CONNECTED but the gateway exposes orgs at `/status` (auth + brand-keyed), not at `/organizations`. Documented limitation; resolving it cleanly is part of ZOHO-2 (gateway client needs an `X-Brand` aware path that hits `/status` instead).
+- Files touched (3 commits):
+  - SHA `aeeb81c` — `docker-compose.yml`, `.env.example`, `deploy/lxc/install.sh` (wiring).
+  - SHA `3d37edd` — `scripts/verify-zoho-gw-1.ts` (verification harness).
+  - (no code in `lib/integrations/zoho/gateway.ts`; no new migration; no `app/(admin)/settings/integrations/zoho/*` changes — ZOHO-1 surface left untouched).
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean (verify-script typechecks against project tsconfig).
+  - `npx vitest run` not re-run since no test files / library code changed in this phase.
+  - Auth smoke **48 / 48 PASS** at SHA `3d37edd`.
+- Staging deploy hiccups (resolved):
+  - Container name conflict on `docker compose up --build` — manually removed orphaned containers `93382577ccde` + `ba697b9c908f` then re-ran `docker compose up -d`. Same recovery pattern as the prior ZOHO-1 deploy.
+  - `tsx` (not `node --experimental-strip-types`) is the correct runner for the verify script because the project uses `@/` tsconfig paths that `tsx` honors via `tsconfig-paths`.
+- Remaining operator action (BLOCKER for ZOHO-2):
+  1. **Re-authorize the `haute_brands` refresh tokens on the gateway** (`books`, `crm`, `expense`, `inventory` all expired). Until that happens, `GET /zoho/inventory/items` against `X-Brand: haute_brands` will fail with token-expired errors.
+  2. (Optional) Decide whether ZOHO-2 should:
+     - Update Luma's gateway client to learn `/status` + `X-Brand` for org discovery (small one-file change), OR
+     - Keep treating "no `/organizations` endpoint" as a documented limitation and hard-code `haute_brands` / org `883647111` via a new env var.
+  3. (Optional) Add `X-Internal-Token` header to the gateway client (currently sends `x-luma-zoho-secret`; gateway requires the former). The connectivity check works without it because `/health` is open, but item/customer reads will need it.
+- Is ZOHO-2 unblocked?
+  - **Network layer: YES** — gateway reachable from Luma, secret pasted, env wired through.
+  - **Auth layer: PARTIAL** — Luma sends `x-luma-zoho-secret` but gateway expects `X-Internal-Token`. A 2-line update to `buildZohoGatewayHeaders` resolves this.
+  - **Org-discovery layer: PARTIAL** — gateway lacks `/organizations`; uses `/status` + `X-Brand`. Either updating Luma's discovery path or adding a `ZOHO_BRAND` env var lets ZOHO-2 proceed.
+  - **Zoho-token layer: NO** — `haute_brands` tokens expired; the gateway needs them re-authorized before any item / customer read succeeds. This is operator action on the gateway side, not a Luma change.
+
+---
+
 ## ZOHO-1: gateway config + connectivity status page (complete)
 - Date: 2026-05-14
 - Result: connectivity-only Zoho gateway phase landed. New gateway client + settings page + sync_runs/sync_state tables. No items / customers / sales orders / POs synced. No live Zoho writes anywhere.
