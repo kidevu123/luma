@@ -4,6 +4,97 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## COMMERCIAL-TRACE-5: allocation review UI (complete)
+- Date: 2026-05-15
+- Result: `/invoice-allocations` admin surface live at SHA `85acbca`. Operators can list every Zoho invoice line, filter by invoice / customer / SKU / status / confidence, generate or regenerate engine suggestions, confirm individual allocations (flipping them to `HIGH` + `CONFIRMED` + bumping `shipment_finished_lots.invoice_allocation_status` to `ALLOCATED`), reject bad suggestions, or clear all unconfirmed rows for a line. Confirmed rows are never overwritten or demoted by any path. Customer-safety banner reads in plain text on every page render: *"Only confirmed allocations should be used for Nexus invoice/batch lookup."*
+- Files changed (1 commit, SHA `85acbca`):
+  - **NEW** `app/(admin)/invoice-allocations/page.tsx` — server component. Loads summary counts via a single `GROUP BY status, confidence, confirmed` query against `finished_lot_invoice_allocations`. Loads up to 200 invoice lines joined to `zoho_invoices` + `customers`, then aggregates per-line allocation totals in one secondary query. Filter form is `<form method="get">` so URLs stay bookmarkable. Selected line (`?invoice_line=<uuid>`) loads its allocation rows joined to `finished_lots` + `shipment_finished_lots` and renders an identity block + the client-side review panel.
+  - **NEW** `app/(admin)/invoice-allocations/invoice-allocation-actions.tsx` — `"use client"`. Per-row Confirm / Reject buttons + line-level Generate / Regenerate / Clear unconfirmed buttons. Uses `useTransition` for pending state, surfaces success / error messages inline with `CheckCircle2` / `AlertCircle` icons. Confidence + status badges render with tone colors that match the global UI-2 vocabulary (`HIGH` → emerald, `MEDIUM` → cyan, `LOW` → amber, `MISSING` → red).
+  - **NEW** `app/(admin)/invoice-allocations/actions.ts` — five server actions wrapping COMMERCIAL-TRACE-4's pure engine + DB layer. Every action: `requireAdmin()`, executes the work, writes one `audit_log` row, then `revalidatePath("/invoice-allocations")`. Audit actions: `invoice_allocation.generate`, `invoice_allocation.regenerate`, `invoice_allocation.confirm`, `invoice_allocation.reject`, `invoice_allocation.clear_unconfirmed`.
+  - MOD `components/admin/sidebar.tsx` — adds `Invoice allocations` link under Management between `Material alerts` and `Production reports`. Uses the Lucide `Receipt` icon.
+  - MOD `components/admin/sidebar.test.ts` — two new cases: link is in Management (not Floor work), href = `/invoice-allocations`.
+  - **NEW** `lib/production/invoice-allocation-actions-shape.test.ts` — 20 source-shape cases.
+  - MOD `scripts/smoke-authenticated-routes.ts` — registers `/invoice-allocations` (50 → 51 routes).
+- Route / UI behavior:
+  - Page title: **Invoice allocations**. Intro copy: *"Match Zoho invoice lines to Luma finished lots. Confirmed allocations become the bridge for Nexus invoice/batch lookup."*
+  - Customer-safety banner directly under the page header explains the customer-scope filter contract: supplier lot, internal receipt, raw bag QR, operator names, and machine details are never exposed to customer-scope Nexus responses (regardless of allocation status).
+  - Summary cards (five): Needs review (warning tone), Suggested (info), Confirmed by operator (good), Rejected (muted), Missing data (critical).
+  - Filters (query-string driven): invoice #, customer, sku, status (Unallocated / Suggested / Needs review / Confirmed / any), confidence (HIGH / MEDIUM / LOW / MISSING / any), Needs review only checkbox, Unconfirmed only checkbox. Reset link clears all filters.
+  - Invoice line table columns: Invoice #, Customer, Date, Item, SKU / Zoho item, Qty + unit, Status (Unallocated / Suggested / Needs review / Confirmed by operator), Suggested qty, Confirmed qty, Warnings (per-line, comma-separated), Review link.
+  - Selected-line detail (when `?invoice_line=<uuid>`): identity block (invoice #, invoice date, customer, item, SKU, Zoho item id, invoice qty, suggestion-row count) + suggestion / confirmed row list. Each row carries finished-lot number, trace code, qty + unit, source label, packed date, shipped date, optional engine notes/warnings, and Confirm / Reject buttons. Already-confirmed rows render as a green "Confirmed" badge with no buttons. Rejected rows render as a slate "Rejected" badge.
+  - Empty state copy: *"No Zoho invoice lines available yet. Invoice rows arrive via the apply phase of COMMERCIAL-TRACE-3; once seeded, generate suggestions per line here."*
+- Generate / regenerate behavior:
+  - `generateInvoiceLineAllocationSuggestionsAction(invoiceLineId)`:
+    1. `requireAdmin()`.
+    2. `loadInvoiceLineAllocationContext(invoiceLineId)` — returns `null` → action returns `{ok:false, error:"Invoice line not found."}`.
+    3. `loadFinishedLotCandidatesForInvoiceLine({invoiceLine: ctx.input})` — pre-filters to invoice's customer.
+    4. `suggestAllocationsForInvoiceLine(...)` with the customer-zoho-id map.
+    5. `buildAllocationInsertRows(suggestions)` → `writeSuggestedAllocationsForInvoiceLine(invoiceLineId, rows)`.
+    6. `writeAudit({action: "invoice_allocation.generate", after: {inserted, cleared, shipmentRowsUpdated, unallocatedQuantity, warningCount}})`.
+    7. `revalidatePath("/invoice-allocations")`.
+    The COMMERCIAL-TRACE-4 DB layer is the only one that touches `finished_lot_invoice_allocations`; it already deletes existing `confirmed=false` rows for the invoice line before inserting, so this action is idempotent.
+  - `regenerateInvoiceLineAllocationSuggestionsAction(invoiceLineId)`: identical mechanics, distinct audit-action name (`invoice_allocation.regenerate`) so the audit trail tells a different story when an operator hits "Regenerate" vs the first "Generate".
+- Confirm / reject behavior:
+  - `confirmInvoiceAllocationAction(allocationId)` runs in a single transaction:
+    1. `requireAdmin()`.
+    2. Load existing row; if `confirmed=true` already → return success no-op (idempotent).
+    3. Call `confirmAllocationPure({...}, actor.id, new Date())` purely to enforce the non-empty-user-id contract (throws if absent).
+    4. `UPDATE finished_lot_invoice_allocations SET confirmed=true, status='CONFIRMED', confidence='HIGH', confirmed_by_user_id, confirmed_at, updated_at WHERE id=?`.
+    5. If row has `shipmentFinishedLotId`: `UPDATE shipment_finished_lots SET invoice_allocation_status='ALLOCATED', last_invoice_allocation_at=now() WHERE id=? AND invoice_allocation_status IN ('UNALLOCATED','SUGGESTED')`. **Never** demotes a row already at `ALLOCATED` or `CONFIRMED`.
+    6. `writeAudit({action: "invoice_allocation.confirm", after: {status, confidence, confirmedAt, shipmentRowsUpdated}})`.
+    7. `revalidatePath("/invoice-allocations")`.
+  - `rejectInvoiceAllocationAction(allocationId)`:
+    1. `requireAdmin()` + load row.
+    2. If `row.confirmed === true` → return `{ok:false, error:"Confirmed allocations cannot be rejected. Use the audit trail instead."}`.
+    3. `UPDATE finished_lot_invoice_allocations SET status='REJECTED', updated_at=now() WHERE id=?`. Row kept (not deleted) for the audit trail.
+    4. `writeAudit({action: "invoice_allocation.reject", after: {status: "REJECTED"}})`.
+  - `clearUnconfirmedInvoiceAllocationsAction(invoiceLineId)`:
+    1. `requireAdmin()`.
+    2. Delegate to `clearUnconfirmedSuggestionsForInvoiceLine(invoiceLineId)` — which deletes only `confirmed=false` rows for the line.
+    3. `writeAudit({action: "invoice_allocation.clear_unconfirmed", after: {cleared}})`.
+- Allocation status behavior:
+  - `finished_lot_invoice_allocations.confirmed` flips `false → true` only via `confirmInvoiceAllocationAction`.
+  - `finished_lot_invoice_allocations.status` lifecycle: `SUGGESTED` / `NEEDS_REVIEW` (engine) → `CONFIRMED` (confirm) | `REJECTED` (reject). Confirmed rows can be neither deleted nor rejected through this surface.
+  - `shipment_finished_lots.invoice_allocation_status` lifecycle: `UNALLOCATED` (default) → `SUGGESTED` (generate / regenerate) → `ALLOCATED` (confirm). Confirm filter only matches `IN ('UNALLOCATED','SUGGESTED')` so it never demotes a row already at `ALLOCATED` or `CONFIRMED`.
+- Safety protections:
+  - Five exported server actions, every one gated behind `requireAdmin()`. Test asserts.
+  - Action source has zero Zoho integration imports + zero `fetchZohoInvoices*` references. Test asserts.
+  - Action source code (with comments stripped) contains zero `nexus` references; comments are honestly allowed to mention Nexus as part of the customer-safety narrative. Test asserts.
+  - Confirm path uses `confirmAllocationPure` as the userId gate. Test asserts.
+  - Reject path explicitly blocks `confirmed=true` rows. Test asserts.
+  - `clearUnconfirmed` delegates to the delete-only helper from COMMERCIAL-TRACE-4 (whose SQL is already test-asserted to filter on `confirmed=false`). Test asserts.
+  - Every public action writes exactly one audit row with the right action name. Test asserts.
+  - Confirm's `inArray` filter on `shipment_finished_lots.invoice_allocation_status` allows only `UNALLOCATED` and `SUGGESTED` — never `CONFIRMED` or `ALLOCATED`. Test asserts.
+  - Page has no `/api/nexus` or `app/api/nexus` reference. Test asserts.
+  - Page is `force-dynamic` so summary counts and per-line aggregates always reflect current state.
+  - Client component contains zero references to `zoho` or `nexus` symbols. Test asserts.
+  - No customer-facing endpoint added, no Nexus route added, no complaint table added. Test asserts.
+- Tests added (+22 vs COMMERCIAL-TRACE-4's 1585 = **1607 / 1607 PASS across 65 files**):
+  - 2 new sidebar.test.ts cases (link under Management, href = `/invoice-allocations`).
+  - 20 source-shape cases in `lib/production/invoice-allocation-actions-shape.test.ts`:
+    - Action: `"use server"` declared (1), all five actions exported + each calls `requireAdmin` (1), no Zoho/Nexus from code (1), `confirmAllocationPure` invoked by confirm (1), reject path blocks confirmed (1), `clearUnconfirmedSuggestionsForInvoiceLine` invoked by clear (1), one audit row per public action (1), confirm's status filter doesn't include CONFIRMED/ALLOCATED (1).
+    - Page: banner copy (1), five summary cards (1), filter inputs (1), honest empty state (1), `requireAdmin` (1), no Nexus endpoint (1), `force-dynamic` (1).
+    - Client: `"use client"` (1), Confirm + Reject conditional gate (1), no Zoho/Nexus from client (1).
+    - Safety: no `nexus_complaints` / `complaint_webhook` in any of the three files (1), `/invoice-allocations` in smoke list (1).
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1607 / 1607 PASS across 65 files** (+22 vs COMMERCIAL-TRACE-4 / +1 test file).
+  - `npx next build` → clean. New route at `/invoice-allocations` ships dynamic.
+  - Auth smoke pending until deploy completes; will assert **51 / 51 PASS** including the new route once verified.
+- Staging verification (LX122, SHA `85acbca`):
+  - Deploy + health pending while `docker compose up -d --build` runs in the background. Once the new SHA lands, page should render under admin auth with the empty-state copy (no Zoho invoices exist on staging yet — same state as COMMERCIAL-TRACE-3).
+  - No QA fixtures seeded; the page's empty state is the honest staging story until either the invoice apply phase lands rows or an operator manually inserts QA test invoices.
+  - No Nexus endpoint exists at `app/api/nexus`. No live Zoho call. No allocation rows created.
+- Is COMMERCIAL-TRACE-6 (Nexus read endpoints) ready?
+  - **Yes.** COMMERCIAL-TRACE-5 closes the operator loop: only confirmed allocations carry `confidence='HIGH' + confirmed=true + status='CONFIRMED'`. COMMERCIAL-TRACE-6 needs to:
+    1. Add `app/api/nexus/invoice-batches/route.ts` + `app/api/nexus/customer-batches/route.ts` + `app/api/nexus/batch-passport/route.ts`.
+    2. Authenticate via `NEXUS_LOOKUP_TOKEN` (customer scope) or `NEXUS_CSR_LOOKUP_TOKEN` (CSR scope).
+    3. Query `finished_lot_invoice_allocations` filtered by `confirmed=true AND status='CONFIRMED'`.
+    4. For each response field, call `commercialTraceVisibilityPolicy(scope).allowField(field)` before serializing — customer scope drops the CSR-only fields per the visibility helper.
+  - Live invoice ingest still gated on the owner re-authorizing the four expired `haute_brands` Zoho tokens, but COMMERCIAL-TRACE-6 endpoints can ship today against locally-seeded fixtures (or against the empty allocation state — the empty response is honest).
+
+---
+
 ## COMMERCIAL-TRACE-4: finished-lot allocation suggestion engine (complete)
 - Date: 2026-05-15
 - Result: pure allocation engine + safe DB write layer ship at SHA `19f7059`. Given one Zoho invoice line + a pool of pre-fetched finished-lot candidates, the engine ranks survivors and greedy-allocates the invoice-line quantity across one or more lots, emitting `SUGGESTED` / `NEEDS_REVIEW` rows at `MEDIUM`, `LOW`, or `MISSING` confidence. **Engine never emits HIGH; engine never marks anything CONFIRMED.** Confirmation is gated behind an explicit operator action that lifts a suggestion via `confirmAllocationPure`. No allocation UI yet (deferred to COMMERCIAL-TRACE-5). No Nexus endpoints. No live Zoho calls.
