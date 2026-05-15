@@ -521,7 +521,40 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 
 ---
 
-### [x] COMMERCIAL-TRACE-1 — Commercial traceability plan
+### [x] WORKFLOW-UX-1 — Workflow-first sidebar + raw-bag intake entrypoint
+**Objective.** Rebuild the admin sidebar around floor jobs (Floor work / Management / Configuration / Advanced) instead of DB tables. Add `/receiving/raw-bags` placeholder for the "Receive raw pills" workflow entry. Rename `Recall lookup` → `Lookup receipt / batch`, `Packaging output` → `Packaging / pack-out`. Keep every existing route reachable; only nav + labels change.
+
+**Files touched (1 commit, SHA `39c5140`).**
+- `components/admin/sidebar.tsx` — rewrite. Four sections; Advanced collapsed by default via native `<details>` + auto-opens on deep-link.
+- `components/admin/sidebar.test.ts` — 4 → 47 cases (section presence, Floor-work labels, DB-style labels absent from Floor-work, 24 routes asserted preserved, banned-phrase scan).
+- `app/(admin)/receiving/raw-bags/page.tsx` — new admin-only placeholder, explains INTAKE-UX-1 lands next, links to `/inbound` so operators are never stuck.
+- `scripts/smoke-authenticated-routes.ts` — auth smoke list 48 → 49.
+
+**Closeout (2026-05-15, SHA `39c5140`):** Sidebar reorganized; no routes deleted. tsc clean / vitest 1420/1420 (+43 vs ZOHO-2A) / next build clean / auth smoke **49/49 PASS** on staging. New `/receiving/raw-bags` returns 200 under admin auth. Floor-work entries: Live floor / Receive raw pills / Receive packaging / Start production / Packaging / pack-out / QC review / Lookup receipt / batch.
+
+---
+
+### [ ] INTAKE-UX-1 — Single-screen raw-bag intake form
+**Objective.** Replace the `/receiving/raw-bags` placeholder body with the live intake workflow: pick product / tablet type → enter supplier lot → enter bag count + per-bag pill count → scan or paste each bag's QR code → Luma issues internal receipt numbers → one click writes the `receive` + `small_boxes` + `inventory_bags` rows in a single transaction.
+
+**Files likely touched.**
+- `app/(admin)/receiving/raw-bags/page.tsx` — replace placeholder with live form.
+- `app/(admin)/receiving/raw-bags/actions.ts` — new server action wrapping the existing `createReceiveWithBoxes()` from `lib/db/queries/receives.ts`.
+- Possibly a new client component for the form (multi-step or single-page; design TBD).
+
+**Acceptance criteria.**
+- One screen, no wizard navigation. Operator enters product, supplier lot, bag count, per-bag count, QR codes, receipt numbers. Submits in one click.
+- Internal receipt numbers (existing `buildInternalReceiptNumber` helper) are issued at save-time, displayed back to the operator.
+- Idempotent: re-submitting same payload returns the same receive id.
+- Audit-logged.
+
+**Tests required.** Action validation matrix, idempotency, an in-container verify against a real receive flow.
+
+**Stop condition.** Operator can scan 10 bags off a truck and have them in `inventory_bags` in under a minute. Verify script exits 0.
+
+---
+
+### [x] COMMERCIAL-TRACE-1 — Commercial traceability plan (paused; see COMMERCIAL-TRACE-2 below)
 **Objective.** Audit-and-plan-only. Define the Zoho invoice → Luma finished-lot allocation model + Nexus read-only lookup contract. No code, no schema, no live calls. Replaces the abandoned NEXUS-1..6 ladder.
 
 **Closeout (2026-05-15, SHA pending push):** `docs/COMMERCIAL_TRACEABILITY_PLAN.md` committed. Vision pivot recorded in `docs/CURRENT_PHASE_STATUS.md`. Old NEXUS-0 plan flagged SUPERSEDED at the top. Three new tables planned (`zoho_invoices`, `zoho_invoice_lines`, `finished_lot_invoice_allocations`); three new Nexus GET endpoints scoped (`/invoice-batches`, `/customer-batches`, `/batch-passport`); three secrets defined (outbound `NEXUS_FINISHED_LOT_SECRET` stays, new `NEXUS_LOOKUP_TOKEN` for customer scope, new `NEXUS_CSR_LOOKUP_TOKEN` for CSR scope). Confidence ladder uses existing HIGH/MEDIUM/LOW/MISSING vocabulary; only HIGH-confirmed allocations exposed to customer scope. 7 open questions + 12 risks recorded.

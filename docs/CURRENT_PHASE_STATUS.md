@@ -4,6 +4,56 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## WORKFLOW-UX-1: workflow-first sidebar + raw-bag intake entrypoint (complete)
+- Date: 2026-05-15
+- Result: sidebar reorganized around the seven floor jobs (receive raw, receive packaging, start production, move bag, pack out, handle QC, look up receipt/batch) rather than around database tables. New `/receiving/raw-bags` placeholder route ships so the "Receive raw pills" sidebar item has a stable destination. No routes deleted; every previously-shipped sidebar destination still has at least one Link in the source (asserted by test). Auth smoke 48/48 → **49/49 PASS** on staging at SHA `39c5140`.
+- Old sidebar audit (the problem WORKFLOW-UX-1 fixed):
+  - 5 sections by DB-table category (`Overview`, `Operations`, `Production intelligence`, `Materials`, `System`).
+  - 26 entries — every one labelled in DB language: "Batches", "Finished lots", "QR cards", "Bag genealogy", "Material recon", "Roll variance", "PO reconciliation", "Active rolls", "Product requirements", "Recall lookup", "Packaging output".
+  - Operator had to think in tables instead of jobs. "Receive raw pills" was nowhere — the closest entry was "POs & receiving", which is the management table, not a workflow.
+- New sidebar grouping:
+  - **FLOOR WORK** (8 entries): Dashboard / Live floor / Receive raw pills (**NEW** /receiving/raw-bags) / Receive packaging (/inbound/packaging-materials) / Start production (/qr-cards — relabelled, route unchanged) / Packaging / pack-out (/packaging-output — renamed) / QC review / Lookup receipt / batch (/recall — renamed)
+  - **MANAGEMENT** (5 entries): Inventory (/packaging-inventory) / POs & receiving (/inbound) / Material alerts / Production reports (/reports) / Operator productivity
+  - **CONFIGURATION** (5 entries): Products & packaging rules (/products) / Standards & targets / Integrations (/settings/integrations/zoho) / Workflow validation / Settings
+  - **ADVANCED** (10 entries, **collapsed by default** via native `<details>`, auto-opens on deep-link): Bag genealogy / Finished lots / Material reconciliation / Roll variance / PO reconciliation / Product requirements / Active rolls / Metrics / Packaging receipts / Batches
+- Labels changed (floor language):
+  - "Recall lookup" → **Lookup receipt / batch** (operators search by receipt or QR, not "recall")
+  - "Packaging output" → **Packaging / pack-out**
+  - "Material recon" → **Material reconciliation** (full term; now under Advanced)
+  - "Packaging inventory" → **Inventory** (under Management; the Luma context is unambiguous)
+  - "POs & receiving" stays under Management (it's the management view); the *workflow* entry is **Receive raw pills**.
+  - New primary entries: **Receive raw pills**, **Start production**, **Lookup receipt / batch**.
+  - "QR cards" / "Bag genealogy" / "Finished lots" / "Batches" no longer appear in the primary operator section (FLOOR WORK); they live only under ADVANCED.
+- Files changed (1 commit, SHA `39c5140`):
+  - MOD `components/admin/sidebar.tsx` — rewrite. Native `<details>` collapsed-by-default for Advanced section; auto-`open` when current path matches any of its items so deep links still highlight correctly.
+  - MOD `components/admin/sidebar.test.ts` — rewrite. 4 cases → **47 cases**. Covers: 4 section headings present, 8 Floor-work entries (Live floor / Receive raw pills / Receive packaging / Start production / Packaging / pack-out / QC review / Lookup receipt / batch — and that `Recall lookup` is gone), 9 DB-style labels asserted absent from Floor-work, **24 routes asserted preserved** (one per previously-shipped destination), `/receiving/raw-bags` + `/settings/integrations/zoho` Integrations entry as new sidebar destinations, banned-phrase scan stays clean.
+  - **NEW** `app/(admin)/receiving/raw-bags/page.tsx` — admin-only placeholder. Shows the intake workflow is coming next; links to `/inbound` for the legacy receive wizard so operators are never stuck. Uses the existing ProductionSection + ProductionAlertCard primitives from UI-2.
+  - MOD `scripts/smoke-authenticated-routes.ts` — added `/receiving/raw-bags` to the Operations group. Auth smoke list 48 → 49 routes.
+- Routes preserved (every entry in the prior sidebar still has at least one Link in the new sidebar):
+  /dashboard · /floor-board · /inbound · /inbound/packaging-materials · /batches · /finished-lots · /qr-cards · /recall · /reports · /metrics · /genealogy · /qc-review · /material-reconciliation · /operator-productivity · /packaging-output · /standards · /packaging-inventory · /product-packaging-requirements · /active-rolls · /roll-variance · /material-alerts · /po-reconciliation · /workflow-validation · /settings — all 24 still linked. Plus the new /receiving/raw-bags. Plus the direct Integrations entry at /settings/integrations/zoho.
+- Tests added:
+  - Sidebar invariants: 4 → 47 cases (full coverage above).
+  - Auth smoke: 48 → 49 routes (added /receiving/raw-bags).
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1420 / 1420 PASS across 59 files** (+43 vs ZOHO-2A's 1377).
+  - `npx next build` → clean; new route `/receiving/raw-bags` 235 B / 106 kB; all previously-built routes unchanged.
+  - Auth smoke → **49 / 49 PASS** at SHA `39c5140`.
+- Staging verification (LX122 / SHA `39c5140`):
+  - Deploy hit the orphan-container-name trap; cleared via `docker rm -f $(docker ps -aq --filter name=luma-app)` then `docker compose up -d`.
+  - `/api/health` SHA `39c5140186a973ed0358b268c31270cca2a0ae88` ✅
+  - `/receiving/raw-bags` returns 200 under admin auth.
+  - Every previously-shipped route still returns 200.
+  - Auth smoke 49/49 PASS.
+- Out of scope (deferred):
+  - INTAKE-UX-1 — the actual single-screen raw-bag intake form (product picker + supplier lot + bag count + per-bag pill count + QR scan + receipt number issuance + one-click save).
+  - Per-role visibility for the ADVANCED section (`canAccessSurface` integration). Today the section is collapsed-by-default but visible to every admin; role-gating is a separate phase.
+  - "Start production" pointing at a richer landing page (not just `/qr-cards`). Today the relabelled entry takes the operator to the card-admin view, which is the closest existing surface.
+- Is INTAKE-UX-1 single-screen raw-bag intake ready next?
+  - **Yes.** The placeholder route is in place and stable. INTAKE-UX-1's only deliverable is replacing the `/receiving/raw-bags` page body with the live form + server action. The sidebar entry, auth smoke, and route resolution are all done.
+
+---
+
 ## COMMERCIAL-TRACE-1: commercial traceability plan (complete; supersedes NEXUS-0..6)
 - Date: 2026-05-15
 - Result: vision pivot recorded. Luma is the finished-batch truth system; Zoho owns customer / invoice / sales-order truth; Nexus is a thin read-only lookup UI. The prior NEXUS-0 inbound-complaint direction is dropped — no `nexus_complaints` table, no complaint webhook, no attachments, no status history, no auto-QC trigger. Luma's outbound finished-lot push (LOT-1F/G) stays as the seed for Nexus's per-customer dropdown.
