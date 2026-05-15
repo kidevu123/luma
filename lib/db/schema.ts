@@ -547,6 +547,13 @@ export const receives = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     poId: uuid("po_id").references(() => purchaseOrders.id),
+    /** INTAKE-WORKFLOW-1 — link to the exact PO line being fulfilled.
+     *  Nullable: legacy receives + manual-PO-reference receives leave
+     *  it null. When set, variance against po_lines.qty_ordered is
+     *  unambiguous. */
+    poLineId: uuid("po_line_id").references(() => poLines.id, {
+      onDelete: "set null",
+    }),
     shipmentId: uuid("shipment_id").references(() => shipments.id),
     receiveName: text("receive_name").notNull(), // sequential per PO, e.g. "PO123-R1"
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
@@ -556,6 +563,9 @@ export const receives = pgTable(
   },
   (t) => [
     index("receives_po_idx").on(t.poId),
+    index("receives_po_line_idx")
+      .on(t.poLineId)
+      .where(sql`po_line_id IS NOT NULL`),
     uniqueIndex("receives_name_unique").on(t.receiveName),
   ],
 );

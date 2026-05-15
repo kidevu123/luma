@@ -1,73 +1,91 @@
-// WORKFLOW-UX-1 — Raw-bag intake placeholder.
+// INTAKE-WORKFLOW-1 — one-screen raw-bag intake.
 //
-// The single-screen intake workflow itself (product picker + supplier
-// lot + bag count + QR codes + receipt numbers, all on one screen)
-// lands in INTAKE-UX-1. This page exists so the "Receive raw pills"
-// sidebar item has a stable destination and the route shows up in
-// the auth smoke list. The body explains the next step and links to
-// the existing /inbound list so operators are never stuck.
+// Loads PO + PO-line + tablet-type options (for the PO picker) and the
+// Zoho gateway readiness (so the verification badge shows the honest
+// state). Hands everything to a client form that handles the three
+// sections + save flow.
 
-import Link from "next/link";
-import { ArrowRight, Inbox } from "lucide-react";
-import { requireAdmin } from "@/lib/auth-guards";
-import { PageHeader } from "@/components/ui/page-header";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { db } from "@/lib/db";
+import { asc, eq } from "drizzle-orm";
 import {
-  ProductionAlertCard,
-  ProductionSection,
-} from "@/components/production/ui";
+  poLines,
+  purchaseOrders,
+  tabletTypes,
+} from "@/lib/db/schema";
+import { requireLead } from "@/lib/auth-guards";
+import { PageHeader } from "@/components/ui/page-header";
+import { ProductionAlertCard } from "@/components/production/ui";
+import {
+  checkZohoGatewayHealth,
+  deriveZohoReadiness,
+  fetchZohoBrandStatus,
+} from "@/lib/integrations/zoho/gateway";
+import { RawBagIntakeForm } from "./raw-bag-intake-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReceiveRawBagsPage() {
-  await requireAdmin();
+  await requireLead();
+
+  // Load PO picker data + tablet types in parallel.
+  const [pos, lines, tablets] = await Promise.all([
+    db
+      .select({
+        id: purchaseOrders.id,
+        poNumber: purchaseOrders.poNumber,
+        vendorName: purchaseOrders.vendorName,
+        status: purchaseOrders.status,
+      })
+      .from(purchaseOrders)
+      .orderBy(asc(purchaseOrders.poNumber)),
+    db
+      .select({
+        id: poLines.id,
+        poId: poLines.poId,
+        tabletTypeId: poLines.tabletTypeId,
+        qtyOrdered: poLines.qtyOrdered,
+        zohoLineItemId: poLines.zohoLineItemId,
+      })
+      .from(poLines),
+    db
+      .select({
+        id: tabletTypes.id,
+        sku: tabletTypes.sku,
+        name: tabletTypes.name,
+      })
+      .from(tabletTypes)
+      .where(eq(tabletTypes.isActive, true))
+      .orderBy(asc(tabletTypes.name)),
+  ]);
+
+  // Probe Zoho readiness — read-only; if NEEDS_REAUTH the form shows
+  // the manual-PO fallback as the primary path.
+  const health = await checkZohoGatewayHealth();
+  const brand =
+    health.status === "CONNECTED" ? await fetchZohoBrandStatus() : null;
+  const { readiness } = deriveZohoReadiness({ health, brand });
 
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Receive raw pills"
-        description="Single-screen intake workflow for raw-pill bags coming off the truck. Captures product, supplier lot, bag count, QR codes, and receipt numbers in one pass."
+        title="Raw bag intake"
+        description="Single-screen receiving for raw-pill bags. Pick the PO, capture supplier lot + bag count + receipt range, scan each QR. One save creates every inventory_bag in a single transaction."
       />
 
-      <ProductionSection
-        title="Workflow coming next"
-        subtitle="INTAKE-UX-1 will replace this placeholder with the live intake form."
-        tone="INFO"
-      >
+      {readiness !== "READY_FOR_DRY_RUN" ? (
         <ProductionAlertCard
-          tone="INFO"
-          title="Raw bag intake workflow coming next"
-          body="Enter product, supplier lot, bag count, QR codes, and receipt numbers on one screen. Until that ships, raw-pill PO + box + bag receiving still flows through the existing POs & receiving page."
+          tone="WARN"
+          title="Zoho PO sync not ready"
+          body={`Live Zoho PO data is unavailable right now (readiness: ${readiness}). The form falls back to the local Luma PO list + a manual PO reference path; receiving is never blocked by Zoho token state.`}
         />
-        <div className="mt-4 flex flex-wrap gap-3">
-          <Link
-            href="/inbound"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:bg-surface-2"
-          >
-            <Inbox className="h-4 w-4" />
-            Go to POs &amp; receiving
-            <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
-      </ProductionSection>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>What this screen will do</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-text-muted leading-relaxed space-y-2">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Pick the product / tablet type the bag is for.</li>
-            <li>Enter the supplier lot number from the bag label.</li>
-            <li>Enter the bag count + per-bag pill count.</li>
-            <li>Scan or paste each bag's QR code; Luma issues the internal receipt numbers.</li>
-            <li>Save — one click writes the receive + small_boxes + inventory_bags rows.</li>
-          </ul>
-          <p className="pt-2">
-            Until then, use the legacy receive wizard from the <Link href="/inbound" className="underline">POs &amp; receiving</Link> page.
-          </p>
-        </CardContent>
-      </Card>
+      <RawBagIntakeForm
+        purchaseOrders={pos}
+        poLines={lines}
+        tabletTypes={tablets}
+        zohoReadiness={readiness}
+      />
     </div>
   );
 }
