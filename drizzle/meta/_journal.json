@@ -246,6 +246,20 @@
       "when": 1781400000000,
       "tag": "0034_receives_po_line",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1781500000000,
+      "tag": "0035_zoho_sync_kind_invoices",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781600000000,
+      "tag": "0036_commercial_trace_schema",
+      "breakpoints": true
     }
   ]
 }

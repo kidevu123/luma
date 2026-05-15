@@ -271,6 +271,10 @@ export const zohoSyncKindEnum = pgEnum("zoho_sync_kind", [
   "SALES_ORDERS",
   "PURCHASE_ORDERS",
   "FINISHED_LOT_PUSH",
+  // COMMERCIAL-TRACE-2 — invoice sync runs land here. Added to the
+  // enum in migration 0035 (standalone ALTER TYPE ADD VALUE; combining
+  // enum-add with table DDL in one transaction silently rolls back).
+  "INVOICES",
 ]);
 
 export const zohoSyncRunStatusEnum = pgEnum("zoho_sync_run_status", [
@@ -3320,6 +3324,17 @@ export const shipmentFinishedLots = pgTable(
     nexusSentAt: timestamp("nexus_sent_at", { withTimezone: true }),
     nexusLastSentResponse: jsonb("nexus_last_sent_response"),
     nexusLastSendError: text("nexus_last_send_error"),
+    /** COMMERCIAL-TRACE-2 — invoice allocation state. UNALLOCATED until
+     *  the allocation engine (COMMERCIAL-TRACE-4) writes a row in
+     *  finished_lot_invoice_allocations referencing this shipment-lot
+     *  pair. Free-text so future statuses (e.g. PARTIALLY_ALLOCATED)
+     *  don't force an enum migration. */
+    invoiceAllocationStatus: text("invoice_allocation_status")
+      .notNull()
+      .default("UNALLOCATED"),
+    lastInvoiceAllocationAt: timestamp("last_invoice_allocation_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -3340,6 +3355,185 @@ export const shipmentFinishedLots = pgTable(
     index("shipment_finished_lots_nexus_sent_at_idx")
       .on(t.nexusSentAt)
       .where(sql`nexus_sent_at IS NOT NULL`),
+    index("shipment_finished_lots_invoice_allocation_status_idx").on(
+      t.invoiceAllocationStatus,
+    ),
+    index("shipment_finished_lots_last_invoice_allocation_at_idx")
+      .on(t.lastInvoiceAllocationAt)
+      .where(sql`last_invoice_allocation_at IS NOT NULL`),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMERCIAL-TRACE-2 — Zoho invoice ingest + finished-lot allocation
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The hinge between Zoho commercial truth and Luma physical truth:
+//   invoice number → invoice line → product/SKU/Zoho item
+//   → finished_lot(s) → shipment_finished_lot → recall passport
+//
+// Schema-only phase. No engine, no live Zoho calls, no UI. Visibility
+// (owner decision 2026-05-15) is enforced at the API edge via
+// lib/production/commercial-trace.ts — customer scope NEVER exposes
+// supplier lot, internal receipt number, raw bag QR, operator names,
+// or machine/station accountability.
+
+export const zohoInvoices = pgTable(
+  "zoho_invoices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** External Zoho identifier (text). Source of truth for cross-sync
+     *  identity — same Zoho invoice always maps to the same row. */
+    zohoInvoiceId: text("zoho_invoice_id").notNull(),
+    invoiceNumber: text("invoice_number").notNull(),
+    zohoCustomerId: text("zoho_customer_id"),
+    customerId: uuid("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
+    invoiceDate: date("invoice_date"),
+    status: text("status"),
+    currency: text("currency"),
+    subtotal: numeric("subtotal", { precision: 20, scale: 4 }),
+    total: numeric("total", { precision: 20, scale: 4 }),
+    balance: numeric("balance", { precision: 20, scale: 4 }),
+    /** Verbatim Zoho payload — kept for replay + audit. */
+    rawPayload: jsonb("raw_payload").notNull().default({}),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("zoho_invoices_zoho_invoice_id_unique").on(t.zohoInvoiceId),
+    index("zoho_invoices_invoice_number_idx").on(t.invoiceNumber),
+    index("zoho_invoices_zoho_customer_id_idx")
+      .on(t.zohoCustomerId)
+      .where(sql`zoho_customer_id IS NOT NULL`),
+    index("zoho_invoices_customer_id_idx")
+      .on(t.customerId)
+      .where(sql`customer_id IS NOT NULL`),
+    index("zoho_invoices_invoice_date_idx")
+      .on(t.invoiceDate)
+      .where(sql`invoice_date IS NOT NULL`),
+    index("zoho_invoices_status_idx")
+      .on(t.status)
+      .where(sql`status IS NOT NULL`),
+  ],
+);
+
+export const zohoInvoiceLines = pgTable(
+  "zoho_invoice_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** UUID FK to the parent zoho_invoices(id). Naming follows the
+     *  COMMERCIAL-TRACE-2 spec verbatim; not to be confused with the
+     *  parent's `zoho_invoice_id` text column (Zoho's external id). */
+    zohoInvoiceId: uuid("zoho_invoice_id")
+      .notNull()
+      .references(() => zohoInvoices.id, { onDelete: "cascade" }),
+    /** Zoho's line-item identifier. Nullable for legacy/manually-imported
+     *  invoices that pre-date the line-id field. */
+    zohoInvoiceLineId: text("zoho_invoice_line_id"),
+    zohoItemId: text("zoho_item_id"),
+    sku: text("sku"),
+    itemName: text("item_name").notNull(),
+    description: text("description"),
+    quantity: numeric("quantity", { precision: 20, scale: 6 }).notNull(),
+    unit: text("unit"),
+    rate: numeric("rate", { precision: 20, scale: 6 }),
+    amount: numeric("amount", { precision: 20, scale: 4 }),
+    rawPayload: jsonb("raw_payload").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("zoho_invoice_lines_invoice_idx").on(t.zohoInvoiceId),
+    index("zoho_invoice_lines_line_id_idx")
+      .on(t.zohoInvoiceLineId)
+      .where(sql`zoho_invoice_line_id IS NOT NULL`),
+    index("zoho_invoice_lines_item_id_idx")
+      .on(t.zohoItemId)
+      .where(sql`zoho_item_id IS NOT NULL`),
+    index("zoho_invoice_lines_sku_idx")
+      .on(t.sku)
+      .where(sql`sku IS NOT NULL`),
+    /** Partial unique so a Zoho upsert is idempotent on (parent, line-id)
+     *  when Zoho supplies a line-id; legacy lines without one are
+     *  tolerated. */
+    uniqueIndex("zoho_invoice_lines_invoice_line_id_unique")
+      .on(t.zohoInvoiceId, t.zohoInvoiceLineId)
+      .where(sql`zoho_invoice_line_id IS NOT NULL`),
+  ],
+);
+
+export const finishedLotInvoiceAllocations = pgTable(
+  "finished_lot_invoice_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    invoiceLineId: uuid("invoice_line_id")
+      .notNull()
+      .references(() => zohoInvoiceLines.id, { onDelete: "cascade" }),
+    finishedLotId: uuid("finished_lot_id")
+      .notNull()
+      .references(() => finishedLots.id, { onDelete: "cascade" }),
+    shipmentFinishedLotId: uuid("shipment_finished_lot_id").references(
+      () => shipmentFinishedLots.id,
+      { onDelete: "set null" },
+    ),
+    /** Positive only (CHECK constraint enforced in migration 0036).
+     *  numeric so partial allocations across multiple finished lots
+     *  preserve full precision. */
+    quantityAllocated: numeric("quantity_allocated", {
+      precision: 20,
+      scale: 6,
+    }).notNull(),
+    unit: text("unit"),
+    /** Free-text confidence band — HIGH / MEDIUM / LOW / MISSING.
+     *  Free-text so future bands extend without an enum migration; see
+     *  lib/production/commercial-trace.ts for the vocabulary. */
+    confidence: text("confidence").notNull(),
+    /** Free-text source — 'PACK_OUT_SCAN', 'ENGINE_SHIPMENT', 'MANUAL',
+     *  'ZOHO_IMPORT', etc. */
+    source: text("source").notNull(),
+    /** Free-text status — SUGGESTED / CONFIRMED / REJECTED /
+     *  NEEDS_REVIEW. SUGGESTED is the default from the allocation
+     *  engine; CONFIRMED requires explicit operator action. */
+    status: text("status").notNull().default("SUGGESTED"),
+    confirmed: boolean("confirmed").notNull().default(false),
+    confirmedByUserId: uuid("confirmed_by_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("finished_lot_invoice_allocations_line_idx").on(t.invoiceLineId),
+    index("finished_lot_invoice_allocations_lot_idx").on(t.finishedLotId),
+    index("finished_lot_invoice_allocations_shipment_lot_idx")
+      .on(t.shipmentFinishedLotId)
+      .where(sql`shipment_finished_lot_id IS NOT NULL`),
+    index("finished_lot_invoice_allocations_confidence_idx").on(t.confidence),
+    index("finished_lot_invoice_allocations_source_idx").on(t.source),
+    index("finished_lot_invoice_allocations_status_idx").on(t.status),
+    index("finished_lot_invoice_allocations_confirmed_idx").on(t.confirmed),
+    index("finished_lot_invoice_allocations_confirmed_at_idx")
+      .on(t.confirmedAt)
+      .where(sql`confirmed_at IS NOT NULL`),
   ],
 );
 
@@ -3395,3 +3589,8 @@ export type ProductRouteAssignment = typeof productRouteAssignments.$inferSelect
 export type RouteStationPermission = typeof routeStationPermissions.$inferSelect;
 export type QualityCheck = typeof qualityChecks.$inferSelect;
 export type RouteQualityCheck = typeof routeQualityChecks.$inferSelect;
+// COMMERCIAL-TRACE-2 — Zoho invoice ingest + allocation tables.
+export type ZohoInvoice = typeof zohoInvoices.$inferSelect;
+export type ZohoInvoiceLine = typeof zohoInvoiceLines.$inferSelect;
+export type FinishedLotInvoiceAllocation =
+  typeof finishedLotInvoiceAllocations.$inferSelect;
