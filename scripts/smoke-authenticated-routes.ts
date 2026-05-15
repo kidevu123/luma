@@ -74,6 +74,7 @@ const ROUTES: ReadonlyArray<{ path: string; group: string }> = [
   { group: "Operations",   path: "/production/start" },
   { group: "Operations",   path: "/recall" },
   { group: "Operations",   path: "/reports" },
+  { group: "Operations",   path: "/invoice-allocations" },
   { group: "Operations",   path: "/metrics" },
   { group: "Operations",   path: "/metrics/forecast" },
   { group: "Production",   path: "/genealogy" },

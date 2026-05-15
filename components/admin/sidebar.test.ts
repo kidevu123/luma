@@ -208,3 +208,21 @@ describe("WORKFLOW-UX-1 · banned-phrase guard", () => {
     expect(sidebarSrc).not.toMatch(/supplier shortage/i);
   });
 });
+
+describe("COMMERCIAL-TRACE-5 · invoice allocations link", () => {
+  it("Invoice allocations is linked under Management (not Floor work)", () => {
+    const floorAt = sidebarSrc.indexOf('heading: "Floor work"');
+    const mgmtAt = sidebarSrc.indexOf('heading: "Management"');
+    const configAt = sidebarSrc.indexOf('heading: "Configuration"');
+    const labelAt = sidebarSrc.indexOf('label: "Invoice allocations"');
+    expect(labelAt).toBeGreaterThan(-1);
+    // Sits between Management and Configuration headings.
+    expect(labelAt).toBeGreaterThan(mgmtAt);
+    expect(labelAt).toBeLessThan(configAt);
+    // …and NOT inside Floor work.
+    expect(labelAt < floorAt || labelAt > mgmtAt).toBe(true);
+  });
+  it("Invoice allocations points to /invoice-allocations", () => {
+    expect(sidebarSrc).toMatch(/href:\s*"\/invoice-allocations"/);
+  });
+});

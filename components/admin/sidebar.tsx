@@ -39,6 +39,7 @@ import {
   ShieldAlert,
   Inbox,
   Plug,
+  Receipt,
   ChevronDown,
   type LucideIcon,
 } from "lucide-react";
@@ -67,6 +68,7 @@ const SECTIONS: Section[] = [
       { href: "/packaging-inventory", label: "Inventory", icon: Boxes },
       { href: "/inbound", label: "POs & receiving", icon: Truck },
       { href: "/material-alerts", label: "Material alerts", icon: TrendingUp },
+      { href: "/invoice-allocations", label: "Invoice allocations", icon: Receipt },
       { href: "/reports", label: "Production reports", icon: BarChart3 },
       { href: "/operator-productivity", label: "Operator productivity", icon: Users },
     ],
