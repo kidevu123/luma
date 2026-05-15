@@ -4,6 +4,65 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## COMMERCIAL-TRACE-1: commercial traceability plan (complete; supersedes NEXUS-0..6)
+- Date: 2026-05-15
+- Result: vision pivot recorded. Luma is the finished-batch truth system; Zoho owns customer / invoice / sales-order truth; Nexus is a thin read-only lookup UI. The prior NEXUS-0 inbound-complaint direction is dropped — no `nexus_complaints` table, no complaint webhook, no attachments, no status history, no auto-QC trigger. Luma's outbound finished-lot push (LOT-1F/G) stays as the seed for Nexus's per-customer dropdown.
+- Files changed (1 commit; no code):
+  - **NEW** `docs/COMMERCIAL_TRACEABILITY_PLAN.md` — 11 sections covering vision correction, current state audit, core flow, data model + confidence ladder, Zoho integration plan, allocation engine, Nexus contract (3 read-only GET endpoints), security (3 secrets / customer-scope cascade / audit log), 8-phase implementation roadmap, 7 open questions + 12 risks.
+  - MOD `docs/NEXUS_QIP_CUSTOMER_COMPLAINT_PLAN.md` — banner at top marks the plan SUPERSEDED 2026-05-15 with a pointer to the new plan. Document body kept for boundary discussion + open-question record.
+  - MOD `docs/CLAUDE_BUILD_QUEUE.md` — NEXUS-0 marked superseded; NEXUS-1..6 ladder removed; COMMERCIAL-TRACE-1..8 ladder added.
+- New core flow:
+  ```
+  Zoho invoice / sales order → Luma allocation suggestion (HIGH/MEDIUM/LOW/MISSING)
+      → operator confirm → finished_lot_invoice_allocations (HIGH-confirmed only)
+      → Nexus customer dropdown (per-customer scope) → CSR drill-through to recall passport
+  ```
+- Confidence ladder (reuses existing Luma vocabulary):
+  - **HIGH** — pack-out scan or operator-confirmed. Only HIGH allocations exposed to the customer-facing Nexus endpoint.
+  - **MEDIUM** — exact `(zoho_item_id → product_id)` + qty + ±7-day date match + same customer. CSR-only.
+  - **LOW** — fuzzy match (multiple candidates). CSR-only with operator review prompt.
+  - **MISSING** — surfaces on admin unresolved-invoices report; never exposed via Nexus.
+- New tables (deferred to COMMERCIAL-TRACE-2 migration):
+  - `zoho_invoices` — Zoho-side header mirror.
+  - `zoho_invoice_lines` — line-level mirror with `zoho_item_id`, `sku`, quantity, unit, raw_payload.
+  - `finished_lot_invoice_allocations` — the hinge: `(invoice_line_id, finished_lot_id)` with `quantity_allocated`, `confidence`, `source`, `confirmed`/`confirmed_by_user_id`/`confirmed_at`.
+  - `shipment_finished_lots` gains `lot_picked_at_pack` + `lot_picked_at_pack_by_user_id` for future HIGH-confidence pack-out scan path.
+- Nexus contract — 3 read-only GETs under `app/api/integrations/nexus/`:
+  - `GET /invoice-batches?invoice_number=...` — customer scope; lists confirmed HIGH allocations only.
+  - `GET /customer-batches?nexus_customer_id=...` — customer scope; dropdown population.
+  - `GET /batch-passport?trace_code=...&scope=customer|csr` — customer scope is sanitised (no supplier_lot / no operators); CSR scope returns full internal passport with supplier_lot when present.
+- Security:
+  - Three separate secrets: `NEXUS_FINISHED_LOT_SECRET` (existing, outbound), `NEXUS_LOOKUP_TOKEN` (new, customer scope), `NEXUS_CSR_LOOKUP_TOKEN` (new, CSR scope). Different direction = different secret. Compromise of one doesn't grant access to the other two scopes.
+  - Customer-scope cascade: validate Bearer → resolve `customers.id` from `X-Nexus-Customer-Id` → filter every result to that customer → 404 on mismatch (no info leak).
+  - Audit log per call (`nexus.lookup.*` actions). No PII in audit body.
+  - No supplier_lot in customer-scope responses ever, regardless of `customers.supplier_lot_visible`.
+- Implementation phases:
+  - **COMMERCIAL-TRACE-1** — plan (this).
+  - **COMMERCIAL-TRACE-2** — schema migration (3 new tables + `shipment_finished_lots` columns + `INVOICES` value on `zoho_sync_kind` enum). No engine yet.
+  - **COMMERCIAL-TRACE-3** — Zoho invoice dry-run client + diff preview (mirrors ZOHO-2A pattern; blocks honestly while haute_brands tokens expired).
+  - **COMMERCIAL-TRACE-4** — pure allocation suggestion engine + apply/confirm actions.
+  - **COMMERCIAL-TRACE-5** — admin allocation review UI (`/admin/invoice-allocations` or similar).
+  - **COMMERCIAL-TRACE-6** — Nexus read-only API endpoints + shared auth middleware.
+  - **COMMERCIAL-TRACE-7** — in-container mock-receiver verify against seeded QA invoice + finished lot.
+  - **COMMERCIAL-TRACE-8** — live Zoho verification after gateway operator re-authorizes `haute_brands` tokens.
+- Open questions for owner:
+  1. Customer scope NEVER sees supplier_lot regardless of `customers.supplier_lot_visible`? (recommended: never)
+  2. Zoho invoice unit conventions (each / bottle / case / display)?
+  3. Should `unresolved_quantity` show on the customer-facing scope or only CSR?
+  4. Pack-out scan station UI — when does it land? Plumbed in COMMERCIAL-TRACE-2; not enabled until a floor PWA flow exists.
+  5. Backfill historical invoices? Default sync window: last 90 days.
+  6. Sales orders in scope? Recommendation: no — invoices only for commercial trace.
+  7. Nexus IP allowlist at reverse proxy?
+- Is COMMERCIAL-TRACE-2 ready?
+  - **Yes, with one owner decision.** The schema phase is fully scoped (DDL drafted in §4.2). Only blocker is owner answer to open question #1 (supplier_lot policy). Questions #2 / #4 / #5 are not schema-blocking — they shape COMMERCIAL-TRACE-4 / -5 / -8 scope.
+- Dependencies on prior work:
+  - ZOHO-GW-2 ✅ (gateway client speaks the real contract)
+  - ZOHO-2A ✅ (item + customer dry-run + diff engine; provides `external_item_mappings.luma_product_id` for the allocation engine)
+  - ZOHO-2B ⚠ (live Zoho dry-run pending token reauth) — required for COMMERCIAL-TRACE-3 live verification but NOT for the schema phase.
+  - LOT-1F/G ✅ (outbound push stays the seed for Nexus dropdown population)
+
+---
+
 ## ZOHO-2A: item / customer dry-run scaffolding (complete)
 - Date: 2026-05-14
 - Result: full dry-run engine (gateway clients + normalizers + diff engine + orchestrator + UI button) shipped. Staging blocks honestly because `haute_brands` Zoho tokens are still expired on the gateway. ZOHO-2B is now strictly an "after tokens are refreshed, re-run the same verify script" phase.

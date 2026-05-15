@@ -516,23 +516,81 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 
 ---
 
-### [ ] Nexus / QIP batch-complaint integration
-**Objective.** Forward batch-complaint signals from Nexus / QIP into Luma so the affected `batches` rows can flip to HELD or RECALLED with audit + operator alert. Read-only inbound; no live writes back to Nexus / QIP from Luma.
+### [~] NEXUS-0 — Customer complaint integration plan (SUPERSEDED 2026-05-15)
+**Status.** SUPERSEDED by `docs/COMMERCIAL_TRACEABILITY_PLAN.md`. Luma does NOT store customer complaints. The inbound webhook + `nexus_complaints` direction is abandoned. The companion document `docs/NEXUS_QIP_CUSTOMER_COMPLAINT_PLAN.md` stays committed for the boundary discussion + open-question record. Luma → Nexus outbound (LOT-1F/G) stays in place as the seed for Nexus's customer-scoped dropdown.
+
+---
+
+### [x] COMMERCIAL-TRACE-1 — Commercial traceability plan
+**Objective.** Audit-and-plan-only. Define the Zoho invoice → Luma finished-lot allocation model + Nexus read-only lookup contract. No code, no schema, no live calls. Replaces the abandoned NEXUS-1..6 ladder.
+
+**Closeout (2026-05-15, SHA pending push):** `docs/COMMERCIAL_TRACEABILITY_PLAN.md` committed. Vision pivot recorded in `docs/CURRENT_PHASE_STATUS.md`. Old NEXUS-0 plan flagged SUPERSEDED at the top. Three new tables planned (`zoho_invoices`, `zoho_invoice_lines`, `finished_lot_invoice_allocations`); three new Nexus GET endpoints scoped (`/invoice-batches`, `/customer-batches`, `/batch-passport`); three secrets defined (outbound `NEXUS_FINISHED_LOT_SECRET` stays, new `NEXUS_LOOKUP_TOKEN` for customer scope, new `NEXUS_CSR_LOOKUP_TOKEN` for CSR scope). Confidence ladder uses existing HIGH/MEDIUM/LOW/MISSING vocabulary; only HIGH-confirmed allocations exposed to customer scope. 7 open questions + 12 risks recorded.
+
+---
+
+### [ ] COMMERCIAL-TRACE-2 — Schema for Zoho invoices/lines + allocations
+**Objective.** Land the migration for `zoho_invoices` + `zoho_invoice_lines` + `finished_lot_invoice_allocations`. Add `lot_picked_at_pack` + `lot_picked_at_pack_by_user_id` to `shipment_finished_lots`. Add `INVOICES` to `zoho_sync_kind` enum. No engine yet — schema-only phase like ZOHO-1.
 
 **Files likely touched.**
-- `lib/integrations/nexus-qip/*` (new).
-- New webhook route under `app/api/integrations/nexus-qip/`.
-- `lib/db/schema.ts` — possibly extend `batches` with `complaint_source` + `complaint_received_at`.
-- Plan doc.
+- `drizzle/00XX_zoho_invoices_and_allocations.sql` — new migration.
+- `lib/db/schema.ts` — Drizzle table definitions.
 
 **Acceptance criteria.**
-- Inbound webhook accepted, validated, idempotent.
-- Affected batch transitions to HELD with audit + operator alert.
+- Migration idempotent + applied on staging.
+- All check constraints (`confidence` ∈ HIGH/MEDIUM/LOW, `source` ∈ enum set) enforce at DB level.
+- Drizzle schema mirrors DDL.
 
-**Tests required.**
-- Webhook validation + idempotency tests.
+**Tests required.** Schema-level invariant tests (CHECK constraints, unique indexes).
 
-**Stop condition.** Webhook live + smoke-tested on staging. Stop.
+**Stop condition.** Migration applied, tables visible in psql, tsc/vitest/build green.
+
+---
+
+### [ ] COMMERCIAL-TRACE-3 — Zoho invoice dry-run client + diff preview
+**Objective.** Implement `fetchZohoInvoicesDryRun` (list paginate) + `fetchZohoInvoiceDetail(invoiceId)` for line items. Mocked-gateway tests; live calls block honestly while `haute_brands` tokens expired.
+
+**Files likely touched.** `lib/integrations/zoho/invoices.ts`, sibling test, sync-dry-run extension or new `invoice-dry-run.ts`. Settings page gains an "Invoice dry-run" section.
+
+**Stop condition.** Mocked tests green; dry-run button blocks with NEEDS_REAUTH on staging.
+
+---
+
+### [ ] COMMERCIAL-TRACE-4 — Allocation suggestion engine
+**Objective.** Pure helpers: `suggestAllocationsForInvoiceLine`, `applyAllocation`, `confirmAllocation`. HIGH only from pack-out scan or operator confirm; MEDIUM from exact `(item_id, qty, ±7d, same customer)` match; LOW from fuzzy multi-candidate; MISSING surfaces in unresolved-invoices report.
+
+**Files likely touched.** `lib/production/invoice-allocations.ts` + tests.
+
+**Stop condition.** Engine emits correct suggestions for fixture invoice lines against fixture finished lots; idempotency proven.
+
+---
+
+### [ ] COMMERCIAL-TRACE-5 — Allocation review UI
+**Objective.** `/admin/invoice-allocations` — invoices grouped by resolved / partially resolved / unresolved. Per-invoice line-by-line view; Confirm / Override / Skip buttons. Audit-logged.
+
+**Acceptance criteria.** Page reachable; lints clean; auth smoke gains 2 routes.
+
+---
+
+### [ ] COMMERCIAL-TRACE-6 — Nexus read-only invoice/batch APIs
+**Objective.** Three GET endpoints under `app/api/integrations/nexus/`: `/invoice-batches`, `/customer-batches`, `/batch-passport`. Shared auth middleware. Customer-scope cascade enforced. Audit log per call. Compose env: `NEXUS_LOOKUP_TOKEN` + `NEXUS_CSR_LOOKUP_TOKEN`.
+
+**Stop condition.** Mock-receiver verify proves customer-safe vs CSR scopes; HIGH-only filter; cross-customer 404.
+
+---
+
+### [ ] COMMERCIAL-TRACE-7 — Staging verification with mock invoice + finished lot
+**Objective.** `scripts/verify-commercial-trace-7.ts` — seed QA invoice + finished lot, run suggestion engine, confirm via action, hit all three Nexus endpoints, assert customer scope hides supplier_lot, CSR scope shows it. Cleanup.
+
+**Stop condition.** Verify script exits 0; auth smoke 50/50 PASS (if endpoints added to smoke list).
+
+---
+
+### [ ] COMMERCIAL-TRACE-8 — Live Zoho verification after token reauth
+**Objective.** After gateway operator re-authorizes `haute_brands` tokens, run invoice dry-run against real Zoho data. Promote a small batch via review UI. Validate Nexus endpoint outputs against a real customer's invoice.
+
+**Prerequisite (operator).** SSH to LXC 9503, run gateway re-auth flow for `haute_brands` × {books, crm, expense, inventory}.
+
+**Stop condition.** Real customer's real invoice resolves to real finished lots; CSR drill-through returns the right internal passport; production-ready signal.
 
 ---
 

@@ -1,6 +1,14 @@
 # Nexus / QIP customer complaint integration — implementation plan (NEXUS-0)
 
-**Status.** Audit + plan only. No code, no schema changes, no live Nexus calls.
+> **SUPERSEDED 2026-05-15** by `docs/COMMERCIAL_TRACEABILITY_PLAN.md`.
+>
+> The product goal changed: Luma is the finished-batch truth system, Zoho owns customer / invoice / sales-order truth, and Nexus is a thin read-only lookup UI that resolves invoice numbers and trace codes into Luma's recall passport. **Luma does NOT store customer complaints.** No `nexus_complaints` table, no inbound-complaint webhook, no `complaint_attachments`, no `complaint_status_history`, no `complaint_qc_events` join.
+>
+> This document stays committed for the boundary discussion + the open-question record. Implementation phases NEXUS-1..6 below are abandoned; the replacement ladder is COMMERCIAL-TRACE-1..8.
+>
+> The Luma → Nexus outbound side (LOT-1F/G, `NexusFinishedLotPayload`, `sendFinishedLotToNexusAction`) is still in place and still useful — it pre-populates Nexus's per-customer dropdown so customers can pick a trace code without typing it.
+
+**Status (original).** Audit + plan only. No code, no schema changes, no live Nexus calls.
 
 **Authoring branch.** `production-intelligence-command-center`
 **Authored.** 2026-05-15
