@@ -42,6 +42,7 @@ import {
 } from "@/lib/integrations/zoho/gateway";
 import { TestConnectionButton } from "./test-connection-button";
 import { DryRunButton } from "./dry-run-button";
+import { InvoiceDryRunButton } from "./invoice-dry-run-button";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +109,21 @@ export default async function ZohoGatewayPage() {
     })
     .from(zohoSyncRuns)
     .where(eq(zohoSyncRuns.syncType, "CUSTOMERS"))
+    .orderBy(desc(zohoSyncRuns.startedAt))
+    .limit(1);
+
+  const [lastInvoicesDryRun] = await db
+    .select({
+      id: zohoSyncRuns.id,
+      status: zohoSyncRuns.status,
+      startedAt: zohoSyncRuns.startedAt,
+      finishedAt: zohoSyncRuns.finishedAt,
+      source: zohoSyncRuns.source,
+      summary: zohoSyncRuns.summary,
+      error: zohoSyncRuns.error,
+    })
+    .from(zohoSyncRuns)
+    .where(eq(zohoSyncRuns.syncType, "INVOICES"))
     .orderBy(desc(zohoSyncRuns.startedAt))
     .limit(1);
 
@@ -402,6 +418,111 @@ export default async function ZohoGatewayPage() {
             no item / customer endpoint is called.
           </p>
           <DryRunButton disabled={!cfg.configured} />
+        </div>
+      </ProductionSection>
+
+      <ProductionSection
+        title="Invoice dry-run (COMMERCIAL-TRACE-3)"
+        subtitle="Read-only diff of Zoho Books invoices + line items against the Luma customer / invoice snapshot. Never writes invoices, customers, allocations, or shipment status. Defers candidate-table writes to a future apply phase."
+        tone={
+          readiness === "READY_FOR_DRY_RUN"
+            ? "GOOD"
+            : readiness === "NEEDS_REAUTH" || readiness === "NEEDS_SELECTION"
+              ? "WARN"
+              : "MUTED"
+        }
+      >
+        {readiness === "NEEDS_REAUTH" ? (
+          <div className="mb-3">
+            <ProductionAlertCard
+              tone="WARN"
+              title="Invoice dry-run blocked — Zoho tokens expired"
+              body="Zoho gateway is reachable, but haute_brands tokens must be re-authorized before live invoice dry-run can fetch invoices. The button below stays enabled so an operator can capture a blocked-state audit row; clicking it does NOT call /zoho/invoices/list or /zoho/invoices/get."
+            />
+          </div>
+        ) : null}
+        <ProductionIdentityBlock
+          columns={2}
+          rows={[
+            { label: "Readiness", value: readiness },
+            { label: "Selected brand", value: cfg.brand ?? null, mono: true },
+            {
+              label: "Gateway URL",
+              value: cfg.configured ? cfg.url : null,
+              mono: true,
+            },
+            {
+              label: "Last invoice dry-run",
+              value: lastInvoicesDryRun
+                ? `${lastInvoicesDryRun.status} · ${fmtDate(lastInvoicesDryRun.startedAt)}`
+                : "Never run",
+            },
+            {
+              label: "Invoices scanned (last run)",
+              value:
+                (lastInvoicesDryRun?.summary as { counts?: { invoicesScanned?: number } } | null)
+                  ?.counts?.invoicesScanned ?? null,
+              mono: true,
+            },
+            {
+              label: "Lines scanned (last run)",
+              value:
+                (lastInvoicesDryRun?.summary as { counts?: { linesScanned?: number } } | null)
+                  ?.counts?.linesScanned ?? null,
+              mono: true,
+            },
+            {
+              label: "Create candidates",
+              value:
+                (lastInvoicesDryRun?.summary as { counts?: { createCandidates?: number } } | null)
+                  ?.counts?.createCandidates ?? null,
+              mono: true,
+            },
+            {
+              label: "Update candidates",
+              value:
+                (lastInvoicesDryRun?.summary as { counts?: { updateCandidates?: number } } | null)
+                  ?.counts?.updateCandidates ?? null,
+              mono: true,
+            },
+            {
+              label: "Needs review",
+              value:
+                (lastInvoicesDryRun?.summary as { counts?: { needsReview?: number } } | null)
+                  ?.counts?.needsReview ?? null,
+              mono: true,
+            },
+            {
+              label: "Conflicts",
+              value:
+                (lastInvoicesDryRun?.summary as { counts?: { conflicts?: number } } | null)
+                  ?.counts?.conflicts ?? null,
+              mono: true,
+            },
+            {
+              label: "Blocked reason",
+              value:
+                (lastInvoicesDryRun?.summary as { blocked?: boolean; message?: string } | null)
+                  ?.blocked
+                  ? (lastInvoicesDryRun?.summary as { message?: string } | null)?.message ?? null
+                  : null,
+            },
+          ] satisfies IdentityRow[]}
+        />
+        <div className="mt-4 space-y-2 text-sm text-text-muted">
+          <p>
+            Click the button to probe Zoho readiness, fetch invoices via the
+            gateway (per_page=200 from <code>/zoho/invoices/list</code>, with up to
+            25 detail backfills from <code>/zoho/invoices/get/&#123;id&#125;</code> when
+            <code> line_items[]</code> is omitted), normalize header + line rows, and diff
+            against the current Luma <code>zoho_invoices</code> + <code>customers</code>
+            snapshot. Writes one <code>zoho_sync_runs</code> row with{" "}
+            <code>sync_type=INVOICES</code> and <code>dry_run=true</code>. If readiness is
+            <em> not</em> <code>READY_FOR_DRY_RUN</code>, a single PARTIAL INVOICES row
+            is written and no invoice endpoint is called. Allocations are <em>not</em> created
+            in this phase.
+          </p>
+          <InvoiceDryRunButton disabled={!cfg.configured} />
         </div>
       </ProductionSection>
 

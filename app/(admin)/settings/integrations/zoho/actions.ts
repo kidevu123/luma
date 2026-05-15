@@ -35,6 +35,11 @@ import {
   type DryRunResult,
   type PersistRunInput,
 } from "@/lib/integrations/zoho/sync-dry-run";
+import {
+  runZohoInvoiceDryRun,
+  type InvoiceDryRunResult,
+  type InvoicePersistRunInput,
+} from "@/lib/integrations/zoho/invoices";
 
 export type ConnectivityCheckResult =
   | {
@@ -357,5 +362,136 @@ export async function runItemCustomerDryRunAction(): Promise<ItemCustomerDryRunR
         reasons: [...r.reasons],
       })),
     },
+  };
+}
+
+// ─── COMMERCIAL-TRACE-3 — invoice dry-run action ─────────────────────────
+
+export type InvoiceDryRunActionResult =
+  | {
+      kind: "blocked";
+      readiness: ZohoReadiness;
+      reason: string;
+      runId: string | null;
+    }
+  | {
+      kind: "ok";
+      readiness: ZohoReadiness;
+      runId: string;
+      counts: {
+        invoicesScanned: number;
+        linesScanned: number;
+        createCandidates: number;
+        updateCandidates: number;
+        noChange: number;
+        needsReview: number;
+        conflicts: number;
+      };
+      warnings: string[];
+      headers: Array<{
+        action: string;
+        zohoInvoiceId: string;
+        invoiceNumber: string | null;
+        customerName: string | null;
+        zohoCustomerId: string | null;
+        customerMatchedLumaId: string | null;
+        lineCount: number;
+        reasons: string[];
+      }>;
+      lines: Array<{
+        action: string;
+        zohoInvoiceId: string;
+        invoiceNumber: string | null;
+        sku: string | null;
+        itemName: string;
+        quantity: number | null;
+        reasons: string[];
+      }>;
+    }
+  | { kind: "error"; message: string };
+
+export async function runZohoInvoiceDryRunAction(): Promise<InvoiceDryRunActionResult> {
+  const actor = await requireAdmin();
+
+  const persistRun = async (input: InvoicePersistRunInput): Promise<string> => {
+    let id = "";
+    await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(zohoSyncRuns)
+        .values({
+          syncType: "INVOICES",
+          status: input.status,
+          finishedAt: new Date(),
+          source: input.source,
+          dryRun: true,
+          summary: input.summary,
+          error: input.error,
+          createdByUserId: input.actorUserId,
+        })
+        .returning({ id: zohoSyncRuns.id });
+      id = inserted[0]?.id ?? "";
+      await writeAudit(
+        {
+          actorId: actor.id,
+          actorRole: actor.role,
+          action: "zoho.invoice.dry_run",
+          targetType: "ZohoSyncRun",
+          targetId: id,
+          after: {
+            syncType: "INVOICES",
+            status: input.status,
+            error: input.error,
+          },
+        },
+        tx,
+      );
+    });
+    return id;
+  };
+
+  const result: InvoiceDryRunResult = await runZohoInvoiceDryRun({
+    persistRun,
+    actorUserId: actor.id,
+    source: "manual",
+  });
+
+  revalidatePath("/settings/integrations/zoho");
+
+  if (result.kind === "BLOCKED") {
+    return {
+      kind: "blocked",
+      readiness: result.readiness,
+      reason: result.reason,
+      runId: result.runId,
+    };
+  }
+  if (result.kind === "ERROR") {
+    return { kind: "error", message: result.message };
+  }
+  return {
+    kind: "ok",
+    readiness: result.readiness,
+    runId: result.runId,
+    counts: { ...result.counts },
+    warnings: [...result.warnings],
+    headers: result.headers.slice(0, 25).map((h) => ({
+      action: h.action,
+      zohoInvoiceId: h.zohoInvoiceId,
+      invoiceNumber: h.invoiceNumber,
+      customerName: h.customerName,
+      zohoCustomerId: h.zohoCustomerId,
+      customerMatchedLumaId: h.customerMatchedLumaId,
+      lineCount: h.lineCount,
+      reasons: [...h.reasons],
+    })),
+    lines: result.lines.slice(0, 50).map((ln) => ({
+      action: ln.action,
+      zohoInvoiceId: ln.zohoInvoiceId,
+      invoiceNumber: ln.invoiceNumber,
+      sku: ln.sku,
+      itemName: ln.itemName,
+      quantity: ln.quantity,
+      reasons: [...ln.reasons],
+    })),
   };
 }
