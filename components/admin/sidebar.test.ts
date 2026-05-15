@@ -57,9 +57,14 @@ describe("WORKFLOW-UX-1 · Floor work entries", () => {
     expect(sidebarSrc).toMatch(/label:\s*"Receive packaging"/);
     expect(inFloorWork('label: "Receive packaging"')).toBe(true);
   });
-  it("Start production entry exists", () => {
+  it("Start production entry exists + points at /production/start (not /qr-cards)", () => {
     expect(sidebarSrc).toMatch(/label:\s*"Start production"/);
     expect(inFloorWork('label: "Start production"')).toBe(true);
+    // The Start production link must NOT point at /qr-cards (which is
+    // QR card management, a DB-table-style page).
+    const startAt = sidebarSrc.indexOf('label: "Start production"');
+    const slice = sidebarSrc.slice(Math.max(0, startAt - 200), startAt);
+    expect(slice).toMatch(/href:\s*"\/production\/start"/);
   });
   it("Packaging / pack-out entry exists (not 'Packaging output')", () => {
     expect(sidebarSrc).toMatch(/label:\s*"Packaging \/ pack-out"/);
@@ -164,6 +169,34 @@ describe("WORKFLOW-UX-1 · new sidebar entries", () => {
   it("integrations gets a direct entry", () => {
     expect(sidebarSrc).toMatch(/label:\s*"Integrations"/);
     expect(sidebarSrc).toMatch(/href:\s*"\/settings\/integrations\/zoho"/);
+  });
+});
+
+describe("WORKFLOW-CLEANUP-2 · Start production vs QR card management", () => {
+  it("Start production points to /production/start", () => {
+    expect(sidebarSrc).toMatch(/href:\s*"\/production\/start"/);
+  });
+
+  it("QR card management lives under Advanced (collapsed) with /qr-cards route", () => {
+    const advancedAt = sidebarSrc.indexOf('heading: "Advanced"');
+    const qrLabelAt = sidebarSrc.indexOf('label: "QR card management"');
+    expect(advancedAt).toBeGreaterThan(-1);
+    expect(qrLabelAt).toBeGreaterThan(advancedAt);
+  });
+
+  it("Lookup receipt / batch only appears once in primary workflow", () => {
+    // Count occurrences of the literal label in the sidebar source.
+    const matches = sidebarSrc.match(/label:\s*"Lookup receipt \/ batch"/g);
+    expect(matches?.length).toBe(1);
+  });
+
+  it("Batches stays under Advanced (not in Floor work)", () => {
+    const floorAt = sidebarSrc.indexOf('heading: "Floor work"');
+    const mgmtAt = sidebarSrc.indexOf('heading: "Management"');
+    const batchesAt = sidebarSrc.indexOf('label: "Batches"');
+    expect(batchesAt).toBeGreaterThan(-1);
+    // Batches must be AFTER Management (i.e. in Advanced).
+    expect(batchesAt < floorAt || batchesAt > mgmtAt).toBe(true);
   });
 });
 

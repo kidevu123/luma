@@ -55,7 +55,7 @@ const SECTIONS: Section[] = [
       { href: "/floor-board", label: "Live floor", icon: Activity },
       { href: "/receiving/raw-bags", label: "Receive raw pills", icon: Inbox },
       { href: "/inbound/packaging-materials", label: "Receive packaging", icon: Boxes },
-      { href: "/qr-cards", label: "Start production", icon: QrCode },
+      { href: "/production/start", label: "Start production", icon: QrCode },
       { href: "/packaging-output", label: "Packaging / pack-out", icon: Package },
       { href: "/qc-review", label: "QC review", icon: ShieldAlert },
       { href: "/recall", label: "Lookup receipt / batch", icon: Search },
@@ -85,6 +85,7 @@ const SECTIONS: Section[] = [
     heading: "Advanced",
     collapsedByDefault: true,
     items: [
+      { href: "/qr-cards", label: "QR card management", icon: QrCode },
       { href: "/genealogy", label: "Bag genealogy", icon: History },
       { href: "/finished-lots", label: "Finished lots", icon: PackageCheck },
       { href: "/material-reconciliation", label: "Material reconciliation", icon: Scale },

@@ -220,52 +220,15 @@ export function RawBagIntakeForm({
         </div>
 
         {poMode === "LOCAL_PO" ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="poId">Purchase order</Label>
-              <Select id="poId" value={poId} onChange={(e) => setPoId(e.target.value)}>
-                <option value="">— Select PO —</option>
-                {purchaseOrders.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.poNumber} — {p.vendorName ?? "no vendor"}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="poLineId">PO line / ordered item</Label>
-              <Select
-                id="poLineId"
-                value={poLineId}
-                onChange={(e) => setPoLineId(e.target.value)}
-                disabled={!poId}
-              >
-                <option value="">— Select PO line —</option>
-                {availableLines.map((l) => {
-                  const tt = tabletTypes.find((t) => t.id === l.tabletTypeId);
-                  return (
-                    <option key={l.id} value={l.id}>
-                      {tt?.name ?? "(unknown product)"} — qty {l.qtyOrdered.toLocaleString()}
-                    </option>
-                  );
-                })}
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Vendor</Label>
-              <div className="text-sm font-mono px-2 py-1.5 rounded border border-border bg-surface">
-                {selectedPo?.vendorName ?? "—"}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Ordered quantity</Label>
-              <div className="text-sm font-mono px-2 py-1.5 rounded border border-border bg-surface">
-                {selectedPoLine?.qtyOrdered != null
-                  ? selectedPoLine.qtyOrdered.toLocaleString()
-                  : "—"}
-              </div>
-            </div>
-          </div>
+          <PoLineCards
+            purchaseOrders={purchaseOrders}
+            poLines={poLines}
+            tabletTypes={tabletTypes}
+            poId={poId}
+            setPoId={setPoId}
+            poLineId={poLineId}
+            setPoLineId={setPoLineId}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -532,6 +495,139 @@ export function RawBagIntakeForm({
       ) : null}
 
       <LookupCard />
+    </div>
+  );
+}
+
+function PoLineCards({
+  purchaseOrders,
+  poLines,
+  tabletTypes,
+  poId,
+  setPoId,
+  poLineId,
+  setPoLineId,
+}: {
+  purchaseOrders: PO[];
+  poLines: PoLine[];
+  tabletTypes: TabletType[];
+  poId: string;
+  setPoId: (s: string) => void;
+  poLineId: string;
+  setPoLineId: (s: string) => void;
+}) {
+  const [filter, setFilter] = React.useState("");
+  const selectedPo = purchaseOrders.find((p) => p.id === poId) ?? null;
+  const linesForPo = poLines.filter((l) => l.poId === poId);
+  const filteredLines = filter.trim().length === 0
+    ? linesForPo
+    : linesForPo.filter((l) => {
+        const tt = tabletTypes.find((t) => t.id === l.tabletTypeId);
+        const haystack = `${tt?.name ?? ""} ${tt?.sku ?? ""}`.toLowerCase();
+        return haystack.includes(filter.trim().toLowerCase());
+      });
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label htmlFor="poId">Purchase order</Label>
+          <Select
+            id="poId"
+            value={poId}
+            onChange={(e) => {
+              setPoId(e.target.value);
+              setPoLineId("");
+            }}
+          >
+            <option value="">— Select PO —</option>
+            {purchaseOrders.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.poNumber} — {p.vendorName ?? "no vendor"}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Vendor</Label>
+          <div className="text-sm font-mono px-2 py-1.5 rounded border border-border bg-surface">
+            {selectedPo?.vendorName ?? "—"}
+          </div>
+        </div>
+      </div>
+
+      {poId ? (
+        <div>
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <div className="text-[11px] uppercase tracking-[0.10em] text-text-muted font-semibold">
+              PO line items ({linesForPo.length})
+            </div>
+            {linesForPo.length > 6 ? (
+              <div className="w-64">
+                <Input
+                  placeholder="Filter by product name or SKU"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              </div>
+            ) : null}
+          </div>
+          {linesForPo.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border/60 bg-surface/40 px-4 py-6 text-center text-sm text-text-muted">
+              This PO has no lines configured. Add lines via{" "}
+              <span className="font-mono">/inbound/[id]</span> or use the
+              manual PO reference tab above.
+            </div>
+          ) : (
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {filteredLines.map((l) => {
+                const tt = tabletTypes.find((t) => t.id === l.tabletTypeId);
+                const active = poLineId === l.id;
+                return (
+                  <li key={l.id}>
+                    <button
+                      type="button"
+                      onClick={() => setPoLineId(active ? "" : l.id)}
+                      className={`w-full text-left rounded-md border px-3 py-2.5 transition-colors ${active ? "border-brand-500 bg-brand-50/60 ring-1 ring-brand-300" : "border-border bg-surface hover:bg-surface-2"}`}
+                    >
+                      <div className="text-[12px] font-semibold text-text leading-tight">
+                        {tt?.name ?? "(unknown product)"}
+                      </div>
+                      {tt?.sku ? (
+                        <div className="text-[10px] font-mono text-text-muted mt-0.5">
+                          {tt.sku}
+                        </div>
+                      ) : null}
+                      <div className="mt-1.5 grid grid-cols-2 gap-1 text-[10px]">
+                        <div>
+                          <div className="text-text-muted uppercase tracking-wider">Ordered</div>
+                          <div className="font-mono tabular-nums">
+                            {l.qtyOrdered.toLocaleString()}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-text-muted uppercase tracking-wider">Status</div>
+                          <div className="font-mono">
+                            {active ? "Receiving" : "Ready"}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {filteredLines.length === 0 && linesForPo.length > 0 ? (
+            <div className="mt-2 text-xs text-text-muted">
+              No PO lines match "{filter}".
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-sm text-text-muted">
+          Pick a PO to see its line items as receive cards.
+        </p>
+      )}
     </div>
   );
 }
