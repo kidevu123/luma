@@ -4,6 +4,68 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## COMMERCIAL-TRACE-2: schema for Zoho invoices + finished-lot allocations (complete)
+- Date: 2026-05-15
+- Result: schema-only phase shipped. Three new tables + two new columns on `shipment_finished_lots` + `INVOICES` added to the `zoho_sync_kind` enum + pure visibility-policy helper for customer/CSR/internal scopes. No engine, no live Zoho calls, no UI. Verified end-to-end on staging at SHA `bb4cc13`.
+- Audit before this phase:
+  - Latest migration index: **0034** (`receives_po_line`). Next unused: **0035**.
+  - `zoho_sync_kind` enum existed with 6 values (`CONNECTIVITY_CHECK`, `ITEMS`, `CUSTOMERS`, `SALES_ORDERS`, `PURCHASE_ORDERS`, `FINISHED_LOT_PUSH`). **Missing `INVOICES`**.
+  - `customers.zoho_customer_id` and `customers.nexus_customer_id` already existed (LOT-1G); `supplier_lot_visible` boolean already there. No change needed.
+  - `products.zoho_item_id` already present; `external_item_mappings` covers Zoho item ↔ Luma product mapping.
+  - `shipment_finished_lots` had `shipment_id` / `finished_lot_id` / `customer_id` / `quantity` / `unit` / `shipped_at` / `nexus_sent_at`. **No** `invoice_allocation_status` or `last_invoice_allocation_at` columns.
+  - **No** `zoho_invoices`, `zoho_invoice_lines`, or `finished_lot_invoice_allocations` tables existed.
+- Migration files (split because `ALTER TYPE ADD VALUE` silently rolls back when batched with table DDL on populated DBs — per memory):
+  - **NEW** `drizzle/0035_zoho_sync_kind_invoices.sql` — standalone `ALTER TYPE "zoho_sync_kind" ADD VALUE IF NOT EXISTS 'INVOICES'`. One statement. The Drizzle pg migrator runs each `.sql` in its own transaction, so the value becomes visible to migration 0036.
+  - **NEW** `drizzle/0036_commercial_trace_schema.sql` — three new tables + two `ADD COLUMN IF NOT EXISTS` on `shipment_finished_lots` + indexes. `CHECK (quantity_allocated > 0)` enforced at the DB.
+- Schema additions (all additive, no destructive ops):
+  - `zoho_invoices` — `id uuid pk`, `zoho_invoice_id text not null unique`, `invoice_number text not null`, `zoho_customer_id text nullable`, `customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`, `invoice_date date nullable`, `status text nullable`, `currency text nullable`, `subtotal/total/balance numeric(20,4) nullable`, `raw_payload jsonb not null default '{}'`, `last_seen_at timestamptz nullable`, `last_synced_at timestamptz nullable`, `created_at/updated_at timestamptz not null default now()`. Indexes: unique on `zoho_invoice_id`; b-tree on `invoice_number`; partial indexes on `zoho_customer_id`, `customer_id`, `invoice_date DESC`, `status`.
+  - `zoho_invoice_lines` — `id uuid pk`, `zoho_invoice_id uuid not null REFERENCES zoho_invoices(id) ON DELETE CASCADE` (UUID FK; spelling follows user spec verbatim; not to be confused with the parent's text `zoho_invoice_id` external id), `zoho_invoice_line_id text nullable`, `zoho_item_id text nullable`, `sku text nullable`, `item_name text not null`, `description text nullable`, `quantity numeric(20,6) not null`, `unit text nullable`, `rate numeric(20,6) nullable`, `amount numeric(20,4) nullable`, `raw_payload jsonb not null default '{}'`, `created_at/updated_at`. Indexes: b-tree on parent FK; partial on `zoho_invoice_line_id`, `zoho_item_id`, `sku`; **partial unique** on `(zoho_invoice_id, zoho_invoice_line_id) WHERE zoho_invoice_line_id IS NOT NULL` so Zoho sync upserts are idempotent on the line-id pair while tolerating legacy lines without one.
+  - `finished_lot_invoice_allocations` — `id uuid pk`, `invoice_line_id uuid not null REFERENCES zoho_invoice_lines(id) ON DELETE CASCADE`, `finished_lot_id uuid not null REFERENCES finished_lots(id) ON DELETE CASCADE`, `shipment_finished_lot_id uuid nullable REFERENCES shipment_finished_lots(id) ON DELETE SET NULL`, `quantity_allocated numeric(20,6) not null` (CHECK > 0), `unit text nullable`, `confidence text not null`, `source text not null`, `status text not null default 'SUGGESTED'`, `confirmed boolean not null default false`, `confirmed_by_user_id uuid REFERENCES users(id) ON DELETE SET NULL`, `confirmed_at timestamptz nullable`, `notes text nullable`, `created_at/updated_at`. Indexes: b-tree on `invoice_line_id`, `finished_lot_id`, `confidence`, `source`, `status`, `confirmed`; partial on `shipment_finished_lot_id`, `confirmed_at DESC`. **No unique index on the pair** — by design, M:N allowed: one invoice line → many finished lots; one finished lot → many invoice lines.
+  - `shipment_finished_lots` — added `invoice_allocation_status text not null default 'UNALLOCATED'` + `last_invoice_allocation_at timestamptz nullable`. B-tree index on the status column; partial index on the timestamp.
+- Enum addition:
+  - `zoho_sync_kind` now `{CONNECTIVITY_CHECK, ITEMS, CUSTOMERS, SALES_ORDERS, PURCHASE_ORDERS, FINISHED_LOT_PUSH, INVOICES}`. Mirrored in `lib/db/schema.ts` `zohoSyncKindEnum`.
+- Visibility policy (owner decision 2026-05-15) implemented in `lib/production/commercial-trace.ts`:
+  - **Customer scope** — `commercialTraceVisibilityPolicy("customer")` rejects: `supplier_lot`, `supplier_lot_number`, `vendor_lot_number`, `internal_receipt_number`, `raw_bag_qr`, `bag_qr_code`, `operator_name`, `operator_id`, `employee_name`, `employee_id`, `machine_id`, `machine_label`, `station_id`, `station_label`, `qc_history`. Field matching is trimmed + lowercase so `Supplier_Lot` and `RAW_BAG_QR` are both blocked.
+  - **CSR scope** — `commercialTraceVisibilityPolicy("csr")` permits every field; `blockedFields` is empty.
+  - **Internal scope** — same as CSR. Distinct identifier kept so future policy splits (e.g. management vs CSR) don't need a refactor.
+  - Helper module is pure — no DB writes, no Zoho client imports, no `fetch` calls. Verified by the safety-guardrail test.
+- Helper exports (`lib/production/commercial-trace.ts`):
+  - `normalizeInvoiceNumber(value)` — trim + uppercase + collapse whitespace; returns `null` for empty.
+  - `normalizeZohoInvoiceLineKey(invoiceId, lineId)` — returns `${invoiceId}::${lineId}` after trimming; `null` if either is empty.
+  - `validateAllocationQuantity(value)` — `{ok: true, value}` for finite positive numbers; `{ok: false, reason}` otherwise. Mirrors the DB CHECK so the UI can surface friendly errors.
+  - `isCustomerSafeCommercialTraceField(field)` — boolean; case-insensitive; rejects whitespace and empty inputs (defensive against accidental field exposure).
+  - `commercialTraceVisibilityPolicy(scope)` — returns `{scope, allowField, blockedFields}`.
+  - Constants: `ALLOCATION_CONFIDENCE_VALUES = ["HIGH","MEDIUM","LOW","MISSING"]`, `ALLOCATION_STATUS_VALUES = ["SUGGESTED","CONFIRMED","REJECTED","NEEDS_REVIEW"]`, `CSR_ONLY_COMMERCIAL_TRACE_FIELDS` (the 15 customer-blocked names).
+- Tests added (+27 vs WORKFLOW-CLEANUP-2's 1478 = **1505 / 1505 PASS across 62 files**):
+  - **Schema shape (5 tests)** — the three new tables export the required columns; `shipment_finished_lots` gained the allocation columns; `zoho_sync_kind` enum contains `INVOICES` (and still contains the original 6 values).
+  - **Migration files (3 tests)** — `0035` is a standalone `ALTER TYPE ADD VALUE 'INVOICES'`; `0036` creates the three tables and extends `shipment_finished_lots` and carries the `quantity_allocated > 0` CHECK; journal registers idx 35 + idx 36.
+  - **Allocation invariants (4 tests)** — confidence vocabulary `[HIGH, MEDIUM, LOW, MISSING]`; status vocabulary `[SUGGESTED, CONFIRMED, REJECTED, NEEDS_REVIEW]`; quantity validator rejects 0 / negative / NaN / Infinity, accepts 0.0001 and 1234; no unique pair index on `(invoice_line_id, finished_lot_id)` in migration 0036 (M:N preserved).
+  - **Visibility (8 tests)** — customer scope hides supplier lot (+ supplier_lot_number, vendor_lot_number), internal receipt, raw bag QR (+ bag_qr_code), operator + employee + machine + station + qc_history; permits customer-safe fields (`finished_lot_number`, `trace_code`, `invoice_number`, etc.); CSR + internal scope permit all CSR-only fields with empty `blockedFields`; case-insensitive matching; empty/whitespace names always rejected.
+  - **Normalizers (2 tests)** — invoice number trim/upper/collapse + null on empty/non-string; line-key requires both parts non-empty.
+  - **Safety guardrails (4 tests)** — schema.ts contains no `nexus_complaints` / `nexusComplaints`, no `complaint_webhook`, no `complaint_attachments`, no `complaint_status_history`; helper module imports no DB / Zoho client modules and uses no `fetch`/`axios`/`node:http`; if `app/api/nexus/` exists, no file references `zoho_invoices` / `invoice-batches` / `customer-batches` (no live endpoint added).
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1505 / 1505 PASS across 62 files** (+27 vs WORKFLOW-CLEANUP-2 / +1 test file).
+  - `npx next build` → clean. No new routes; bundle sizes unchanged from WORKFLOW-CLEANUP-2.
+  - Auth smoke → **50 / 50 PASS** at SHA `bb4cc13`.
+- Staging verification (LX122 / SHA `bb4cc13`):
+  - The orphan-container trap that hit INTAKE-WORKFLOW-1 and WORKFLOW-CLEANUP-2 hit again. Cleared via `docker compose down` + `up -d`. The standard pattern still works.
+  - `/api/health` SHA `bb4cc13fce78f7e0fb2b0849e840e34c2fa01f30` ✅
+  - Migration 0035 applied: `SELECT unnest(enum_range(NULL::zoho_sync_kind))` returns 7 values including `INVOICES`.
+  - Migration 0036 applied: `information_schema.tables` shows `zoho_invoices`, `zoho_invoice_lines`, `finished_lot_invoice_allocations` in `public`.
+  - `shipment_finished_lots.invoice_allocation_status` + `shipment_finished_lots.last_invoice_allocation_at` columns present (verified via `information_schema.columns`).
+  - `finished_lot_invoice_allocations_quantity_positive` CHECK constraint present (verified via `pg_constraint`): `CHECK ((quantity_allocated > (0)::numeric))`.
+  - No invoice data exists yet (no fake rows seeded).
+  - Auth smoke 50/50 PASS — no UI route was added or affected.
+- Visibility policy in plain terms:
+  - **Customer scope** = lookup endpoints reachable from the Nexus customer-facing token. NEVER returns supplier lot, internal receipt number, raw bag QR, operator names, machine IDs, station IDs, or QC history.
+  - **CSR scope** = lookup endpoints reachable from the Nexus CSR/internal token or from an authenticated Luma admin. May surface the full set.
+  - The helper is the only place the policy is encoded today; once COMMERCIAL-TRACE-6 wires the Nexus endpoints, every response filter MUST go through `commercialTraceVisibilityPolicy(scope).allowField(field)`.
+- Is COMMERCIAL-TRACE-3 ready?
+  - **Yes.** The schema hinge is live. The next phase (Zoho invoice dry-run client + diff preview) writes to `zoho_invoices` + `zoho_invoice_lines` only, gated behind `zoho_sync_runs.sync_type = 'INVOICES'` with `dry_run = true`. Owner still needs to reauth `haute_brands` Zoho tokens before any live read, but the dry-run scaffolding (per ZOHO-2A) supports a mocked-gateway fixture path independent of token state.
+
+---
+
 ## WORKFLOW-CLEANUP-2: PO line cards, material tabs, Start production (complete)
 - Date: 2026-05-14
 - Result: three workflow confusion points closed before Commercial Trace resumes. Receiving raw bags now exposes every PO line as a card, packaging-materials receiving separates count vs roll into tabs (QA hidden by default), and the sidebar's "Start production" lands on a real four-step page that fires CARD_ASSIGNED via the same projector path the floor PWA uses. Verified end-to-end on staging at SHA `fe8778a`.

@@ -594,21 +594,23 @@ This phase supersedes the earlier "INTAKE-UX-1" entry below — same target, bro
 
 ---
 
-### [ ] COMMERCIAL-TRACE-2 — Schema for Zoho invoices/lines + allocations
-**Objective.** Land the migration for `zoho_invoices` + `zoho_invoice_lines` + `finished_lot_invoice_allocations`. Add `lot_picked_at_pack` + `lot_picked_at_pack_by_user_id` to `shipment_finished_lots`. Add `INVOICES` to `zoho_sync_kind` enum. No engine yet — schema-only phase like ZOHO-1.
+### [x] COMMERCIAL-TRACE-2 — Schema for Zoho invoices/lines + allocations
+**Objective.** Land the migration for `zoho_invoices` + `zoho_invoice_lines` + `finished_lot_invoice_allocations`. Extend `shipment_finished_lots` with allocation-status columns. Add `INVOICES` to `zoho_sync_kind` enum. No engine — schema-only phase like ZOHO-1.
 
-**Files likely touched.**
-- `drizzle/00XX_zoho_invoices_and_allocations.sql` — new migration.
-- `lib/db/schema.ts` — Drizzle table definitions.
+**Files touched (1 commit, SHA `bb4cc13`).**
+- `drizzle/0035_zoho_sync_kind_invoices.sql` — standalone `ALTER TYPE "zoho_sync_kind" ADD VALUE 'INVOICES'`. Split because Postgres requires the enum value to commit before tables that reference it can be created in the same pass (Drizzle pg migrator runs each `.sql` in its own transaction).
+- `drizzle/0036_commercial_trace_schema.sql` — `zoho_invoices`, `zoho_invoice_lines`, `finished_lot_invoice_allocations` plus `ADD COLUMN IF NOT EXISTS invoice_allocation_status` + `last_invoice_allocation_at` on `shipment_finished_lots`. `CHECK (quantity_allocated > 0)` enforced at the DB.
+- `drizzle/meta/_journal.json` — registers idx 35 + idx 36 with strictly increasing `when` timestamps (1781500000000, 1781600000000).
+- `lib/db/schema.ts` — mirrors the new tables + columns + extends `zohoSyncKindEnum` with `INVOICES`.
+- `lib/production/commercial-trace.ts` — pure helpers: `normalizeInvoiceNumber`, `normalizeZohoInvoiceLineKey`, `validateAllocationQuantity`, `isCustomerSafeCommercialTraceField`, `commercialTraceVisibilityPolicy`. Confidence/status vocabularies. CSR-only-field list.
+- `lib/production/commercial-trace.test.ts` — 27 cases covering schema shape, migration files, journal registration, allocation invariants, visibility policy (customer hides supplier lot / receipt / raw bag QR / operator / machine; CSR + internal see all), normalizers, and safety guardrails (no nexus_complaints, no complaint webhook/attachment/status-history tables, no live Zoho fetch, no Nexus invoice-batches endpoint yet).
 
-**Acceptance criteria.**
-- Migration idempotent + applied on staging.
-- All check constraints (`confidence` ∈ HIGH/MEDIUM/LOW, `source` ∈ enum set) enforce at DB level.
-- Drizzle schema mirrors DDL.
+**Visibility policy (owner decision 2026-05-15):**
+- Customer scope NEVER exposes supplier_lot, supplier_lot_number, vendor_lot_number, internal_receipt_number, raw_bag_qr, bag_qr_code, operator_name, operator_id, employee_name, employee_id, machine_id, machine_label, station_id, station_label, qc_history.
+- CSR + internal scope permit the full set; `blockedFields` empty.
+- The helper is the only encoding today; future Nexus endpoints (COMMERCIAL-TRACE-6) MUST call `commercialTraceVisibilityPolicy(scope).allowField(field)` before returning any data.
 
-**Tests required.** Schema-level invariant tests (CHECK constraints, unique indexes).
-
-**Stop condition.** Migration applied, tables visible in psql, tsc/vitest/build green.
+**Closeout (2026-05-15, SHA `bb4cc13`):** tsc clean / vitest **1505/1505** (+27 vs WORKFLOW-CLEANUP-2 / +1 test file) / next build clean / migrations 0035 + 0036 applied on LX122 (`SELECT unnest(enum_range(NULL::zoho_sync_kind))` returns 7 values including `INVOICES`; three new tables visible in `information_schema.tables`; `shipment_finished_lots` gained both allocation columns; `pg_constraint` confirms `CHECK ((quantity_allocated > (0)::numeric))`) / auth smoke **50/50 PASS**. No data seeded. No live Zoho calls made. No UI added.
 
 ---
 
