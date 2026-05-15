@@ -534,7 +534,24 @@ No business-logic, loader, projector, migration, or formula changes anywhere. Co
 
 ---
 
-### [ ] INTAKE-UX-1 — Single-screen raw-bag intake form
+### [x] INTAKE-WORKFLOW-1 — PO-driven one-screen raw bag intake + lookup
+**Objective.** Replace the WORKFLOW-UX-1 placeholder at `/receiving/raw-bags` with the live PO-driven intake form. One screen captures PO + vendor + supplier lot + bag count + per-bag receipt # + per-bag QR + declared count. Atomic save. Lookup-by-receipt and lookup-by-QR both resolve to the same bag with full PO/vendor/product/supplier-lot context.
+
+**Files touched (1 commit, SHA `59182fd`).**
+- `drizzle/0034_receives_po_line.sql` — additive: `receives.po_line_id`.
+- `lib/db/schema.ts`, `drizzle/meta/_journal.json` — mirror.
+- `lib/production/raw-bag-intake.ts` + tests (46 cases).
+- `lib/db/queries/raw-bag-intake.ts` — atomic save + lookup.
+- `app/(admin)/receiving/raw-bags/{page,actions,raw-bag-intake-form}.tsx` — live UI.
+- `scripts/verify-intake-workflow-1.ts` — end-to-end harness.
+
+**Closeout (2026-05-15, SHA `59182fd`):** tsc clean / vitest **1466/1466** (+46 vs WORKFLOW-UX-1 / +1 test file) / next build clean (`/receiving/raw-bags` 235 B → 20.4 kB live form) / migration 0034 applied / verify-intake-workflow-1 exits 0 with every PO/vendor/product/supplier-lot link asserted + variance EXACT @ 200,000 + no finished_lots created during raw intake / auth smoke 49/49 PASS. Manual fallback path keeps receiving unblocked while `haute_brands` tokens stay expired.
+
+This phase supersedes the earlier "INTAKE-UX-1" entry below — same target, broader scope (PO-driven, not just bag-shape).
+
+---
+
+### [~] INTAKE-UX-1 — Single-screen raw-bag intake form (subsumed by INTAKE-WORKFLOW-1)
 **Objective.** Replace the `/receiving/raw-bags` placeholder body with the live intake workflow: pick product / tablet type → enter supplier lot → enter bag count + per-bag pill count → scan or paste each bag's QR code → Luma issues internal receipt numbers → one click writes the `receive` + `small_boxes` + `inventory_bags` rows in a single transaction.
 
 **Files likely touched.**

@@ -4,6 +4,89 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## INTAKE-WORKFLOW-1: PO-driven one-screen raw bag intake (complete)
+- Date: 2026-05-15
+- Result: live PO-driven intake replaces the WORKFLOW-UX-1 placeholder. One screen handles PO/vendor context + supplier lot + bag-row generation + per-bag QR/receipt entry + atomic save. Receipt + QR lookup resolve to the same bag with full PO/vendor/product/supplier-lot context. End-to-end verified on staging at SHA `59182fd`.
+- Current receiving audit (before this phase):
+  - `/inbound/new` (existing 346-line wizard) captured PO + tablet type + batch number per box, auto-generated `<receive_name>-B<box>-<bag>` receipt numbers + `BAG-<uuid>` QR codes server-side. **Did NOT** prompt for PO line, ordered qty, per-bag QR, per-bag receipt-number override.
+  - PO + vendor + ordered qty / line / mapping: `purchase_orders` + `po_lines` exist; `receives.po_id` linked to header but **no link to specific PO line**. Variance vs `qty_ordered` therefore ambiguous when a PO had two lines for the same tablet type.
+- PO table / PO line findings:
+  - `purchase_orders` — `id, po_number (unique), parent_po_number, vendor_name, status, zoho_po_id, opened_at, closed_at, notes`.
+  - `po_lines` — `id, po_id, tablet_type_id, packaging_material_id, qty_ordered, zoho_line_item_id, notes`. Sufficient for the new workflow.
+  - `inventory_bags` already has `bag_qr_code` (unique partial), `internal_receipt_number` (indexed), `declared_pill_count`, `weight_grams` from LOT-1B. **No schema gap for the bag side.**
+  - `batches` carries supplier-lot identity via `batch_number` + `vendor_lot_number` columns for `kind=TABLET` rows.
+- Files changed (1 commit, SHA `59182fd`):
+  - **NEW** `drizzle/0034_receives_po_line.sql` — adds `receives.po_line_id uuid REFERENCES po_lines(id) ON DELETE SET NULL` + partial index. Idempotent ADD COLUMN IF NOT EXISTS.
+  - MOD `lib/db/schema.ts` — mirrors the new column.
+  - MOD `drizzle/meta/_journal.json` — registers idx 34.
+  - **NEW** `lib/production/raw-bag-intake.ts` — pure helpers: `generateBagRowSeed`, `splitReceiptStart` (preserves padding), `detectDuplicatesInPayload`, `validateBagRowSeeds`, `computeReceivedTotal`, `computeVariance`, `derivePoVerificationStatus`, `verificationStatusLabel`, `preflightRawBagIntake` + Zod schema.
+  - **NEW** `lib/production/raw-bag-intake.test.ts` — **46 unit tests**: receipt-padding edge cases (`1001` / `QA-R1001` / `R-007` / no-digit / empty / whitespace), bag-row generation (count / increment / QA prefix / zero-pad / explicit prefix / bulk declared / bulk weight / empty for 0 or negative / 1-indexed sequence), duplicate detection (receipt + QR; doesn't false-positive on null QRs), validation matrix (missing QR / missing declared / non-positive declared / missing receipt; clean rows pass), variance EXACT/PARTIAL/OVER/UNKNOWN, PO verification status table (4 outcomes × manual / local / Zoho / mapping presence), label data-honesty (`Manual PO reference — not verified against Zoho yet`), preflightRawBagIntake (LOCAL_PO requires poId, MANUAL_REFERENCE requires poNumber + vendor, Zod rejects negative sequences, duplicate receipts surface as issues), plus an acceptance test verifying the PO-1234 / 10 bags / 20000 / start 1001 scenario produces 1001..1010 with EXACT variance @ 200,000.
+  - **NEW** `lib/db/queries/raw-bag-intake.ts` — `createRawBagIntakeAtomic` + `findRawBagByReceiptOrQr`. Atomic save in a single transaction: upserts PO (for manual mode without overwriting existing vendor), validates duplicate-QR/duplicate-receipt against the DB before any INSERT, upserts batch by supplier lot, creates receive (auto-named `{PO}-R{seq}` from the receive count for that PO), single small_box, N inventory_bags. Audit-logged with the full save context. Lookup helper searches `internal_receipt_number` → `bag_qr_code` → `vendor_barcode` (legacy fallback), returns PO + vendor + product + supplier lot + bag sequence + workflow_bag (if production started) + finished_lots (if packed).
+  - **NEW** `app/(admin)/receiving/raw-bags/{page,actions,raw-bag-intake-form}.tsx` — live UI. `page.tsx` loads PO + PO line + tablet type options + Zoho readiness; surfaces a WARN banner when readiness ≠ READY_FOR_DRY_RUN (manual fallback path explained). `actions.ts` exposes `createRawBagIntakeAction` (requireLead) + `lookupRawBagAction` (requireLead). `raw-bag-intake-form.tsx` is the client form with the three sections + variance display + result panel + quick-lookup card.
+  - **NEW** `scripts/verify-intake-workflow-1.ts` — in-container end-to-end harness; seeds QA-PO-1234 / QA Vendor X / QA Mango Peach / QA-1243 / 200,000 ordered + receives 10 × 20,000 bags via the live action, asserts every link, cleans up QA rows (audit_log entries remain).
+- PO / manual fallback behavior:
+  - Mode toggle: "Pick from local POs (N)" vs "Manual PO reference". Local mode loads `purchase_orders` + filters `po_lines` by selected PO. Manual mode requires PO number + vendor; ordered qty is optional and surfaces a UNKNOWN variance row when omitted.
+  - Verification badge: `VERIFIED_LOCAL` (green), `VERIFIED_ZOHO` (green; never claimed today because Zoho cached invoices are deferred to ZOHO-3/COMMERCIAL-TRACE-3), `MANUAL_REFERENCE` (amber + "not verified against Zoho yet"), `MISSING_PRODUCT_MAPPING` (red — review before save).
+  - **Receiving is NEVER blocked by Zoho token state.** When the gateway page says NEEDS_REAUTH, the manual fallback path is the primary entry — operator types PO + vendor + product + ordered qty.
+- One-screen raw intake behavior:
+  - Section 1 (PO / vendor) — picker + auto-select tablet type from PO line + display vendor + ordered qty.
+  - Section 2 (Supplier lot setup) — supplier lot + bag count + declared per bag + optional weight per bag + receipt prefix + receipt start. One click "Generate bag rows" produces the seed.
+  - Section 3 (Bag rows) — operator types/scans QR per row, can override per-bag receipt + declared + weight; live variance summary. PARTIAL / OVER receipts show ProductionAlertCard warnings inline.
+  - Save result panel — PO / vendor / product / supplier lot / receipt range / bag count / variance + three forward links (Lookup receipt / batch, Start production, Receive another batch).
+- Receipt auto-fill behavior:
+  - `generateBagRowSeed({ count: 10, receiptStart: "1001" })` → "1001", "1002", … "1010".
+  - `generateBagRowSeed({ count: 10, receiptStart: "QA-R1001" })` → "QA-R1001" .. "QA-R1010".
+  - `generateBagRowSeed({ count: 4, receiptStart: "R-007" })` → "R-007", "R-008", "R-009", "R-010" (3-wide padding preserved).
+  - `generateBagRowSeed({ count: 3, receiptStart: "1001", receiptPrefix: "QA-R" })` → "QA-R1001", "QA-R1002", "QA-R1003".
+  - Operator can manually edit any generated receipt number in the bag-rows table.
+- Variance behavior:
+  - `EXACT` when received == ordered.
+  - `PARTIAL` when received < ordered → amber alert.
+  - `OVER` when received > ordered → red alert.
+  - `UNKNOWN` when ordered is null (manual fallback without qty) → no alert, just `—` in the variance cell.
+  - Both the live preview AND the persisted result panel report receivedQuantity / orderedQuantity / variance / status with consistent wording.
+- QR / receipt lookup behavior:
+  - `findRawBagByReceiptOrQr(value)` searches `internal_receipt_number` exact match → `bag_qr_code` exact match → `vendor_barcode` exact match (legacy fallback). Returns the FIRST match.
+  - Returns full resolved context: bag (id, sequence, qr, receipt, declared, weight, status, received_at) + receive (id, name, po_id, po_line_id) + po (number, vendor) + poLine (qtyOrdered) + product (tablet_type_id + name + product sku/name) + supplierLot (batch id + number) + workflow (workflow_bag_id if production started) + finishedLots (array; populated via finished_lot_inputs join on batch_id) + warnings.
+  - Legacy bags missing QR return `["Legacy bag QR missing."]` in `warnings`.
+  - Quick-lookup card on the intake page shares the same helper; standalone Lookup receipt / batch surface stays at `/recall`.
+- Sidebar workflow changes:
+  - **None.** WORKFLOW-UX-1 already routed `Receive raw pills` → `/receiving/raw-bags` and that wiring is preserved. The 47 sidebar tests still pass; the new live page just replaces the placeholder body.
+- Tests added (+46 vs WORKFLOW-UX-1's 1420 = **1466 / 1466 PASS across 60 files**):
+  - 46 cases in `lib/production/raw-bag-intake.test.ts` covering every helper.
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1466 / 1466 PASS across 60 files**.
+  - `npx next build` → clean; `/receiving/raw-bags` grew from 235 B (placeholder) to **20.4 kB / 126 kB** (live form).
+  - Auth smoke → **49 / 49 PASS** at SHA `59182fd`.
+- Staging verification (LX122 / SHA `59182fd`):
+  - Deploy hit the standard orphan-container-name trap; cleared via `docker rm -f` + `docker compose up -d`.
+  - `/api/health` SHA `59182fd7541cc601f76e83c1d42e41792dfdd932` ✅
+  - Migration 0034 applied: `receives.po_line_id` column present (psql confirms).
+  - `scripts/verify-intake-workflow-1.ts` exited 0 with every assertion satisfied:
+    ```
+    actor= 1b94da4a-c082-4c05-8e9a-4848a2b0a87b
+    seeded PO= c8a272c6-… line= 2ef52680-… tablet= 059b7f7f-…
+    result.ok receive= 4d1b1bb3-… bags= 10
+    ✓ variance EXACT @ 200,000
+    ✓ receipt range QA-R1001 → QA-R1010
+    ✓ receipt QA-R1004 → QA-PO-1234 · QA Vendor X · QA Mango Peach · lot QA-1243 · bag 4
+    ✓ qr QA-QR-1004 resolves to the same bag as receipt QA-R1004
+    ✓ no finished_lots created during raw intake
+    cleanup ok
+    ```
+  - QA rows cleaned up; audit_log retains the intake events.
+  - Auth smoke 49/49 PASS.
+- Remaining receiving workflow gaps:
+  - **Pack-out scan station** UI (floor PWA) is not yet built; HIGH-confidence allocations from a pack-out scan are plumbed via the COMMERCIAL-TRACE plan but not enabled until a floor flow ships. Doesn't affect raw intake.
+  - **Zoho-cached invoice / PO** awareness on the verification badge (`VERIFIED_ZOHO`) will activate once COMMERCIAL-TRACE-3 lands cached invoices + the page reads from `zoho_invoices`.
+  - **Multi-box receives** (e.g. one truck delivers two pallets, each its own box) are still a one-box receive in the new screen. The existing `/inbound/new` wizard handles N boxes; for MVP one-box-per-receive is sufficient and matches the "one supplier lot per receive" model.
+  - **PO list paging / search** — the picker loads all open POs. Once the PO count grows past ~200, a search input replaces the dropdown.
+- Is Commercial Trace ready to resume?
+  - **Yes — COMMERCIAL-TRACE-2 (schema)** can resume immediately. INTAKE-WORKFLOW-1 didn't take a dependency on the planned `zoho_invoices` / `zoho_invoice_lines` / `finished_lot_invoice_allocations` tables, so the schema phase is unblocked. Owner just needs to answer COMMERCIAL-TRACE-1 §10.1 #1 (supplier_lot policy for customer scope) before the migration lands.
+
+---
+
 ## WORKFLOW-UX-1: workflow-first sidebar + raw-bag intake entrypoint (complete)
 - Date: 2026-05-15
 - Result: sidebar reorganized around the seven floor jobs (receive raw, receive packaging, start production, move bag, pack out, handle QC, look up receipt/batch) rather than around database tables. New `/receiving/raw-bags` placeholder route ships so the "Receive raw pills" sidebar item has a stable destination. No routes deleted; every previously-shipped sidebar destination still has at least one Link in the source (asserted by test). Auth smoke 48/48 → **49/49 PASS** on staging at SHA `39c5140`.
