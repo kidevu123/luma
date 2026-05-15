@@ -4,6 +4,80 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## COMMERCIAL-TRACE-4: finished-lot allocation suggestion engine (complete)
+- Date: 2026-05-15
+- Result: pure allocation engine + safe DB write layer ship at SHA `19f7059`. Given one Zoho invoice line + a pool of pre-fetched finished-lot candidates, the engine ranks survivors and greedy-allocates the invoice-line quantity across one or more lots, emitting `SUGGESTED` / `NEEDS_REVIEW` rows at `MEDIUM`, `LOW`, or `MISSING` confidence. **Engine never emits HIGH; engine never marks anything CONFIRMED.** Confirmation is gated behind an explicit operator action that lifts a suggestion via `confirmAllocationPure`. No allocation UI yet (deferred to COMMERCIAL-TRACE-5). No Nexus endpoints. No live Zoho calls.
+- Audit before this phase:
+  - **Invoice customer identifying fields**: `zoho_invoices.customer_id` (UUID FK to Luma `customers`), `zoho_invoices.zoho_customer_id` (text), plus `customers.zoho_customer_id` for the indirect map. Already present from COMMERCIAL-TRACE-2.
+  - **Invoice item identifying fields**: `zoho_invoice_lines.zoho_item_id`, `zoho_invoice_lines.sku`, `zoho_invoice_lines.item_name`, `zoho_invoice_lines.quantity`, `zoho_invoice_lines.unit`.
+  - **Finished lot product identifying fields**: `finished_lots.product_id` → `products.id` → `products.zoho_item_id` / `products.sku`. Indirect path through `external_item_mappings.luma_product_id` ↔ `external_item_mappings.external_item_id` (active rows only).
+  - **Finished lot ↔ customer shipment link**: `shipment_finished_lots.finished_lot_id` + `shipment_finished_lots.customer_id` + `shipment_finished_lots.shipment_id` → `shipments.shipped_at`.
+  - **Shipped quantity/unit**: `shipment_finished_lots.quantity` + `shipment_finished_lots.unit`. Lots without a shipment row fall back to `finished_lots.units_produced` as the candidate-available signal.
+  - **packed_at**: `finished_lots.packed_at` ✅ (timestamptz). Plus `finished_lots.produced_on` (date) as a fallback.
+  - **shipped_at**: `shipment_finished_lots.shipped_at` ✅ (denormalized) with `shipments.shipped_at` as canonical.
+  - **Product mapping path**: all three layers exist (`products.zoho_item_id`, `external_item_mappings`, `products.sku`).
+  - **Unit conversion**: `itemConversions` exists for raw-inventory units (kg ↔ g, etc.) but does NOT cover finished-lot/invoice-line conversions. The engine treats unit conflicts as `unit_conflict_no_conversion` → `LOW` + `NEEDS_REVIEW`; it never invents a conversion.
+  - **Missing field handling**: missing customer linkage, missing item id, missing SKU, missing quantity, conflicting units all become explicit reasons + warnings; the engine never silently fails.
+- Files added (1 commit, SHA `19f7059`):
+  - **NEW** `lib/production/commercial-trace-allocations.ts` — 632 LOC. Fully pure: no `@/lib/db` import, no `fetch`, no `process.env`, no Zoho integrations. Exports the full type vocabulary (`EngineConfidence`, `EngineStatus`, `EngineSource`, `AllocationReason`, `InvoiceLineAllocationInput`, `FinishedLotAllocationCandidate`, `AllocationSuggestion`, `AllocationInsertRow`, `SuggestAllocationsOptions`, `SuggestAllocationsResult`, `SuggestionSummary`) plus matchers (`classifyProductMatch`, `classifyCustomerMatch`, `classifyUnitMatch`), the engine (`suggestAllocationsForInvoiceLine`), the rollup (`summarizeAllocationSuggestions`), the row mapper (`buildAllocationInsertRows`), and the confirmation lifter (`confirmAllocationPure`).
+  - **NEW** `lib/db/queries/commercial-trace-allocations.ts` — DB read + write layer. Three functions: `loadInvoiceLineAllocationContext(invoiceLineId)` composes the engine input from `zoho_invoices ⋈ zoho_invoice_lines ⋈ customers`; `loadFinishedLotCandidatesForInvoiceLine` resolves product candidates (via `products.zoho_item_id`, `external_item_mappings`, or `products.sku`), joins `finished_lots ⋈ shipment_finished_lots ⋈ shipments`, subtracts already-allocated quantity (excludes `REJECTED` rows), and optionally pre-filters by the invoice's customer for query performance; `writeSuggestedAllocationsForInvoiceLine` persists engine output in a transaction (delete-then-insert against `confirmed=false` rows only; bumps `shipment_finished_lots.invoice_allocation_status` from `UNALLOCATED` → `SUGGESTED` for touched pairs). `clearUnconfirmedSuggestionsForInvoiceLine` provides a regenerate-flow primitive.
+  - **NEW** `lib/production/commercial-trace-allocations.test.ts` — 41 cases.
+- Matching rules implemented:
+  - **Product matching priority**: (1) `zoho_item_id` exact match → `product_match_zoho_item_id`, `MEDIUM`. (2) `external_item_mappings` match (DB layer sets `matchedViaExternalMapping=true` on the candidate; engine recognizes the hint) → `product_match_external_mapping`, `MEDIUM`. (3) SKU exact match (case-insensitive, trimmed) → `product_match_sku`, `MEDIUM`. (4) Name-only fallback (case-insensitive equality) → `product_match_name_fallback`, **`LOW`**. Mismatch (ids differ AND SKUs differ) → hard reject with `product_mismatch`. No usable mapping → reject with `no_product_mapping`.
+  - **Customer matching priority**: (1) `customer_id` direct equality → `customer_match_id`. (2) `zohoCustomerIdToLumaId` map lookup → `customer_match_via_zoho_id`. (3) Mismatch → hard reject. (4) Missing on either side → kept but flips row status to `NEEDS_REVIEW` with `missing_customer` reason.
+  - **Date matching**: invoice-date vs candidate `shippedAt ?? packedAt`. Inside `dateWindowDays` (default 14) adds `+30` to score and emits `date_within_window`; outside emits `date_outside_window` and adds `+10` only at 2× the window. Engine also emits `packed_before_invoice` and `shipped_after_invoice` as plausibility hints (never crashes, never decides on date alone).
+  - **Quantity matching**: exact single-lot match (one row, full qty, MEDIUM product strength) → `quantity_exact` + `AUTO_SUGGESTED_EXACT`. Split across multiple lots → `quantity_split` + `AUTO_SUGGESTED_SPLIT`. Partial single-lot → `AUTO_SUGGESTED_PARTIAL`. Engine surfaces unallocated quantity as a top-level warning and flips every row's status to `NEEDS_REVIEW` with `quantity_under_match` reason. Over-match (only when `allowOverAllocation: true`) surfaces `quantity_over_match`. Missing/non-finite/non-positive quantity returns a synthetic single suggestion with confidence `MISSING`, status `NEEDS_REVIEW`, reason `quantity_missing`.
+  - **Unit handling**: matching units → `unit_match`. Either side missing → `unit_missing` (no row-level flip). Conflict with no conversion configured → `unit_conflict_no_conversion`, row flipped to `LOW` + `NEEDS_REVIEW`, warning attached.
+- Allocation behavior:
+  - **Filter** impossible candidates first (customer mismatch, product mismatch, zero remaining-available quantity unless `allowOverAllocation`).
+  - **Score** survivors: id-match `+100`, external mapping `+80`, SKU `+60`, name `+20`; date-within-window `+30`; remaining-available ≥ invoice quantity `+20`; unit conflict `-10`.
+  - **Sort** stably: score descending, then `shippedAt` descending (newer ships first), then `finishedLotId` ascending. Idempotency tested.
+  - **Greedy allocate**: take `min(remainingInvoiceQty, candidate.remainingAvailable)` per row until the invoice-line quantity is exhausted. `allowOverAllocation: true` removes the per-candidate cap.
+  - **One-to-many**: a single invoice line can spread across multiple finished lots. Verified by the split-across-two-lots test.
+  - **Many-to-one**: one finished lot can serve multiple invoice lines because the DB layer subtracts `alreadyAllocatedQuantity` (sum of non-REJECTED prior allocation rows) before passing the candidate to the engine.
+- DB write behavior (`writeSuggestedAllocationsForInvoiceLine`):
+  - Runs in a single transaction.
+  - Step 1: `DELETE FROM finished_lot_invoice_allocations WHERE invoice_line_id = $1 AND confirmed = false`. Confirmed rows are **never** deleted or overwritten.
+  - Step 2: `INSERT` the new engine rows. Engine output guarantees `confirmed=false`, `confirmedByUserId=null`, `confirmedAt=null`, and confidence ∈ `{MEDIUM, LOW, MISSING}` (no `HIGH` insertion path exists).
+  - Step 3: `UPDATE shipment_finished_lots SET invoice_allocation_status='SUGGESTED', last_invoice_allocation_at=now() WHERE id = ANY(touched_pairs) AND invoice_allocation_status='UNALLOCATED'`. Never demotes `ALLOCATED` or `CONFIRMED`; never sets either of those values in this phase.
+  - Returns `{ inserted, cleared, shipmentRowsUpdated }` so callers can audit-log the count.
+- Confidence/status behavior:
+  - **Engine emits**: `MEDIUM` for clean id/SKU matches with matching units; `LOW` for name-only matches or unit-conflict rows; `MISSING` only for synthetic "no candidates / no quantity" review rows. **HIGH is impossible from the engine.**
+  - **Engine status**: `SUGGESTED` for full clean rows; `NEEDS_REVIEW` for any row with quantity gaps, missing customer, unit conflict, or LOW confidence; `REJECTED` reserved (engine itself never emits REJECTED — rejected candidates are dropped from suggestions, listed in `evaluatedCandidates`).
+  - **Confirmation** (`confirmAllocationPure`): pure object transform setting `confidence='HIGH'`, `status='CONFIRMED'`, `confirmed=true`, plus `confirmedByUserId` + `confirmedAt`. Throws on empty/whitespace userId. No DB write — the DB-layer apply path comes in a later phase.
+- Safety protections:
+  - Engine source contains zero DB imports (`@/lib/db` blacklisted via test), zero Zoho imports, zero `fetch`/`axios`/`node:http`, zero `process.env`. Test enforces this.
+  - DB layer never deletes/updates `confirmed=true` rows (test enforces every `.delete(finishedLotInvoiceAllocations)…returning(` block contains the `confirmed=false` predicate).
+  - DB layer never sets `invoice_allocation_status` to `ALLOCATED` or `CONFIRMED`. Test enforces.
+  - No new schema, no new migrations, no Nexus endpoint, no complaint table. Tests assert.
+  - Customer-scope visibility — engine output may include `traceCode`, `shipmentFinishedLotId`, `finishedLotId`. Nexus customer-scope endpoints (later) must filter these via `commercialTraceVisibilityPolicy("customer").allowField(...)` before returning.
+- Tests added (+41 vs COMMERCIAL-TRACE-3's 1544 = **1585 / 1585 PASS across 64 files**):
+  - `classifyProductMatch` (6 cases): zoho_item_id, external_item_mappings, SKU, name fallback (LOW), id-and-sku mismatch reject, no-usable-mapping reject.
+  - `classifyCustomerMatch` (5 cases): id match, zoho-map match, mismatch reject, missing on both sides, zoho-map pointing to different luma id.
+  - `classifyUnitMatch` (3 cases): match, missing, conflict.
+  - Engine quantity paths (6 cases): exact one-lot, split-across-two-lots, partial under-match, allowOverAllocation, missing quantity, negative/NaN/Infinity rejection.
+  - Engine hard filters (4 cases): customer mismatch reject, product mismatch reject, missing customer flips to NEEDS_REVIEW, name-only without candidate name → review.
+  - Engine unit handling (3 cases): matching accepted, missing warns, conflict → LOW + NEEDS_REVIEW.
+  - Engine invariants (3 cases): never emits HIGH, all built rows have `confirmed=false`, status rollup totals match.
+  - `confirmAllocationPure` (2 cases): happy path, empty userId throws.
+  - `buildAllocationInsertRows` (3 cases): drops synthetic rows, never emits CONFIRMED, numeric precision preserved as string.
+  - Safety guardrails (4 cases): engine source purity, no Nexus/complaint additions, DB layer delete-scoped-to-confirmed=false, DB layer never writes ALLOCATED/CONFIRMED status.
+  - Idempotency (2 cases): same input deterministic, already-allocated subtracts from available.
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1585 / 1585 PASS across 64 files** (+41 vs COMMERCIAL-TRACE-3 / +1 test file).
+  - `npx next build` → clean. No new routes; no UI added.
+  - Auth smoke: still **50 / 50 PASS** (no new routes).
+- Staging verification (LX122):
+  - Deploy + health pending (running in background as this entry is being drafted; will reflect SHA `19f7059` once `docker compose up` finishes).
+  - No DB writes performed during deploy itself. `finished_lot_invoice_allocations` remains empty unless an operator triggers a future apply path.
+  - No Zoho endpoint called. No Nexus endpoint added.
+  - No QA-fixture allocations seeded; the pure-engine + safety-guardrail tests cover the matching behavior without persisting fake rows on staging.
+- Is COMMERCIAL-TRACE-5 (allocation review UI) ready?
+  - **Yes.** The engine produces stable preview rows + counts; the DB layer can persist them safely. COMMERCIAL-TRACE-5 needs to: (1) load invoices grouped by resolved / partially resolved / unresolved using the new allocations table; (2) per-invoice-line, show engine suggestions with Confirm / Override / Skip buttons; (3) on confirm, call `confirmAllocationPure` + a `confirmAllocation` server action that updates the row to `CONFIRMED` + `HIGH` and writes an audit row; (4) on regenerate, call `clearUnconfirmedSuggestionsForInvoiceLine` then re-run the engine + `writeSuggestedAllocationsForInvoiceLine`. Live invoice ingest still waits on haute_brands token re-auth before any non-synthetic suggestions can land; the engine works against locally-seeded fixtures in the interim.
+
+---
+
 ## COMMERCIAL-TRACE-3: Zoho invoice dry-run client + preview (complete)
 - Date: 2026-05-15
 - Result: schema-aware read-only invoice client live on staging at SHA `8a747a6`. Mirrors the ZOHO-2A item/customer dry-run pattern verbatim: pure normalizer + diff helpers, gateway list/detail fetchers, an orchestrator that probes readiness and writes one audit row, and a settings UI section. Honestly blocked today because `haute_brands` Zoho tokens are expired on the gateway — staging verification ran one BLOCKED dry-run end-to-end without touching `/zoho/invoices/list` or `/zoho/invoices/get`. No allocations, no candidate-table writes, no live Zoho call when readiness is not READY_FOR_DRY_RUN.

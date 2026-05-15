@@ -628,12 +628,15 @@ This phase supersedes the earlier "INTAKE-UX-1" entry below — same target, bro
 
 ---
 
-### [ ] COMMERCIAL-TRACE-4 — Allocation suggestion engine
-**Objective.** Pure helpers: `suggestAllocationsForInvoiceLine`, `applyAllocation`, `confirmAllocation`. HIGH only from pack-out scan or operator confirm; MEDIUM from exact `(item_id, qty, ±7d, same customer)` match; LOW from fuzzy multi-candidate; MISSING surfaces in unresolved-invoices report.
+### [x] COMMERCIAL-TRACE-4 — Allocation suggestion engine
+**Objective.** Pure-helper engine that suggests finished-lot allocations for one Zoho invoice line, plus a safe DB write layer. Engine emits MEDIUM / LOW / MISSING — never HIGH; HIGH and CONFIRMED only ever come from an explicit operator confirmation (`confirmAllocationPure`). One-to-many + many-to-one allocations supported. DB writer never overwrites confirmed rows.
 
-**Files likely touched.** `lib/production/invoice-allocations.ts` + tests.
+**Files touched (1 commit, SHA `19f7059`).**
+- `lib/production/commercial-trace-allocations.ts` — pure engine. `classifyProductMatch` (zoho_item_id > external_item_mappings > sku > name), `classifyCustomerMatch` (id > zoho map > missing), `classifyUnitMatch` (match/missing/conflict), `suggestAllocationsForInvoiceLine` (greedy split across scored candidates), `summarizeAllocationSuggestions`, `buildAllocationInsertRows`, `confirmAllocationPure`.
+- `lib/db/queries/commercial-trace-allocations.ts` — `loadInvoiceLineAllocationContext`, `loadFinishedLotCandidatesForInvoiceLine` (joins finished_lots ⋈ shipment_finished_lots ⋈ shipments, subtracts already-allocated quantity), `writeSuggestedAllocationsForInvoiceLine` (transactional delete-then-insert against confirmed=false rows only; bumps shipment_finished_lots.invoice_allocation_status from UNALLOCATED to SUGGESTED), `clearUnconfirmedSuggestionsForInvoiceLine`.
+- `lib/production/commercial-trace-allocations.test.ts` — 41 cases.
 
-**Stop condition.** Engine emits correct suggestions for fixture invoice lines against fixture finished lots; idempotency proven.
+**Closeout (2026-05-15, SHA `19f7059`):** tsc clean / vitest **1585/1585** (+41 vs COMMERCIAL-TRACE-3 / +1 test file) / next build clean / auth smoke 50/50 PASS (no new routes). Engine source contains zero DB / Zoho / fetch / env imports (test enforced). DB writer's delete blocks all scope to confirmed=false (test enforced). DB writer never sets invoice_allocation_status to ALLOCATED or CONFIRMED in this phase (test enforced). No fake allocations seeded on staging.
 
 ---
 
