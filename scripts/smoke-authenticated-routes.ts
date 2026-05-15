@@ -93,6 +93,7 @@ const ROUTES: ReadonlyArray<{ path: string; group: string }> = [
   { group: "Materials",    path: "/po-reconciliation" },
   { group: "Materials",    path: "/po-reconciliation-v2" },
   { group: "Materials",    path: "/packaging-receipts" },
+  { group: "Operations",   path: "/receiving/raw-bags" },
   { group: "System",       path: "/workflow-validation" },
   { group: "System",       path: "/settings/integrations/packtrack" },
   { group: "System",       path: "/settings" },
