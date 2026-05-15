@@ -4,6 +4,61 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## WORKFLOW-CLEANUP-2: PO line cards, material tabs, Start production (complete)
+- Date: 2026-05-14
+- Result: three workflow confusion points closed before Commercial Trace resumes. Receiving raw bags now exposes every PO line as a card, packaging-materials receiving separates count vs roll into tabs (QA hidden by default), and the sidebar's "Start production" lands on a real four-step page that fires CARD_ASSIGNED via the same projector path the floor PWA uses. Verified end-to-end on staging at SHA `fe8778a`.
+- Audit before this phase:
+  - `/receiving/raw-bags` already loaded PO + PO line + tablet options after INTAKE-WORKFLOW-1, but a flat dropdown made multi-line POs ambiguous. PO line cards are a UI-only refactor — no schema or query change.
+  - `/inbound/packaging-materials` lumped count and roll forms side-by-side with no QA filter; QA_TEST_ materials clogged the picker.
+  - Sidebar's "Start production" pointed at `/qr-cards`, which is QR card administration (add / retire / print labels) — not the workflow of starting a bag. The page existed only as admin tooling.
+- Files changed (1 commit, SHA `fe8778a`):
+  - MOD `components/admin/sidebar.tsx` — `Start production` href flips from `/qr-cards` to `/production/start`. Advanced section gains `QR card management → /qr-cards`. Other sections untouched.
+  - MOD `components/admin/sidebar.test.ts` — refreshed the Start-production test and added four new assertions for the WORKFLOW-CLEANUP-2 wiring (`/production/start` href, QR card management under Advanced, Lookup receipt / batch only appears once, Batches stays under Advanced).
+  - **NEW** `lib/production/material-filters.ts` — pure `isQaTestMaterial({sku, name})` helper. Lives outside the page route so the Next.js route-export check stays clean.
+  - **NEW** `lib/production/material-filters.test.ts` — 8 cases (QA_TEST_ / QA- / QA-TEST- prefixes, "QA TEST" substring on name, legit SKUs not flagged, empty input, case-insensitive).
+  - MOD `app/(admin)/inbound/packaging-materials/page.tsx` — search-params-driven tab switcher (`?tab=count|roll`, `?show_qa=true`). Count-based packaging tab keeps the same fields; Roll materials tab keeps the roll-specific fields (roll #, gross/net/tare, width/thickness/spec). Recent receipts table is shared; source column shows "PackTrack" / "Manual" / sourceSystem fallback in plain text. QA filter strips QA_TEST_ materials from the picker by default and surfaces a count of hidden items with a one-click toggle.
+  - MOD `app/(admin)/receiving/raw-bags/raw-bag-intake-form.tsx` — replaced the PO line dropdown inside the LOCAL_PO mode with a `PoLineCards` component. Each line is a clickable card showing product name, SKU, ordered qty, with an Active/Receiving toggle on the selected card. Filter input appears when a PO has more than six lines. Vendor displayed alongside the PO picker.
+  - **NEW** `app/(admin)/production/start/page.tsx` — server component. Loads idle QR cards (LIMIT 200), active stations, and `productAllowedTablets JOIN products WHERE products.isActive=true`. Groups allowed products by tabletTypeId so the form can show only the products this bag's tablet type is mapped to.
+  - **NEW** `app/(admin)/production/start/actions.ts` — `lookupRawBagForStartAction(value)` wraps `findRawBagByReceiptOrQr` with `requireLead`. `startProductionForRawBagAction({inventoryBagId, productId, qrCardId, stationId})` validates each id, then in a single transaction: inserts `workflow_bags`, flips `qr_cards.status` IDLE → ASSIGNED, fires CARD_ASSIGNED via `projectEvent` (with `accountabilitySource: "MANUAL_TEXT"` because this is admin-driven, not a station scan), fires PRODUCT_MAPPED so read models see the SKU on the first event, writes one `audit_log` row (`production.start_from_admin`). Returns a discriminated `StartProductionResult` so the client renders an honest success vs error panel.
+  - **NEW** `app/(admin)/production/start/start-production-form.tsx` — client component with the four-step UI:
+    - Step 1 · Scan the raw bag. Input accepts receipt # or `BAG-…` QR. Look-up reads via the same `findRawBagByReceiptOrQr` helper the recall passport uses; on success renders a `ProductionIdentityBlock` with PO number, vendor, tablet product / type, supplier lot, bag sequence, internal receipt, raw bag QR, declared count, status.
+    - Step 2 · Pick the product. Allowed products (from the tablet-type mapping) render as clickable cards mirroring the PO-line-cards pattern — name, SKU, kind.
+    - Step 3 · Assign a workflow QR card. Idle cards in a `<select>`; shows a warning + link to `/qr-cards` if nothing is idle.
+    - Step 4 · Pick a station + Start production button.
+    - Each section toggles tone MUTED → INFO → GOOD as the operator advances. Success view renders an identity block (product, station, receipt, raw bag QR, workflow / qr-card / inventory-bag IDs) plus a link to `/floor-board` and "Start another bag".
+  - MOD `scripts/smoke-authenticated-routes.ts` — registers `/production/start` (49 → 50 routes).
+- Data-honest labels (per the cleanup brief):
+  - Manual PO reference (amber) vs Verified local PO (green) preserved on the verification badge.
+  - PackTrack-origin receipt vs Manual material receipt called out in plain text under each form.
+  - Roll material vs Count-based packaging used as tab labels — no "PVC tab" or "bottle tab" shorthand.
+  - Reusable workflow QR card vs Raw bag QR used consistently in copy and identity blocks so an operator never confuses the floor badge with the sticky on the bag.
+- Sidebar after cleanup:
+  - Floor work · Live floor, Receive raw pills, **Start production** (→ /production/start), QC review, Recall passport, Lookup receipt / batch.
+  - Management · Material reconciliation, Operator productivity, Packaging output, Genealogy, Finished lots, Reports.
+  - Configuration · Settings home and all child settings pages.
+  - Advanced (collapsed) · **QR card management** (→ /qr-cards), Batches, QR labels, Workflow validation, Danger zone.
+  - Lookup receipt / batch appears once in primary nav (Floor work). Batches lives only under Advanced. No routes deleted.
+- Tests added (+12 vs INTAKE-WORKFLOW-1's 1466 = **1478 / 1478 PASS across 61 files**):
+  - 8 cases in `lib/production/material-filters.test.ts`.
+  - 4 cases appended to `components/admin/sidebar.test.ts` (Start production href, QR card management under Advanced, Lookup receipt / batch only once, Batches under Advanced).
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1478 / 1478 PASS across 61 files**.
+  - `npx next build` → clean. `/production/start` lands at **3.92 kB / 109 kB**. `/inbound/packaging-materials` rebuilt without a size jump.
+  - Auth smoke → **50 / 50 PASS** at SHA `fe8778a`.
+- Staging verification (LX122 / SHA `fe8778a`):
+  - Standard orphan-container trap on the first `docker compose up -d --build`; cleared via `docker rm -f 303c4a47138b_luma-app-1` and re-up. Same pattern as INTAKE-WORKFLOW-1.
+  - `/api/health` SHA `fe8778af6ad43608280da5c53e82b2f99ded097c` ✅
+  - Smoke run: `[smoke-auth] PASS=50  REDIR=0  FAIL=0` including the new `/production/start` row.
+- Remaining workflow gaps:
+  - **Floor PWA equivalent** of Start Production (an operator scanning their badge + the bag's QR at a station kiosk) is still the canonical CARD_ASSIGNED path. The new admin page is the desk-side on-ramp; downstream stage events (BLISTER_COMPLETE etc.) still come from station scans.
+  - **PO line cards with verified Zoho line items** awaits COMMERCIAL-TRACE-3 cached invoices; today the verification badge says VERIFIED_LOCAL when the PO came from local data.
+  - **Material picker search** on `/inbound/packaging-materials` is still scroll-only; with ~50 materials the tabs scale fine. If material count crosses ~200 a search input replaces the picker.
+- Is Commercial Trace ready to resume?
+  - **Yes.** WORKFLOW-CLEANUP-2 is closed. COMMERCIAL-TRACE-2 (schema migration for `zoho_invoices` / `zoho_invoice_lines` / `finished_lot_invoice_allocations`) is unblocked as soon as the owner answers COMMERCIAL-TRACE-1 §10.1 #1 (supplier_lot policy for customer scope).
+
+---
+
 ## INTAKE-WORKFLOW-1: PO-driven one-screen raw bag intake (complete)
 - Date: 2026-05-15
 - Result: live PO-driven intake replaces the WORKFLOW-UX-1 placeholder. One screen handles PO/vendor context + supplier lot + bag-row generation + per-bag QR/receipt entry + atomic save. Receipt + QR lookup resolve to the same bag with full PO/vendor/product/supplier-lot context. End-to-end verified on staging at SHA `59182fd`.

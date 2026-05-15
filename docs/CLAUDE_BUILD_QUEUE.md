@@ -551,6 +551,22 @@ This phase supersedes the earlier "INTAKE-UX-1" entry below — same target, bro
 
 ---
 
+### [x] WORKFLOW-CLEANUP-2 — PO line cards, material tabs, Start production page
+**Objective.** Three workflow confusion points closed before Commercial Trace resumes: (1) PO lines render as clickable cards on `/receiving/raw-bags` instead of a dropdown, with filter input when a PO has more than six lines; (2) `/inbound/packaging-materials` splits count-based packaging and roll materials into tabs with QA/test materials hidden by default; (3) sidebar's "Start production" stops pointing at `/qr-cards` and lands on a real four-step workflow at `/production/start` that fires CARD_ASSIGNED via projectEvent (same path the floor PWA uses), `accountabilitySource: "MANUAL_TEXT"`. QR card administration (add / retire / print labels) moves under Advanced, still at `/qr-cards`.
+
+**Files touched (1 commit, SHA `fe8778a`).**
+- `components/admin/sidebar.tsx` — Start production href → `/production/start`; Advanced section gains QR card management.
+- `components/admin/sidebar.test.ts` — refreshed Start-production assertion + 4 new WORKFLOW-CLEANUP-2 tests.
+- `lib/production/material-filters.ts` + tests (8 cases) — `isQaTestMaterial` helper.
+- `app/(admin)/inbound/packaging-materials/page.tsx` — search-params-driven tab switcher + QA filter + UI-2 primitives.
+- `app/(admin)/receiving/raw-bags/raw-bag-intake-form.tsx` — `PoLineCards` component replaces the PO line dropdown.
+- `app/(admin)/production/start/{page,actions,start-production-form}.tsx` — new 4-step workflow page.
+- `scripts/smoke-authenticated-routes.ts` — 49 → 50 routes.
+
+**Closeout (2026-05-14, SHA `fe8778a`):** tsc clean / vitest **1478/1478** (+12 vs INTAKE-WORKFLOW-1) / next build clean (`/production/start` at 3.92 kB / 109 kB) / auth smoke **50/50 PASS** including `/production/start`. Sidebar still has Floor work / Management / Configuration / Advanced; Lookup receipt / batch appears once in primary nav; Batches stays under Advanced; no routes deleted. Data-honest labels enforced (Manual PO reference vs Verified local PO, PackTrack-origin vs Manual material receipt, Reusable workflow QR card vs Raw bag QR).
+
+---
+
 ### [~] INTAKE-UX-1 — Single-screen raw-bag intake form (subsumed by INTAKE-WORKFLOW-1)
 **Objective.** Replace the `/receiving/raw-bags` placeholder body with the live intake workflow: pick product / tablet type → enter supplier lot → enter bag count + per-bag pill count → scan or paste each bag's QR code → Luma issues internal receipt numbers → one click writes the `receive` + `small_boxes` + `inventory_bags` rows in a single transaction.
 
