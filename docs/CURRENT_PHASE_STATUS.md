@@ -4,6 +4,90 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## COMMERCIAL-TRACE-3: Zoho invoice dry-run client + preview (complete)
+- Date: 2026-05-15
+- Result: schema-aware read-only invoice client live on staging at SHA `8a747a6`. Mirrors the ZOHO-2A item/customer dry-run pattern verbatim: pure normalizer + diff helpers, gateway list/detail fetchers, an orchestrator that probes readiness and writes one audit row, and a settings UI section. Honestly blocked today because `haute_brands` Zoho tokens are expired on the gateway — staging verification ran one BLOCKED dry-run end-to-end without touching `/zoho/invoices/list` or `/zoho/invoices/get`. No allocations, no candidate-table writes, no live Zoho call when readiness is not READY_FOR_DRY_RUN.
+- Gateway invoice route audit (read-only against `/opt/zoho-integration-service` on LXC 9503):
+  - **invoice read route**: `GET /zoho/invoices/list` and `GET /zoho/invoices/get/{invoice_id}`. Documented in `API_ROUTES.md` under "Zoho Books (14 routes) → Invoices". The generic proxy at `app/api/zoho_proxy.py` forwards every `GET /zoho/{service}/{action}` to the brand's Zoho org; there is no bespoke invoice handler.
+  - **Books vs Inventory**: invoice data comes from **Zoho Books** (Books is the source-of-truth for invoices; Inventory holds items + stock).
+  - **Sales orders vs invoices**: separate Books endpoints. `sales_orders` lives at `/zoho/salesorders/...` (and is one of the listed Books routes). COMMERCIAL-TRACE-3 only consumes invoices; sales orders are out of scope until a future phase wants delivery-vs-invoice reconciliation.
+  - **Invoice response shape**: standard Zoho Books invoice JSON. Fields used today — `invoice_id` (required for idempotency), `invoice_number`, `customer_id`, `customer_name`, `date`, `status`, `currency_code`, `sub_total`, `total`, `balance`. Verbatim payload stored in `raw_payload` jsonb when (future) candidate writes land.
+  - **Invoice-line response shape**: `line_items[]` on a single-invoice GET response. Fields used — `line_item_id`, `item_id`, `sku`, `name`, `description`, `quantity`, `unit`, `rate`, `item_total`. Lines also normalized into the shared `NormalizedZohoInvoiceLine` shape.
+  - **Pagination**: gateway forwards `per_page` + `page` query params to Zoho. Default per_page=200; we cap detail fetches at 25 per run (see `maxDetailFetches`).
+  - **Date filters**: `date_start` / `date_end` (YYYY-MM-DD) pass through. Not required for COMMERCIAL-TRACE-3 dry-run; reserved for scoped future runs.
+  - **Customer + item IDs**: included on every Zoho Books invoice and line. Mapped to Luma via `customers.zoho_customer_id` and `products.zoho_item_id` / `external_item_mappings`.
+  - **Invoice number**: returned. Required for matching; absence forces NEEDS_REVIEW.
+  - **Gateway transformers**: only `_transform_books_invoices_create` exists in `app/clients/transformers.py`, and it is for the unused POST path. GET responses pass through verbatim from Zoho Books.
+- Files added (1 commit, SHA `8a747a6`):
+  - **NEW** `lib/integrations/zoho/invoices.ts` (610 LOC):
+    - `normalizeZohoInvoice(input)` and `normalizeZohoInvoiceLine(input)` — pure header + line normalizers.
+    - `fetchZohoInvoicesDryRun(opts)` — gateway list call. Returns `OK` / `NOT_CONFIGURED` / `UNREACHABLE` / `ERROR` / `UNAUTHORIZED`. Never throws.
+    - `fetchZohoInvoiceByNumberDryRun({zohoInvoiceId, ...})` — gateway detail call. Adds `NOT_FOUND` on 404 and short-circuits empty input.
+    - `deriveZohoInvoiceDiff({invoices, luma})` — pure diff producing header rows (`CREATE_CANDIDATE` / `UPDATE_CANDIDATE` / `NO_CHANGE` / `NEEDS_REVIEW` / `CONFLICT`) + line rows + warnings. Reasons enumerated: `missing_invoice_number`, `missing_zoho_invoice_id`, `duplicate_invoice_number_in_zoho`, `duplicate_zoho_invoice_id_in_zoho`, `invoice_number_collides_in_luma`, `missing_zoho_customer_id`, `customer_not_mapped_to_luma`, `invoice_has_no_lines`, `local_invoice_already_exists`, `local_invoice_changed_since_last_sync`, `line_missing_item_id`, `line_missing_sku`, `line_missing_quantity`, `line_quantity_invalid`. Worst-line action bubbles to the header row.
+    - `summarizeZohoInvoiceDryRun({headers, lines})` — count rollup.
+    - `runZohoInvoiceDryRun(opts)` — orchestrator. Probes readiness through `deriveZohoReadiness({health, brand})`. If not `READY_FOR_DRY_RUN`, writes one `PARTIAL` `INVOICES` row with `{readiness, blocked: true, message, note}` and returns `BLOCKED` — never calls the invoice endpoints. If ready, list-fetches, backfills missing line items via `/invoices/get` (capped at 25 detail fetches per run), diffs against the Luma snapshot, writes one `INVOICES` `zoho_sync_runs` row with `dry_run=true`. Returns `OK`/`ERROR`/`BLOCKED` discriminated.
+    - `mapZohoInvoiceGatewayError(input)` — distinct exported error-mapper alias so callers / tests can stub one without affecting items/customers.
+  - **NEW** `lib/integrations/zoho/invoices.test.ts` — 39 cases (full mocks; no live HTTP).
+  - **NEW** `app/(admin)/settings/integrations/zoho/invoice-dry-run-button.tsx` — client component mirroring `DryRunButton`. Renders readiness, blocked reason, counts, header preview, line preview, warnings, run id; never displays the secret.
+  - MOD `app/(admin)/settings/integrations/zoho/actions.ts` — adds `runZohoInvoiceDryRunAction()`. Same persist-+-audit transaction shape as `runItemCustomerDryRunAction`. Audit action name: `zoho.invoice.dry_run`. Strips preview to first 25 headers + 50 lines for the UI snapshot; full rows kept in `zoho_sync_runs.summary` jsonb.
+  - MOD `app/(admin)/settings/integrations/zoho/page.tsx` — loads the latest `INVOICES` row and renders an "Invoice dry-run (COMMERCIAL-TRACE-3)" section with readiness, brand, gateway URL, last-run status + start time, scanned/create/update/no-change/review/conflicts, blocked reason. Surfaces a WARN banner explaining haute_brands must be re-authorized when readiness is `NEEDS_REAUTH`. Button stays enabled when configured.
+- Invoice client behavior:
+  - Headers built by `buildZohoGatewayHeaders` (`X-Internal-Token` + `X-Brand`). The secret is never echoed; the redactor in `gateway.ts` (`stripZohoSecret`) covers logs.
+  - Method is always `GET`. Tests explicitly assert no `POST` / `PUT` / `PATCH` / `DELETE` strings appear in `invoices.ts`.
+  - No direct-OAuth import; no `refresh_token` reference; no Zoho writes anywhere.
+  - Backfill path: when the list response carries `line_items[]` inline, those lines are normalized and used. When inline lines are missing, the orchestrator calls `/invoices/get/{id}` for the first 25 invoices and tolerates failures (each turns into an "invoice with empty lines" → `NEEDS_REVIEW`).
+- Normalization behavior:
+  - `normalizeZohoInvoice` returns `null` if `invoice_id` is missing (idempotency requires it). Other fields tolerate missing values; numeric strings (`"123.45"`) coerce to numbers.
+  - `normalizeZohoInvoiceLine` returns `null` only if both `item_id` and `name` are missing. Lines with name-only or id-only are kept (the diff engine will flag what's missing).
+- Dry-run preview behavior (per spec):
+  - **CREATE_CANDIDATE** — Zoho invoice unknown to Luma, clean enough to be a future create candidate.
+  - **NEEDS_REVIEW** — at least one of: missing invoice number, missing zoho_customer_id, customer not mapped, invoice has no lines, a line is missing item id / SKU / quantity, or quantity is non-positive.
+  - **CONFLICT** — duplicate Zoho invoice id within the same fetch, duplicate invoice number within the same fetch, or invoice_number collides with a different existing Luma row.
+  - **NO_CHANGE** — local row with the same Zoho invoice id already exists. (Field-level UPDATE_CANDIDATE detection deferred to a future phase that compares source hashes.)
+  - **Counts** rolled up: `invoicesScanned`, `linesScanned`, `createCandidates`, `updateCandidates`, `noChange`, `needsReview`, `conflicts`.
+- Blocked readiness behavior — verified live on LX122:
+  - Test harness `scripts/verify-invoice-blocked.ts` calls `runZohoInvoiceDryRun({source: "staging-verify"})` from inside the container.
+  - Output: `{"kind":"BLOCKED","readiness":"NEEDS_REAUTH","reason":"Zoho gateway is reachable, but haute_brands tokens must be re-authorized before live dry-run can fetch items/customers.","runId":"e55fbef8-c9c4-48ef-a935-a816ed6a4ebc"}`.
+  - `zoho_sync_runs` row e55fbef8: `sync_type=INVOICES, status=PARTIAL, dry_run=true, source=staging-verify, summary.blocked=true, summary.readiness="NEEDS_REAUTH"`.
+  - `zoho_invoices` count: **0**. `zoho_invoice_lines` count: **0**. `finished_lot_invoice_allocations` count: **0**. `shipment_finished_lots` with non-`UNALLOCATED` allocation status: **0**. Read-only invariant holds.
+- UI behavior:
+  - `/settings/integrations/zoho` now has four sections: Gateway configuration, Last connectivity check, Dry-run item/customer sync (ZOHO-2A), Invoice dry-run (COMMERCIAL-TRACE-3), Legacy direct-OAuth path.
+  - The Invoice dry-run identity block surfaces readiness, brand, gateway URL, last-invoice-dry-run timestamp/status, invoices/lines scanned, create / update / needs review / conflicts, blocked reason.
+  - Today's banner reads: *"Invoice dry-run blocked — Zoho tokens expired. Zoho gateway is reachable, but haute_brands tokens must be re-authorized before live invoice dry-run can fetch invoices. The button below stays enabled so an operator can capture a blocked-state audit row; clicking it does NOT call /zoho/invoices/list or /zoho/invoices/get."*
+  - Secrets are never rendered. The summary block only shows whether the secret env is configured, not its value.
+- Tests added (+39 vs COMMERCIAL-TRACE-2's 1505 = **1544 / 1544 PASS across 63 files**):
+  - 5 cases on `normalizeZohoInvoice` (happy path, missing id, non-object, partials, numeric-string coercion).
+  - 4 cases on `normalizeZohoInvoiceLine` (happy path, both missing → null, name-only, id-only).
+  - 5 cases on `fetchZohoInvoicesDryRun` (NOT_CONFIGURED, header + URL + method shape, UNAUTHORIZED on 401, UNREACHABLE on ECONNREFUSED, never POST/PUT/PATCH/DELETE).
+  - 3 cases on `fetchZohoInvoiceByNumberDryRun` (happy path with line items, 404 → NOT_FOUND, empty id → ERROR without fetch).
+  - 11 cases on `deriveZohoInvoiceDiff` covering every action × reason combination listed in the spec.
+  - 1 case on `summarizeZohoInvoiceDryRun`.
+  - 2 cases on `runZohoInvoiceDryRun` BLOCKED path (NEEDS_REAUTH writes one PARTIAL row + every non-READY readiness blocks without calling endpoints).
+  - 2 cases on `runZohoInvoiceDryRun` OK path (SUCCESS + PARTIAL on conflicts).
+  - 6 safety-guardrail cases asserting `invoices.ts` does not import the direct-OAuth client, does not reference `refresh_token`, never uses POST/PUT/PATCH/DELETE method strings, never imports / inserts / updates the allocation tables, never writes `shipment_finished_lots`, and exports a distinct `mapZohoInvoiceGatewayError`.
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1544 / 1544 PASS across 63 files** (+39 vs COMMERCIAL-TRACE-2 / +1 test file).
+  - `npx next build` → clean. No new routes; `/settings/integrations/zoho` bundle stayed the same kB.
+  - Auth smoke → **50 / 50 PASS** at SHA `8a747a6`.
+- Staging verification (LX122 / SHA `8a747a6`):
+  - The orphan-container trap hit again on the first `docker compose up -d --build`; cleared via `docker compose down` + `docker compose up -d`. Same recovery pattern as INTAKE-WORKFLOW-1, WORKFLOW-CLEANUP-2, and COMMERCIAL-TRACE-2.
+  - `/api/health` SHA `8a747a67be1cc9784f8854d5a7284effbe24c384` ✅.
+  - Latest connectivity check shows readiness `"NEEDS_REAUTH"` with the message *"Brand 'haute_brands' found but 4 product tokens expired. Re-authorize on the gateway."* — exactly the expected state for COMMERCIAL-TRACE-3 staging.
+  - Live BLOCKED-path verification via `scripts/verify-invoice-blocked.ts`: returned `{kind: BLOCKED, readiness: NEEDS_REAUTH, runId: e55fbef8-…}`. `zoho_sync_runs` row written with the right shape.
+  - No-write invariant: `zoho_invoices`, `zoho_invoice_lines`, `finished_lot_invoice_allocations` all empty. No `shipment_finished_lots` rows have `invoice_allocation_status != 'UNALLOCATED'`. ✅
+  - Auth smoke 50/50 PASS.
+- Is COMMERCIAL-TRACE-4 (allocation suggestion engine) ready?
+  - **Yes for the pure-helper portion.** All schema + invoice ingest reads needed by the engine exist:
+    - `zoho_invoices` + `zoho_invoice_lines` tables present (COMMERCIAL-TRACE-2).
+    - `customers.zoho_customer_id` already maps Zoho customers to Luma customers.
+    - `products.zoho_item_id` + `external_item_mappings` map Zoho items to Luma products.
+    - `finished_lots` + `shipment_finished_lots` provide the lot-pool + per-customer allocation surface.
+    - `commercialTraceVisibilityPolicy` is in place for response filtering.
+  - **What's still needed for the live-call portion**: someone has to re-authorize haute_brands' four expired product tokens (books / inventory / crm / expense) on the gateway. That isn't a Luma-side blocker — the engine plan (`suggestAllocationsForInvoiceLine`, `applyAllocation`, `confirmAllocation`) is all pure logic against fixture data plus existing tables, and the engine doesn't itself need to call Zoho. The engine can ship and operate against locally-stored invoices the moment any are imported (COMMERCIAL-TRACE-3B will land the candidate-write apply phase that populates them).
+
+---
+
 ## COMMERCIAL-TRACE-2: schema for Zoho invoices + finished-lot allocations (complete)
 - Date: 2026-05-15
 - Result: schema-only phase shipped. Three new tables + two new columns on `shipment_finished_lots` + `INVOICES` added to the `zoho_sync_kind` enum + pure visibility-policy helper for customer/CSR/internal scopes. No engine, no live Zoho calls, no UI. Verified end-to-end on staging at SHA `bb4cc13`.

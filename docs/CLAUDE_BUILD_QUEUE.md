@@ -614,12 +614,17 @@ This phase supersedes the earlier "INTAKE-UX-1" entry below — same target, bro
 
 ---
 
-### [ ] COMMERCIAL-TRACE-3 — Zoho invoice dry-run client + diff preview
-**Objective.** Implement `fetchZohoInvoicesDryRun` (list paginate) + `fetchZohoInvoiceDetail(invoiceId)` for line items. Mocked-gateway tests; live calls block honestly while `haute_brands` tokens expired.
+### [x] COMMERCIAL-TRACE-3 — Zoho invoice dry-run client + diff preview
+**Objective.** Read-only invoice client + diff preview against the existing Luma snapshot (`customers` + `zoho_invoices`). Mocked-gateway tests; live calls block honestly while `haute_brands` Zoho tokens are expired. No allocations, no candidate-table writes (deferred to COMMERCIAL-TRACE-3B per ZOHO-2A precedent).
 
-**Files likely touched.** `lib/integrations/zoho/invoices.ts`, sibling test, sync-dry-run extension or new `invoice-dry-run.ts`. Settings page gains an "Invoice dry-run" section.
+**Files touched (1 commit, SHA `8a747a6`).**
+- `lib/integrations/zoho/invoices.ts` — `normalizeZohoInvoice`, `normalizeZohoInvoiceLine`, `fetchZohoInvoicesDryRun`, `fetchZohoInvoiceByNumberDryRun`, `deriveZohoInvoiceDiff`, `summarizeZohoInvoiceDryRun`, `runZohoInvoiceDryRun`, `mapZohoInvoiceGatewayError`.
+- `lib/integrations/zoho/invoices.test.ts` — 39 cases (normalization, gateway fetchers, diff, summary, orchestrator BLOCKED + OK paths, safety guardrails).
+- `app/(admin)/settings/integrations/zoho/{actions.ts,page.tsx,invoice-dry-run-button.tsx}` — `runZohoInvoiceDryRunAction` server action + UI section + button.
 
-**Stop condition.** Mocked tests green; dry-run button blocks with NEEDS_REAUTH on staging.
+**Gateway audit (read-only against LXC 9503).** `GET /zoho/invoices/list` + `GET /zoho/invoices/get/{id}` proxy generically through `app/api/zoho_proxy.py` with `X-Internal-Token` + `X-Brand=haute_brands`. No bespoke invoice transformer (`_transform_books_invoices_create` is unused, POST path only); GETs pass through verbatim from Zoho Books. Invoice header carries `invoice_id`, `invoice_number`, `customer_id`, `customer_name`, `date`, `status`, `currency_code`, `sub_total`, `total`, `balance`. Detail GET adds `line_items[]` with `line_item_id`, `item_id`, `sku`, `name`, `quantity`, `unit`, `rate`, `item_total`.
+
+**Closeout (2026-05-15, SHA `8a747a6`):** tsc clean / vitest **1544/1544** (+39 vs COMMERCIAL-TRACE-2 / +1 test file) / next build clean / auth smoke 50/50 PASS / live BLOCKED-path verified on LX122: `runZohoInvoiceDryRun` returned `{kind: BLOCKED, readiness: NEEDS_REAUTH}` and wrote one PARTIAL INVOICES row without calling `/zoho/invoices/list` or `/zoho/invoices/get`. `zoho_invoices`, `zoho_invoice_lines`, `finished_lot_invoice_allocations` all empty; no `shipment_finished_lots` row changed allocation status. UI section visible on `/settings/integrations/zoho` with the NEEDS_REAUTH banner. Secrets never rendered.
 
 ---
 
