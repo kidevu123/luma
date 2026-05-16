@@ -85,20 +85,16 @@ describe("COMMERCIAL-TRACE-7 · verify-commercial-trace.ts shape", () => {
     expect(src).not.toMatch(/fetchZohoInvoices|checkZohoGatewayHealth|fetchZohoBrandStatus/);
   });
 
-  it("does not POST/PUT/PATCH/DELETE to any Nexus endpoint except the 405 method-guard test", () => {
+  it("issues no fetch() to Nexus URLs and never uses POST/PUT/PATCH/DELETE methods", () => {
     const src = read();
-    // We invoke handlers directly; no fetch() to Nexus URLs. Confirm
-    // no `fetch(` calls hitting nexus paths.
+    // We compose endpoint logic via helpers + DB loaders rather than
+    // making HTTP calls, so no fetch() should target a Nexus URL.
     expect(src).not.toMatch(/fetch\s*\([^)]*\/api\/nexus\//);
-    // Exactly one POST invocation exists — and it is the method-guard
-    // test that asserts 405.
-    const posts = [...src.matchAll(/method:\s*"POST"/g)];
-    expect(posts.length).toBe(1);
-    // The POST call lives near a 405 assertion.
-    const idxPost = src.indexOf('method: "POST"');
-    const idxAssert405 = src.indexOf("405", idxPost);
-    expect(idxAssert405).toBeGreaterThan(idxPost);
-    expect(idxAssert405).toBeLessThan(idxPost + 400);
+    // No mutating HTTP methods are constructed anywhere in the script.
+    expect(src).not.toMatch(/method:\s*"POST"/);
+    expect(src).not.toMatch(/method:\s*"PUT"/);
+    expect(src).not.toMatch(/method:\s*"PATCH"/);
+    expect(src).not.toMatch(/method:\s*"DELETE"/);
   });
 
   it("does not create complaint tables / webhooks", () => {
