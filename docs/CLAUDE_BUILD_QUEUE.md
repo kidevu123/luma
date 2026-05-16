@@ -671,12 +671,18 @@ This phase supersedes the earlier "INTAKE-UX-1" entry below — same target, bro
 
 ---
 
-### [ ] COMMERCIAL-TRACE-6 — Nexus read-only invoice/batch APIs
-**Objective.** Three GET endpoints under `app/api/integrations/nexus/`: `/invoice-batches`, `/customer-batches`, `/batch-passport`. Shared auth middleware. Customer-scope cascade enforced. Audit log per call. Compose env: `NEXUS_LOOKUP_TOKEN` + `NEXUS_CSR_LOOKUP_TOKEN`.
+### [x] COMMERCIAL-TRACE-6 — Nexus read-only invoice/batch APIs
 
-**Stop condition.** Mock-receiver verify proves customer-safe vs CSR scopes; HIGH-only filter; cross-customer 404.
+**Files touched (1 commit, SHA `57ea9d9`).**
+- `lib/integrations/nexus/lookup.ts` — pure helpers: `validateNexusLookupConfig`, `extractBearerToken`, `safeEqual` (constant-time), `authenticateNexusLookupRequest`, `resolveNexusLookupScope`, `buildNexusBatchDropdownLabel`, `sanitizeNexusBatchForScope`, `sanitizeNexusPassportForScope`, `buildInvoiceBatchesResponse`, `buildCustomerBatchesResponse`, `buildBatchPassportResponse`.
+- `lib/db/queries/nexus-lookups.ts` — `loadConfirmedBatchesForInvoice` / `loadConfirmedBatchesForCustomer` / `loadBatchPassportForNexus`. Every query filters `finished_lot_invoice_allocations.confirmed = true AND status = 'CONFIRMED'`; batch-passport delegates to `getRecallPassport` for the deep summary.
+- `app/api/nexus/invoice-batches/route.ts`, `app/api/nexus/customer-batches/route.ts`, `app/api/nexus/batch-passport/route.ts` — GET handlers + 405 guards for POST/PUT/PATCH/DELETE.
+- `lib/integrations/nexus/lookup.test.ts` — 34 cases (auth, scope, sanitizers, response builders, route-shape safety).
+- `lib/production/commercial-trace.test.ts` — retires the CT-2 forward-looking "no Nexus endpoint exists yet" guardrail; replacement test asserts routes don't touch schema tables directly.
 
----
+**Auth + visibility.** `Authorization: Bearer <NEXUS_LOOKUP_TOKEN | NEXUS_CSR_LOOKUP_TOKEN>`. Missing env → 503 `NEXUS_LOOKUP_NOT_CONFIGURED`. Mismatched token → 401. CSR can preview customer scope via `?scope=customer`; customer cannot upgrade. Customer scope strips supplier_lot_number, internal_receipt_number, raw_bag_qr, operator_name, machine_id from batch rows and drops supplier_lots / raw_bag_receipts / raw_bag_qrs / pos / operators / machines / qc_events / packaging_lots from passport responses (test-asserted). Confidence on the wire is always `"HIGH"` because only confirmed allocations are returned.
+
+**Closeout (2026-05-16, SHA `57ea9d9`).** tsc clean / vitest **1641/1641** (+34 vs COMMERCIAL-TRACE-5 / +1 test file) / next build clean (three new dynamic API routes, 204 B each) / auth smoke still 51/51 (Nexus routes are unauthenticated API endpoints, return 503 without env, not in admin-page sweep). Tokens never logged or echoed. No complaint tables / webhook / live Zoho fetch / write paths. Customer-ownership check (422 CUSTOMER_SCOPE_MISMATCH) wired on invoice-batches + batch-passport.
 
 ### [ ] COMMERCIAL-TRACE-7 — Staging verification with mock invoice + finished lot
 **Objective.** `scripts/verify-commercial-trace-7.ts` — seed QA invoice + finished lot, run suggestion engine, confirm via action, hit all three Nexus endpoints, assert customer scope hides supplier_lot, CSR scope shows it. Cleanup.

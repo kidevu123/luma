@@ -4,6 +4,80 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## COMMERCIAL-TRACE-6: Nexus read-only invoice/batch lookup endpoints (complete)
+- Date: 2026-05-16
+- Result: three GET-only Nexus endpoints ship at SHA `57ea9d9`. Customer-scope and CSR-scope tokens give cleanly separated views into confirmed allocations and the recall-passport summary. **No live Zoho fetches, no Zoho writes, no complaint tables, no UI surfaces added.** Every endpoint authenticates first, queries the confirmed-only allocations join second, sanitizes for scope third. Customer scope cannot upgrade itself to CSR; CSR can preview customer scope via `?scope=customer`.
+- Files changed (1 commit, SHA `57ea9d9`):
+  - **NEW** `lib/integrations/nexus/lookup.ts` (470 LOC). Pure helpers: `validateNexusLookupConfig(env)`, `extractBearerToken(headers)`, `safeEqual(a, b)` (constant-time), `authenticateNexusLookupRequest(request, env)`, `resolveNexusLookupScope(request, authScope)`, `buildNexusBatchDropdownLabel(batch)`, `sanitizeNexusBatchForScope(batch, scope)`, `sanitizeNexusPassportForScope(passport, scope)`, `buildInvoiceBatchesResponse(...)`, `buildCustomerBatchesResponse(...)`, `buildBatchPassportResponse(...)`. Structured error union (`NEXUS_LOOKUP_NOT_CONFIGURED` / `UNAUTHORIZED` / `INVALID_REQUEST` / `NOT_FOUND` / `CUSTOMER_SCOPE_MISMATCH` / `METHOD_NOT_ALLOWED` / `SERVER_ERROR`).
+  - **NEW** `lib/db/queries/nexus-lookups.ts` (380 LOC). Three loaders, all filtering on `finished_lot_invoice_allocations.confirmed = true AND status = 'CONFIRMED'`: `loadConfirmedBatchesForInvoice`, `loadConfirmedBatchesForCustomer`, `loadBatchPassportForNexus` (delegates to `getRecallPassport` from `lib/production/recall-passport-loaders` for the deep summary).
+  - **NEW** `app/api/nexus/invoice-batches/route.ts` — GET handler + 405 guards.
+  - **NEW** `app/api/nexus/customer-batches/route.ts` — same shape.
+  - **NEW** `app/api/nexus/batch-passport/route.ts` — same shape + per-call customer ownership check on customer scope.
+  - **NEW** `lib/integrations/nexus/lookup.test.ts` — 34 cases.
+  - MOD `lib/production/commercial-trace.test.ts` — retires the COMMERCIAL-TRACE-2 forward-looking guardrail "no Nexus endpoint was added under app/api/nexus for invoice lookup yet" (phase 6 explicitly ships them). The replacement test asserts Nexus routes don't touch schema tables directly — they must delegate to `lib/db/queries/nexus-lookups.ts`.
+- Auth / token behavior:
+  - `validateNexusLookupConfig(env)` returns `{configured, hasCustomerToken, hasCsrToken, issues}`. If neither token is set, every endpoint returns 503 with code `NEXUS_LOOKUP_NOT_CONFIGURED`.
+  - Bearer header: case-insensitive scheme + arbitrary whitespace between scheme and value tolerated. Empty token → null → 401.
+  - Match path: CSR token wins on dual-configured collisions (defensive — prevents an internal token from silently downgrading). `safeEqual` is a length-aware constant-time compare so timing reveals length only, not contents.
+  - Tokens never appear in error messages, audit rows, or logs. Test asserts.
+- Invoice-batches endpoint:
+  - `GET /api/nexus/invoice-batches?invoice_number=...&nexus_customer_id=...&customer_code=...&product_sku=...`.
+  - Validates header → resolves scope → parses query → requires `invoice_number`.
+  - When customer scope omits both `nexus_customer_id` and `customer_code`, attaches a warning to the response (no hard block — the warning is honest about possible cross-customer leakage if Luma's invoice→customer mapping is ambiguous; the SQL still respects the scope check when an identifier is provided).
+  - DB layer joins `zoho_invoices ⋈ zoho_invoice_lines ⋈ finished_lot_invoice_allocations ⋈ finished_lots ⋈ products ⋈ shipment_finished_lots ⋈ shipments` with `confirmed=true AND status='CONFIRMED'` predicates. Optional `product_sku` filter via `ilike`. Ordered by `shipped_at desc, packed_at desc, finished_lot_id asc`.
+  - Customer-scope ownership: when caller supplies `nexus_customer_id` or `customer_code`, the invoice's resolved customer must match → otherwise 422 `CUSTOMER_SCOPE_MISMATCH`.
+  - Empty result returns honest: `"No confirmed allocations exist for this invoice yet."`.
+  - Response shape mirrors the spec exactly: `{schema_version, source, scope, invoice: {invoice_number, invoice_date, customer_code, nexus_customer_id}, batches: [...], warnings: [...]}`. Each batch row includes `dropdown_label` (auto-filled from product + trace + shipped date).
+- Customer-batches endpoint:
+  - `GET /api/nexus/customer-batches?nexus_customer_id=...|customer_code=...&product_sku=...&date_from=...&date_to=...&active_only=true`.
+  - 400 `INVALID_REQUEST` when neither identifier is supplied (cannot return "all customers' batches" — no full catalog leakage path).
+  - DB layer resolves the customer by `nexus_customer_id` (preferred) or `customer_code`, then INNER JOINs `shipment_finished_lots` with `customer_id = ?` so cross-customer leakage is structurally impossible.
+  - Filters: `product_sku` (ilike), `date_from` / `date_to` (gte/lte on `shipped_at`), `active_only=true` (requires `shipped_at IS NOT NULL`).
+  - Empty result returns honest empty batch list with `"No confirmed allocations exist for this customer yet."` warning.
+- Batch-passport endpoint:
+  - `GET /api/nexus/batch-passport?trace_code=...|shipment_finished_lot_id=...&nexus_customer_id=...&scope=customer`.
+  - 400 if neither `trace_code` nor `shipment_finished_lot_id` supplied.
+  - DB layer resolves the finished lot, then delegates to `getRecallPassport({kind: "finished_lot_trace_code", value: traceCode})` for the deep summary (when a trace_code exists). When the lot has no trace_code, the response is the minimal customer-safe shape plus a `missing_links` entry: `"Finished lot has no trace_code; deep recall passport not available."`.
+  - Customer scope: when `nexus_customer_id` is supplied, the resolved customer on the linked `shipment_finished_lots` row must match → otherwise 422 `CUSTOMER_SCOPE_MISMATCH`. CSR scope skips the check (recall investigations need full reach).
+  - Response shape includes (CSR scope only): `supplier_lots[]`, `raw_bag_receipts[]`, `raw_bag_qrs[]`, `pos[]`, `operators[]`, `machines[]`, `qc_events[]`, `packaging_lots[]`. Customer scope returns only `trace_code`, `finished_lot_id`, `shipment_finished_lot_id`, `product_name`, `product_sku`, `packed_at`, `shipped_at`, `quantity`, `unit`, `warnings`, `missing_links`.
+- Visibility / scope behavior:
+  - Anchored on `commercialTraceVisibilityPolicy("customer")` from COMMERCIAL-TRACE-2 (15 CSR-only fields). The Nexus sanitizers are the second line of defense — even if a DB query leaked a CSR-only field, `sanitizeNexusBatchForScope` and `sanitizeNexusPassportForScope` would strip it before serialization. Tests assert.
+  - Confidence on the wire is always `"HIGH"` for batch rows (only confirmed allocations are returned). Test asserts via the type literal.
+  - Warnings carried through unchanged — operators / customers see the same honest messages.
+- Tests added (+34, 1607 → 1641):
+  - Config (2): `configured=false` when no tokens; `configured=true` when at least one.
+  - Auth (6): 503 when no tokens, 401 when header missing, 401 when token mismatched, customer scope on matching customer token, csr scope on matching CSR token, never echoes token in messages, whitespace + case-insensitive on Bearer scheme.
+  - `extractBearerToken` + `safeEqual` (3).
+  - Scope resolution (2): customer auth can't upgrade; csr auth can preview customer scope.
+  - Dropdown label (3): product + trace + shipped; packed fallback; Untitled batch fallback.
+  - `sanitizeNexusBatchForScope` (2): customer strips CSR-only; csr preserves.
+  - `sanitizeNexusPassportForScope` (2): customer drops 7 CSR-only field arrays; csr preserves.
+  - Response builders (5): invoice / customer / passport — customer scope strips; CSR preserves; honest empty list.
+  - Route shape + safety (6): all three export GET + POST/PUT/PATCH/DELETE→405; auth is the first call in GET (no DB query before auth); no Zoho integration imports; no complaint table; CUSTOMER_SCOPE_MISMATCH wired on invoice-batches + batch-passport; DB layer hard-filters confirmed=true + status='CONFIRMED'.
+  - Plus the COMMERCIAL-TRACE-2 guardrail update (1 — pre-existing test refit; not counted in +34).
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1641 / 1641 PASS across 66 files** (+34 vs COMMERCIAL-TRACE-5 / +1 test file).
+  - `npx next build` → clean. New API routes: `/api/nexus/batch-passport`, `/api/nexus/customer-batches`, `/api/nexus/invoice-batches` (each 204 B / 102 kB First Load JS — pure JSON handlers).
+  - Auth smoke (admin-route sweep): unchanged at 51/51 — the new Nexus routes are unauthenticated API routes that return 503 without env, not admin pages.
+- Staging verification (LX122, pending deploy):
+  - Deploy + health pending while `docker compose up -d --build` runs in the background.
+  - Once SHA `57ea9d9` lands: `NEXUS_LOOKUP_TOKEN` and `NEXUS_CSR_LOOKUP_TOKEN` are not configured on staging, so every endpoint will return **503 NOT_CONFIGURED** with code `NEXUS_LOOKUP_NOT_CONFIGURED` — the honest "no tokens" state per the spec.
+  - With temporary tokens set:
+    1. Invalid `Authorization: Bearer wrong` → 401 UNAUTHORIZED (no token echo).
+    2. Missing `invoice_number` on `/api/nexus/invoice-batches` → 400 INVALID_REQUEST.
+    3. Missing customer id on `/api/nexus/customer-batches` → 400 INVALID_REQUEST.
+    4. Valid customer token with `invoice_number=ANY` → returns `{batches: [], warnings: ["No confirmed allocations exist for this invoice yet."]}` (zero confirmed allocations exist on staging).
+  - No QA fixtures seeded. `finished_lot_invoice_allocations` row count remains 0 (per COMMERCIAL-TRACE-5's invariant).
+  - No customer-scope response can include `supplier_lot_number`, `internal_receipt_number`, `raw_bag_qr`, `operator_name`, or `machine_id` — sanitizer strips them; test asserts.
+- Is COMMERCIAL-TRACE-7 (mock end-to-end verification) ready?
+  - **Yes.** Every layer is in place: schema (CT-2), invoice ingest dry-run (CT-3), allocation engine (CT-4), operator review UI (CT-5), Nexus read endpoints (CT-6). COMMERCIAL-TRACE-7 needs to:
+    1. Add a `scripts/verify-commercial-trace.ts` harness that seeds one QA invoice + one QA finished lot + one QA shipment-finished-lot + one QA confirmed allocation, then hits each Nexus endpoint and asserts: 401 on bad token, customer-scope response hides CSR-only fields, CSR-scope response includes them, scope-mismatch returns 422, empty filters return honest empty lists, dropdown label well-formed.
+    2. The harness should clean up its own QA rows on exit (same pattern as `scripts/verify-intake-workflow-1.ts`).
+  - Live Zoho ingest is still gated on owner re-authorizing the four expired `haute_brands` tokens, but COMMERCIAL-TRACE-7 doesn't need live Zoho — the mock harness exercises the local pipeline end-to-end.
+
+---
+
 ## COMMERCIAL-TRACE-5: allocation review UI (complete)
 - Date: 2026-05-15
 - Result: `/invoice-allocations` admin surface live at SHA `85acbca`. Operators can list every Zoho invoice line, filter by invoice / customer / SKU / status / confidence, generate or regenerate engine suggestions, confirm individual allocations (flipping them to `HIGH` + `CONFIRMED` + bumping `shipment_finished_lots.invoice_allocation_status` to `ALLOCATED`), reject bad suggestions, or clear all unconfirmed rows for a line. Confirmed rows are never overwritten or demoted by any path. Customer-safety banner reads in plain text on every page render: *"Only confirmed allocations should be used for Nexus invoice/batch lookup."*
