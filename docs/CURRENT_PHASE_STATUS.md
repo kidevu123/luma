@@ -4,6 +4,75 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## COMMERCIAL-TRACE-7: mock end-to-end commercial-trace verification (complete)
+- Date: 2026-05-16
+- Result: `scripts/verify-commercial-trace.ts` ships at SHA `db5e61c`. Staging run **VERIFY OK** — seeded QA fixture, exercised all three Nexus endpoints across 10 assertions, cleaned up every QA row. No live Zoho calls. No Nexus modifications. No complaint tables. No POST/PUT/PATCH/DELETE methods constructed anywhere in the harness.
+- Files changed (3 commits, ending at SHA `db5e61c`):
+  - **NEW** `scripts/verify-commercial-trace.ts` — fixture seeder + endpoint emulator + cleanup, ~530 LOC.
+  - **NEW** `lib/production/verify-commercial-trace-shape.test.ts` — 11 source-shape safety cases.
+  - All three commits: `feat(commercial-trace-7)`, `fix(commercial-trace-7)` ×2 (initial dynamic-import attempts, then refactor to direct helper composition).
+- QA fixture behavior:
+  - Customer `QA-COMMERCIAL-CUSTOMER` / nexus `QA-NEXUS-CUSTOMER-001` / zoho `QA-ZOHO-CUSTOMER-001`. Upserted by `nexus_customer_id` — if the row already exists, it's preserved (never overwritten) and the `customerPreexisting` flag flips so cleanup skips it.
+  - Product `QA-MANGO-PEACH` (kind=BOTTLE since the product-kind enum is `CARD`/`BOTTLE`/`VARIETY`; the spec's "QA Mango Peach" name is preserved verbatim). Upserted by `zoho_item_id` with the same preserve-if-exists rule.
+  - Finished lot `QA-FL-MANGO-001` (lot number `QA-FL-MANGO-001-LOT`, produced 2026-05-01, packed 2026-05-10T12:00:00Z).
+  - Shipment + shipment_finished_lot for that customer, quantity 10 cases, shipped 2026-05-15T12:00:00Z.
+  - Zoho invoice `QA-INV-001` (zoho id `QA-ZOHO-INVOICE-001`, customer linked, dated 2026-05-12).
+  - Zoho invoice line `QA-ZOHO-INVOICE-LINE-001` (item `QA-ZOHO-ITEM-MANGO`, sku `QA-MANGO-PEACH`, qty 10 cases).
+  - **Confirmed** allocation row (status=CONFIRMED, confidence=HIGH, confirmed=true, source=`QA_COMMERCIAL_TRACE_7`, quantity 10 cases, linked to the QA invoice line + QA shipment_finished_lot).
+  - Every row carries the `QA-COMMERCIAL-TRACE-7` marker in a stable column so a manual sweep can find any leftovers.
+- Endpoint verification (10 assertions, all passing):
+  1. **Missing Authorization → 401**. (Method-guard 405 is covered by `lib/integrations/nexus/lookup.test.ts`; the Next.js standalone runtime image keeps only the compiled `.next` output, not the `app/` source, so the script composes endpoint behavior from the same helpers + DB loaders the route handlers use rather than dynamic-importing route files.)
+  2. **Invalid bearer token → 401**, with the returned message asserted **never** to contain the QA tokens (customer, csr) or the wrong token literal.
+  3. **invoice-batches customer scope → 200**. Asserted: `schema_version=1.0`, `source=LUMA`, `scope=customer`, exactly one batch, `trace_code=QA-FL-MANGO-001`, `product_sku=QA-MANGO-PEACH`, `quantity=10`, `unit=cases`, `confidence=HIGH`, `dropdown_label` includes both `"QA Mango Peach"` and `"QA-FL-MANGO-001"`. CSR-only fields (`supplier_lot_number`, `internal_receipt_number`, `raw_bag_qr`, `operator_name`, `machine_id`) are **absent**.
+  4. **customer-batches customer scope → 200**. Asserted: exactly one batch with the same trace, `customer.nexus_customer_id=QA-NEXUS-CUSTOMER-001`.
+  5. **batch-passport customer scope → 200**. Asserted: trace + product preserved; `supplier_lots`, `raw_bag_receipts`, `raw_bag_qrs`, `operators`, `machines`, `qc_events`, `packaging_lots` all **absent**; `warnings` + `missing_links` arrays are present (honest, may be empty).
+  6. **batch-passport CSR scope → 200**. Asserted: `scope=csr`; all seven internal arrays are present (may be empty — engine never invents data; QA fixture has no QC events / operators / packaging lots, so those arrays are `[]`, which is the honest result).
+  7. **Cross-customer mismatch on invoice-batches → 422 CUSTOMER_SCOPE_MISMATCH** when caller passes `nexus_customer_id=QA-NEXUS-WRONG-CUSTOMER`.
+  8. **Cross-customer mismatch on batch-passport → 422**.
+  9. **Unknown invoice number → 404 NOT_FOUND** (`QA-INV-DOES-NOT-EXIST`).
+  10. **Missing required query → 400 INVALID_REQUEST**.
+- Customer-safe visibility verification:
+  - `sanitizeNexusBatchForScope("customer")` confirmed in-situ: the QA batch row returned with the five CSR-only fields stripped.
+  - `sanitizeNexusPassportForScope("customer")` confirmed in-situ: the seven CSR-only arrays absent from the passport.
+- CSR visibility verification:
+  - CSR-scope passport response keeps the same seven arrays as `[]` (or populated where the QA fixture provided data). No fabricated entries — the supplier_lots, raw_bag_receipts, raw_bag_qrs, operators, machines, qc_events, packaging_lots arrays are honestly populated from `getRecallPassport`, which the QA fixture doesn't seed deep data for. `missing_links` carries the honest text `"Finished lot has no trace_code; deep recall passport not available."` only when the lot lacks a trace_code — the QA lot has one, so the array is empty.
+- Mismatch / security verification:
+  - 422 paths exercised on both invoice-batches and batch-passport with `nexus_customer_id=QA-NEXUS-WRONG-CUSTOMER`. Both return `CUSTOMER_SCOPE_MISMATCH`.
+  - 401 path exercised with `"obviously-wrong"` token. Response body asserted to contain none of: `qa-customer-token-COMMERCIAL-TRACE-7-aaaa`, `qa-csr-token-COMMERCIAL-TRACE-7-bbbb`, `obviously-wrong`.
+- Cleanup result:
+  - All 8 rows deleted in reverse dependency order: allocation → zoho_invoice_line → zoho_invoice → shipment_finished_lot → shipment → finished_lot → product → customer.
+  - Each delete wrapped in `tryDelete()` so one stuck row doesn't strand the others.
+  - Per-row preserve logic: if a preexisting `customer` or `product` was matched on upsert, cleanup logs `"preserved (preexisting)"` and skips. The QA run on 2026-05-16 created fresh rows for both, so both were deleted.
+  - Post-cleanup sweep query against staging confirmed: `qa_cust=0, qa_prod=0, qa_inv=0, qa_alloc=0`.
+- Tests added (+11, 1641 → 1652):
+  - `verify-commercial-trace-shape.test.ts`:
+    1. Script exists at expected path.
+    2. Every QA identifier uses the `QA-` prefix family (9 specific strings checked).
+    3. `refuseInProduction()` wired with `NODE_ENV` + `ALLOW_STAGING_QA_DATA`.
+    4. Cleanup runs in reverse dependency order (delete-string positions asserted in order).
+    5. Preexisting customer/product preserved via `preexisting` flags.
+    6. No `@/lib/integrations/zoho` import. No `fetchZohoInvoices` / `checkZohoGatewayHealth` / `fetchZohoBrandStatus` reference.
+    7. No `fetch()` to Nexus URLs. No `method: "POST"|"PUT"|"PATCH"|"DELETE"` strings anywhere.
+    8. No complaint tables / webhooks referenced.
+    9. Customer-scope batch assertions name all five CSR-only fields and the negative phrase `"customer-scope batch must NOT include"`.
+    10. Customer-scope passport assertions name all seven CSR-only arrays and the negative phrase `"customer-scope passport must NOT include"`.
+    11. 401 path explicitly asserted not to echo any token.
+- Build / test / smoke results:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → **1652 / 1652 PASS across 67 files** (+11 vs CT-6 / +1 test file).
+  - `npx next build` → clean.
+  - Admin auth smoke → **51 / 51 PASS** (unchanged).
+- Staging verification (LX122, SHA `db5e61c`):
+  - Health green at SHA `db5e61cb056bcac8ae38d6439a934c9591adde60`.
+  - Verification run output (full output preserved in `/private/tmp/claude-501/.../tasks/bl8cyo2yh.output`): 8 inserts → 10 assertions PASS → `VERIFY OK` → 8 deletes.
+  - Post-run sweep: zero QA rows survive across all four tables (`customers`, `products`, `zoho_invoices`, `finished_lot_invoice_allocations`).
+  - No Nexus endpoint changes. No live Zoho call. No complaint table created.
+- Remaining live blocker for COMMERCIAL-TRACE-8:
+  - **The four expired `haute_brands` Zoho refresh tokens on the integration gateway (LXC 9503)** are still the only thing preventing a live end-to-end Zoho → Luma → Nexus run. Until the owner re-authorizes them on the gateway, the COMMERCIAL-TRACE-3 invoice dry-run continues to return BLOCKED (NEEDS_REAUTH). COMMERCIAL-TRACE-7 explicitly does not require live Zoho — it proves the local pipeline works against real Postgres with a clearly-marked QA fixture. Once tokens are re-authorized, COMMERCIAL-TRACE-8 can run the same shape of verification against a real Zoho invoice instead of `QA-INV-001`.
+  - No other Luma-side blocker. Schema, engine, review UI, Nexus endpoints, and the mock harness are all live and green on staging.
+
+---
+
 ## COMMERCIAL-TRACE-6: Nexus read-only invoice/batch lookup endpoints (complete)
 - Date: 2026-05-16
 - Result: three GET-only Nexus endpoints ship at SHA `57ea9d9`. Customer-scope and CSR-scope tokens give cleanly separated views into confirmed allocations and the recall-passport summary. **No live Zoho fetches, no Zoho writes, no complaint tables, no UI surfaces added.** Every endpoint authenticates first, queries the confirmed-only allocations join second, sanitizes for scope third. Customer scope cannot upgrade itself to CSR; CSR can preview customer scope via `?scope=customer`.

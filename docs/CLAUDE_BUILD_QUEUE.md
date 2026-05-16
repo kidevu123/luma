@@ -684,10 +684,17 @@ This phase supersedes the earlier "INTAKE-UX-1" entry below — same target, bro
 
 **Closeout (2026-05-16, SHA `57ea9d9`).** tsc clean / vitest **1641/1641** (+34 vs COMMERCIAL-TRACE-5 / +1 test file) / next build clean (three new dynamic API routes, 204 B each) / auth smoke still 51/51 (Nexus routes are unauthenticated API endpoints, return 503 without env, not in admin-page sweep). Tokens never logged or echoed. No complaint tables / webhook / live Zoho fetch / write paths. Customer-ownership check (422 CUSTOMER_SCOPE_MISMATCH) wired on invoice-batches + batch-passport.
 
-### [ ] COMMERCIAL-TRACE-7 — Staging verification with mock invoice + finished lot
-**Objective.** `scripts/verify-commercial-trace-7.ts` — seed QA invoice + finished lot, run suggestion engine, confirm via action, hit all three Nexus endpoints, assert customer scope hides supplier_lot, CSR scope shows it. Cleanup.
+### [x] COMMERCIAL-TRACE-7 — Staging verification with mock invoice + finished lot
 
-**Stop condition.** Verify script exits 0; auth smoke 50/50 PASS (if endpoints added to smoke list).
+**Files touched (3 commits, ending at SHA `db5e61c`).**
+- `scripts/verify-commercial-trace.ts` — fixture seeder + endpoint emulator + cleanup harness (~530 LOC). Composes endpoint behavior via `authenticateNexusLookupRequest` / `resolveNexusLookupScope` / `loadConfirmedBatchesForInvoice` / `loadConfirmedBatchesForCustomer` / `loadBatchPassportForNexus` / `buildInvoiceBatchesResponse` / `buildCustomerBatchesResponse` / `buildBatchPassportResponse` (the same helpers the route handlers compose internally). Direct-import path is required because the Next.js standalone runtime image keeps only `.next` output, not `app/` source — see commits 1f1338e / b85cf26 / 214fa32 / db5e61c for the iteration trail.
+- `lib/production/verify-commercial-trace-shape.test.ts` — 11 source-shape safety cases.
+
+**QA fixture.** Customer `QA-COMMERCIAL-CUSTOMER`, product `QA-MANGO-PEACH`, finished lot trace `QA-FL-MANGO-001`, invoice `QA-INV-001`, allocation source `QA_COMMERCIAL_TRACE_7`. Every row tagged `QA-COMMERCIAL-TRACE-7`. Customer + product are upserted by nexus_customer_id / zoho_item_id and preserved if pre-existing.
+
+**Endpoint assertions (10).** Missing Authorization → 401; invalid bearer → 401 (token never echoed); invoice-batches customer scope → 200 with HIGH confidence + CSR-only fields stripped; customer-batches customer scope → 200 with one batch; batch-passport customer scope → 200 with 7 CSR-only arrays absent; batch-passport CSR scope → 200 with 7 internal arrays present (may be empty — engine never invents); cross-customer 422 on both invoice-batches and batch-passport; unknown invoice → 404; missing invoice_number → 400. Method-guard 405 is covered by `lib/integrations/nexus/lookup.test.ts` route-shape tests (route source isn't available in the standalone runtime image).
+
+**Closeout (2026-05-16, SHA `db5e61c`).** tsc clean / vitest **1652/1652** (+11 vs CT-6 / +1 test file) / next build clean / admin auth smoke 51/51 / staging run exits with `VERIFY OK` and cleans 8/8 QA rows. Post-run DB sweep confirms zero QA rows survive in customers / products / zoho_invoices / finished_lot_invoice_allocations.
 
 ---
 
