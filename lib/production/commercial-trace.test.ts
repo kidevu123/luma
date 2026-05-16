@@ -359,14 +359,21 @@ describe("COMMERCIAL-TRACE-2 · safety guardrails", () => {
     expect(helperSrc).not.toMatch(/fetch\s*\(|axios|node:http/);
   });
 
-  it("no Nexus endpoint was added under app/api/nexus for invoice lookup yet", () => {
+  it("no Nexus endpoint queries zoho_invoices directly (must go through confirmed-allocations join)", () => {
+    // Originally this test guarded that no Nexus endpoint existed at
+    // all during COMMERCIAL-TRACE-2's schema-only phase. COMMERCIAL-
+    // TRACE-6 has since shipped three read-only Nexus endpoints that
+    // intentionally exist; the customer/CSR-scope safety contract is
+    // covered by the dedicated nexus lookup tests. What remains
+    // load-bearing here is the rule that any Nexus endpoint reading
+    // invoice context must do so through finished_lot_invoice_
+    // allocations (i.e. only confirmed rows). A direct query against
+    // `zoho_invoices` from a nexus route file would bypass that gate.
     const nexusDir = path.join(REPO_ROOT, "app", "api", "nexus");
     if (!fs.existsSync(nexusDir)) {
-      // No nexus API tree means no invoice endpoint by definition.
       expect(true).toBe(true);
       return;
     }
-    // Recurse and assert no file references zoho_invoices / invoice-batches.
     function walk(dir: string): string[] {
       const out: string[] = [];
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -379,7 +386,12 @@ describe("COMMERCIAL-TRACE-2 · safety guardrails", () => {
     const files = walk(nexusDir);
     for (const f of files) {
       const src = fs.readFileSync(f, "utf8");
-      expect(src).not.toMatch(/zoho_invoices|invoice-batches|customer-batches/);
+      // Route files MUST delegate to the queries module — they may
+      // import it, but they shouldn't reference zohoInvoices /
+      // zoho_invoice_lines tables themselves.
+      expect(src).not.toMatch(/from\s+["']@\/lib\/db\/schema/);
+      expect(src).not.toMatch(/zohoInvoices\b/);
+      expect(src).not.toMatch(/zohoInvoiceLines\b/);
     }
   });
 });
