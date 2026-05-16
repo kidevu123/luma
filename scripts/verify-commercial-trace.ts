@@ -411,12 +411,17 @@ async function callNexus(
     GET: (r: Request) => Promise<Response>;
     POST?: (r?: Request) => Promise<Response>;
   };
+  // Dynamic import via template literal so the .ts extension stays
+  // out of static TS resolution. tsx's ESM resolver needs the extension
+  // for raw filesystem paths (it can't fall back to module resolution
+  // here because the route files live outside lib/).
+  const ext = ".ts";
   if (routePath === "/api/nexus/invoice-batches") {
-    mod = await import("../app/api/nexus/invoice-batches/route");
+    mod = await import(`../app/api/nexus/invoice-batches/route${ext}`);
   } else if (routePath === "/api/nexus/customer-batches") {
-    mod = await import("../app/api/nexus/customer-batches/route");
+    mod = await import(`../app/api/nexus/customer-batches/route${ext}`);
   } else if (routePath === "/api/nexus/batch-passport") {
-    mod = await import("../app/api/nexus/batch-passport/route");
+    mod = await import(`../app/api/nexus/batch-passport/route${ext}`);
   } else {
     fail(`unknown nexus route ${routePath}`);
   }
