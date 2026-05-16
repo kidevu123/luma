@@ -412,11 +412,11 @@ async function callNexus(
     POST?: (r?: Request) => Promise<Response>;
   };
   if (routePath === "/api/nexus/invoice-batches") {
-    mod = await import("@/app/api/nexus/invoice-batches/route");
+    mod = await import("../app/api/nexus/invoice-batches/route");
   } else if (routePath === "/api/nexus/customer-batches") {
-    mod = await import("@/app/api/nexus/customer-batches/route");
+    mod = await import("../app/api/nexus/customer-batches/route");
   } else if (routePath === "/api/nexus/batch-passport") {
-    mod = await import("@/app/api/nexus/batch-passport/route");
+    mod = await import("../app/api/nexus/batch-passport/route");
   } else {
     fail(`unknown nexus route ${routePath}`);
   }
