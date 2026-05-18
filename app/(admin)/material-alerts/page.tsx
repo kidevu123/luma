@@ -1,16 +1,34 @@
-// Phase H.x7 — Material alerts panel. PT-7D — extended with shortage
-// recommendations section reading from read_material_recommendations.
+// LUMA-UI-FINAL-1 — material alerts panel.
+//
+// Chrome rebuilt on the Operations Atelier design language.
+// Data loading, loader functions, and recommendations panel unchanged.
 
 import { requireAdmin } from "@/lib/auth-guards";
 import { loadMaterialAlertsPanel } from "@/lib/production/material-panels";
 import { VARIANCE_LABELS } from "@/lib/production/reconciliation-v2-loader";
-import { PageHeader } from "@/components/ui/page-header";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
-import { ProductionEmptyState } from "@/components/production/ui";
 import { loadMaterialRecommendations } from "@/lib/db/queries/material-recommendations";
 import { validatePackTrackRecommendationConfig } from "@/lib/integrations/packtrack/recommendations";
 import { ShortageRecommendationsPanel } from "./_recommendations-panel";
+import {
+  CommandShell,
+  PageHero,
+  RibbonStrip,
+  SectionCard,
+  DataEmptyState,
+  StatusBadge,
+  type HeroBadge,
+  type RibbonSegmentData,
+} from "@/components/production/luma-ui";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Layers,
+  Package,
+  Archive,
+  Clock,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -28,227 +46,472 @@ export default async function MaterialAlertsPage() {
     panel.openAllocations.length +
     panel.reconciliationAlerts.length;
 
+  const heroBadges: HeroBadge[] = [
+    {
+      label:
+        totalAlerts === 0
+          ? "No active alerts"
+          : `${totalAlerts} active alert${totalAlerts === 1 ? "" : "s"}`,
+      tone: totalAlerts === 0 ? "good" : totalAlerts > 3 ? "crit" : "warn",
+    },
+    { label: "Read-only", tone: "muted" },
+  ];
+
+  const ribbonSegments: RibbonSegmentData[] = [
+    {
+      label: "Below par",
+      value: panel.shortages.length,
+      tone: panel.shortages.length > 0 ? "warn" : "good",
+      icon: Package,
+      hint: "Materials below configured par level",
+    },
+    {
+      label: "Roll runouts",
+      value: panel.runouts.length,
+      tone: panel.runouts.length > 0 ? "crit" : "good",
+      icon: Layers,
+      hint: "Active rolls projected to run low",
+    },
+    {
+      label: "Variance alerts",
+      value: panel.reconciliationAlerts.length,
+      tone: panel.reconciliationAlerts.length > 0 ? "warn" : "good",
+      icon: AlertTriangle,
+      hint: "PT-6 receipt / cycle-count / consumption variance",
+    },
+    {
+      label: "Held / scrapped",
+      value: panel.held.length,
+      tone: panel.held.length > 0 ? "warn" : "muted",
+      icon: Archive,
+      hint: "Lots on hold or scrapped",
+    },
+    {
+      label: "Stale allocations",
+      value: panel.openAllocations.length,
+      tone: panel.openAllocations.length > 0 ? "warn" : "muted",
+      icon: Clock,
+      hint: "Allocation sessions open > 12 hours",
+    },
+  ];
+
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Material alerts"
-        description={`${totalAlerts} active alert${totalAlerts === 1 ? "" : "s"}. Read-only; alerts point to missing data or variance buckets, not automatic actions.`}
+    <CommandShell density="wide">
+      <PageHero
+        eyebrow="Management · Inventory risk"
+        title="Material alerts."
+        description="Read-only. Alerts point to missing data or variance buckets — not automatic actions. Each row cites the source table so the underlying issue can be resolved directly."
+        badges={heroBadges}
       />
 
+      <RibbonStrip reveal="reveal-2" segments={ribbonSegments} />
+
       {totalAlerts === 0 ? (
-        <ProductionEmptyState
-          title="No active alerts"
-          description="Inventory is above par, no low remaining rolls, and no PT-6 variance rows currently require attention."
-          hint="materials · packaging_lots · read_material_reconciliation"
+        <DataEmptyState
+          icon={CheckCircle2}
+          title="No active material alerts"
+          body="Inventory is above par, no active rolls are running low, and no PT-6 variance rows currently require attention."
+          tone="good"
         />
       ) : null}
 
+      {/* Shortage recommendations from PackTrack */}
       <ShortageRecommendationsPanel
         rows={recommendations}
         packtrackConfigured={packtrackConfig.configured}
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Below par level ({panel.shortages.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {panel.shortages.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              No materials below par. Materials without a configured par level do not appear here.
-            </p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="text-text-muted text-xs uppercase">
-                <tr>
-                  <th className="text-left p-2">Material</th>
-                  <th className="text-left p-2">Kind</th>
-                  <th className="text-right p-2">Par level</th>
-                  <th className="text-right p-2">On hand</th>
-                  <th className="text-left p-2">Conf.</th>
-                  <th className="text-left p-2">Warning</th>
+      {/* Below par */}
+      <SectionCard
+        eyebrow="Inventory risk"
+        title={`Below par level — ${panel.shortages.length}`}
+        subtitle="Materials where current on-hand quantity is below the configured par level. Materials without a par level are not listed here."
+        tone={panel.shortages.length > 0 ? "warn" : "muted"}
+        reveal="reveal-3"
+      >
+        {panel.shortages.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No materials below par. Materials without a configured par level do
+            not appear here.
+          </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Material</Th>
+                  <Th>Kind</Th>
+                  <Th align="right">Par level</Th>
+                  <Th align="right">On hand</Th>
+                  <Th>Confidence</Th>
+                  <Th>Warning</Th>
                 </tr>
               </thead>
               <tbody>
                 {panel.shortages.map((s) => (
-                  <tr key={s.materialId} className="border-t border-border/40">
-                    <td className="p-2">{s.materialName}</td>
-                    <td className="p-2">{s.materialKind}</td>
-                    <td className="p-2 text-right tabular-nums">{s.parLevel} {s.uom}</td>
-                    <td className="p-2 text-right tabular-nums">{s.totalOnHand ?? "Missing"} {s.uom}</td>
-                    <td className="p-2"><ConfidenceBadge confidence={s.confidence} /></td>
-                    <td className="p-2 text-amber-700">{s.warning}</td>
+                  <tr
+                    key={s.materialId}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td className="font-medium text-text-strong">
+                      {s.materialName}
+                    </Td>
+                    <Td className="text-text-muted">{s.materialKind}</Td>
+                    <Td align="right" className="tabular-nums font-mono">
+                      {s.parLevel} {s.uom}
+                    </Td>
+                    <Td
+                      align="right"
+                      className={cn(
+                        "tabular-nums font-mono font-semibold",
+                        s.totalOnHand == null
+                          ? "italic text-text-subtle"
+                          : "text-warn-700",
+                      )}
+                    >
+                      {s.totalOnHand ?? "Missing"} {s.uom}
+                    </Td>
+                    <Td>
+                      <ConfidenceBadge confidence={s.confidence} />
+                    </Td>
+                    <Td className="text-warn-700 text-[11px]">{s.warning}</Td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Active rolls running out ({panel.runouts.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {panel.runouts.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              No active rolls projected to run low. Rolls with missing standards cannot project runout and surface on the roll variance panel.
-            </p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="text-text-muted text-xs uppercase">
-                <tr>
-                  <th className="text-left p-2">Roll</th>
-                  <th className="text-left p-2">Role</th>
-                  <th className="text-left p-2">Machine</th>
-                  <th className="text-right p-2">Current est.</th>
-                  <th className="text-right p-2">Blisters left</th>
-                  <th className="text-left p-2">Conf.</th>
-                  <th className="text-left p-2">Warning</th>
+      {/* Active roll runouts */}
+      <SectionCard
+        eyebrow="Roll materials"
+        title={`Active rolls running out — ${panel.runouts.length}`}
+        subtitle="Rolls with projected runout below the station threshold. Rolls with missing standards cannot project runout and appear on the Roll Variance panel instead."
+        tone={panel.runouts.length > 0 ? "crit" : "muted"}
+        reveal="reveal-4"
+      >
+        {panel.runouts.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No active rolls projected to run low.
+          </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Roll</Th>
+                  <Th>Role</Th>
+                  <Th>Machine</Th>
+                  <Th align="right">Current est.</Th>
+                  <Th align="right">Blisters left</Th>
+                  <Th>Confidence</Th>
+                  <Th>Warning</Th>
                 </tr>
               </thead>
               <tbody>
                 {panel.runouts.map((r) => (
-                  <tr key={r.packagingLotId} className="border-t border-border/40">
-                    <td className="p-2">
-                      {r.rollNumber ?? r.packagingLotId.slice(0, 8)}
-                      <span className="text-[11px] text-text-muted ml-1">{r.materialName}</span>
-                    </td>
-                    <td className="p-2">{r.materialRole ?? "Missing"}</td>
-                    <td className="p-2">{r.machineName ?? "Unassigned"}</td>
-                    <td className="p-2 text-right tabular-nums">
-                      {r.currentWeightGramsEstimate != null ? `${r.currentWeightGramsEstimate} g` : "Missing"}
-                    </td>
-                    <td className="p-2 text-right tabular-nums text-amber-700 font-semibold">
-                      {r.projectedBlistersRemaining ?? "Missing"}
-                    </td>
-                    <td className="p-2"><ConfidenceBadge confidence={r.confidence} /></td>
-                    <td className="p-2 text-amber-700">{r.warning}</td>
+                  <tr
+                    key={r.packagingLotId}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td>
+                      <span className="font-mono font-medium text-text-strong">
+                        {r.rollNumber ?? r.packagingLotId.slice(0, 8)}
+                      </span>
+                      <span className="ml-1.5 text-[11px] text-text-muted">
+                        {r.materialName}
+                      </span>
+                    </Td>
+                    <Td className="text-text-muted">
+                      {r.materialRole ?? (
+                        <span className="italic text-text-subtle">Missing</span>
+                      )}
+                    </Td>
+                    <Td className="text-text-muted">
+                      {r.machineName ?? (
+                        <span className="italic text-text-subtle">
+                          Unassigned
+                        </span>
+                      )}
+                    </Td>
+                    <Td
+                      align="right"
+                      className="tabular-nums font-mono text-text-muted"
+                    >
+                      {r.currentWeightGramsEstimate != null
+                        ? `${r.currentWeightGramsEstimate} g`
+                        : "—"}
+                    </Td>
+                    <Td
+                      align="right"
+                      className="tabular-nums font-mono font-semibold text-crit-700"
+                    >
+                      {r.projectedBlistersRemaining ?? "—"}
+                    </Td>
+                    <Td>
+                      <ConfidenceBadge confidence={r.confidence} />
+                    </Td>
+                    <Td className="text-warn-700 text-[11px]">{r.warning}</Td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>PT-6 material variance alerts ({panel.reconciliationAlerts.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {panel.reconciliationAlerts.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              No receipt, cycle-count, or consumption variance rows currently require attention.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="text-text-muted uppercase">
-                  <tr>
-                    <th className="text-left p-2">Material</th>
-                    <th className="text-left p-2">Variance type</th>
-                    <th className="text-right p-2">Value</th>
-                    <th className="text-left p-2">Severity</th>
-                    <th className="text-left p-2">Conf.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {panel.reconciliationAlerts.flatMap((row) =>
-                    Object.values(row.variances)
-                      .filter((v) => v.value != null && Math.abs(v.value) > 0.0001)
-                      .map((v) => (
-                        <tr key={`${row.id}-${v.kind}`} className="border-t border-border/40">
-                          <td className="p-2">{row.materialName ?? row.materialSku ?? row.scopeId.slice(0, 8)}</td>
-                          <td className="p-2">
-                            <div>{VARIANCE_LABELS[v.kind].title}</div>
-                            <div className="text-[10px] text-text-muted">{VARIANCE_LABELS[v.kind].subtitle}</div>
-                          </td>
-                          <td className="p-2 text-right tabular-nums">{v.value} {v.unit}</td>
-                          <td className="p-2">{v.severity}</td>
-                          <td className="p-2"><ConfidenceBadge confidence={v.confidence} /></td>
-                        </tr>
-                      )),
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* PT-6 variance */}
+      <SectionCard
+        eyebrow="PT-6 reconciliation"
+        title={`Material variance alerts — ${panel.reconciliationAlerts.length}`}
+        subtitle="Receipt, cycle-count, and consumption variance rows. Each row carries a severity and confidence; investigate any CRITICAL or HIGH-severity row first."
+        tone={panel.reconciliationAlerts.length > 0 ? "warn" : "muted"}
+        reveal="reveal-4"
+      >
+        {panel.reconciliationAlerts.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No receipt, cycle-count, or consumption variance rows currently
+            require attention.
+          </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[11.5px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Material</Th>
+                  <Th>Variance type</Th>
+                  <Th align="right">Value</Th>
+                  <Th>Severity</Th>
+                  <Th>Confidence</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {panel.reconciliationAlerts.flatMap((row) =>
+                  Object.values(row.variances)
+                    .filter((v) => v.value != null && Math.abs(v.value) > 0.0001)
+                    .map((v) => (
+                      <tr
+                        key={`${row.id}-${v.kind}`}
+                        className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                      >
+                        <Td className="font-medium text-text-strong">
+                          {row.materialName ??
+                            row.materialSku ??
+                            row.scopeId.slice(0, 8)}
+                        </Td>
+                        <Td>
+                          <div className="font-medium">
+                            {VARIANCE_LABELS[v.kind].title}
+                          </div>
+                          <div className="text-[10px] text-text-muted">
+                            {VARIANCE_LABELS[v.kind].subtitle}
+                          </div>
+                        </Td>
+                        <Td
+                          align="right"
+                          className="tabular-nums font-mono font-medium"
+                        >
+                          {v.value} {v.unit}
+                        </Td>
+                        <Td>
+                          <SeverityBadge severity={v.severity} />
+                        </Td>
+                        <Td>
+                          <ConfidenceBadge confidence={v.confidence} />
+                        </Td>
+                      </tr>
+                    )),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Held / scrapped lots ({panel.held.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {panel.held.length === 0 ? (
-            <p className="text-sm text-text-muted">No held or scrapped lots.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="text-text-muted text-xs uppercase">
-                <tr>
-                  <th className="text-left p-2">Lot id</th>
-                  <th className="text-left p-2">Material</th>
-                  <th className="text-left p-2">Status</th>
-                  <th className="text-right p-2">Qty on hand</th>
-                  <th className="text-left p-2">Supplier</th>
-                  <th className="text-left p-2">Conf.</th>
+      {/* Held / scrapped */}
+      <SectionCard
+        eyebrow="Lot status"
+        title={`Held / scrapped lots — ${panel.held.length}`}
+        subtitle="Packaging lots with status HELD or SCRAPPED. Investigate before pulling from inventory."
+        tone={panel.held.length > 0 ? "warn" : "muted"}
+        reveal="reveal-5"
+      >
+        {panel.held.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">No held or scrapped lots.</p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Lot id</Th>
+                  <Th>Material</Th>
+                  <Th>Status</Th>
+                  <Th align="right">Qty on hand</Th>
+                  <Th>Supplier</Th>
+                  <Th>Confidence</Th>
                 </tr>
               </thead>
               <tbody>
                 {panel.held.map((h) => (
-                  <tr key={h.lotId} className="border-t border-border/40">
-                    <td className="p-2 font-mono text-[10px]">{h.lotId.slice(0, 8)}</td>
-                    <td className="p-2">{h.materialName}</td>
-                    <td className="p-2">{h.status}</td>
-                    <td className="p-2 text-right tabular-nums">{h.qtyOnHand} {h.uom}</td>
-                    <td className="p-2">{h.supplier ?? "Missing"}</td>
-                    <td className="p-2"><ConfidenceBadge confidence={h.confidence} /></td>
+                  <tr
+                    key={h.lotId}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td className="font-mono text-[10.5px] text-text-muted">
+                      {h.lotId.slice(0, 8)}
+                    </Td>
+                    <Td className="font-medium text-text-strong">
+                      {h.materialName}
+                    </Td>
+                    <Td>
+                      <StatusBadge
+                        tone={h.status === "SCRAPPED" ? "crit" : "warn"}
+                        mono
+                      >
+                        {h.status}
+                      </StatusBadge>
+                    </Td>
+                    <Td align="right" className="tabular-nums font-mono">
+                      {h.qtyOnHand} {h.uom}
+                    </Td>
+                    <Td className="text-text-muted">
+                      {h.supplier ?? (
+                        <span className="italic text-text-subtle">Missing</span>
+                      )}
+                    </Td>
+                    <Td>
+                      <ConfidenceBadge confidence={h.confidence} />
+                    </Td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Stale open allocations ({panel.openAllocations.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {panel.openAllocations.length === 0 ? (
-            <p className="text-sm text-text-muted">
-              No allocation sessions older than 12 hours.
-            </p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="text-text-muted text-xs uppercase">
-                <tr>
-                  <th className="text-left p-2">Session</th>
-                  <th className="text-left p-2">Inventory bag</th>
-                  <th className="text-left p-2">Product</th>
-                  <th className="text-right p-2">Open for</th>
-                  <th className="text-left p-2">Warning</th>
+      {/* Stale open allocations */}
+      <SectionCard
+        eyebrow="Allocation health"
+        title={`Stale open allocations — ${panel.openAllocations.length}`}
+        subtitle="Bag-allocation sessions open for more than 12 hours. These may indicate an incomplete production run or an abandoned session."
+        tone={panel.openAllocations.length > 0 ? "warn" : "muted"}
+        reveal="reveal-5"
+      >
+        {panel.openAllocations.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No allocation sessions older than 12 hours.
+          </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Session</Th>
+                  <Th>Inventory bag</Th>
+                  <Th>Product</Th>
+                  <Th align="right">Open for</Th>
+                  <Th>Warning</Th>
                 </tr>
               </thead>
               <tbody>
                 {panel.openAllocations.map((a) => (
-                  <tr key={a.sessionId} className="border-t border-border/40">
-                    <td className="p-2 font-mono text-[10px]">{a.sessionId.slice(0, 8)}</td>
-                    <td className="p-2 font-mono text-[10px]">{a.inventoryBagId.slice(0, 8)}</td>
-                    <td className="p-2">{a.productName ?? "Missing"}</td>
-                    <td className="p-2 text-right tabular-nums text-amber-700">{a.hoursOpen.toFixed(1)} h</td>
-                    <td className="p-2 text-amber-700">{a.warning}</td>
+                  <tr
+                    key={a.sessionId}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td className="font-mono text-[10.5px] text-text-muted">
+                      {a.sessionId.slice(0, 8)}
+                    </Td>
+                    <Td className="font-mono text-[10.5px] text-text-muted">
+                      {a.inventoryBagId.slice(0, 8)}
+                    </Td>
+                    <Td className="font-medium text-text-strong">
+                      {a.productName ?? (
+                        <span className="italic text-text-subtle">Missing</span>
+                      )}
+                    </Td>
+                    <Td
+                      align="right"
+                      className="tabular-nums font-mono font-semibold text-warn-700"
+                    >
+                      {a.hoursOpen.toFixed(1)} h
+                    </Td>
+                    <Td className="text-warn-700 text-[11px]">{a.warning}</Td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+          </div>
+        )}
+      </SectionCard>
+    </CommandShell>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Table helpers
+// ─────────────────────────────────────────────────────────────────────
+
+function Th({
+  children,
+  align = "left",
+}: {
+  children?: React.ReactNode;
+  align?: "left" | "right";
+}) {
+  return (
+    <th
+      className={cn(
+        "px-3 py-2 text-[10px] uppercase tracking-[0.12em] text-text-subtle font-semibold",
+        align === "right" ? "text-right" : "text-left",
+      )}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  align = "left",
+  className,
+}: {
+  children?: React.ReactNode;
+  align?: "left" | "right";
+  className?: string;
+}) {
+  return (
+    <td
+      className={cn(
+        "px-3 py-2.5",
+        align === "right" ? "text-right" : "",
+        className,
+      )}
+    >
+      {children}
+    </td>
+  );
+}
+
+function SeverityBadge({ severity }: { severity: string | undefined }) {
+  const map: Record<string, string> = {
+    CRITICAL: "bg-crit-50/80 text-crit-700 border-crit-500/30",
+    HIGH: "bg-warn-50/80 text-warn-700 border-warn-500/30",
+    MEDIUM: "bg-info-50/80 text-info-700 border-info-500/30",
+    LOW: "bg-surface-2 text-text-muted border-border",
+  };
+  if (!severity)
+    return <span className="italic text-text-subtle text-[11px]">—</span>;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center h-5 px-1.5 rounded border text-[10px] font-semibold uppercase tracking-wider",
+        map[severity] ?? map["LOW"],
+      )}
+    >
+      {severity}
+    </span>
   );
 }

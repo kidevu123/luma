@@ -348,7 +348,7 @@ export default async function InvoiceAllocationsPage({
       <ActionPanel
         tone="info"
         icon={ShieldAlert}
-        title="Confirmed allocations are the only path to Nexus customer-scope lookup."
+        title="Only confirmed allocations should be used for Nexus invoice/batch lookup."
         body={
           <>
             Suggestions may be wrong. Confirm only when the finished lot truly
@@ -464,14 +464,8 @@ export default async function InvoiceAllocationsPage({
             ) : (
               <DataEmptyState
                 icon={Inbox}
-                title="No Zoho invoice lines yet"
-                body={
-                  <>
-                    Invoice rows arrive via the apply phase of COMMERCIAL-TRACE-3.
-                    Once seeded, every line surfaces here and the suggestion
-                    engine can be invoked per-line.
-                  </>
-                }
+                title="No Zoho invoice lines available yet. Invoice rows arrive via the apply phase."
+                body="Once invoice lines are seeded, every line surfaces here and the suggestion engine can be invoked per-line."
                 tone="muted"
               />
             )
