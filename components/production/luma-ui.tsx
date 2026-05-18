@@ -487,10 +487,15 @@ function RibbonSegment({
   icon: Icon,
   isLast,
 }: RibbonSegmentData & { isLast: boolean }) {
+  // The numeric value can be 8+ digits with commas; the segment must
+  // never bleed into its neighbour. min-w-0 lets the grid track
+  // shrink; the clamp() font-size scales between cramped and roomy
+  // viewport widths so large numbers fit without truncation in most
+  // cases. truncate is the final safety net.
   return (
     <div
       className={cn(
-        "relative px-5 py-5 lg:px-6 lg:py-6",
+        "relative min-w-0 px-4 py-5 lg:px-5 lg:py-6",
         !isLast && "border-r border-white/[0.07]",
       )}
     >
@@ -498,32 +503,38 @@ function RibbonSegment({
         {live ? (
           <span
             aria-hidden
-            className="pulse-accent inline-block h-1.5 w-1.5 rounded-full bg-brand-accent"
+            className="pulse-accent inline-block h-1.5 w-1.5 rounded-full bg-brand-accent shrink-0"
           />
         ) : Icon ? (
           <span
             className={cn(
-              "inline-flex h-4 w-4 items-center justify-center text-text-inverse/55",
+              "inline-flex h-4 w-4 items-center justify-center shrink-0",
               TONE_TEXT_INVERSE[tone],
             )}
           >
             <Icon className="h-3 w-3" />
           </span>
         ) : null}
-        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-text-inverse/55">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-text-inverse/55 truncate">
           {label}
         </div>
       </div>
       <div
         className={cn(
-          "display-num text-[44px] sm:text-[52px] lg:text-[58px] text-text-inverse",
+          "display-num text-text-inverse truncate",
           TONE_TEXT_INVERSE[tone],
         )}
+        style={{ fontSize: "clamp(26px, 3.2vw, 46px)" }}
+        title={
+          typeof value === "string" || typeof value === "number"
+            ? String(value)
+            : undefined
+        }
       >
         {value}
       </div>
       {hint ? (
-        <div className="mt-2 text-[11.5px] text-text-inverse/55 leading-snug">
+        <div className="mt-2 text-[11px] text-text-inverse/55 leading-snug line-clamp-2">
           {hint}
         </div>
       ) : null}
