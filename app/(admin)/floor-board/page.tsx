@@ -1,20 +1,27 @@
-// Phase E — Luma Production Command Center.
+// Phase E → LUMA-UI-REBUILD-1.
+//
+// Luma Production Command Center — the floor wallboard.
 //
 // Single source of truth: lib/production/metrics.ts. UI computes
 // nothing; it formats values and arranges them. Honest by default —
 // every metric flows through MetricResult, every empty surfaces with
 // the canonical missing-data label.
 //
-// The legacy 12-tile strip + lifeline cards live at
-// _legacy-page.tsx.bak for rollback. Components in _components/ are
-// dead code on disk; nothing imports them now.
+// Surface: dark "command wall" (bg-inverse). Chrome rebuilt in the
+// LUMA-UI-REBUILD-1 design language — 3px tone rail as signature
+// motif, refined eyebrow + display type hierarchy, tone vocabulary
+// (good / warn / crit / info / muted / brand) replaces ad-hoc
+// amber / rose / cyan. Existing domain primitives (MetricCard,
+// MissingState, ConfidenceBadge, LiveRefresh) preserved — they were
+// already dark-tuned and re-render unchanged.
+//
+// Data loading + every read query unchanged from the prior version.
 
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { eq, desc, isNotNull, and, isNull } from "drizzle-orm";
+import { eq, desc, isNotNull, and } from "drizzle-orm";
 import {
   machines,
-  stations,
   workflowBags,
   readBagState,
   readMaterialReconciliation,
@@ -39,14 +46,20 @@ import { todayRange } from "@/lib/production/time";
 import { MetricCard } from "@/components/production/metric-card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { MissingState } from "@/components/production/missing-state";
-import { ProductionAlertCard, ProductionEmptyState } from "@/components/production/ui";
 import { LiveRefresh } from "./live-refresh";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Cpu,
+  GitBranch,
+  Layers,
+  Radar,
+} from "lucide-react";
 import {
   type StageKey,
   type MetricResult,
-  STAGE_KEYS,
 } from "@/lib/production/types";
-import { ok } from "@/lib/production/confidence";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +81,37 @@ const BOTTLE_LANE: ReadonlyArray<{ key: StageKey; label: string }> = [
   { key: "BOTTLE_INDUCTION_QUEUE", label: "Induction sealing" },
   { key: "FINISHED_GOODS_QUEUE", label: "Finished goods" },
 ];
+
+// Tone vocabulary on the dark wall — same names as the light pages,
+// different shades so they read on bg-inverse.
+type WallTone = "good" | "warn" | "crit" | "info" | "muted" | "brand";
+
+const RAIL: Record<WallTone, string> = {
+  good: "before:bg-good-500",
+  warn: "before:bg-warn-500",
+  crit: "before:bg-crit-500",
+  info: "before:bg-info-500",
+  muted: "before:bg-slate-600",
+  brand: "before:bg-brand-accent",
+};
+
+const TILE_TEXT: Record<WallTone, string> = {
+  good: "text-emerald-300",
+  warn: "text-amber-300",
+  crit: "text-rose-300",
+  info: "text-cyan-300",
+  muted: "text-slate-100",
+  brand: "text-brand-accent",
+};
+
+const TILE_BORDER: Record<WallTone, string> = {
+  good: "border-emerald-500/30",
+  warn: "border-amber-500/30",
+  crit: "border-rose-500/30",
+  info: "border-cyan-500/25",
+  muted: "border-slate-800/70",
+  brand: "border-brand-500/35",
+};
 
 export default async function FloorBoardPage() {
   await requireSession();
@@ -164,248 +208,297 @@ export default async function FloorBoardPage() {
   const estimatedRows = reconAlerts.filter((r) => r.isEstimated).slice(0, 8);
 
   return (
-    <div className="space-y-4 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-4 bg-slate-950 min-h-dvh text-slate-200">
-      {/* HEADER */}
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight text-slate-100">
-            Luma — Production Command Center
-          </h1>
-          <p className="text-[11px] text-slate-500">
-            Source: lib/production/metrics.ts · Window: today {today.from.toISOString().slice(0, 10)} UTC
-          </p>
-        </div>
-        <div className="flex items-center gap-3 text-[11px] text-slate-400">
-          <ConfidenceBadge confidence="HIGH" />
-          <span>Last refresh: {fmtTime(new Date())}</span>
-          <LiveRefresh />
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 px-4 sm:px-6 lg:px-10 py-6 lg:py-8 bg-inverse text-text-inverse min-h-dvh space-y-6">
+      {/* COMMAND BAND — brand identity + live signal. The eyebrow
+          ties the page to the rest of the system; the display title
+          carries weight; the right-aligned cluster delivers signal
+          state at a glance. */}
+      <header className="relative">
+        <div className="flex flex-wrap items-end justify-between gap-4 pb-4 border-b border-slate-800">
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-text-inverse/55 flex items-center gap-2">
+              <span
+                aria-hidden
+                className="inline-block h-1.5 w-1.5 rounded-full bg-brand-accent shadow-[0_0_0_3px_rgb(var(--brand-accent)/0.18)]"
+              />
+              Luma · Floor work · Live operations
+            </div>
+            <h1 className="mt-1.5 font-display text-[26px] leading-[1.05] tracking-tight font-semibold text-text-inverse">
+              Production command center
+            </h1>
+            <p className="mt-1.5 text-[12px] text-text-inverse/55 max-w-2xl">
+              Single source of truth:{" "}
+              <code className="font-mono text-text-inverse/75">lib/production/metrics.ts</code>.
+              Window: today {today.from.toISOString().slice(0, 10)} UTC.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="text-right">
+              <div className="text-[9.5px] uppercase tracking-[0.14em] text-text-inverse/45">
+                Last refresh
+              </div>
+              <div className="font-mono text-[11px] text-text-inverse/85 tabular">
+                {fmtTime(new Date())}
+              </div>
+            </div>
+            <div className="h-7 w-px bg-slate-800" aria-hidden />
+            <ConfidenceBadge confidence="HIGH" />
+            <LiveRefresh />
+          </div>
         </div>
       </header>
 
-      {/* WORKFLOW HEALTH — diagnostic strip. Surfaces the gap
-          between activity and finalization. Always visible. */}
-      <section aria-label="Workflow health">
-        <SectionHeader
-          title="Workflow health"
-          subtitle={
-            health.lastEventAt
-              ? `Last event ${new Date(health.lastEventAt).toISOString().replace("T", " ").slice(0, 19)} UTC`
-              : "No events recorded yet"
-          }
-        />
-        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-          <DiagTile label="Total events" value={health.totalEvents} accent="default" />
-          <DiagTile label="Total bags" value={health.totalBags} accent="default" />
-          <DiagTile label="Active" value={health.activeBags} accent="default" />
-          <DiagTile
+      {/* WORKFLOW HEALTH — diagnostic strip. Always visible. Surfaces
+          the gap between activity and finalization. */}
+      <WallSection
+        eyebrow="Workflow health"
+        subtitle={
+          health.lastEventAt
+            ? `Last event ${new Date(health.lastEventAt).toISOString().replace("T", " ").slice(0, 19)} UTC`
+            : "No events recorded yet"
+        }
+        tone="info"
+        icon={Radar}
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <WallTile label="Total events" value={health.totalEvents} />
+          <WallTile label="Total bags" value={health.totalBags} />
+          <WallTile label="Active" value={health.activeBags} />
+          <WallTile
             label="Finalized"
             value={health.finalizedBags}
-            accent={health.finalizedBags === 0 && health.totalBags > 0 ? "rose" : "default"}
+            tone={
+              health.finalizedBags === 0 && health.totalBags > 0
+                ? "crit"
+                : "muted"
+            }
           />
-          <DiagTile
+          <WallTile
             label="Missing finalize"
             value={health.bagsMissingFinalization}
-            accent={health.bagsMissingFinalization > 0 ? "amber" : "default"}
+            tone={health.bagsMissingFinalization > 0 ? "warn" : "muted"}
           />
-          <DiagTile
+          <WallTile
             label="Completion rate"
             value={
               health.completionRatePct == null
                 ? "—"
                 : `${health.completionRatePct}%`
             }
-            accent={
+            tone={
               health.completionRatePct != null && health.completionRatePct < 50
-                ? "rose"
-                : "default"
+                ? "crit"
+                : "muted"
             }
           />
-          <DiagTile
+          <WallTile
             label="Operator capture"
             value={
               health.activeBags === 0
                 ? "—"
                 : `${health.operatorCodeCaptureCount} / ${health.activeBags}`
             }
-            accent={
+            tone={
               health.activeBags > 0 && health.operatorCodeCaptureCount === 0
-                ? "rose"
-                : "default"
+                ? "crit"
+                : "muted"
             }
           />
         </div>
         <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-          <DiagTile label="Stuck @ start" value={health.bagsStuckAtStart} accent="amber" />
-          <DiagTile label="Stuck @ blister" value={health.bagsStuckAtBlister} accent="amber" />
-          <DiagTile label="Stuck @ seal" value={health.bagsStuckAtSeal} accent="amber" />
-          <DiagTile label="Packaged, not finalized" value={health.bagsPackagedNotFinalized} accent="amber" />
-          <DiagTile label="Force releases" value={health.forceReleaseCount} />
-          <DiagTile label="Submission corrections" value={health.submissionCorrectionCount} />
-          <DiagTile label="Paused bags" value={health.pausedBags} />
+          <WallTile label="Stuck @ start" value={health.bagsStuckAtStart} tone="warn" />
+          <WallTile label="Stuck @ blister" value={health.bagsStuckAtBlister} tone="warn" />
+          <WallTile label="Stuck @ seal" value={health.bagsStuckAtSeal} tone="warn" />
+          <WallTile label="Packaged, not finalized" value={health.bagsPackagedNotFinalized} tone="warn" />
+          <WallTile label="Force releases" value={health.forceReleaseCount} />
+          <WallTile label="Submission corrections" value={health.submissionCorrectionCount} />
+          <WallTile label="Paused bags" value={health.pausedBags} />
         </div>
-      </section>
+      </WallSection>
 
       {/* WHY ARE METRICS EMPTY? — only shows when activity exists
           but no bags have finalized. */}
       {health.totalEvents > 0 && health.finalizedBags === 0 && (
-        <ProductionAlertCard
-          tone="WARN"
+        <WallAlert
+          tone="warn"
+          icon={AlertTriangle}
           title="Why are output metrics empty?"
           body={
             <>
               <p className="leading-relaxed">
                 Production activity exists ({health.totalEvents} events across{" "}
-                {health.totalBags} bags), but <strong>no bags have reached BAG_FINALIZED</strong>.
-                Output metrics (good units, displays, cases, yield, OEE,
+                {health.totalBags} bags), but{" "}
+                <strong className="text-amber-200">
+                  no bags have reached BAG_FINALIZED
+                </strong>
+                . Output metrics (good units, displays, cases, yield, OEE,
                 material reconciliation) are blocked until bags are finalized
                 on the floor or until legacy activity is mapped into canonical
                 completion states via the legacy synthesizer.
               </p>
               <p className="mt-1.5">
                 Action: complete the full floor flow on the station —{" "}
-                <span className="font-mono">CARD_ASSIGNED → BLISTER_COMPLETE → SEALING_COMPLETE → PACKAGING_COMPLETE → BAG_FINALIZED</span>.
-                The Finalize button on the packaging station fires
-                BAG_FINALIZED, which writes read_bag_metrics and unlocks
-                every output KPI.
+                <span className="font-mono text-text-inverse/80">
+                  CARD_ASSIGNED → BLISTER_COMPLETE → SEALING_COMPLETE →
+                  PACKAGING_COMPLETE → BAG_FINALIZED
+                </span>
+                . The Finalize button on the packaging station fires
+                BAG_FINALIZED, which writes read_bag_metrics and unlocks every
+                output KPI.
               </p>
             </>
           }
         />
       )}
 
-      {/* BLOCKED METRICS — list every blocked KPI, why, and what to do. */}
+      {/* BLOCKED METRICS — list every blocked KPI, why, and what to
+          do. */}
       {blocked.length > 0 && (
-        <section aria-label="Blocked metrics">
-          <SectionHeader
-            title="Blocked metrics"
-            subtitle={`${blocked.length} KPI${blocked.length === 1 ? "" : "s"} cannot compute today`}
-          />
-          <div className="mt-2 grid grid-cols-1 lg:grid-cols-2 gap-2">
+        <WallSection
+          eyebrow="Blocked metrics"
+          subtitle={`${blocked.length} KPI${blocked.length === 1 ? "" : "s"} cannot compute today`}
+          tone="crit"
+          icon={AlertTriangle}
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
             {blocked.map((b) => (
               <div
                 key={b.metric}
-                className="rounded-md border border-slate-700/60 bg-slate-900/60 p-3 space-y-1.5"
+                className={cn(
+                  "rail",
+                  RAIL.crit,
+                  "relative pl-[3px] rounded-md border border-rose-500/25 bg-slate-900/60 p-3 space-y-1.5",
+                )}
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-slate-100">{b.metric}</h3>
+                  <h3 className="text-[13px] font-semibold tracking-tight text-text-inverse">
+                    {b.metric}
+                  </h3>
                   <ConfidenceBadge confidence="MISSING" />
                 </div>
-                <p className="text-[12px] text-slate-400">{b.reason}</p>
-                <div className="text-[11px] text-slate-500">
-                  <strong className="text-slate-400">Missing:</strong>{" "}
+                <p className="text-[12px] text-text-inverse/65 leading-relaxed">
+                  {b.reason}
+                </p>
+                <div className="text-[11px] text-text-inverse/45">
+                  <strong className="text-text-inverse/70">Missing:</strong>{" "}
                   {b.missing.join(", ") || "—"}
                 </div>
-                <div className="text-[11px] text-slate-500">
-                  <strong className="text-slate-400">Action:</strong> {b.action}
+                <div className="text-[11px] text-text-inverse/45">
+                  <strong className="text-text-inverse/70">Action:</strong>{" "}
+                  {b.action}
                 </div>
               </div>
             ))}
           </div>
-        </section>
+        </WallSection>
       )}
 
       {/* ACTIVITY SIGNALS — raw event counts. NEVER reported as
           output / yield / OEE / good units. The label spells this
           out. */}
-      <section aria-label="Activity signals">
-        <SectionHeader
-          title="Activity signals (last 30d)"
-          subtitle="Raw scan counts. Never output, yield, or OEE."
-        />
-        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-          <DiagTile label="Total events 30d" value={activity.totalEvents30d} accent="cyan" />
-          <DiagTile label="Card assigns" value={activity.cardAssigned30d} />
-          <DiagTile label="Blister scans" value={activity.blisterEvents30d} />
-          <DiagTile label="Sealing scans" value={activity.sealingEvents30d} />
-          <DiagTile
-            label="Packaging snapshots"
-            value={activity.packagingSnapshots30d}
-          />
-          <DiagTile
-            label="Packaging complete"
-            value={activity.packagingComplete30d}
-          />
-          <DiagTile label="Bag pauses" value={activity.bagPaused30d} />
-          <DiagTile label="Bag resumes" value={activity.bagResumed30d} />
+      <WallSection
+        eyebrow="Activity signals (last 30d)"
+        subtitle="Raw scan counts. Never output, yield, or OEE."
+        tone="info"
+        icon={Radar}
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+          <WallTile label="Total events 30d" value={activity.totalEvents30d} tone="info" />
+          <WallTile label="Card assigns" value={activity.cardAssigned30d} />
+          <WallTile label="Blister scans" value={activity.blisterEvents30d} />
+          <WallTile label="Sealing scans" value={activity.sealingEvents30d} />
+          <WallTile label="Packaging snapshots" value={activity.packagingSnapshots30d} />
+          <WallTile label="Packaging complete" value={activity.packagingComplete30d} />
+          <WallTile label="Bag pauses" value={activity.bagPaused30d} />
+          <WallTile label="Bag resumes" value={activity.bagResumed30d} />
         </div>
         {activity.bottleHandpack30d +
           activity.bottleCapSeal30d +
           activity.bottleSticker30d >
           0 && (
           <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <DiagTile label="Bottle handpack" value={activity.bottleHandpack30d} />
-            <DiagTile label="Bottle cap/seal" value={activity.bottleCapSeal30d} />
-            <DiagTile label="Bottle sticker" value={activity.bottleSticker30d} />
+            <WallTile label="Bottle handpack" value={activity.bottleHandpack30d} />
+            <WallTile label="Bottle cap/seal" value={activity.bottleCapSeal30d} />
+            <WallTile label="Bottle sticker" value={activity.bottleSticker30d} />
           </div>
         )}
         {activity.lastEventByStation.length > 0 && (
-          <div className="mt-2 rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
-            <table className="min-w-full text-[12px]">
-              <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
-                <tr>
-                  <th className="text-left px-3 py-2">Station</th>
-                  <th className="text-left px-3 py-2">Machine</th>
-                  <th className="text-left px-3 py-2">Kind</th>
-                  <th className="text-right px-3 py-2">Events 30d</th>
-                  <th className="text-left px-3 py-2">Last activity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activity.lastEventByStation.slice(0, 10).map((s) => (
-                  <tr key={s.stationId} className="border-t border-slate-800">
-                    <td className="px-3 py-1.5 text-slate-200">
-                      {s.stationLabel ?? s.stationId.slice(0, 8) + "…"}
-                    </td>
-                    <td className="px-3 py-1.5 text-slate-300">
-                      {s.machineName ?? "—"}
-                    </td>
-                    <td className="px-3 py-1.5 text-slate-500 font-mono">
-                      {s.machineKind ?? "—"}
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">
-                      {s.eventCount30d}
-                    </td>
-                    <td className="px-3 py-1.5 font-mono text-slate-500">
-                      {s.lastEventAt.toISOString().replace("T", " ").slice(0, 19)} UTC
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mt-3 rounded-md border border-slate-800/70 bg-slate-900/60 overflow-hidden">
+            <div className="grid grid-cols-[1fr_1fr_100px_90px_180px] gap-2 px-3 py-2 text-[9.5px] font-semibold uppercase tracking-[0.10em] text-text-inverse/45 bg-slate-900/80 border-b border-slate-800/70">
+              <div>Station</div>
+              <div>Machine</div>
+              <div>Kind</div>
+              <div className="text-right">Events 30d</div>
+              <div>Last activity</div>
+            </div>
+            {activity.lastEventByStation.slice(0, 10).map((s) => (
+              <div
+                key={s.stationId}
+                className="grid grid-cols-[1fr_1fr_100px_90px_180px] gap-2 px-3 py-1.5 text-[12px] border-t border-slate-800/40 first:border-t-0 items-baseline"
+              >
+                <div className="text-text-inverse/85 truncate">
+                  {s.stationLabel ?? s.stationId.slice(0, 8) + "…"}
+                </div>
+                <div className="text-text-inverse/70 truncate">
+                  {s.machineName ?? "—"}
+                </div>
+                <div className="text-text-inverse/45 font-mono text-[11px]">
+                  {s.machineKind ?? "—"}
+                </div>
+                <div className="text-right font-mono tabular text-text-inverse/85">
+                  {s.eventCount30d}
+                </div>
+                <div className="font-mono text-[10.5px] text-text-inverse/45">
+                  {s.lastEventAt.toISOString().replace("T", " ").slice(0, 19)} UTC
+                </div>
+              </div>
+            ))}
           </div>
         )}
-      </section>
+      </WallSection>
 
-      {/* KPI STRIP */}
-      <section aria-label="KPI strip" className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-        <MetricCard label="Bags in flow" metric={dashboard.bagsInFlow ?? FALLBACK} size="sm" />
-        <MetricCard label="Good units today" metric={dashboard.goodUnitsToday ?? FALLBACK} size="sm" />
-        <MetricCard label="Displays today" metric={dashboard.displaysToday ?? FALLBACK} size="sm" />
-        <MetricCard label="Cases today" metric={dashboard.casesToday ?? FALLBACK} size="sm" />
-        <MetricCard label="Oldest queue age" metric={dashboard.oldestQueueAgeMinutes ?? FALLBACK} size="sm" />
-        <MetricCard label="Paused > 30m" metric={dashboard.pausedBagsOverThreshold ?? FALLBACK} size="sm" />
-        <MetricCard label="Bottleneck" metric={bottleneck.stageKey} size="sm" />
-        <MetricCard label="Schedule gap" metric={dashboard.scheduleGap ?? FALLBACK} size="sm" />
-      </section>
+      {/* KPI STRIP — eight at-a-glance numbers. */}
+      <WallSection eyebrow="Today" tone="brand" icon={Layers}>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+          <MetricCard label="Bags in flow" metric={dashboard.bagsInFlow ?? FALLBACK} size="sm" />
+          <MetricCard label="Good units today" metric={dashboard.goodUnitsToday ?? FALLBACK} size="sm" />
+          <MetricCard label="Displays today" metric={dashboard.displaysToday ?? FALLBACK} size="sm" />
+          <MetricCard label="Cases today" metric={dashboard.casesToday ?? FALLBACK} size="sm" />
+          <MetricCard label="Oldest queue age" metric={dashboard.oldestQueueAgeMinutes ?? FALLBACK} size="sm" />
+          <MetricCard label="Paused > 30m" metric={dashboard.pausedBagsOverThreshold ?? FALLBACK} size="sm" />
+          <MetricCard label="Bottleneck" metric={bottleneck.stageKey} size="sm" />
+          <MetricCard label="Schedule gap" metric={dashboard.scheduleGap ?? FALLBACK} size="sm" />
+        </div>
+      </WallSection>
 
-      {/* PROCESS MAP — two lanes */}
-      <section aria-label="Process map" className="space-y-3">
-        <SectionHeader title="Process map" subtitle="Live queue snapshot — one row per stage" />
-        <LaneRow lane="CARD" label="Card / blister route" stages={CARD_LANE} queues={queues} />
-        {bottleLaneHasActivity(queues) ? (
-          <LaneRow lane="BOTTLE" label="Bottle route" stages={BOTTLE_LANE} queues={queues} />
-        ) : (
-          <ProductionEmptyState
-            title="Bottle line idle"
-            description="No bottle-route activity captured in the current window."
-            hint="read_queue_state · BOTTLE_*_QUEUE"
-          />
-        )}
-      </section>
+      {/* PROCESS MAP — two lanes the floor walks. */}
+      <WallSection
+        eyebrow="Process map"
+        subtitle="Live queue snapshot — one row per stage, in the order bags travel."
+        tone="brand"
+        icon={GitBranch}
+      >
+        <div className="space-y-4">
+          <LaneRow lane="CARD" label="Card / blister route" stages={CARD_LANE} queues={queues} />
+          {bottleLaneHasActivity(queues) ? (
+            <LaneRow lane="BOTTLE" label="Bottle route" stages={BOTTLE_LANE} queues={queues} />
+          ) : (
+            <WallEmpty
+              title="Bottle line idle"
+              body="No bottle-route activity captured in the current window."
+              source="read_queue_state · BOTTLE_*_QUEUE"
+            />
+          )}
+        </div>
+      </WallSection>
 
-      {/* MACHINE WALL */}
-      <section aria-label="Machine wall" className="space-y-3">
-        <SectionHeader title="Machine state" subtitle={`${machinesList.length} machines configured`} />
+      {/* MACHINE WALL — one tile per machine. State drives the rail. */}
+      <WallSection
+        eyebrow="Machine state"
+        subtitle={`${machinesList.length} machine${machinesList.length === 1 ? "" : "s"} configured`}
+        tone="info"
+        icon={Cpu}
+      >
         {machineSnapshots.length === 0 ? (
           <MissingState
             metric={{
@@ -419,49 +512,46 @@ export default async function FloorBoardPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {machineSnapshots.map(({ machine, metrics }) => (
-              <MachineCard key={machine.id} name={machine.name} kind={machine.kind} metrics={metrics} />
+              <MachineTile
+                key={machine.id}
+                name={machine.name}
+                kind={machine.kind}
+                metrics={metrics}
+              />
             ))}
           </div>
         )}
-      </section>
+      </WallSection>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* BOTTLENECK */}
-        <Panel title="Bottleneck" subtitle="Highest queue-age or WIP among all stages">
+      {/* TRIPTYCH — bottleneck / packaging / damage detail */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <WallPanel eyebrow="Bottleneck" subtitle="Highest queue-age or WIP across stages" tone="warn">
           {bottleneck.stageKey.confidence === "MISSING" ? (
             <MissingState metric={bottleneck.stageKey} />
           ) : (
-            <div className="space-y-2 text-sm">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-slate-400 text-[11px] uppercase tracking-wider">Stage</span>
-                <span className="font-mono text-slate-100">{String(bottleneck.stageKey.value)}</span>
-              </div>
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-slate-400 text-[11px] uppercase tracking-wider">Reason</span>
-                <span className="font-mono text-amber-300">{String(bottleneck.reason.value ?? "—")}</span>
-              </div>
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-slate-400 text-[11px] uppercase tracking-wider">Oldest age</span>
-                <span className="font-mono text-slate-100">
-                  {String(bottleneck.oldestAgeMinutes.value ?? 0)}{" "}
-                  <span className="text-slate-500 text-[11px]">{bottleneck.oldestAgeMinutes.unit}</span>
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-slate-400 text-[11px] uppercase tracking-wider">WIP</span>
-                <span className="font-mono text-slate-100">{String(bottleneck.wip.value ?? 0)}</span>
-              </div>
+            <div className="space-y-1.5">
+              <BottleRow label="Stage" value={String(bottleneck.stageKey.value)} mono />
+              <BottleRow label="Reason" value={String(bottleneck.reason.value ?? "—")} mono tone="warn" />
+              <BottleRow
+                label="Oldest age"
+                value={`${String(bottleneck.oldestAgeMinutes.value ?? 0)} ${bottleneck.oldestAgeMinutes.unit ?? ""}`}
+                mono
+              />
+              <BottleRow label="WIP" value={String(bottleneck.wip.value ?? 0)} mono />
               {bottleneck.cycleVsStandardPct.confidence === "MISSING" && (
-                <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-800/60">
+                <div className="text-[10.5px] text-text-inverse/45 pt-1.5 border-t border-slate-800/60">
                   cycle vs. standard: {bottleneck.cycleVsStandardPct.label}
                 </div>
               )}
             </div>
           )}
-        </Panel>
+        </WallPanel>
 
-        {/* PACKAGING OUTPUT */}
-        <Panel title="Packaging output (7d)" subtitle="Strict unit-type separation">
+        <WallPanel
+          eyebrow="Packaging output (7d)"
+          subtitle="Strict unit-type separation"
+          tone="info"
+        >
           <div className="grid grid-cols-2 gap-2">
             <MetricCard label="Cases" metric={packaging.masterCases ?? FALLBACK} size="sm" />
             <MetricCard label="Displays" metric={packaging.displaysMade ?? FALLBACK} size="sm" />
@@ -470,10 +560,13 @@ export default async function FloorBoardPage() {
             <MetricCard label="Ripped cards" metric={packaging.rippedCards ?? FALLBACK} size="sm" />
             <MetricCard label="Damage rate" metric={packaging.damageRatePct ?? FALLBACK} size="sm" />
           </div>
-        </Panel>
+        </WallPanel>
 
-        {/* DAMAGE / REWORK */}
-        <Panel title="Damage & rework (7d)" subtitle="Reject events — all from workflow_events">
+        <WallPanel
+          eyebrow="Damage & rework (7d)"
+          subtitle="Reject events — all from workflow_events"
+          tone="crit"
+        >
           <div className="grid grid-cols-2 gap-2">
             <MetricCard label="First-pass yield" metric={damage.firstPassYieldPct ?? FALLBACK} size="sm" />
             <MetricCard label="Damage events" metric={damage.damageEvents ?? FALLBACK} size="sm" />
@@ -482,18 +575,19 @@ export default async function FloorBoardPage() {
             <MetricCard label="Rework events" metric={damage.reworkEvents ?? FALLBACK} size="sm" />
           </div>
           {damage.reworkEvents?.confidence === "MISSING" && (
-            <div className="mt-2 text-[11px] text-slate-500">
+            <div className="mt-2 text-[10.5px] text-text-inverse/45">
               Rework event flow not configured — REWORK_SENT events not emitted (Phase F).
             </div>
           )}
-        </Panel>
+        </WallPanel>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* GENEALOGY PREVIEW */}
-        <Panel
-          title="Latest active bag"
-          subtitle="Chronological event preview — full timeline at /genealogy/[bagId]"
+      {/* DUO — most recent active bag / recon alerts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <WallPanel
+          eyebrow="Latest active bag"
+          subtitle="Chronological event preview · full timeline at /genealogy/[bagId]"
+          tone="brand"
         >
           {!recentActiveBag[0] || !genealogy || genealogy.events.length === 0 ? (
             <MissingState
@@ -507,50 +601,71 @@ export default async function FloorBoardPage() {
             />
           ) : (
             <div className="space-y-2">
-              <div className="flex flex-wrap items-baseline justify-between gap-2 pb-2 border-b border-slate-800/60">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 pb-2 border-b border-slate-800/70">
                 <Link
                   href={`/genealogy/${recentActiveBag[0].id}`}
-                  className="font-mono text-cyan-300 hover:text-cyan-200 text-sm"
+                  className="font-mono text-cyan-300 hover:text-cyan-200 text-[12.5px]"
                 >
                   bag {recentActiveBag[0].id.slice(0, 8)}…
                 </Link>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[11px] text-text-inverse/70">
                   {recentActiveBag[0].productName ?? "no product mapped"}
-                  {recentActiveBag[0].productSku ? ` · ${recentActiveBag[0].productSku}` : ""}
+                  {recentActiveBag[0].productSku
+                    ? ` · ${recentActiveBag[0].productSku}`
+                    : ""}
                 </span>
-                <span className="text-[11px] text-slate-500">
-                  stage: <span className="text-slate-300">{recentActiveBag[0].stage ?? "—"}</span>
-                  {recentActiveBag[0].currentOperator ? ` · op ${recentActiveBag[0].currentOperator}` : ""}
+                <span className="text-[11px] text-text-inverse/55">
+                  stage:{" "}
+                  <span className="text-text-inverse/85">
+                    {recentActiveBag[0].stage ?? "—"}
+                  </span>
+                  {recentActiveBag[0].currentOperator
+                    ? ` · op ${recentActiveBag[0].currentOperator}`
+                    : ""}
                 </span>
               </div>
               <ol className="space-y-1.5 text-[12px]">
-                {(genealogy ? genealogy.events.slice(-5).reverse() : []).map((e) => (
-                  <li key={e.eventId} className="flex flex-wrap items-baseline gap-2">
-                    <span className="font-mono text-slate-500 text-[10px]">
-                      {e.occurredAt.toISOString().slice(11, 19)}
-                    </span>
-                    <span className="font-mono text-cyan-300 text-[10px] uppercase tracking-wider">
-                      {e.eventType}
-                    </span>
-                    {e.machineName && <span className="text-slate-300">{e.machineName}</span>}
-                    {e.employeeName && <span className="text-slate-500">· {e.employeeName}</span>}
-                  </li>
-                ))}
+                {(genealogy ? genealogy.events.slice(-5).reverse() : []).map(
+                  (e) => (
+                    <li
+                      key={e.eventId}
+                      className="flex flex-wrap items-baseline gap-2"
+                    >
+                      <span className="font-mono text-text-inverse/45 text-[10px] tabular">
+                        {e.occurredAt.toISOString().slice(11, 19)}
+                      </span>
+                      <span className="font-mono text-cyan-300 text-[10px] uppercase tracking-wider">
+                        {e.eventType}
+                      </span>
+                      {e.machineName && (
+                        <span className="text-text-inverse/80">
+                          {e.machineName}
+                        </span>
+                      )}
+                      {e.employeeName && (
+                        <span className="text-text-inverse/55">
+                          · {e.employeeName}
+                        </span>
+                      )}
+                    </li>
+                  ),
+                )}
               </ol>
               <Link
                 href={`/genealogy/${recentActiveBag[0].id}`}
-                className="block text-[11px] text-cyan-400 hover:text-cyan-300 pt-1"
+                className="inline-flex items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200 pt-1"
               >
-                full timeline →
+                Full timeline
+                <ArrowRight className="h-3 w-3" />
               </Link>
             </div>
           )}
-        </Panel>
+        </WallPanel>
 
-        {/* RECON ALERTS */}
-        <Panel
-          title="Material reconciliation alerts"
+        <WallPanel
+          eyebrow="Material reconciliation alerts"
           subtitle="High variance + estimated rows from read_material_reconciliation"
+          tone="crit"
         >
           {reconAlerts.length === 0 ? (
             <MissingState
@@ -565,28 +680,35 @@ export default async function FloorBoardPage() {
               }}
             />
           ) : (
-            <div className="space-y-2 text-[12px]">
+            <div className="space-y-2.5 text-[12px]">
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+                <div className="eyebrow text-text-inverse/55 mb-1">
                   High variance (&gt;5%)
                 </div>
                 {highVariance.length === 0 ? (
-                  <div className="text-slate-500 text-[11px]">None — all reconciliations within tolerance.</div>
+                  <div className="text-text-inverse/55 text-[11px]">
+                    None — all reconciliations within tolerance.
+                  </div>
                 ) : (
                   <ul className="space-y-0.5">
                     {highVariance.slice(0, 5).map((r) => (
-                      <li key={r.bagId} className="flex flex-wrap items-baseline gap-2">
+                      <li
+                        key={r.bagId}
+                        className="flex flex-wrap items-baseline gap-2"
+                      >
                         <Link
                           href={`/genealogy/${r.bagId}`}
                           className="font-mono text-cyan-300 hover:text-cyan-200 text-[11px]"
                         >
                           {r.bagId.slice(0, 8)}…
                         </Link>
-                        <span className="text-slate-300">{r.productName ?? "—"}</span>
-                        <span className="font-mono text-rose-300">
+                        <span className="text-text-inverse/85">
+                          {r.productName ?? "—"}
+                        </span>
+                        <span className="font-mono text-rose-300 tabular">
                           {Number(r.variancePct ?? 0).toFixed(2)}%
                         </span>
-                        <span className="font-mono text-slate-500">
+                        <span className="font-mono text-text-inverse/50">
                           ({r.varianceQty} tablets)
                         </span>
                       </li>
@@ -594,64 +716,252 @@ export default async function FloorBoardPage() {
                   </ul>
                 )}
               </div>
-              <div className="pt-2 border-t border-slate-800/60">
-                <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+              <div className="pt-2 border-t border-slate-800/70">
+                <div className="eyebrow text-text-inverse/55 mb-1">
                   Estimated (input gap)
                 </div>
                 {estimatedRows.length === 0 ? (
-                  <div className="text-slate-500 text-[11px]">
+                  <div className="text-text-inverse/55 text-[11px]">
                     None — every row has full input data.
                   </div>
                 ) : (
-                  <div className="text-slate-500 text-[11px]">
-                    {estimatedRows.length} row{estimatedRows.length === 1 ? "" : "s"} estimated.
-                    See <Link href="/material-reconciliation" className="text-cyan-300 hover:text-cyan-200">/material-reconciliation</Link> for the full table.
+                  <div className="text-text-inverse/55 text-[11px]">
+                    {estimatedRows.length} row
+                    {estimatedRows.length === 1 ? "" : "s"} estimated. See{" "}
+                    <Link
+                      href="/material-reconciliation"
+                      className="text-cyan-300 hover:text-cyan-200"
+                    >
+                      /material-reconciliation
+                    </Link>{" "}
+                    for the full table.
                   </div>
                 )}
               </div>
             </div>
           )}
-        </Panel>
+        </WallPanel>
       </div>
     </div>
   );
 }
 
-function bottleLaneHasActivity(queues: Awaited<ReturnType<typeof deriveQueueAging>>): boolean {
-  for (const key of ["BOTTLE_FILL_QUEUE", "BOTTLE_STICKER_QUEUE", "BOTTLE_INDUCTION_QUEUE"] as const) {
+function bottleLaneHasActivity(
+  queues: Awaited<ReturnType<typeof deriveQueueAging>>,
+): boolean {
+  for (const key of [
+    "BOTTLE_FILL_QUEUE",
+    "BOTTLE_STICKER_QUEUE",
+    "BOTTLE_INDUCTION_QUEUE",
+  ] as const) {
     const wip = queues[`${key}.wip`];
     if (wip && typeof wip.value === "number" && wip.value > 0) return true;
   }
   return false;
 }
 
-function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+// ── Dark-wall primitives ────────────────────────────────────────────
+//
+// Local to this page on purpose. The light-canvas primitives in
+// components/production/luma-ui.tsx are tuned for bg-surface and would
+// read wrong on bg-inverse. These mirror the same vocabulary (rail,
+// eyebrow, tone) but on the dark wallboard.
+
+function WallSection({
+  eyebrow,
+  subtitle,
+  tone = "muted",
+  icon: Icon,
+  children,
+}: {
+  eyebrow: string;
+  subtitle?: string;
+  tone?: WallTone;
+  icon?: typeof Radar;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex items-baseline justify-between gap-2 border-b border-slate-800/70 pb-1">
-      <h2 className="text-[11px] uppercase tracking-[0.10em] text-slate-300 font-semibold">
-        {title}
-      </h2>
-      {subtitle && <span className="text-[10px] text-slate-500">{subtitle}</span>}
+    <section
+      className={cn(
+        "rail",
+        RAIL[tone],
+        "relative pl-[3px] rounded-[10px] bg-slate-900/50 border border-slate-800/70 overflow-hidden",
+      )}
+      aria-label={eyebrow}
+    >
+      <header className="px-4 pt-3 pb-2.5 border-b border-slate-800/70 flex items-center justify-between gap-3 flex-wrap bg-slate-900/40">
+        <div className="flex items-center gap-2 min-w-0">
+          {Icon ? (
+            <span
+              className={cn(
+                "inline-flex h-5 w-5 items-center justify-center rounded-sm border bg-slate-900/80",
+                TILE_BORDER[tone],
+                TILE_TEXT[tone],
+              )}
+            >
+              <Icon className="h-3 w-3" />
+            </span>
+          ) : null}
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-inverse/75">
+            {eyebrow}
+          </span>
+        </div>
+        {subtitle ? (
+          <span className="text-[10.5px] text-text-inverse/45 font-mono tabular">
+            {subtitle}
+          </span>
+        ) : null}
+      </header>
+      <div className="px-4 py-3">{children}</div>
+    </section>
+  );
+}
+
+function WallPanel({
+  eyebrow,
+  subtitle,
+  tone = "muted",
+  children,
+}: {
+  eyebrow: string;
+  subtitle?: string;
+  tone?: WallTone;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "rail",
+        RAIL[tone],
+        "relative pl-[3px] rounded-[10px] bg-slate-900/50 border border-slate-800/70 overflow-hidden",
+      )}
+    >
+      <header className="px-3.5 pt-3 pb-2 border-b border-slate-800/70 bg-slate-900/30">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-inverse/75">
+          {eyebrow}
+        </div>
+        {subtitle ? (
+          <div className="mt-0.5 text-[10.5px] text-text-inverse/45 leading-snug">
+            {subtitle}
+          </div>
+        ) : null}
+      </header>
+      <div className="px-3.5 py-3">{children}</div>
+    </section>
+  );
+}
+
+function WallTile({
+  label,
+  value,
+  tone = "muted",
+}: {
+  label: string;
+  value: number | string;
+  tone?: WallTone;
+}) {
+  return (
+    <div
+      className={cn(
+        "rail",
+        RAIL[tone],
+        "relative pl-[3px] rounded-md bg-slate-900/60 border px-3 py-2.5",
+        TILE_BORDER[tone],
+      )}
+    >
+      <div className="text-[10px] uppercase tracking-[0.10em] text-text-inverse/55 leading-tight truncate">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-1 text-[20px] font-mono tabular leading-none",
+          TILE_TEXT[tone],
+        )}
+      >
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </div>
     </div>
   );
 }
 
-function Panel({
+function WallAlert({
+  tone = "info",
   title,
-  subtitle,
-  children,
+  body,
+  icon: Icon,
+}: {
+  tone?: WallTone;
+  title: string;
+  body?: React.ReactNode;
+  icon?: typeof AlertTriangle;
+}) {
+  return (
+    <div
+      className={cn(
+        "rail",
+        RAIL[tone],
+        "relative pl-[3px] rounded-[10px] border bg-slate-900/60",
+        TILE_BORDER[tone],
+      )}
+      role="status"
+    >
+      <div className="flex items-start gap-3 px-4 py-3">
+        {Icon ? (
+          <span
+            className={cn(
+              "shrink-0 mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-md border bg-slate-900/80",
+              TILE_BORDER[tone],
+              TILE_TEXT[tone],
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+          </span>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <p
+            className={cn(
+              "text-[13px] font-semibold tracking-tight",
+              TILE_TEXT[tone],
+            )}
+          >
+            {title}
+          </p>
+          {body ? (
+            <div className="mt-1 text-[12px] leading-relaxed text-text-inverse/70">
+              {body}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WallEmpty({
+  title,
+  body,
+  source,
 }: {
   title: string;
-  subtitle?: string;
-  children: React.ReactNode;
+  body?: React.ReactNode;
+  source?: string;
 }) {
-  const headerProps: { title: string; subtitle?: string } = { title };
-  if (subtitle !== undefined) headerProps.subtitle = subtitle;
   return (
-    <section className="rounded-md border border-slate-700/60 bg-slate-900/60 p-3">
-      <SectionHeader {...headerProps} />
-      <div className="mt-2">{children}</div>
-    </section>
+    <div className="rounded-md border border-dashed border-slate-800/80 bg-slate-900/40 px-4 py-5 text-center">
+      <p className="text-[12.5px] font-semibold tracking-tight text-text-inverse/85">
+        {title}
+      </p>
+      {body ? (
+        <p className="mt-1 text-[11px] text-text-inverse/55 leading-relaxed">
+          {body}
+        </p>
+      ) : null}
+      {source ? (
+        <p className="mt-1 text-[10px] text-text-inverse/40 font-mono">
+          {source}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -668,26 +978,29 @@ function LaneRow({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-[0.10em] text-slate-500 mb-1.5">
-        {label}
-      </div>
+      <div className="eyebrow text-text-inverse/55 mb-1.5">{label}</div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {stages.map((s) => (
-          <StageCard key={`${lane}-${s.key}`} stageKey={s.key} label={s.label} queues={queues} />
+          <StageTile
+            key={`${lane}-${s.key}`}
+            stageKey={s.key}
+            label={s.label}
+            queues={queues}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  EMPTY: "border-slate-700/60",
-  FLOWING: "border-emerald-500/40",
-  AGING: "border-amber-500/40",
-  STALLED: "border-rose-500/40",
+const STAGE_STATUS_TONE: Record<string, WallTone> = {
+  EMPTY: "muted",
+  FLOWING: "good",
+  AGING: "warn",
+  STALLED: "crit",
 };
 
-function StageCard({
+function StageTile({
   stageKey,
   label,
   queues,
@@ -703,33 +1016,52 @@ function StageCard({
   const overThreshold = queues[`${stageKey}.bagsOverThreshold`];
   const status = queues[`${stageKey}.status`];
   const statusValue = String(status?.value ?? "EMPTY");
-  const borderClass = STATUS_COLOR[statusValue] ?? "border-slate-700/60";
+  const tone: WallTone = STAGE_STATUS_TONE[statusValue] ?? "muted";
   return (
-    <div className={`rounded-md border ${borderClass} bg-slate-900/60 p-2.5 space-y-1`}>
+    <div
+      className={cn(
+        "rail",
+        RAIL[tone],
+        "relative pl-[3px] rounded-md border bg-slate-900/60 px-3 py-2.5 space-y-1.5",
+        TILE_BORDER[tone],
+      )}
+    >
       <div className="flex items-center justify-between gap-1.5">
-        <div className="text-[10px] uppercase tracking-[0.10em] text-slate-300 font-semibold leading-tight truncate">
+        <div className="text-[10px] uppercase tracking-[0.10em] text-text-inverse/85 font-semibold leading-tight truncate">
           {label}
         </div>
-        <span className="text-[9px] uppercase tracking-wider text-slate-400">
+        <span
+          className={cn(
+            "text-[9px] uppercase tracking-[0.10em] font-mono",
+            TILE_TEXT[tone],
+          )}
+        >
           {statusValue}
         </span>
       </div>
-      <div className="flex items-baseline gap-1">
-        <span className="text-2xl font-mono tabular-nums text-slate-100">
+      <div className="flex items-baseline gap-1.5">
+        <span
+          className={cn(
+            "text-[26px] leading-none font-mono tabular",
+            TILE_TEXT[tone],
+          )}
+        >
           {String(wip?.value ?? "—")}
         </span>
-        <span className="text-[10px] text-slate-500">bags WIP</span>
+        <span className="text-[10px] text-text-inverse/45">bags WIP</span>
       </div>
-      <div className="grid grid-cols-3 gap-1 text-[10px] text-slate-400 pt-1 border-t border-slate-800/60">
+      <div className="grid grid-cols-3 gap-1 text-[10px] text-text-inverse/55 pt-1 border-t border-slate-800/60">
         <Mini label="oldest" m={oldest} />
         <Mini label="avg" m={avg} />
         <Mini label="p90" m={p90} />
       </div>
-      {overThreshold && typeof overThreshold.value === "number" && overThreshold.value > 0 && (
-        <div className="text-[10px] text-amber-300">
-          {overThreshold.value} over threshold
-        </div>
-      )}
+      {overThreshold &&
+        typeof overThreshold.value === "number" &&
+        overThreshold.value > 0 && (
+          <div className="text-[10px] text-amber-300">
+            {overThreshold.value} over threshold
+          </div>
+        )}
     </div>
   );
 }
@@ -738,15 +1070,15 @@ function Mini({ label, m }: { label: string; m: MetricResult | undefined }) {
   if (!m || m.value == null) {
     return (
       <div>
-        <div className="text-slate-600">{label}</div>
-        <div className="text-slate-500 font-mono">—</div>
+        <div className="text-text-inverse/40">{label}</div>
+        <div className="text-text-inverse/55 font-mono">—</div>
       </div>
     );
   }
   return (
     <div>
-      <div className="text-slate-500">{label}</div>
-      <div className="text-slate-300 font-mono">
+      <div className="text-text-inverse/45">{label}</div>
+      <div className="text-text-inverse/85 font-mono tabular">
         {String(m.value)}
         {m.unit ? ` ${m.unit}` : ""}
       </div>
@@ -754,7 +1086,14 @@ function Mini({ label, m }: { label: string; m: MetricResult | undefined }) {
   );
 }
 
-function MachineCard({
+const MACHINE_STATE_TONE: Record<string, WallTone> = {
+  LIVE: "good",
+  PAUSED: "warn",
+  NO_ACTIVITY_TODAY: "muted",
+  NOT_INTEGRATED: "muted",
+};
+
+function MachineTile({
   name,
   kind,
   metrics,
@@ -764,58 +1103,101 @@ function MachineCard({
   metrics: Awaited<ReturnType<typeof deriveMachineMetrics>>;
 }) {
   const state = String(metrics.state?.value ?? "UNKNOWN");
-  const stateColor =
-    state === "LIVE"
-      ? "border-emerald-500/40 text-emerald-300"
-      : state === "NO_ACTIVITY_TODAY"
-        ? "border-slate-700/60 text-slate-400"
-        : state === "NOT_INTEGRATED"
-          ? "border-slate-800 text-slate-500"
-          : state === "PAUSED"
-            ? "border-amber-500/40 text-amber-300"
-            : "border-slate-700/60 text-slate-400";
+  const tone: WallTone = MACHINE_STATE_TONE[state] ?? "muted";
   return (
-    <div className={`rounded-md border ${stateColor} bg-slate-900/60 p-2.5 space-y-1`}>
+    <div
+      className={cn(
+        "rail",
+        RAIL[tone],
+        "relative pl-[3px] rounded-md border bg-slate-900/60 px-3 py-2.5 space-y-1",
+        TILE_BORDER[tone],
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[12px] font-semibold text-slate-100 leading-tight truncate">
+        <div className="text-[12.5px] font-semibold text-text-inverse leading-tight truncate">
           {name}
         </div>
-        <span className="text-[9px] uppercase tracking-wider">{state}</span>
+        <span
+          className={cn(
+            "text-[9px] uppercase tracking-[0.10em] font-mono",
+            TILE_TEXT[tone],
+          )}
+        >
+          {state}
+        </span>
       </div>
-      <div className="text-[10px] text-slate-500 uppercase tracking-wider">{kind}</div>
-      <div className="text-[11px] text-slate-300 truncate">
+      <div className="text-[10px] text-text-inverse/45 uppercase tracking-[0.10em]">
+        {kind}
+      </div>
+      <div className="text-[11px] text-text-inverse/85 truncate">
         bag:{" "}
-        <span className="font-mono text-slate-200">
+        <span className="font-mono text-text-inverse">
           {metrics.currentBag?.value
             ? String(metrics.currentBag.value).slice(0, 8) + "…"
             : "—"}
         </span>
       </div>
-      <div className="text-[11px] text-slate-300 truncate">
-        product: <span className="text-slate-200">{String(metrics.currentSku?.value ?? "—")}</span>
+      <div className="text-[11px] text-text-inverse/85 truncate">
+        product:{" "}
+        <span className="text-text-inverse">
+          {String(metrics.currentSku?.value ?? "—")}
+        </span>
       </div>
-      <div className="text-[11px] text-slate-300 truncate">
-        op: <span className="text-slate-200">{String(metrics.currentOperator?.value ?? "—")}</span>
+      <div className="text-[11px] text-text-inverse/85 truncate">
+        op:{" "}
+        <span className="text-text-inverse">
+          {String(metrics.currentOperator?.value ?? "—")}
+        </span>
       </div>
       <div className="grid grid-cols-2 gap-1 text-[10px] pt-1 border-t border-slate-800/60">
         <div>
-          <div className="text-slate-500">runtime</div>
-          <div className="text-slate-300 font-mono">
-            {String(metrics.activeRuntimeToday?.value ?? 0)} {metrics.activeRuntimeToday?.unit}
+          <div className="text-text-inverse/45">runtime</div>
+          <div className="text-text-inverse/85 font-mono tabular">
+            {String(metrics.activeRuntimeToday?.value ?? 0)}{" "}
+            {metrics.activeRuntimeToday?.unit}
           </div>
         </div>
         <div>
-          <div className="text-slate-500">units/hr</div>
-          <div className="text-slate-300 font-mono">
+          <div className="text-text-inverse/45">units/hr</div>
+          <div className="text-text-inverse/85 font-mono tabular">
             {String(metrics.unitsPerHour?.value ?? 0)}
           </div>
         </div>
       </div>
       {metrics.idealCycleSeconds?.confidence === "MISSING" && (
-        <div className="text-[9px] text-slate-500">
+        <div className="text-[9px] text-text-inverse/45">
           {metrics.idealCycleSeconds.label}
         </div>
       )}
+    </div>
+  );
+}
+
+function BottleRow({
+  label,
+  value,
+  mono,
+  tone,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  tone?: WallTone;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[10px] uppercase tracking-[0.10em] text-text-inverse/55">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "text-[12.5px]",
+          mono ? "font-mono tabular" : "",
+          tone ? TILE_TEXT[tone] : "text-text-inverse/90",
+        )}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -827,42 +1209,3 @@ const FALLBACK: MetricResult = {
   missingInputs: ["metric_api"],
   label: "No data",
 };
-
-function DiagTile({
-  label,
-  value,
-  accent = "default",
-}: {
-  label: string;
-  value: number | string;
-  accent?: "default" | "amber" | "rose" | "cyan";
-}) {
-  const valueColor =
-    accent === "amber"
-      ? "text-amber-300"
-      : accent === "rose"
-        ? "text-rose-300"
-        : accent === "cyan"
-          ? "text-cyan-300"
-          : "text-slate-100";
-  const borderColor =
-    accent === "amber"
-      ? "border-amber-500/30"
-      : accent === "rose"
-        ? "border-rose-500/30"
-        : accent === "cyan"
-          ? "border-cyan-500/30"
-          : "border-slate-700/60";
-  return (
-    <div
-      className={`rounded-md border ${borderColor} bg-slate-900/60 px-3 py-2`}
-    >
-      <div className="text-[10px] uppercase tracking-[0.10em] text-slate-400 leading-tight truncate">
-        {label}
-      </div>
-      <div className={`mt-1 text-xl font-mono tabular-nums ${valueColor}`}>
-        {typeof value === "number" ? value.toLocaleString() : value}
-      </div>
-    </div>
-  );
-}

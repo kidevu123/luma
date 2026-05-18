@@ -1,13 +1,16 @@
-// WORKFLOW-CLEANUP-2 — Start Production workflow.
+// WORKFLOW-CLEANUP-2 → LUMA-UI-REBUILD-1
 //
-// Guided 4-step workflow: scan the raw bag → pick the product → pick
-// an IDLE workflow QR card → pick a station → click Start. The
-// CARD_ASSIGNED event fires through projectEvent inside the action,
-// just like the floor PWA does. This is the admin on-ramp; downstream
-// stage events still come from station scans.
+// Start Production workflow. Guided 4-step flow: scan the raw bag →
+// pick the product → pick an IDLE workflow QR card → pick a station →
+// click Start. The CARD_ASSIGNED event fires through projectEvent
+// inside the action, just like the floor PWA does. This is the admin
+// on-ramp; downstream stage events still come from station scans.
+//
+// Chrome rebuilt on the new luma-ui primitives. Data loading + form
+// wiring unchanged.
 
 import { db } from "@/lib/db";
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import {
   productAllowedTablets,
   products,
@@ -15,7 +18,14 @@ import {
   stations,
 } from "@/lib/db/schema";
 import { requireLead } from "@/lib/auth-guards";
-import { PageHeader } from "@/components/ui/page-header";
+import {
+  CommandShell,
+  PageHero,
+  SectionCard,
+  WorkflowStepper,
+  type HeroBadge,
+  type StepperStep,
+} from "@/components/production/luma-ui";
 import { StartProductionForm } from "./start-production-form";
 
 export const dynamic = "force-dynamic";
@@ -48,18 +58,70 @@ export default async function StartProductionPage() {
       .where(eq(products.isActive, true)),
   ]);
 
+  // Server-side workflow telemetry surfaced as hero badges and the
+  // active-tone of the stepper — gives the lead an at-a-glance read
+  // on whether they CAN start a run right now.
+  const idleCardCount = idleCards.length;
+  const stationCount = activeStations.length;
+  const idleReady = idleCardCount > 0;
+  const stationReady = stationCount > 0;
+
+  const heroBadges: HeroBadge[] = [
+    {
+      label: `${idleCardCount} idle QR card${idleCardCount === 1 ? "" : "s"}`,
+      tone: idleReady ? "info" : "crit",
+      mono: true,
+    },
+    {
+      label: `${stationCount} active station${stationCount === 1 ? "" : "s"}`,
+      tone: stationReady ? "info" : "crit",
+      mono: true,
+    },
+  ];
+
+  // Stepper labels mirror the form sequence so an operator can map
+  // the page to their physical actions before they start clicking.
+  const steps: StepperStep[] = [
+    { label: "Scan raw bag", state: "active" },
+    { label: "Pick product", state: "pending" },
+    { label: "Assign QR card", state: "pending" },
+    { label: "Pick station", state: "pending" },
+    { label: "Start run", state: "pending" },
+  ];
+
   return (
-    <div className="space-y-5">
-      <PageHeader
+    <CommandShell>
+      <PageHero
+        eyebrow="Floor work · On-ramp"
         title="Start production"
-        description="Scan a raw bag, assign a workflow QR card, pick a station, and start. Workflow QR cards are reusable floor badges that track this bag through every station until packaging. QR card administration (add/retire/print labels) lives under Advanced."
+        description={
+          <>
+            Scan a raw bag, assign a workflow QR card, pick a station, and
+            start. Workflow QR cards are reusable floor badges that track this
+            bag through every station until packaging. QR card administration
+            (add / retire / print labels) lives under{" "}
+            <span className="text-text-strong">Advanced → QR card management</span>.
+          </>
+        }
+        badges={heroBadges}
       />
+
+      <SectionCard
+        eyebrow="Run sequence"
+        title="Five steps to a live workflow card"
+        subtitle="Each step gates the next. The CARD_ASSIGNED event fires only after you click Start."
+        tone="info"
+        pad="tight"
+      >
+        <WorkflowStepper steps={steps} />
+      </SectionCard>
+
       <StartProductionForm
         idleCards={idleCards.map((c) => ({ id: c.id, code: c.code }))}
         stations={activeStations}
         allowedProductsByTabletType={groupAllowedProductsByTabletType(allowedRows)}
       />
-    </div>
+    </CommandShell>
   );
 }
 
