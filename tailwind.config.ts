@@ -1,9 +1,10 @@
 import type { Config } from "tailwindcss";
 
-// LUMA-UI-REBUILD-1 — extends the existing token system with the
-// industrial-command-surface palette + display/mono font families.
-// Every color references a CSS variable from globals.css; never
-// hardcode hex values in components.
+// LUMA-UI-REBUILD-1 v2 — Operations Atelier. Extends the existing
+// token system with the luxury-industrial palette + Fraunces display
+// font family + layered shadow tokens for embossed depth. Every color
+// references a CSS variable from globals.css; never hardcode hex
+// values in components.
 
 export default {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
@@ -17,6 +18,7 @@ export default {
         "surface-2": "rgb(var(--bg-surface-2) / <alpha-value>)",
         "surface-3": "rgb(var(--bg-surface-3) / <alpha-value>)",
         inverse: "rgb(var(--bg-inverse) / <alpha-value>)",
+        "inverse-2": "rgb(var(--bg-inverse-2) / <alpha-value>)",
         // Text
         text: "rgb(var(--text) / <alpha-value>)",
         "text-strong": "rgb(var(--text-strong) / <alpha-value>)",
@@ -27,7 +29,7 @@ export default {
         border: "rgb(var(--border) / <alpha-value>)",
         "border-strong": "rgb(var(--border-strong) / <alpha-value>)",
         "border-inverse": "rgb(var(--border-inverse) / <alpha-value>)",
-        // Brand teal
+        // Brand teal (dominant)
         brand: {
           50:  "rgb(var(--brand-50)  / <alpha-value>)",
           100: "rgb(var(--brand-100) / <alpha-value>)",
@@ -38,6 +40,7 @@ export default {
           800: "rgb(var(--brand-800) / <alpha-value>)",
           900: "rgb(var(--brand-900) / <alpha-value>)",
           accent: "rgb(var(--brand-accent) / <alpha-value>)",
+          "accent-bright": "rgb(var(--brand-accent-bright) / <alpha-value>)",
         },
         // Status tones (semantic, never decorative)
         good: {
@@ -77,10 +80,13 @@ export default {
       boxShadow: {
         card: "var(--shadow-card)",
         pop: "var(--shadow-pop)",
-        rail: "var(--shadow-rail)",
+        hero: "var(--shadow-hero)",
+        ribbon: "var(--shadow-ribbon)",
+        "glow-accent": "var(--shadow-glow-accent)",
       },
       borderRadius: {
         xl: "12px",
+        "2xl": "16px",
         lg: "10px",
       },
     },

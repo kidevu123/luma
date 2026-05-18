@@ -175,10 +175,12 @@ export function Sidebar() {
               Production Command
             </div>
           </div>
-          {/* Brand accent dot — visual anchor + version-state slot. */}
+          {/* Brand accent dot — visual anchor + live signal pip. The
+              pulse only happens here at the top of the sidebar, so the
+              eye finds the brand mark first. */}
           <span
             aria-hidden
-            className="mt-1 inline-block h-2 w-2 rounded-full bg-brand-accent shadow-[0_0_0_3px_rgb(var(--brand-accent)/0.18)]"
+            className="pulse-accent mt-1 inline-block h-2 w-2 rounded-full bg-brand-accent"
           />
         </div>
       </div>

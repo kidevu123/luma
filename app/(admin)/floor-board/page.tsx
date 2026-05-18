@@ -213,22 +213,22 @@ export default async function FloorBoardPage() {
           ties the page to the rest of the system; the display title
           carries weight; the right-aligned cluster delivers signal
           state at a glance. */}
-      <header className="relative">
-        <div className="flex flex-wrap items-end justify-between gap-4 pb-4 border-b border-slate-800">
+      <header className="relative reveal reveal-1">
+        <div className="flex flex-wrap items-end justify-between gap-4 pb-5 border-b border-slate-800">
           <div className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-text-inverse/55 flex items-center gap-2">
               <span
                 aria-hidden
-                className="inline-block h-1.5 w-1.5 rounded-full bg-brand-accent shadow-[0_0_0_3px_rgb(var(--brand-accent)/0.18)]"
+                className="pulse-accent inline-block h-1.5 w-1.5 rounded-full bg-brand-accent"
               />
               Luma · Floor work · Live operations
             </div>
-            <h1 className="mt-1.5 font-display text-[26px] leading-[1.05] tracking-tight font-semibold text-text-inverse">
+            <h1 className="display-title mt-3 text-[36px] sm:text-[42px] text-text-inverse">
               Production command center
             </h1>
-            <p className="mt-1.5 text-[12px] text-text-inverse/55 max-w-2xl">
+            <p className="mt-2 text-[12.5px] text-text-inverse/55 max-w-2xl leading-relaxed">
               Single source of truth:{" "}
-              <code className="font-mono text-text-inverse/75">lib/production/metrics.ts</code>.
+              <code className="font-mono text-text-inverse/80">lib/production/metrics.ts</code>.
               Window: today {today.from.toISOString().slice(0, 10)} UTC.
             </p>
           </div>

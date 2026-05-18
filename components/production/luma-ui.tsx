@@ -1,8 +1,8 @@
-// LUMA-UI-REBUILD-1 — Industrial Command Surface design system.
+// LUMA-UI-REBUILD-1 v2 — Operations Atelier primitive library.
 //
 // One file, intentionally. Every primitive shares the same tone
 // vocabulary, the same rail motif, the same spacing scale, the same
-// numeric voice. Splitting them into separate files invites drift;
+// display numerals. Splitting them into separate files invites drift;
 // keeping them together makes the system inspectable in one read.
 //
 // Tone vocabulary (semantic, never decoration):
@@ -11,12 +11,18 @@
 //   crit  · blocked / conflict / over-allocated
 //   info  · neutral signal / data window
 //   muted · missing / idle / legacy / waiting
-//   brand · earned only for the primary CTA + active nav state
+//   brand · earned only for the primary CTA + active nav state + live signal
 //
-// Signature: 3px status rail anchored to the left edge of cards and
-// section headers. Tone drives rail color; the rail is the only place
-// status color appears at full saturation, so the eye finds it
-// instantly across a dense surface.
+// Signature moves (v2):
+//   1. 3px tone rail with a 1px inner highlight + an outer bloom in
+//      the rail's own color — reads as a sliver of light.
+//   2. Surface cards carry a top-edge highlight + layered shadow.
+//   3. Hero band sits on its own backdrop (dual radial + scoped grid).
+//   4. RibbonStrip — a unified inverse band carrying massive Fraunces
+//      tabular numerals, hairline dividers between segments, with the
+//      accent-glow earned only when a segment is live.
+//   5. Display numerals run on Fraunces (modern high-contrast serif).
+//   6. Page-load reveal: lift-in cascade.
 
 import * as React from "react";
 import Link from "next/link";
@@ -30,21 +36,21 @@ import { cn } from "@/lib/utils";
 export type Tone = "good" | "warn" | "crit" | "info" | "muted" | "brand";
 
 const RAIL_CLASS: Record<Tone, string> = {
-  good: "before:bg-good-500",
-  warn: "before:bg-warn-500",
-  crit: "before:bg-crit-500",
-  info: "before:bg-info-500",
-  muted: "before:bg-muted-500",
-  brand: "before:bg-brand-accent",
+  good: "rail-good",
+  warn: "rail-warn",
+  crit: "rail-crit",
+  info: "rail-info",
+  muted: "rail-muted",
+  brand: "rail-brand",
 };
 
 const TONE_TINT: Record<Tone, string> = {
-  good: "bg-good-50/60",
-  warn: "bg-warn-50/60",
-  crit: "bg-crit-50/60",
-  info: "bg-info-50/40",
+  good: "bg-good-50/70",
+  warn: "bg-warn-50/70",
+  crit: "bg-crit-50/70",
+  info: "bg-info-50/50",
   muted: "bg-surface-2/70",
-  brand: "bg-brand-50/40",
+  brand: "bg-brand-50/50",
 };
 
 const TONE_TEXT: Record<Tone, string> = {
@@ -57,21 +63,28 @@ const TONE_TEXT: Record<Tone, string> = {
 };
 
 const TONE_BORDER: Record<Tone, string> = {
-  good: "border-good-500/30",
-  warn: "border-warn-500/30",
-  crit: "border-crit-500/30",
-  info: "border-info-500/25",
+  good: "border-good-500/35",
+  warn: "border-warn-500/35",
+  crit: "border-crit-500/35",
+  info: "border-info-500/30",
   muted: "border-border",
-  brand: "border-brand-500/25",
+  brand: "border-brand-500/30",
+};
+
+// Inverse counterparts — used on dark backdrops (ribbon segments).
+const TONE_TEXT_INVERSE: Record<Tone, string> = {
+  good: "text-emerald-300",
+  warn: "text-amber-300",
+  crit: "text-rose-300",
+  info: "text-cyan-300",
+  muted: "text-text-inverse/65",
+  brand: "text-[rgb(var(--brand-accent-bright))]",
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// CommandShell — the page chrome
+// CommandShell — page chrome
 // ─────────────────────────────────────────────────────────────────────
 
-/** Wraps the page body in the canonical industrial-command surface
- *  layout: a max-width content rail with the page's eyebrow, hero, and
- *  body sections. Pages compose <CommandShell> at the top level. */
 export function CommandShell({
   children,
   density = "default",
@@ -90,7 +103,7 @@ export function CommandShell({
           : density === "wide"
             ? "max-w-[1480px] px-5 lg:px-8"
             : "max-w-[1280px] px-5 lg:px-8",
-        "py-6 lg:py-8 space-y-6",
+        "py-6 lg:py-8 space-y-7",
         className,
       )}
     >
@@ -100,21 +113,20 @@ export function CommandShell({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// PageHero — the single-line command identity at the top of each page
+// PageHero — the architectural top band
 // ─────────────────────────────────────────────────────────────────────
 
 export type HeroBadge = {
   label: string;
   tone?: Tone;
-  /** Monospace formatting for ID-shaped values. */
   mono?: boolean;
 };
 
-/** Hero header: eyebrow + bold title + supportive subtitle + a chip
- *  row for state badges (workflow mode, gateway readiness, scope, etc.)
- *  + an actions slot. Designed to answer four questions in one glance:
- *  what page am I on, what mode am I in, what's the state, what can
- *  I do next. */
+/** Hero band — sits on its own backdrop (brand+accent radial + scoped
+ *  grid + layered shadow). Display title runs on Fraunces. A live-signal
+ *  brand-accent pip pulses in the eyebrow. Answers four questions in
+ *  one glance: what page am I on, what mode am I in, what's the state,
+ *  what can I do next. */
 export function PageHero({
   eyebrow,
   title,
@@ -131,24 +143,39 @@ export function PageHero({
   className?: string;
 }) {
   return (
-    <header className={cn("relative", className)}>
-      <div className="flex items-start justify-between gap-6 flex-wrap">
+    <header
+      className={cn(
+        "surface-hero reveal reveal-1 px-6 py-7 lg:px-8 lg:py-8",
+        className,
+      )}
+    >
+      <div className="flex items-start justify-between gap-8 flex-wrap">
         <div className="min-w-0 max-w-3xl">
-          {eyebrow ? <div className="eyebrow mb-2">{eyebrow}</div> : null}
-          <h1
-            className="font-display text-[28px] leading-[1.05] tracking-tightest font-semibold text-text-strong"
-          >
+          {eyebrow ? (
+            <div className="flex items-center gap-2 mb-3">
+              <span
+                aria-hidden
+                className="pulse-accent inline-block h-1.5 w-1.5 rounded-full bg-brand-accent"
+              />
+              <div className="eyebrow">{eyebrow}</div>
+            </div>
+          ) : null}
+          <h1 className="display-title text-[34px] sm:text-[40px] lg:text-[44px]">
             {title}
           </h1>
           {description ? (
-            <p className="mt-2 text-[13px] leading-relaxed text-text-muted max-w-2xl">
+            <p className="mt-3 text-[13.5px] leading-relaxed text-text-muted max-w-2xl">
               {description}
             </p>
           ) : null}
           {badges && badges.length > 0 ? (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <div className="mt-4 flex flex-wrap items-center gap-1.5">
               {badges.map((b, i) => (
-                <StatusBadge key={i} tone={b.tone ?? "muted"} mono={b.mono === true}>
+                <StatusBadge
+                  key={i}
+                  tone={b.tone ?? "muted"}
+                  mono={b.mono === true}
+                >
                   {b.label}
                 </StatusBadge>
               ))}
@@ -164,11 +191,9 @@ export function PageHero({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// StatusBadge — compact tone-tinted chip
+// StatusBadge
 // ─────────────────────────────────────────────────────────────────────
 
-/** Replaces ad-hoc colored chips across the app with one canonical
- *  shape. Tone drives all color. Mono variant for ID-shaped data. */
 export function StatusBadge({
   tone = "muted",
   mono = false,
@@ -200,13 +225,9 @@ export function StatusBadge({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// SectionCard — the canonical lifted panel with status rail
+// SectionCard — canonical lifted panel
 // ─────────────────────────────────────────────────────────────────────
 
-/** Replaces the older ProductionSection. Always carries a 3px rail
- *  (default neutral, tinted by tone). Header + body + optional
- *  toolbar slot. Body padding is dense by default; pass `pad="loose"`
- *  for hero panels. */
 export function SectionCard({
   eyebrow,
   title,
@@ -217,6 +238,7 @@ export function SectionCard({
   children,
   pad = "default",
   className,
+  reveal: revealClass,
 }: {
   eyebrow?: string;
   title?: string;
@@ -227,14 +249,16 @@ export function SectionCard({
   children: React.ReactNode;
   pad?: "tight" | "default" | "loose";
   className?: string;
+  reveal?: "reveal-2" | "reveal-3" | "reveal-4" | "reveal-5" | "reveal-6";
 }) {
   const hasHeader = !!(eyebrow || title || subtitle || actions);
   return (
     <section
       className={cn(
-        "rail",
+        "surface-card rail",
         RAIL_CLASS[tone],
-        "relative pl-[3px] rounded-[10px] bg-surface border border-border shadow-card overflow-hidden",
+        "relative pl-[3px] overflow-hidden",
+        revealClass ? `reveal ${revealClass}` : "",
         className,
       )}
     >
@@ -243,7 +267,7 @@ export function SectionCard({
           <div className="min-w-0">
             {eyebrow ? <div className="eyebrow mb-1.5">{eyebrow}</div> : null}
             {title ? (
-              <h2 className="text-[14px] font-semibold tracking-tight text-text-strong leading-tight">
+              <h2 className="text-[14.5px] font-semibold tracking-tight text-text-strong leading-tight">
                 {title}
               </h2>
             ) : null}
@@ -282,8 +306,6 @@ export function SectionCard({
 // ActionPanel — the alert / banner band
 // ─────────────────────────────────────────────────────────────────────
 
-/** Replaces ProductionAlertCard with cleaner geometry. Use sparingly —
- *  earn each one. Title + body + optional inline action. */
 export function ActionPanel({
   tone = "info",
   title,
@@ -304,17 +326,17 @@ export function ActionPanel({
       className={cn(
         "rail",
         RAIL_CLASS[tone],
-        "relative pl-[3px] rounded-[10px] border bg-surface",
+        "relative pl-[3px] rounded-[12px] border bg-surface shadow-card overflow-hidden",
         TONE_BORDER[tone],
         className,
       )}
       role="status"
     >
-      <div className="flex items-start gap-3 px-4 py-3">
+      <div className="flex items-start gap-3.5 px-5 py-4">
         {Icon ? (
           <span
             className={cn(
-              "shrink-0 mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-md border",
+              "shrink-0 mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-md border",
               TONE_BORDER[tone],
               TONE_TINT[tone],
               TONE_TEXT[tone],
@@ -324,11 +346,16 @@ export function ActionPanel({
           </span>
         ) : null}
         <div className="min-w-0 flex-1">
-          <p className={cn("text-[13px] font-semibold tracking-tight", TONE_TEXT[tone])}>
+          <p
+            className={cn(
+              "text-[13.5px] font-semibold tracking-tight",
+              TONE_TEXT[tone],
+            )}
+          >
             {title}
           </p>
           {body ? (
-            <div className="mt-1 text-[12px] leading-relaxed text-text-muted">
+            <div className="mt-1 text-[12.5px] leading-relaxed text-text-muted">
               {body}
             </div>
           ) : null}
@@ -340,13 +367,9 @@ export function ActionPanel({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// StatusCard / KPIMetric — for summary strips
+// StatusCard — summary tile
 // ─────────────────────────────────────────────────────────────────────
 
-/** Compact summary card with eyebrow label + display number + optional
- *  delta / context line. Designed to tile in a 3-6 column grid. Tone
- *  drives the left rail; the number itself stays text-strong so the
- *  eye reads the count first, the meaning second. */
 export function StatusCard({
   label,
   value,
@@ -367,25 +390,29 @@ export function StatusCard({
   const inner = (
     <div
       className={cn(
-        "rail",
+        "surface-card rail",
         RAIL_CLASS[tone],
-        "relative pl-[3px] rounded-[10px] bg-surface border border-border shadow-card px-4 py-3.5",
-        href && "transition-colors hover:border-border-strong hover:shadow-pop cursor-pointer",
+        "relative pl-[3px] px-4 py-4",
+        href && "lift-on-hover hover:border-border-strong cursor-pointer",
         className,
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="eyebrow">{label}</div>
-          <div className="mt-1.5 display-num text-[28px]">{value}</div>
+          <div className="mt-2 display-num text-[32px] sm:text-[36px]">
+            {value}
+          </div>
           {hint ? (
-            <div className="mt-1 text-[11px] text-text-muted leading-snug">{hint}</div>
+            <div className="mt-1.5 text-[11px] text-text-muted leading-snug">
+              {hint}
+            </div>
           ) : null}
         </div>
         {Icon ? (
           <span
             className={cn(
-              "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-[12px]",
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border",
               TONE_TINT[tone],
               TONE_BORDER[tone],
               TONE_TEXT[tone],
@@ -402,12 +429,112 @@ export function StatusCard({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// RecordCard — clickable record summary (PO line, allocation row, etc.)
+// RibbonStrip + RibbonSegment — unified inverse KPI band
 // ─────────────────────────────────────────────────────────────────────
 
-/** Replaces ad-hoc clickable cards across the app. Header line +
- *  subline + optional metadata row + optional selection ring. Tone
- *  drives the rail and the optional inset selection state. */
+export type RibbonSegmentData = {
+  label: string;
+  value: React.ReactNode;
+  hint?: React.ReactNode;
+  tone?: Tone;
+  /** Pulses the brand-accent dot when true — earn it, only one live
+   *  segment per ribbon is the rule. */
+  live?: boolean;
+  /** Optional icon glyph rendered above the label. */
+  icon?: LucideIcon;
+};
+
+/** The signature KPI band. One dark surface, hairline dividers between
+ *  segments, massive Fraunces tabular numerals. Use sparingly — one
+ *  per page maximum, at the top of the data layer. */
+export function RibbonStrip({
+  segments,
+  className,
+  reveal: revealClass,
+}: {
+  segments: RibbonSegmentData[];
+  className?: string;
+  reveal?: "reveal-2" | "reveal-3" | "reveal-4";
+}) {
+  return (
+    <div
+      className={cn(
+        "surface-ribbon",
+        revealClass ? `reveal ${revealClass}` : "",
+        className,
+      )}
+    >
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: `repeat(${segments.length}, minmax(0, 1fr))`,
+        }}
+      >
+        {segments.map((s, i) => (
+          <RibbonSegment key={i} {...s} isLast={i === segments.length - 1} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RibbonSegment({
+  label,
+  value,
+  hint,
+  tone = "muted",
+  live,
+  icon: Icon,
+  isLast,
+}: RibbonSegmentData & { isLast: boolean }) {
+  return (
+    <div
+      className={cn(
+        "relative px-5 py-5 lg:px-6 lg:py-6",
+        !isLast && "border-r border-white/[0.07]",
+      )}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        {live ? (
+          <span
+            aria-hidden
+            className="pulse-accent inline-block h-1.5 w-1.5 rounded-full bg-brand-accent"
+          />
+        ) : Icon ? (
+          <span
+            className={cn(
+              "inline-flex h-4 w-4 items-center justify-center text-text-inverse/55",
+              TONE_TEXT_INVERSE[tone],
+            )}
+          >
+            <Icon className="h-3 w-3" />
+          </span>
+        ) : null}
+        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-text-inverse/55">
+          {label}
+        </div>
+      </div>
+      <div
+        className={cn(
+          "display-num text-[44px] sm:text-[52px] lg:text-[58px] text-text-inverse",
+          TONE_TEXT_INVERSE[tone],
+        )}
+      >
+        {value}
+      </div>
+      {hint ? (
+        <div className="mt-2 text-[11.5px] text-text-inverse/55 leading-snug">
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// RecordCard — clickable record summary
+// ─────────────────────────────────────────────────────────────────────
+
 export function RecordCard({
   selected = false,
   tone = "muted",
@@ -427,12 +554,10 @@ export function RecordCard({
 }) {
   const railTone: Tone = selected ? "brand" : tone;
   const classes = cn(
-    "rail",
+    "surface-card rail",
     RAIL_CLASS[railTone],
-    "relative pl-[3px] rounded-[10px] bg-surface border text-left w-full transition",
-    selected
-      ? "border-brand-500/50 shadow-pop"
-      : "border-border hover:border-border-strong shadow-card hover:shadow-pop",
+    "relative pl-[3px] text-left w-full",
+    selected ? "border-brand-500/50 shadow-pop" : "lift-on-hover hover:border-border-strong",
     className,
   );
   if (href) {
@@ -444,7 +569,11 @@ export function RecordCard({
   }
   if (as === "div") {
     return (
-      <div className={classes} onClick={onClick} role={onClick ? "button" : undefined}>
+      <div
+        className={classes}
+        onClick={onClick}
+        role={onClick ? "button" : undefined}
+      >
         {children}
       </div>
     );
@@ -468,9 +597,6 @@ export type FieldRow = {
   hint?: string;
 };
 
-/** Replaces ProductionIdentityBlock with sharper geometry. Renders a
- *  grid of label/value pairs in nested wells. Missing values render
- *  as italic "missing" rather than empty cells. */
 export function FieldGroup({
   rows,
   columns = 2,
@@ -497,12 +623,12 @@ export function FieldGroup({
         return (
           <div
             key={`${r.label}-${i}`}
-            className="rounded-md border border-border bg-surface-2/40 px-2.5 py-2"
+            className="surface-well px-3 py-2"
           >
             <dt className="eyebrow">{r.label}</dt>
             <dd
               className={cn(
-                "mt-1 text-[12.5px] leading-snug",
+                "mt-1.5 text-[12.5px] leading-snug",
                 missing && "italic text-text-subtle",
                 r.mono && !missing && "font-mono text-[12px] tracking-normal text-text-strong",
                 !r.mono && !missing && "text-text-strong",
@@ -520,11 +646,9 @@ export function FieldGroup({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// DataEmptyState — honest, contextual empty
+// DataEmptyState — signature empty moment with brand halo
 // ─────────────────────────────────────────────────────────────────────
 
-/** Replaces gray boxes that say "no data". Always names the next
- *  action. Never decorative. */
 export function DataEmptyState({
   title,
   body,
@@ -543,37 +667,47 @@ export function DataEmptyState({
   return (
     <div
       className={cn(
-        "rail",
-        RAIL_CLASS[tone],
-        "relative pl-[3px] rounded-[10px] bg-surface-2/40 border border-dashed border-border/80 px-5 py-8 text-center",
+        "relative rounded-[12px] border border-dashed border-border bg-surface-2/30 px-6 py-10 text-center overflow-hidden",
         className,
       )}
     >
+      {/* Brand-tinted halo behind the glyph — small but distinct moment. */}
+      <div
+        aria-hidden
+        className="absolute left-1/2 top-6 -translate-x-1/2 h-24 w-24 rounded-full pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(circle, rgb(var(--brand-500) / 0.10) 0%, transparent 70%)",
+        }}
+      />
       {Icon ? (
         <span
           className={cn(
-            "mx-auto mb-3 inline-flex h-9 w-9 items-center justify-center rounded-md border",
+            "relative mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl border bg-surface shadow-card",
             TONE_BORDER[tone],
-            TONE_TINT[tone],
             TONE_TEXT[tone],
           )}
         >
-          <Icon className="h-4 w-4" />
+          <Icon className="h-5 w-5" />
         </span>
       ) : null}
-      <p className="text-[13px] font-semibold tracking-tight text-text-strong">{title}</p>
+      <p className="relative text-[14px] font-semibold tracking-tight text-text-strong">
+        {title}
+      </p>
       {body ? (
-        <div className="mx-auto mt-1.5 max-w-md text-[12px] text-text-muted leading-relaxed">
+        <div className="relative mx-auto mt-2 max-w-md text-[12.5px] text-text-muted leading-relaxed">
           {body}
         </div>
       ) : null}
-      {action ? <div className="mt-3 flex justify-center">{action}</div> : null}
+      {action ? (
+        <div className="relative mt-4 flex justify-center">{action}</div>
+      ) : null}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// WorkflowStepper — staged-task indicator
+// WorkflowStepper
 // ─────────────────────────────────────────────────────────────────────
 
 export type StepperStep = {
@@ -581,8 +715,6 @@ export type StepperStep = {
   state: "complete" | "active" | "pending" | "blocked";
 };
 
-/** Compact horizontal stepper. State drives color + connector style.
- *  Used on /production/start, multi-step wizards, etc. */
 export function WorkflowStepper({
   steps,
   className,
@@ -591,42 +723,46 @@ export function WorkflowStepper({
   className?: string;
 }) {
   return (
-    <ol className={cn("flex items-center gap-1 text-[11px]", className)}>
+    <ol className={cn("flex items-center gap-1 text-[11.5px]", className)}>
       {steps.map((s, i) => {
         const stateClass =
           s.state === "complete"
-            ? "bg-good-500/15 text-good-700 border-good-500/30"
+            ? "bg-good-50/70 text-good-700 border-good-500/35"
             : s.state === "active"
-              ? "bg-brand-accent/10 text-brand-800 border-brand-accent/40 ring-2 ring-brand-accent/15"
+              ? "bg-brand-50/70 text-brand-800 border-brand-500/40 shadow-card"
               : s.state === "blocked"
-                ? "bg-crit-50 text-crit-700 border-crit-500/30"
-                : "bg-surface-2 text-text-subtle border-border";
+                ? "bg-crit-50/70 text-crit-700 border-crit-500/35"
+                : "bg-surface text-text-subtle border-border";
+        const dotClass =
+          s.state === "complete"
+            ? "bg-good-500"
+            : s.state === "active"
+              ? "bg-brand-accent pulse-accent"
+              : s.state === "blocked"
+                ? "bg-crit-500"
+                : "bg-border-strong";
         return (
-          <React.Fragment key={s.label}>
+          <React.Fragment key={`${s.label}-${i}`}>
             <li
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-medium tracking-tight whitespace-nowrap",
+                "inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 font-medium tracking-tight transition-colors",
                 stateClass,
               )}
             >
               <span
+                aria-hidden
                 className={cn(
-                  "inline-flex h-4 w-4 items-center justify-center rounded-full border text-[9px] font-mono font-semibold",
-                  s.state === "complete"
-                    ? "bg-good-500 text-white border-good-500"
-                    : s.state === "active"
-                      ? "bg-brand-accent text-white border-brand-accent"
-                      : s.state === "blocked"
-                        ? "bg-crit-500 text-white border-crit-500"
-                        : "bg-surface text-text-subtle border-border-strong",
+                  "inline-block h-1.5 w-1.5 rounded-full",
+                  dotClass,
                 )}
-              >
-                {s.state === "complete" ? "✓" : String(i + 1)}
-              </span>
-              {s.label}
+              />
+              <span>{s.label}</span>
             </li>
             {i < steps.length - 1 ? (
-              <ChevronRight className="h-3 w-3 text-text-subtle/60 shrink-0" aria-hidden />
+              <ChevronRight
+                className="h-3 w-3 text-text-subtle shrink-0"
+                aria-hidden
+              />
             ) : null}
           </React.Fragment>
         );
@@ -636,27 +772,20 @@ export function WorkflowStepper({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// MonoCode — inline mono token
+// MonoCode + RailHeading — small helpers
 // ─────────────────────────────────────────────────────────────────────
 
-/** ID-shaped values (trace codes, receipts, UUIDs) render through
- *  this. Tabular numerals, slightly muted background, very small. */
 export function MonoCode({
   children,
   className,
-  tone,
 }: {
   children: React.ReactNode;
   className?: string;
-  tone?: Tone;
 }) {
   return (
     <code
       className={cn(
-        "font-mono text-[11.5px] tracking-normal rounded-[4px] px-1.5 py-[1px] border",
-        tone ? TONE_TINT[tone] : "bg-surface-2",
-        tone ? TONE_BORDER[tone] : "border-border",
-        tone ? TONE_TEXT[tone] : "text-text-strong",
+        "font-mono text-[12px] tracking-normal text-text-strong bg-surface-2/70 border border-border rounded px-1.5 py-0.5",
         className,
       )}
     >
@@ -665,22 +794,16 @@ export function MonoCode({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// RailHeading — minor section label with rail
-// ─────────────────────────────────────────────────────────────────────
-
-/** A small step / sub-section label that carries the rail motif at
- *  smaller scale. Used inside SectionCard bodies. */
 export function RailHeading({
-  step,
+  eyebrow,
   title,
-  hint,
+  subtitle,
   tone = "muted",
   className,
 }: {
-  step?: string | number;
+  eyebrow?: string;
   title: string;
-  hint?: React.ReactNode;
+  subtitle?: React.ReactNode;
   tone?: Tone;
   className?: string;
 }) {
@@ -689,32 +812,29 @@ export function RailHeading({
       className={cn(
         "rail",
         RAIL_CLASS[tone],
-        "relative pl-3 flex items-baseline gap-2",
+        "relative pl-3.5",
         className,
       )}
     >
-      {step != null ? (
-        <span className="eyebrow font-mono">{String(step).padStart(2, "0")}</span>
-      ) : null}
-      <span className="text-[13px] font-semibold tracking-tight text-text-strong">
+      {eyebrow ? <div className="eyebrow mb-1">{eyebrow}</div> : null}
+      <h2 className="text-[14px] font-semibold tracking-tight text-text-strong">
         {title}
-      </span>
-      {hint ? <span className="text-[11px] text-text-muted">{hint}</span> : null}
+      </h2>
+      {subtitle ? (
+        <p className="mt-0.5 text-[12px] text-text-muted leading-snug">
+          {subtitle}
+        </p>
+      ) : null}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Back-compat shims
+// Back-compat aliases — existing pages outside the rebuild scope keep
+// rendering without modification.
 // ─────────────────────────────────────────────────────────────────────
 
-/** Existing pages reference these legacy names from
- *  components/production/ui. Re-export the new primitives under the
- *  legacy names so we can roll out without breaking pages until each
- *  one is migrated in this same phase. */
-export {
-  SectionCard as ProductionSection,
-  ActionPanel as ProductionAlertCard,
-  FieldGroup as ProductionIdentityBlock,
-  DataEmptyState as ProductionEmptyState,
-};
+export const ProductionSection = SectionCard;
+export const ProductionAlertCard = ActionPanel;
+export const ProductionIdentityBlock = FieldGroup;
+export const ProductionEmptyState = DataEmptyState;

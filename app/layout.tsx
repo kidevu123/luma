@@ -1,35 +1,42 @@
-import type { ReactNode } from "react";
-import type { CSSProperties } from "react";
+import type { ReactNode, CSSProperties } from "react";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
+import { Fraunces } from "next/font/google";
 import "./globals.css";
+
+// LUMA-UI-REBUILD-1 v2 — Operations Atelier type stack.
+//
+// - Geist Sans (body / UI) — self-hosted via next/font/geist
+// - Geist Mono (code / IDs) — self-hosted via next/font/geist
+// - Fraunces (display) — modern high-contrast serif, self-hosted at
+//   build via next/font/google. Used for hero numerals + display
+//   titles. Variable axes available: opsz (auto optical sizing),
+//   SOFT, WONK. CSS picks them up via font-variation-settings.
+
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-display",
+  display: "swap",
+});
 
 export const metadata = {
   title: "Luma — Production Command",
   description: "Manufacturing intelligence for the production floor",
 };
 
-// LUMA-UI-REBUILD-1 — Geist Sans + Geist Mono loaded via next/font so
-// the design tokens in globals.css can resolve --font-sans /
-// --font-mono to the actually loaded font families. next/font
-// self-hosts the files; no Google Fonts network dependency.
-
-const fontVars: CSSProperties = {
-  // Inline overrides on the html element so var() resolves correctly
-  // for nested CSS that references --font-sans / --font-mono.
-} as CSSProperties;
-// Tailwind picks up the var via the className token bindings below.
+const fontVars: CSSProperties = {} as CSSProperties;
 Object.assign(fontVars, {
   ["--font-sans"]: GeistSans.style.fontFamily,
-  ["--font-display"]: GeistSans.style.fontFamily,
   ["--font-mono"]: GeistMono.style.fontFamily,
+  // --font-display is set by the Fraunces variable below.
 });
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      className={`${GeistSans.variable} ${GeistMono.variable} ${fraunces.variable}`}
       style={fontVars}
     >
       <body className="bg-canvas text-text antialiased">{children}</body>

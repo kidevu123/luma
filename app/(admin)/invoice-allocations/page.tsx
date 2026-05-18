@@ -28,10 +28,11 @@ import {
   FieldGroup,
   PageHero,
   RecordCard,
+  RibbonStrip,
   SectionCard,
   StatusBadge,
-  StatusCard,
   type FieldRow,
+  type RibbonSegmentData,
 } from "@/components/production/luma-ui";
 import {
   AlertTriangle,
@@ -358,14 +359,21 @@ export default async function InvoiceAllocationsPage({
         }
       />
 
-      {/* Summary strip — five named statuses, each on its own tone. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatusCard label="Needs review" value={summary.needsReview} tone="warn" icon={AlertTriangle} hint="Lines with at least one unresolved row" />
-        <StatusCard label="Suggested" value={summary.suggested} tone="info" icon={Sparkles} hint="Engine output, awaiting confirm" />
-        <StatusCard label="Confirmed by operator" value={summary.confirmed} tone="good" icon={CheckCircle2} hint="HIGH confidence, in Nexus" />
-        <StatusCard label="Rejected" value={summary.rejected} tone="muted" icon={Slash} hint="Kept for audit trail" />
-        <StatusCard label="Missing data" value={summary.missing} tone="crit" icon={Receipt} hint="Quantity / mapping absent" />
-      </div>
+      {/* Signature ribbon — one unified inverse band carrying the five
+          allocation statuses as proportional segments. The accent pip
+          only pulses on the live tone (Confirmed > 0). */}
+      <RibbonStrip
+        reveal="reveal-2"
+        segments={
+          [
+            { label: "Needs review",  value: summary.needsReview.toLocaleString(), tone: "warn", icon: AlertTriangle, hint: "Lines with at least one unresolved row" },
+            { label: "Suggested",     value: summary.suggested.toLocaleString(),   tone: "info", icon: Sparkles,       hint: "Engine output, awaiting confirm" },
+            { label: "Confirmed",     value: summary.confirmed.toLocaleString(),   tone: "good", icon: CheckCircle2,   hint: "HIGH confidence, in Nexus",        live: summary.confirmed > 0 },
+            { label: "Rejected",      value: summary.rejected.toLocaleString(),    tone: "muted", icon: Slash,         hint: "Kept for audit trail" },
+            { label: "Missing data",  value: summary.missing.toLocaleString(),     tone: "crit", icon: Receipt,        hint: "Quantity / mapping absent" },
+          ] satisfies RibbonSegmentData[]
+        }
+      />
 
       {/* Filters — toolbar pattern, denser than a free-floating form. */}
       <SectionCard
