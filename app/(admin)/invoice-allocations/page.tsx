@@ -1,21 +1,17 @@
-// COMMERCIAL-TRACE-5 — admin allocation review page.
+// COMMERCIAL-TRACE-5 → LUMA-UI-REBUILD-1
 //
 // Server component. Loads:
 //   - summary counts from finished_lot_invoice_allocations
-//   - invoice-line list with filter support (?invoice / ?customer / ?sku
-//     / ?status / ?confidence / ?needs_review / ?unconfirmed)
+//   - invoice-line list with filter support
 //   - selected invoice line detail (?invoice_line=<uuid>)
 //
-// All copy follows the data-honesty rules from the phase brief:
-//   - Suggested vs Confirmed by operator is always distinct
-//   - LOW / name-only / unit conflict / missing customer are surfaced
-//     as plain-text labels
-//   - "Only confirmed allocations should be used for Nexus invoice/batch
-//     lookup." appears near the summary
+// UI built on the new Luma command-surface primitive library
+// (components/production/luma-ui). Data loading + filter logic
+// unchanged from CT-5 shipping version — only chrome rebuilt.
 
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, sql } from "drizzle-orm";
 import {
   customers,
   finishedLotInvoiceAllocations,
@@ -25,13 +21,30 @@ import {
   zohoInvoices,
 } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
-import { PageHeader } from "@/components/ui/page-header";
 import {
-  ProductionAlertCard,
-  ProductionSection,
-  ProductionIdentityBlock,
-  type IdentityRow,
-} from "@/components/production/ui";
+  ActionPanel,
+  CommandShell,
+  DataEmptyState,
+  FieldGroup,
+  PageHero,
+  RecordCard,
+  SectionCard,
+  StatusBadge,
+  StatusCard,
+  type FieldRow,
+} from "@/components/production/luma-ui";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  ClipboardList,
+  Filter,
+  Inbox,
+  Receipt,
+  ShieldAlert,
+  Slash,
+  Sparkles,
+} from "lucide-react";
 import { InvoiceAllocationActions } from "./invoice-allocation-actions";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +64,11 @@ function fmtDate(d: Date | string | null | undefined): string {
   if (!d) return "—";
   const date = typeof d === "string" ? new Date(d) : d;
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toISOString().slice(0, 10);
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  return `${months[date.getUTCMonth()]} ${date.getUTCDate()} ${date.getUTCFullYear()}`;
 }
 
 export default async function InvoiceAllocationsPage({
@@ -72,7 +89,7 @@ export default async function InvoiceAllocationsPage({
   };
   const selectedInvoiceLineId = sp.invoice_line?.trim() || null;
 
-  // ── Summary counts. One query, grouped by status + confirmed. ───────
+  // Summary counts (unchanged from CT-5).
   const summaryRows = await db
     .select({
       status: finishedLotInvoiceAllocations.status,
@@ -102,9 +119,10 @@ export default async function InvoiceAllocationsPage({
     if (r.confirmed) summary.confirmed += c;
     if (r.confidence === "MISSING") summary.missing += c;
   }
+  const totalRows =
+    summary.needsReview + summary.suggested + summary.confirmed + summary.rejected;
 
-  // ── Invoice-line list. Builds a row per zoho_invoice_lines with
-  // aggregated suggested/confirmed quantity from allocations. ─────────
+  // Invoice-line list (unchanged from CT-5).
   const wherePieces = [] as Array<ReturnType<typeof eq>>;
   if (filters.invoice) {
     wherePieces.push(
@@ -141,7 +159,6 @@ export default async function InvoiceAllocationsPage({
     .orderBy(desc(zohoInvoices.invoiceDate), desc(zohoInvoiceLines.createdAt))
     .limit(200);
 
-  // Per-line allocation aggregates.
   const lineIds = lineRows.map((r) => r.lineId);
   const allocAggRows =
     lineIds.length === 0
@@ -169,9 +186,7 @@ export default async function InvoiceAllocationsPage({
   type Agg = {
     suggestedQty: number;
     confirmedQty: number;
-    hasConflict: boolean;
     hasNeedsReview: boolean;
-    hasUnitMismatch: boolean;
     rowCount: number;
     confirmedCount: number;
   };
@@ -180,15 +195,7 @@ export default async function InvoiceAllocationsPage({
     const key = r.invoiceLineId;
     const a =
       aggByLine.get(key) ??
-      ({
-        suggestedQty: 0,
-        confirmedQty: 0,
-        hasConflict: false,
-        hasNeedsReview: false,
-        hasUnitMismatch: false,
-        rowCount: 0,
-        confirmedCount: 0,
-      } as Agg);
+      ({ suggestedQty: 0, confirmedQty: 0, hasNeedsReview: false, rowCount: 0, confirmedCount: 0 } as Agg);
     const qty = Number(r.sumQty ?? 0);
     a.rowCount += Number(r.count);
     if (r.confirmed) {
@@ -201,8 +208,6 @@ export default async function InvoiceAllocationsPage({
     aggByLine.set(key, a);
   }
 
-  // Apply post-aggregate filters (status / confidence / needs_review /
-  // unconfirmed / customer name).
   const filteredLines = lineRows.filter((r) => {
     if (filters.customer) {
       const v = (r.customerName ?? "").toLowerCase();
@@ -227,31 +232,31 @@ export default async function InvoiceAllocationsPage({
     return true;
   });
 
-  // ── Detail block for selected line (if any). ────────────────────────
-  let detail: {
-    line: typeof lineRows[number] | null;
-    rows: Array<{
-      id: string;
-      finishedLotNumber: string | null;
-      traceCode: string | null;
-      shipmentFinishedLotId: string | null;
-      packedAt: Date | null;
-      shippedAt: Date | null;
-      quantityAllocated: string;
-      unit: string | null;
-      confidence: string;
-      source: string;
-      status: string;
-      confirmed: boolean;
-      confirmedAt: Date | null;
-      notes: string | null;
-    }>;
-  } = { line: null, rows: [] };
+  // Detail block for selected line (unchanged from CT-5).
+  type DetailRow = {
+    id: string;
+    finishedLotNumber: string | null;
+    traceCode: string | null;
+    shipmentFinishedLotId: string | null;
+    packedAt: Date | null;
+    shippedAt: Date | null;
+    quantityAllocated: string;
+    unit: string | null;
+    confidence: string;
+    source: string;
+    status: string;
+    confirmed: boolean;
+    confirmedAt: Date | null;
+    notes: string | null;
+  };
+  const detail: { line: (typeof lineRows)[number] | null; rows: DetailRow[] } = {
+    line: null,
+    rows: [],
+  };
 
   if (selectedInvoiceLineId) {
     detail.line = lineRows.find((r) => r.lineId === selectedInvoiceLineId) ?? null;
     if (!detail.line) {
-      // Re-fetch in case the selected line is outside the 200-row page.
       const [extra] = await db
         .select({
           lineId: zohoInvoiceLines.id,
@@ -292,16 +297,10 @@ export default async function InvoiceAllocationsPage({
           sflShippedAt: shipmentFinishedLots.shippedAt,
         })
         .from(finishedLotInvoiceAllocations)
-        .leftJoin(
-          finishedLots,
-          eq(finishedLots.id, finishedLotInvoiceAllocations.finishedLotId),
-        )
+        .leftJoin(finishedLots, eq(finishedLots.id, finishedLotInvoiceAllocations.finishedLotId))
         .leftJoin(
           shipmentFinishedLots,
-          eq(
-            shipmentFinishedLots.id,
-            finishedLotInvoiceAllocations.shipmentFinishedLotId,
-          ),
+          eq(shipmentFinishedLots.id, finishedLotInvoiceAllocations.shipmentFinishedLotId),
         )
         .where(eq(finishedLotInvoiceAllocations.invoiceLineId, selectedInvoiceLineId))
         .orderBy(desc(finishedLotInvoiceAllocations.confirmed), desc(finishedLotInvoiceAllocations.confidence));
@@ -324,305 +323,362 @@ export default async function InvoiceAllocationsPage({
     }
   }
 
+  const hasAnyData = totalRows > 0 || filteredLines.length > 0;
+
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Invoice allocations"
-        description="Match Zoho invoice lines to Luma finished lots. Confirmed allocations become the bridge for Nexus invoice/batch lookup."
+    <CommandShell density="wide">
+      <PageHero
+        eyebrow="Commercial trace · Operator review"
+        title="Invoice Allocations"
+        description={
+          <>
+            Confirm which Luma finished lots fulfilled each Zoho invoice line.
+            Only <strong className="text-text-strong">confirmed allocations</strong> power the
+            Nexus invoice / batch lookup — suggestions are engine-generated and
+            require your explicit confirmation.
+          </>
+        }
+        badges={[
+          { label: `${totalRows} allocation row${totalRows === 1 ? "" : "s"}`, tone: "info", mono: true },
+          { label: `${filteredLines.length} line${filteredLines.length === 1 ? "" : "s"} shown`, tone: "muted", mono: true },
+        ]}
       />
 
-      <ProductionAlertCard
-        tone="INFO"
-        title="Only confirmed allocations should be used for Nexus invoice/batch lookup."
-        body="Suggestions are engine-generated and may be wrong. The Confirm action is the only path to HIGH confidence and customer-visible (CSR-scope) traceability later in COMMERCIAL-TRACE-6. Customer-scope responses will continue to hide supplier lot, internal receipt, raw bag QR, operator, and machine details regardless of confirmation."
+      <ActionPanel
+        tone="info"
+        icon={ShieldAlert}
+        title="Confirmed allocations are the only path to Nexus customer-scope lookup."
+        body={
+          <>
+            Suggestions may be wrong. Confirm only when the finished lot truly
+            fulfilled the invoice line. Customer-scope Nexus responses always
+            hide supplier lot, internal receipt, raw bag QR, operator, and
+            machine details — regardless of confirmation.
+          </>
+        }
       />
 
-      {/* Summary cards */}
+      {/* Summary strip — five named statuses, each on its own tone. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <SummaryCard label="Needs review" value={summary.needsReview} tone="WARN" />
-        <SummaryCard label="Suggested" value={summary.suggested} tone="INFO" />
-        <SummaryCard label="Confirmed by operator" value={summary.confirmed} tone="GOOD" />
-        <SummaryCard label="Rejected" value={summary.rejected} tone="MUTED" />
-        <SummaryCard label="Missing data" value={summary.missing} tone="CRITICAL" />
+        <StatusCard label="Needs review" value={summary.needsReview} tone="warn" icon={AlertTriangle} hint="Lines with at least one unresolved row" />
+        <StatusCard label="Suggested" value={summary.suggested} tone="info" icon={Sparkles} hint="Engine output, awaiting confirm" />
+        <StatusCard label="Confirmed by operator" value={summary.confirmed} tone="good" icon={CheckCircle2} hint="HIGH confidence, in Nexus" />
+        <StatusCard label="Rejected" value={summary.rejected} tone="muted" icon={Slash} hint="Kept for audit trail" />
+        <StatusCard label="Missing data" value={summary.missing} tone="crit" icon={Receipt} hint="Quantity / mapping absent" />
       </div>
 
-      {/* Filters */}
-      <ProductionSection title="Filters" subtitle="All filters are query-string driven; bookmarkable.">
-        <form className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" method="get">
-          <Field
-            name="invoice"
-            label="Invoice #"
-            defaultValue={filters.invoice}
-            placeholder="INV-…"
-          />
-          <Field
-            name="customer"
-            label="Customer"
-            defaultValue={filters.customer}
-            placeholder="customer name"
-          />
-          <Field
-            name="sku"
-            label="SKU"
-            defaultValue={filters.sku}
-            placeholder="SKU-…"
-          />
-          <SelectField
+      {/* Filters — toolbar pattern, denser than a free-floating form. */}
+      <SectionCard
+        eyebrow="Filters"
+        title="Narrow the queue"
+        subtitle="All filters are query-string driven and bookmarkable."
+        tone="muted"
+        actions={
+          <Link href="/invoice-allocations" className="text-[11px] font-medium text-text-muted hover:text-text underline-offset-2 hover:underline">
+            Reset
+          </Link>
+        }
+      >
+        <form className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end" method="get">
+          <FilterField name="invoice" label="Invoice #" defaultValue={filters.invoice} placeholder="INV-…" />
+          <FilterField name="customer" label="Customer" defaultValue={filters.customer} placeholder="customer name" />
+          <FilterField name="sku" label="SKU" defaultValue={filters.sku} placeholder="SKU-…" mono />
+          <FilterSelect
             name="status"
-            label="Status"
+            label="Line status"
             defaultValue={filters.status}
             options={[
               { value: "", label: "Any" },
-              { value: "UNALLOCATED", label: "Unallocated (no suggestions yet)" },
+              { value: "UNALLOCATED", label: "Unallocated" },
               { value: "SUGGESTED", label: "Suggested" },
               { value: "NEEDS_REVIEW", label: "Needs review" },
               { value: "CONFIRMED", label: "Confirmed" },
             ]}
           />
-          <SelectField
+          <FilterSelect
             name="confidence"
             label="Confidence"
             defaultValue={filters.confidence}
             options={[
               { value: "", label: "Any" },
-              { value: "HIGH", label: "HIGH (confirmed only)" },
+              { value: "HIGH", label: "HIGH (confirmed)" },
               { value: "MEDIUM", label: "MEDIUM" },
               { value: "LOW", label: "LOW" },
               { value: "MISSING", label: "MISSING" },
             ]}
           />
-          <label className="block self-end">
-            <span className="text-[10px] uppercase tracking-[0.10em] text-text-muted">
-              Needs review only
-            </span>
-            <input
-              type="checkbox"
-              name="needs_review"
-              value="true"
-              defaultChecked={filters.needsReview}
-              className="mt-1 h-5 w-5"
-            />
-          </label>
-          <label className="block self-end">
-            <span className="text-[10px] uppercase tracking-[0.10em] text-text-muted">
-              Unconfirmed only
-            </span>
-            <input
-              type="checkbox"
-              name="unconfirmed"
-              value="true"
-              defaultChecked={filters.unconfirmed}
-              className="mt-1 h-5 w-5"
-            />
-          </label>
-          <div className="self-end flex gap-2">
+          <div className="flex items-end gap-3">
+            <div className="flex flex-col gap-2 text-[11px]">
+              <ToggleCheckbox name="needs_review" label="Needs review" defaultChecked={filters.needsReview} />
+              <ToggleCheckbox name="unconfirmed" label="Unconfirmed" defaultChecked={filters.unconfirmed} />
+            </div>
             <button
               type="submit"
-              className="h-9 px-4 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium"
+              className="ml-auto inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-brand-700 hover:bg-brand-800 text-white text-[12.5px] font-medium tracking-tight shadow-card transition-colors"
             >
+              <Filter className="h-3.5 w-3.5" />
               Apply
             </button>
-            <Link
-              href="/invoice-allocations"
-              className="h-9 px-4 rounded-md border border-border text-sm flex items-center justify-center"
-            >
-              Reset
-            </Link>
           </div>
         </form>
-      </ProductionSection>
+      </SectionCard>
 
-      {/* Invoice line list */}
-      <ProductionSection
-        title="Invoice lines"
-        subtitle={
-          filteredLines.length === 0
-            ? "No invoice lines match the current filters. Confirmed allocations live on at the audit trail regardless."
-            : `Showing ${filteredLines.length} line${filteredLines.length === 1 ? "" : "s"}.`
-        }
-      >
-        {filteredLines.length === 0 ? (
-          <p className="text-sm text-text-muted">
-            No Zoho invoice lines available yet. Invoice rows arrive via the apply phase of COMMERCIAL-TRACE-3; once
-            seeded, generate suggestions per line here.
-          </p>
-        ) : (
-          <div className="overflow-x-auto rounded-md border border-border/60">
-            <table className="min-w-full text-sm">
-              <thead className="bg-surface-2 text-[10px] uppercase tracking-wider text-text-muted">
-                <tr>
-                  <th className="text-left px-3 py-2">Invoice #</th>
-                  <th className="text-left px-3 py-2">Customer</th>
-                  <th className="text-left px-3 py-2">Date</th>
-                  <th className="text-left px-3 py-2">Item</th>
-                  <th className="text-left px-3 py-2">SKU / Zoho item</th>
-                  <th className="text-right px-3 py-2">Qty</th>
-                  <th className="text-left px-3 py-2">Status</th>
-                  <th className="text-right px-3 py-2">Suggested</th>
-                  <th className="text-right px-3 py-2">Confirmed</th>
-                  <th className="text-left px-3 py-2">Warnings</th>
-                  <th className="text-left px-3 py-2">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLines.map((r) => {
-                  const a = aggByLine.get(r.lineId);
-                  const status = !a
+      {/* Master-detail grid: queue on the left, review panel on the right. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] gap-6 items-start">
+        <SectionCard
+          eyebrow="Queue"
+          title="Invoice lines"
+          subtitle={
+            filteredLines.length === 0
+              ? hasAnyData
+                ? "No invoice lines match the current filters."
+                : undefined
+              : `Showing ${filteredLines.length} of ${lineRows.length} line${lineRows.length === 1 ? "" : "s"}.`
+          }
+          tone="muted"
+          pad="tight"
+        >
+          {filteredLines.length === 0 ? (
+            hasAnyData ? (
+              <DataEmptyState
+                icon={Filter}
+                title="No invoice lines match these filters"
+                body="Adjust the filters above, or reset to see every invoice line."
+                action={
+                  <Link
+                    href="/invoice-allocations"
+                    className="text-[12px] font-medium text-brand-800 hover:text-brand-700 underline-offset-2 hover:underline"
+                  >
+                    Reset filters →
+                  </Link>
+                }
+              />
+            ) : (
+              <DataEmptyState
+                icon={Inbox}
+                title="No Zoho invoice lines yet"
+                body={
+                  <>
+                    Invoice rows arrive via the apply phase of COMMERCIAL-TRACE-3.
+                    Once seeded, every line surfaces here and the suggestion
+                    engine can be invoked per-line.
+                  </>
+                }
+                tone="muted"
+              />
+            )
+          ) : (
+            <ul className="divide-y divide-border/70">
+              {filteredLines.map((r) => {
+                const a = aggByLine.get(r.lineId);
+                const lineStatus =
+                  !a
                     ? "Unallocated"
                     : a.confirmedCount === a.rowCount
                       ? "Confirmed by operator"
                       : a.hasNeedsReview
                         ? "Needs review"
                         : "Suggested";
-                  const warnings: string[] = [];
-                  if (!r.zohoItemId && !r.sku) warnings.push("Missing item id / SKU");
-                  if (!r.customerId) warnings.push("Missing customer");
-                  if (r.quantity == null) warnings.push("Missing quantity");
-                  return (
-                    <tr key={r.lineId} className="border-t border-border/40">
-                      <td className="px-3 py-2 font-mono">{r.invoiceNumber ?? "—"}</td>
-                      <td className="px-3 py-2">{r.customerName ?? "—"}</td>
-                      <td className="px-3 py-2 font-mono">{fmtDate(r.invoiceDate)}</td>
-                      <td className="px-3 py-2">{r.itemName}</td>
-                      <td className="px-3 py-2 font-mono text-[11px]">
-                        {r.sku ?? "—"}
-                        {r.zohoItemId ? (
-                          <span className="block text-text-muted">{r.zohoItemId}</span>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono">
-                        {r.quantity ?? "?"} {r.unit ?? ""}
-                      </td>
-                      <td className="px-3 py-2">{status}</td>
-                      <td className="px-3 py-2 text-right font-mono">
-                        {a ? a.suggestedQty : 0}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono">
-                        {a ? a.confirmedQty : 0}
-                      </td>
-                      <td className="px-3 py-2 text-amber-700 text-[11px]">
-                        {warnings.length > 0 ? warnings.join(" · ") : ""}
-                      </td>
-                      <td className="px-3 py-2">
-                        <Link
-                          href={`/invoice-allocations?invoice_line=${r.lineId}`}
-                          className="text-brand-700 hover:underline"
-                        >
-                          Review
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </ProductionSection>
+                const statusTone =
+                  lineStatus === "Confirmed by operator"
+                    ? "good"
+                    : lineStatus === "Needs review"
+                      ? "warn"
+                      : lineStatus === "Suggested"
+                        ? "info"
+                        : "muted";
+                const warnings: string[] = [];
+                if (!r.zohoItemId && !r.sku) warnings.push("Missing item id / SKU");
+                if (!r.customerId) warnings.push("Missing customer");
+                if (r.quantity == null) warnings.push("Missing quantity");
+                const isSelected = selectedInvoiceLineId === r.lineId;
+                return (
+                  <li key={r.lineId}>
+                    <Link
+                      href={`/invoice-allocations?invoice_line=${r.lineId}`}
+                      className={
+                        "group block py-3 pl-3 pr-4 transition-colors " +
+                        (isSelected ? "bg-surface-2/70" : "hover:bg-surface-2/40")
+                      }
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-[12px] text-text-strong tabular">
+                              {r.invoiceNumber ?? "(no invoice number)"}
+                            </span>
+                            <StatusBadge tone={statusTone as "good" | "warn" | "info" | "muted"}>
+                              {lineStatus}
+                            </StatusBadge>
+                            <span className="text-[10.5px] text-text-subtle font-mono uppercase tracking-[0.08em]">
+                              {fmtDate(r.invoiceDate)}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-[13px] text-text-strong font-medium tracking-tight truncate">
+                            {r.itemName}
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-3 text-[11px] text-text-muted">
+                            <span className="truncate">{r.customerName ?? "Missing customer"}</span>
+                            {r.sku ? <span className="font-mono text-text-subtle">{r.sku}</span> : null}
+                          </div>
+                          {warnings.length > 0 ? (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                              {warnings.map((w) => (
+                                <StatusBadge key={w} tone="warn" icon={AlertTriangle}>
+                                  {w}
+                                </StatusBadge>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                          <div className="font-mono text-[13px] tabular text-text-strong">
+                            {r.quantity ?? "?"} <span className="text-text-subtle">{r.unit ?? ""}</span>
+                          </div>
+                          <div className="text-[10.5px] uppercase tracking-[0.10em] text-text-subtle">
+                            {a ? (
+                              <>
+                                <span className="text-good-700 font-mono tabular">{a.confirmedQty}</span>
+                                <span className="text-text-subtle"> / </span>
+                                <span className="text-info-700 font-mono tabular">{a.suggestedQty}</span>
+                              </>
+                            ) : (
+                              <span className="text-text-subtle">No suggestions</span>
+                            )}
+                          </div>
+                          <ArrowRight className="h-3.5 w-3.5 text-text-subtle group-hover:text-brand-800 transition-colors" />
+                        </div>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </SectionCard>
 
-      {/* Detail panel */}
-      {detail.line ? (
-        <ProductionSection
-          title={`Review · invoice ${detail.line.invoiceNumber ?? "(no number)"} · ${detail.line.itemName}`}
-          subtitle="Confirmed allocations become the bridge for CSR / Nexus invoice → batch lookup later. Customer-scope responses never expose supplier lot, internal receipt, raw bag QR, operator, or machine details."
-          tone="INFO"
-        >
-          <ProductionIdentityBlock
-            rows={[
-              { label: "Invoice #", value: detail.line.invoiceNumber, mono: true },
-              { label: "Invoice date", value: fmtDate(detail.line.invoiceDate), mono: true },
-              { label: "Customer", value: detail.line.customerName ?? "Missing" },
-              { label: "Item", value: detail.line.itemName },
-              { label: "SKU", value: detail.line.sku, mono: true },
-              { label: "Zoho item id", value: detail.line.zohoItemId, mono: true },
-              {
-                label: "Invoice qty",
-                value: `${detail.line.quantity ?? "?"} ${detail.line.unit ?? ""}`,
-                mono: true,
-              },
-              { label: "Suggestion rows", value: detail.rows.length, mono: true },
-            ] satisfies IdentityRow[]}
-          />
+        {/* Review panel — sticky on the right at lg+, full-width below. */}
+        <div className="lg:sticky lg:top-6">
+          {detail.line ? (
+            <SectionCard
+              eyebrow={`Review · ${detail.line.invoiceNumber ?? "(no number)"}`}
+              title={detail.line.itemName}
+              subtitle={
+                <>
+                  Confirmed rows become the bridge for Nexus invoice → batch lookup.
+                  Customer-scope responses never expose supplier lot, internal
+                  receipt, raw bag QR, operator, or machine details.
+                </>
+              }
+              tone="info"
+              actions={
+                <Link
+                  href="/invoice-allocations"
+                  className="text-[11px] font-medium text-text-muted hover:text-text underline-offset-2 hover:underline"
+                >
+                  Close
+                </Link>
+              }
+            >
+              <FieldGroup
+                columns={2}
+                rows={
+                  [
+                    { label: "Invoice", value: detail.line.invoiceNumber, mono: true },
+                    { label: "Invoice date", value: fmtDate(detail.line.invoiceDate), mono: true },
+                    { label: "Customer", value: detail.line.customerName },
+                    {
+                      label: "Invoice qty",
+                      value: `${detail.line.quantity ?? "?"} ${detail.line.unit ?? ""}`,
+                      mono: true,
+                    },
+                    { label: "SKU", value: detail.line.sku, mono: true },
+                    { label: "Zoho item id", value: detail.line.zohoItemId, mono: true },
+                  ] satisfies FieldRow[]
+                }
+              />
 
-          <InvoiceAllocationActions
-            invoiceLineId={detail.line.lineId}
-            rows={detail.rows.map((row) => ({
-              id: row.id,
-              finishedLotNumber: row.finishedLotNumber,
-              traceCode: row.traceCode,
-              shipmentFinishedLotId: row.shipmentFinishedLotId,
-              packedAt: row.packedAt ? row.packedAt.toISOString() : null,
-              shippedAt: row.shippedAt ? row.shippedAt.toISOString() : null,
-              quantityAllocated: row.quantityAllocated,
-              unit: row.unit,
-              confidence: row.confidence,
-              source: row.source,
-              status: row.status,
-              confirmed: row.confirmed,
-              confirmedAt: row.confirmedAt ? row.confirmedAt.toISOString() : null,
-              notes: row.notes,
-            }))}
-          />
-        </ProductionSection>
-      ) : null}
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: "GOOD" | "WARN" | "CRITICAL" | "INFO" | "MUTED";
-}) {
-  const ring: Record<typeof tone, string> = {
-    GOOD: "border-emerald-500/40 bg-emerald-500/5",
-    WARN: "border-amber-500/40 bg-amber-500/5",
-    CRITICAL: "border-red-500/40 bg-red-500/5",
-    INFO: "border-cyan-500/40 bg-cyan-500/5",
-    MUTED: "border-slate-500/40 bg-slate-500/5",
-  };
-  return (
-    <div className={`rounded-md border px-3 py-2 ${ring[tone]}`}>
-      <div className="text-[10px] uppercase tracking-[0.10em] text-text-muted">
-        {label}
+              <div className="mt-4">
+                <InvoiceAllocationActions
+                  invoiceLineId={detail.line.lineId}
+                  rows={detail.rows.map((row) => ({
+                    id: row.id,
+                    finishedLotNumber: row.finishedLotNumber,
+                    traceCode: row.traceCode,
+                    shipmentFinishedLotId: row.shipmentFinishedLotId,
+                    packedAt: row.packedAt ? row.packedAt.toISOString() : null,
+                    shippedAt: row.shippedAt ? row.shippedAt.toISOString() : null,
+                    quantityAllocated: row.quantityAllocated,
+                    unit: row.unit,
+                    confidence: row.confidence,
+                    source: row.source,
+                    status: row.status,
+                    confirmed: row.confirmed,
+                    confirmedAt: row.confirmedAt ? row.confirmedAt.toISOString() : null,
+                    notes: row.notes,
+                  }))}
+                />
+              </div>
+            </SectionCard>
+          ) : (
+            <RecordCard as="div" tone="muted" className="px-5 py-6">
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-surface-2 border border-border">
+                  <ClipboardList className="h-4 w-4 text-text-muted" />
+                </span>
+                <div>
+                  <p className="text-[13px] font-semibold tracking-tight text-text-strong">
+                    Select an invoice line to review
+                  </p>
+                  <p className="mt-1 text-[12px] text-text-muted leading-relaxed">
+                    Pick a row on the left. The review panel will load the
+                    engine&apos;s suggested finished lots, their confidence, and
+                    the Confirm / Reject actions.
+                  </p>
+                </div>
+              </div>
+            </RecordCard>
+          )}
+        </div>
       </div>
-      <div className="text-xl font-semibold">{value.toLocaleString()}</div>
-    </div>
+    </CommandShell>
   );
 }
 
-function Field({
+// ── Page-local form bits ────────────────────────────────────────────
+
+function FilterField({
   name,
   label,
-  type = "text",
   defaultValue,
   placeholder,
+  mono,
 }: {
   name: string;
   label: string;
-  type?: string;
   defaultValue?: string;
   placeholder?: string;
+  mono?: boolean;
 }) {
   return (
     <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-text-muted">{label}</span>
+      <span className="block eyebrow mb-1">{label}</span>
       <input
         name={name}
-        type={type}
+        type="text"
         defaultValue={defaultValue}
         placeholder={placeholder}
-        className="mt-1 w-full h-9 px-2 rounded-md border border-border bg-surface text-sm focus:border-brand-500 focus:outline-none"
+        className={
+          "w-full h-9 px-2.5 rounded-md border border-border bg-surface text-[12.5px] " +
+          "focus:border-brand-500 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/15 " +
+          (mono ? "font-mono text-[12px] tracking-normal" : "")
+        }
       />
     </label>
   );
 }
 
-function SelectField({
+function FilterSelect({
   name,
   label,
   options,
@@ -635,11 +691,11 @@ function SelectField({
 }) {
   return (
     <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-text-muted">{label}</span>
+      <span className="block eyebrow mb-1">{label}</span>
       <select
         name={name}
         defaultValue={defaultValue ?? ""}
-        className="mt-1 w-full h-9 px-2 rounded-md border border-border bg-surface text-sm focus:border-brand-500 focus:outline-none"
+        className="w-full h-9 px-2.5 rounded-md border border-border bg-surface text-[12.5px] focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -647,6 +703,42 @@ function SelectField({
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+function ToggleCheckbox({
+  name,
+  label,
+  defaultChecked,
+}: {
+  name: string;
+  label: string;
+  defaultChecked?: boolean;
+}) {
+  return (
+    <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+      <span className="relative inline-flex h-4 w-4">
+        <input
+          type="checkbox"
+          name={name}
+          value="true"
+          defaultChecked={defaultChecked}
+          className="peer absolute inset-0 h-full w-full appearance-none rounded-[4px] border border-border bg-surface checked:border-brand-accent checked:bg-brand-accent transition-colors"
+        />
+        <svg
+          aria-hidden
+          className="pointer-events-none absolute inset-0 m-auto h-3 w-3 stroke-white opacity-0 peer-checked:opacity-100"
+          viewBox="0 0 24 24"
+          fill="none"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 12l5 5L20 7" />
+        </svg>
+      </span>
+      <span className="text-[11.5px] text-text-muted">{label}</span>
     </label>
   );
 }

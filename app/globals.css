@@ -2,22 +2,215 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * LUMA-UI-REBUILD-1 — Industrial Command Surface design tokens.
+ *
+ * Three-layer color system:
+ *   - canvas: the page background (warm-neutral, NOT pure white)
+ *   - surface: lifted card / panel / table backgrounds (pure white)
+ *   - surface-2: nested wells / inputs / chips (cool-neutral)
+ *
+ * Type system:
+ *   - sans: refined display + body, system-stack with feature settings on
+ *   - mono: ID-shaped data (trace codes, receipts, UUIDs)
+ *
+ * Signature motif: 3px status rail anchored to the left of section
+ * cards and active sidebar items. Earned color only — emerald / amber /
+ * red / slate / cyan never appear as decoration.
+ */
+
 @layer base {
   :root {
-    --bg-page: 250 250 250;
-    --bg-surface: 255 255 255;
-    --bg-surface-2: 245 245 245;
-    --text: 15 23 42;
-    --text-muted: 71 85 105;
-    --text-subtle: 148 163 184;
-    --border: 226 232 240;
-    --brand-50: 240 253 250;
-    --brand-100: 204 251 241;
-    --brand-700: 13 148 136;
-    --brand-800: 17 94 89;
+    /* ── Canvas + surfaces ────────────────────────────────────────── */
+    --bg-canvas: 248 247 245;        /* warm-neutral, slightly off-white */
+    --bg-page: 248 247 245;          /* legacy alias for bg-canvas */
+    --bg-surface: 255 255 255;       /* lifted card / panel */
+    --bg-surface-2: 244 243 240;     /* nested well / input fill */
+    --bg-surface-3: 234 232 227;     /* chip / divider tint */
+    --bg-inverse: 18 22 30;          /* dark surface for command-bar accents */
+
+    /* ── Text scale ───────────────────────────────────────────────── */
+    --text: 12 16 24;                /* near-black, warm */
+    --text-strong: 7 10 16;          /* hero numbers / titles */
+    --text-muted: 82 92 108;
+    --text-subtle: 132 142 158;
+    --text-on-inverse: 244 243 240;
+
+    /* ── Hairlines + structure ────────────────────────────────────── */
+    --border: 224 222 216;           /* warm hairline */
+    --border-strong: 198 196 188;
+    --border-inverse: 35 42 54;
+
+    /* ── Brand: deep cyan-teal, single confident accent ──────────── */
+    --brand-50:  240 250 250;
+    --brand-100: 215 240 240;
+    --brand-200: 180 224 222;
+    --brand-500: 22 138 140;
+    --brand-600: 18 122 124;
+    --brand-700: 13 100 102;
+    --brand-800: 11 78 82;
+    --brand-900: 10 60 64;
+    /* Hot accent used ONLY on the primary CTA + active nav rail. */
+    --brand-accent: 6 182 178;
+
+    /* ── Status tones — earned only, never decoration ────────────── */
+    --good-50:  236 253 245;
+    --good-500: 16 175 119;
+    --good-700: 14 124 84;
+    --warn-50:  254 247 224;
+    --warn-500: 217 152 12;
+    --warn-700: 161 100 10;
+    --crit-50:  254 239 236;
+    --crit-500: 211 60 50;
+    --crit-700: 162 38 30;
+    --info-50:  239 247 252;
+    --info-500: 22 132 184;
+    --info-700: 18 100 142;
+    --muted-50:  244 243 240;
+    --muted-500: 122 130 142;
+    --muted-700: 82 90 102;
+
+    /* ── Shadows: refined, never decorative ──────────────────────── */
+    --shadow-rail:  0 1px 0 rgb(0 0 0 / 0.04), 0 0 0 1px rgb(var(--border) / 0.9);
+    --shadow-card:  0 1px 2px rgb(15 22 36 / 0.04), 0 1px 0 rgb(15 22 36 / 0.03);
+    --shadow-pop:   0 12px 32px -8px rgb(15 22 36 / 0.18), 0 4px 12px -2px rgb(15 22 36 / 0.06);
+
+    /* ── Sans display + mono pairing ─────────────────────────────── */
+    --font-sans: "Geist", "InterVariable", ui-sans-serif, system-ui, -apple-system,
+                 BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+    --font-display: "GeistDisplay", "Geist", "InterVariable", ui-sans-serif,
+                    system-ui, sans-serif;
+    --font-mono: "GeistMono", "JetBrains Mono", "IBM Plex Mono", ui-monospace,
+                 SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
+
+  html {
+    font-feature-settings:
+      "ss01" on, "ss02" on, "ss03" on,
+      "cv01" on, "cv02" on, "cv11" on,
+      "tnum" on, "calt" on;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
-    background: rgb(var(--bg-page));
+    background: rgb(var(--bg-canvas));
     color: rgb(var(--text));
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11", "tnum", "calt";
   }
+
+  /* Subtle grid-rule texture on the page canvas — feels like
+     engineering paper, never decorative enough to read as pattern. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      linear-gradient(rgb(15 22 36 / 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(15 22 36 / 0.025) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: -1px -1px;
+    mask-image: radial-gradient(ellipse at top, black 0%, transparent 70%);
+    -webkit-mask-image: radial-gradient(ellipse at top, black 0%, transparent 70%);
+  }
+
+  /* Tabular numerals everywhere — invoice numbers, quantities, dates.
+     Critical for command-center readability. */
+  .tabular,
+  .font-mono,
+  code,
+  kbd,
+  samp {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Selection: brand teal, not browser default blue. */
+  ::selection {
+    background: rgb(var(--brand-500) / 0.22);
+    color: rgb(var(--text-strong));
+  }
+
+  /* Focus ring: brand teal, offset, never the system blue. */
+  *:focus-visible {
+    outline: 2px solid rgb(var(--brand-500) / 0.7);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  /* The signature 3px status rail. Applied to section headers and
+     section cards via data-tone="good|warn|crit|info|muted" or via
+     the .rail-* utilities. */
+  .rail {
+    position: relative;
+  }
+  .rail::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: 3px;
+    border-top-left-radius: inherit;
+    border-bottom-left-radius: inherit;
+    background: rgb(var(--border-strong));
+  }
+  .rail-good::before  { background: rgb(var(--good-500)); }
+  .rail-warn::before  { background: rgb(var(--warn-500)); }
+  .rail-crit::before  { background: rgb(var(--crit-500)); }
+  .rail-info::before  { background: rgb(var(--info-500)); }
+  .rail-muted::before { background: rgb(var(--muted-500)); }
+  .rail-brand::before { background: rgb(var(--brand-accent)); }
+
+  /* Card surface — the canonical lifted panel. */
+  .surface-card {
+    background: rgb(var(--bg-surface));
+    border: 1px solid rgb(var(--border));
+    border-radius: 10px;
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Inset well — for inputs, code blocks, identity rows. */
+  .surface-well {
+    background: rgb(var(--bg-surface-2));
+    border: 1px solid rgb(var(--border));
+    border-radius: 8px;
+  }
+
+  /* Eyebrow label — used above hero titles and above metrics. */
+  .eyebrow {
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: rgb(var(--text-subtle));
+  }
+
+  /* Display number — the hero metric voice. */
+  .display-num {
+    font-family: var(--font-display);
+    font-feature-settings: "tnum", "ss01", "cv11";
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: rgb(var(--text-strong));
+  }
+}
+
+@layer utilities {
+  /* Inverse band — used in the sidebar header and command-bar accents. */
+  .bg-inverse {
+    background: rgb(var(--bg-inverse));
+    color: rgb(var(--text-on-inverse));
+  }
+  .border-inverse { border-color: rgb(var(--border-inverse)); }
+
+  /* Hairline divider — replaces border-border/40 for clearer intent. */
+  .divider-h { border-top: 1px solid rgb(var(--border)); }
+  .divider-v { border-left: 1px solid rgb(var(--border)); }
 }
