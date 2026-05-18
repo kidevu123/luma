@@ -4,6 +4,38 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
 
 ---
 
+## LUMA-UI-FINAL-1: Operations Atelier final premium UI pass (complete)
+- Date: 2026-05-18
+- Branch: `production-intelligence-command-center`
+- SHA: `bf169243ecb7e4c37f54c7d9915a644f3c575c7d`
+- Result: full chrome rebuild on 4 remaining pages + minor test-string fix on 1 page. All builds clean. 1652/1652 PASS. Staging verified.
+- Skill: `frontend-design` (Operations Atelier design language). Handoff doc read before coding.
+- Files changed (1 commit, SHA `bf16924`):
+  - **REBUILT** `app/(admin)/inbound/packaging-materials/page.tsx` — `CommandShell` + `PageHero` + `RibbonStrip` + search-params-driven tabbed `SectionCard` layout. Old `PageHeader` + `ProductionSection` (uppercase tones) removed.
+  - **REBUILT** `app/(admin)/material-alerts/page.tsx` — `CommandShell` + `PageHero` + `RibbonStrip` (5 segments) + tone-aware `SectionCard` per alert section. Old `PageHeader` + shadcn `Card`/`CardHeader` removed. `ShortageRecommendationsPanel` client component preserved unchanged.
+  - **REBUILT** `app/(admin)/recall/page.tsx` — `CommandShell` + `PageHero` + `SectionCard` per passport section + `FieldGroup` + `DataEmptyState` + `StatusBadge`. Old `PageHeader` + `ProductionIdentityBlock` + local `ConfBadge` removed. All search logic unchanged.
+  - **REBUILT** `app/(admin)/packaging-output/page.tsx` — `CommandShell` + `PageHero` + `RibbonStrip` (4 segments: released lots/units, damage rate, on-time) + two `SectionCard` wrappers. Fixed TypeScript errors from comparing `MetricResult.value` (`string | number | null`) against numeric thresholds — added explicit `typeof === "number"` narrowing before comparisons.
+  - **MINOR FIX** `app/(admin)/invoice-allocations/page.tsx` — restored two test-expected strings altered in the prior LUMA-UI-REBUILD-1 Turn 1 pivot: `ActionPanel` title and `DataEmptyState` body. No chrome changes.
+- Design system used: `components/production/luma-ui.tsx` — `CommandShell`, `PageHero`, `RibbonStrip`, `SectionCard`, `FieldGroup`, `DataEmptyState`, `StatusBadge`. No business logic / projectors / migrations / event types changed.
+- Type safety fix: `MetricResult.value` is `string | number | null`; all four numeric threshold comparisons and `.toFixed()` calls now guarded by `typeof val === "number"` checks.
+- Pre-broken tests fixed: `lib/production/invoice-allocation-actions-shape.test.ts` asserts exact strings in the invoice-allocations page source. Two strings had drifted during LUMA-UI-REBUILD-1 Turn 1; restored to match expectations.
+- Build / test / smoke:
+  - `npx tsc --noEmit` → clean.
+  - `npx vitest run` → 1652 / 1652 PASS.
+  - `npx next build` → clean.
+  - Staging health: `{"status":"ok","checks":{"app":"ok","db":"ok"},"sha":"bf169243ecb7e4c37f54c7d9915a644f3c575c7d","elapsedMs":0}`.
+  - Auth smoke: not runnable from local dev machine (SSH key not provisioned on LXC 122). No routes added or removed in this phase; prior auth smoke at COMMERCIAL-TRACE-7 was 51/51 PASS on the same route list.
+- Taste audit summary:
+  - `RibbonStrip` at page top creates immediate operational KPI visibility across all redesigned pages.
+  - `SectionCard` tone rails (`warn`/`crit`/`good`) give visual triage without table row coloring.
+  - `DataEmptyState` with contextual icons replaces blank tables.
+  - `MetricCard` on `/packaging-output` remains visually slightly out-of-place (dark-on-dark style from old floor-board context); minor inconsistency only.
+  - `/floor-board` excluded by design — uses custom dark-canvas primitives that cannot share `CommandShell`'s light canvas without a full dark-mode audit.
+- Full review doc: `docs/UI_FINAL_1_REVIEW.md`.
+- Luma readiness: ready for human walkthrough of all 9 redesigned pages. Known gap: `MetricCard` light-canvas polish (cosmetic only).
+
+---
+
 ## COMMERCIAL-TRACE-7: mock end-to-end commercial-trace verification (complete)
 - Date: 2026-05-16
 - Result: `scripts/verify-commercial-trace.ts` ships at SHA `db5e61c`. Staging run **VERIFY OK** — seeded QA fixture, exercised all three Nexus endpoints across 10 assertions, cleaned up every QA row. No live Zoho calls. No Nexus modifications. No complaint tables. No POST/PUT/PATCH/DELETE methods constructed anywhere in the harness.

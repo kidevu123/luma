@@ -698,6 +698,23 @@ This phase supersedes the earlier "INTAKE-UX-1" entry below — same target, bro
 
 ---
 
+### [x] LUMA-UI-FINAL-1 — Operations Atelier final premium UI pass
+**Objective.** Complete the Operations Atelier chrome rebuild on the 5 remaining pages that still used the old `PageHeader` + shadcn cards design. No business logic, projectors, migrations, or event types changed.
+
+**Pages rebuilt (full chrome):**
+- `/inbound/packaging-materials` — `CommandShell` + `PageHero` + `RibbonStrip` + tabbed `SectionCard`
+- `/material-alerts` — `CommandShell` + `PageHero` + `RibbonStrip` + tone-aware `SectionCard` per section
+- `/recall` — `CommandShell` + `PageHero` + `SectionCard` + `FieldGroup` + `DataEmptyState` + `StatusBadge`
+- `/packaging-output` — `CommandShell` + `PageHero` + `RibbonStrip` + two `SectionCard` wrappers
+
+**Minor fix:** `/invoice-allocations` — two test-expected strings restored that had drifted in the prior LUMA-UI-REBUILD-1 Turn 1 pivot. No chrome changes.
+
+**TypeScript fix:** `MetricResult.value` is `string | number | null`. All numeric threshold comparisons and `.toFixed()` calls in `packaging-output/page.tsx` guarded by `typeof val === "number"` narrowing.
+
+**Closeout (2026-05-18, SHA `bf16924`).** tsc clean / vitest **1652/1652** (no regression; pre-broken test strings restored) / next build clean / staging health ok at SHA `bf169243ecb7e4c37f54c7d9915a644f3c575c7d` / auth smoke not re-run from local dev (no routes added/removed; prior 51/51 PASS still current). Full review doc: `docs/UI_FINAL_1_REVIEW.md`.
+
+---
+
 ### [ ] COMMERCIAL-TRACE-8 — Live Zoho verification after token reauth
 **Objective.** After gateway operator re-authorizes `haute_brands` tokens, run invoice dry-run against real Zoho data. Promote a small batch via review UI. Validate Nexus endpoint outputs against a real customer's invoice.
 
