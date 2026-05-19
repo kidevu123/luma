@@ -64,10 +64,15 @@ export function TabletTypeDialog({
               action={async (form) => {
                 setPending(true);
                 setError(null);
-                const r = await saveTabletTypeAction(form);
-                setPending(false);
-                if (r?.error) setError(r.error);
-                else setOpen(false);
+                try {
+                  const r = await saveTabletTypeAction(form);
+                  setPending(false);
+                  if (r?.error) setError(r.error);
+                  else setOpen(false);
+                } catch {
+                  setPending(false);
+                  setError("Session expired — please reload the page and try again.");
+                }
               }}
               className="p-5 space-y-4"
             >

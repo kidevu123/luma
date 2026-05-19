@@ -5,9 +5,19 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth-guards";
 import { createProduct, updateProduct, deleteProduct } from "@/lib/db/queries/products";
 
+function generateSku(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 20);
+  const suffix = Math.random().toString(36).slice(2, 7).toUpperCase();
+  return `LUMA-${slug}-${suffix}`;
+}
+
 const schema = z.object({
   id: z.string().uuid().optional(),
-  sku: z.string().min(1).max(60),
+  sku: z.string().max(60).optional().nullable(),
   name: z.string().min(1).max(120),
   kind: z.enum(["CARD", "BOTTLE", "VARIETY"]),
   tabletsPerUnit: z.coerce.number().int().min(0).optional().nullable(),
@@ -24,7 +34,7 @@ export async function saveProductAction(
   const actor = await requireAdmin();
   const parsed = schema.safeParse({
     id: formData.get("id") || undefined,
-    sku: formData.get("sku"),
+    sku: formData.get("sku") || null,
     name: formData.get("name"),
     kind: formData.get("kind"),
     tabletsPerUnit: formData.get("tabletsPerUnit") || null,
@@ -37,7 +47,9 @@ export async function saveProductAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
-  const { id, ...input } = parsed.data;
+  const { id, sku, ...rest } = parsed.data;
+  const resolvedSku = sku?.trim() || generateSku(rest.name);
+  const input = { sku: resolvedSku, ...rest };
   try {
     if (id) {
       await updateProduct(id, input, actor);

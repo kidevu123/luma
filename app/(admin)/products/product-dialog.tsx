@@ -71,14 +71,18 @@ export function ProductDialog({
               action={async (form) => {
                 setPending(true);
                 setError(null);
-                const r = await saveProductAction(form);
-                setPending(false);
-                if (r?.error) { setError(r.error); return; }
-                if (r?.id) {
-                  // New product — go straight to BOM editor
-                  router.push(`/products/${r.id}`);
-                } else {
-                  setOpen(false);
+                try {
+                  const r = await saveProductAction(form);
+                  setPending(false);
+                  if (r?.error) { setError(r.error); return; }
+                  if (r?.id) {
+                    router.push(`/products/${r.id}`);
+                  } else {
+                    setOpen(false);
+                  }
+                } catch {
+                  setPending(false);
+                  setError("Session expired — please reload the page and try again.");
                 }
               }}
               className="p-5 space-y-4"
@@ -87,7 +91,13 @@ export function ProductDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="sku">SKU</Label>
-                  <Input id="sku" name="sku" defaultValue={row?.sku ?? ""} required autoFocus />
+                  <Input
+                    id="sku"
+                    name="sku"
+                    defaultValue={row?.sku ?? ""}
+                    placeholder="optional — auto-generated if blank"
+                    autoFocus
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="kind">Kind</Label>
@@ -155,12 +165,12 @@ export function ProductDialog({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="zohoItemId">Zoho item ID</Label>
+                  <Label htmlFor="zohoItemId">Zoho item ID (single unit)</Label>
                   <Input
                     id="zohoItemId"
                     name="zohoItemId"
                     defaultValue={row?.zohoItemId ?? ""}
-                    placeholder="optional"
+                    placeholder="optional — display &amp; case IDs coming soon"
                   />
                 </div>
               </div>
@@ -193,10 +203,15 @@ export function ProductDialog({
                         disabled={pending}
                         onClick={async () => {
                           setPending(true);
-                          const r = await deleteProductAction(row.id);
-                          setPending(false);
-                          if (r?.error) { setError(r.error); setConfirmDelete(false); }
-                          else { setOpen(false); router.refresh(); }
+                          try {
+                            const r = await deleteProductAction(row.id);
+                            setPending(false);
+                            if (r?.error) { setError(r.error); setConfirmDelete(false); }
+                            else { setOpen(false); router.refresh(); }
+                          } catch {
+                            setPending(false);
+                            setError("Session expired — please reload the page and try again.");
+                          }
                         }}
                         className="text-xs text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
                       >
