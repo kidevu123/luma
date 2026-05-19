@@ -33,7 +33,7 @@ export default async function LoginPage() {
               Enter your credentials to access the system.
             </p>
           </div>
-          <LoginForm />
+          <LoginForm oidcEnabled={Boolean(process.env.AUTHENTIK_CLIENT_ID)} />
           <p className="pt-1 text-center text-[11px] text-text-subtle">
             Need help? Contact your system administrator.
           </p>

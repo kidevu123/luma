@@ -176,3 +176,19 @@ export async function currentUser(): Promise<CurrentUser | null> {
     employeeId,
   };
 }
+
+export async function createSessionCookie(user: { id: string; role: SessionPayload["role"]; email: string }) {
+  const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
+  const token = await signToken({ uid: user.id, role: user.role, email: user.email, exp });
+  return {
+    name: COOKIE_NAME,
+    value: token,
+    options: {
+      httpOnly: true,
+      sameSite: "lax" as const,
+      secure: process.env.NODE_ENV === "production" && (process.env.APP_URL ?? "").startsWith("https"),
+      path: "/",
+      maxAge: COOKIE_MAX_AGE,
+    },
+  };
+}
