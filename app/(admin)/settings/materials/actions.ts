@@ -100,3 +100,23 @@ export async function toggleMaterialItemActiveAction(
   revalidatePath("/settings/materials");
   return { ok: true };
 }
+
+export async function deleteMaterialAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  await requireAdmin();
+  const id = z.string().uuid().safeParse(formData.get("id"));
+  if (!id.success) return { error: "Invalid id." };
+  try {
+    await db.delete(packagingMaterials).where(and(eq(packagingMaterials.id, id.data)));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Delete failed.";
+    if (msg.includes("foreign key") || msg.includes("violates") || msg.includes("constraint")) {
+      return { error: "This material has receiving or BOM records — deactivate it instead of deleting." };
+    }
+    return { error: msg };
+  }
+  revalidatePath("/settings/materials");
+  revalidatePath("/inbound/packaging-materials");
+  return { ok: true };
+}

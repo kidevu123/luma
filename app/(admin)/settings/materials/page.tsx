@@ -1,16 +1,16 @@
-// Phase H.x5 — material item master list. Lets the admin create
-// the master records for every packaging material the floor will
-// later consume (display boxes, cases, bottles, caps, labels,
-// induction seals, PVC rolls, foil rolls). Empty by default.
-
 import { db } from "@/lib/db";
 import { eq, desc, sql } from "drizzle-orm";
 import { packagingMaterials } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
-import { PageHeader } from "@/components/ui/page-header";
+import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header";
+import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input, Label, Select } from "@/components/ui/input";
+import { Boxes } from "lucide-react";
 import {
   saveMaterialItemAction,
   toggleMaterialItemActiveAction,
+  deleteMaterialAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +26,10 @@ const KIND_LABELS: Record<string, string> = {
   SHRINK_BAND: "Shrink band",
   PVC_ROLL: "PVC roll",
   FOIL_ROLL: "Foil roll",
+  BLISTER_FOIL: "Blister foil",
+  HEAT_SEAL_FILM: "Heat-seal film",
+  DESICCANT: "Desiccant",
+  COTTON: "Cotton",
   OTHER: "Other",
 };
 
@@ -41,144 +45,126 @@ export default async function MaterialsAdminPage({
   const rows = await db
     .select()
     .from(packagingMaterials)
-    .where(
-      kindFilter
-        ? eq(packagingMaterials.kind, kindFilter as never)
-        : sql`true`,
-    )
+    .where(kindFilter ? eq(packagingMaterials.kind, kindFilter as never) : sql`true`)
     .orderBy(desc(packagingMaterials.createdAt));
   const filtered = q
-    ? rows.filter(
-        (r) =>
-          r.name.toLowerCase().includes(q) ||
-          r.sku.toLowerCase().includes(q),
-      )
+    ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.sku.toLowerCase().includes(q))
     : rows;
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Materials"
-        description={`${rows.length} item${rows.length === 1 ? "" : "s"} in the master list. Inactive items are hidden from new BOM and receiving forms.`}
+        description={`${rows.length} item${rows.length === 1 ? "" : "s"} in the master list. Inactive items are hidden from BOM and receiving forms.`}
       />
 
       {/* Filter bar */}
-      <form
-        method="get"
-        className="rounded-md border border-slate-700/60 bg-slate-900/60 p-3 flex flex-wrap items-end gap-2"
-      >
-        <label className="block">
-          <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">Kind</span>
-          <select
-            name="kind"
-            defaultValue={kindFilter ?? "ALL"}
-            className="mt-1 h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
-          >
-            <option value="ALL">All</option>
+      <form method="get" className="flex flex-wrap items-end gap-2 rounded-xl border border-border bg-surface px-4 py-3">
+        <div className="space-y-1">
+          <Label htmlFor="kind-filter">Kind</Label>
+          <Select id="kind-filter" name="kind" defaultValue={kindFilter ?? "ALL"}>
+            <option value="ALL">All kinds</option>
             {Object.entries(KIND_LABELS).map(([k, label]) => (
-              <option key={k} value={k}>
-                {label}
-              </option>
+              <option key={k} value={k}>{label}</option>
             ))}
-          </select>
-        </label>
-        <label className="block flex-1 min-w-[200px]">
-          <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">Search</span>
-          <input
-            type="text"
-            name="q"
-            placeholder="name or sku"
-            defaultValue={q}
-            className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
-          />
-        </label>
-        <button
-          type="submit"
-          className="h-9 px-3 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm"
-        >
-          Filter
-        </button>
+          </Select>
+        </div>
+        <div className="space-y-1 flex-1 min-w-[200px]">
+          <Label htmlFor="q-filter">Search</Label>
+          <Input id="q-filter" name="q" placeholder="name or SKU" defaultValue={q} />
+        </div>
+        <Button type="submit" variant="secondary">Filter</Button>
       </form>
 
       {/* Create form */}
-      <form
-        action={async (fd) => {
-          "use server";
-          await saveMaterialItemAction(fd);
-        }}
-        className="rounded-md border border-slate-700/60 bg-slate-900/60 p-4 grid grid-cols-1 md:grid-cols-3 gap-3"
-      >
-        <h3 className="md:col-span-3 text-sm font-semibold text-slate-100">New material</h3>
-        <Field name="sku" label="SKU / code" required placeholder="DISP-A-12" />
-        <Field name="name" label="Name" required placeholder="Display box — A pack" />
-        <SelectField
-          name="kind"
-          label="Kind"
-          required
-          options={Object.entries(KIND_LABELS).map(([v, l]) => ({ value: v, label: l }))}
-        />
-        <Field name="uom" label="Unit of measure" required defaultValue="each" placeholder="each / kg / roll" />
-        <Field name="parLevel" label="Par level (optional)" type="number" min={0} />
-        <label className="flex items-end gap-2">
-          <input
-            type="checkbox"
-            name="isActive"
-            defaultChecked
-            className="h-4 w-4 accent-cyan-500"
-          />
-          <span className="text-sm text-slate-300">Active</span>
-        </label>
-        <div className="md:col-span-3 flex justify-end">
-          <button
-            type="submit"
-            className="h-9 px-4 rounded-md bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 text-sm font-medium"
-          >
-            Add material
-          </button>
-        </div>
-      </form>
+      <div className="rounded-xl border border-border bg-surface px-4 py-4 space-y-3">
+        <p className="text-sm font-semibold text-text-strong">New material</p>
+        <form
+          action={async (fd) => {
+            "use server";
+            await saveMaterialItemAction(fd);
+          }}
+          className="grid grid-cols-1 sm:grid-cols-3 gap-3"
+        >
+          <div className="space-y-1">
+            <Label htmlFor="new-sku">SKU / code</Label>
+            <Input id="new-sku" name="sku" required placeholder="DISP-A-12" />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="new-name">Name</Label>
+            <Input id="new-name" name="name" required placeholder="Display box — A pack" />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="new-kind">Kind</Label>
+            <Select id="new-kind" name="kind" required defaultValue="">
+              <option value="">— select —</option>
+              {Object.entries(KIND_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="new-uom">Unit of measure</Label>
+            <Input id="new-uom" name="uom" required defaultValue="each" placeholder="each / kg / roll" />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="new-par">Par level (optional)</Label>
+            <Input id="new-par" name="parLevel" type="number" min={0} placeholder="—" />
+          </div>
+          <label className="flex items-end gap-2 pb-1">
+            <input
+              type="checkbox"
+              name="isActive"
+              defaultChecked
+              className="h-4 w-4 rounded border-border accent-brand-700"
+            />
+            <span className="text-sm text-text-muted">Active</span>
+          </label>
+          <div className="sm:col-span-3 flex justify-end">
+            <Button type="submit">Add material</Button>
+          </div>
+        </form>
+      </div>
 
       {/* List */}
-      <div className="rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
-            <tr>
-              <th className="text-left px-3 py-2">SKU</th>
-              <th className="text-left px-3 py-2">Name</th>
-              <th className="text-left px-3 py-2">Kind</th>
-              <th className="text-left px-3 py-2">UoM</th>
-              <th className="text-right px-3 py-2">Par</th>
-              <th className="text-left px-3 py-2">Status</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={Boxes}
+          title={rows.length === 0 ? "No materials yet" : "No items match the filter"}
+          description={
+            rows.length === 0
+              ? "Add packaging materials above so receiving and BOM forms have something to reference."
+              : "Clear the filter to see all materials."
+          }
+        />
+      ) : (
+        <DataTable>
+          <THead>
+            <TR>
+              <TH>SKU</TH>
+              <TH>Name</TH>
+              <TH>Kind</TH>
+              <TH>UoM</TH>
+              <TH className="text-right">Par</TH>
+              <TH>Status</TH>
+              <TH className="text-right">Actions</TH>
+            </TR>
+          </THead>
           <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
-                  {rows.length === 0
-                    ? "No materials configured yet. Create the first one above."
-                    : "No items match the current filter."}
-                </td>
-              </tr>
-            ) : (
-              filtered.map((r) => (
-                <tr key={r.id} className="border-t border-slate-800">
-                  <td className="px-3 py-2 text-slate-100 font-mono">{r.sku}</td>
-                  <td className="px-3 py-2 text-slate-200">{r.name}</td>
-                  <td className="px-3 py-2 text-slate-300">{KIND_LABELS[r.kind] ?? r.kind}</td>
-                  <td className="px-3 py-2 text-slate-300 font-mono">{r.uom}</td>
-                  <td className="px-3 py-2 text-right text-slate-300 font-mono">
-                    {r.parLevel ?? "—"}
-                  </td>
-                  <td className="px-3 py-2">
-                    {r.isActive ? (
-                      <span className="text-emerald-300 text-[11px]">active</span>
-                    ) : (
-                      <span className="text-slate-500 text-[11px]">inactive</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right">
+            {filtered.map((r) => (
+              <TR key={r.id}>
+                <TD className="font-mono text-xs">{r.sku}</TD>
+                <TD className="font-medium">{r.name}</TD>
+                <TD>{KIND_LABELS[r.kind] ?? r.kind}</TD>
+                <TD className="font-mono text-xs">{r.uom}</TD>
+                <TD className="text-right tabular-nums">{r.parLevel ?? "—"}</TD>
+                <TD>
+                  <StatusPill kind={r.isActive ? "ok" : "neutral"}>
+                    {r.isActive ? "Active" : "Inactive"}
+                  </StatusPill>
+                </TD>
+                <TD className="text-right">
+                  <div className="flex items-center justify-end gap-3">
                     <form
                       action={async () => {
                         "use server";
@@ -187,90 +173,32 @@ export default async function MaterialsAdminPage({
                     >
                       <button
                         type="submit"
-                        className="text-[11px] text-slate-400 hover:text-cyan-300"
+                        className="text-xs text-text-subtle hover:text-text transition-colors"
                       >
-                        {r.isActive ? "deactivate" : "activate"}
+                        {r.isActive ? "Deactivate" : "Activate"}
                       </button>
                     </form>
-                  </td>
-                </tr>
-              ))
-            )}
+                    <form
+                      action={async (fd) => {
+                        "use server";
+                        await deleteMaterialAction(fd);
+                      }}
+                    >
+                      <input type="hidden" name="id" value={r.id} />
+                      <button
+                        type="submit"
+                        className="text-xs text-text-subtle hover:text-red-600 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </form>
+                  </div>
+                </TD>
+              </TR>
+            ))}
           </tbody>
-        </table>
-      </div>
+        </DataTable>
+      )}
     </div>
-  );
-}
-
-function Field({
-  name,
-  label,
-  type = "text",
-  required,
-  placeholder,
-  defaultValue,
-  min,
-  max,
-  step,
-}: {
-  name: string;
-  label: string;
-  type?: string;
-  required?: boolean;
-  placeholder?: string;
-  defaultValue?: string;
-  min?: number;
-  max?: number;
-  step?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">{label}</span>
-      <input
-        name={name}
-        type={type}
-        required={required}
-        placeholder={placeholder}
-        defaultValue={defaultValue}
-        {...(min != null ? { min } : {})}
-        {...(max != null ? { max } : {})}
-        {...(step ? { step } : {})}
-        className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none"
-      />
-    </label>
-  );
-}
-
-function SelectField({
-  name,
-  label,
-  options,
-  required,
-  defaultValue,
-}: {
-  name: string;
-  label: string;
-  options: ReadonlyArray<{ value: string; label: string }>;
-  required?: boolean;
-  defaultValue?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">{label}</span>
-      <select
-        name={name}
-        required={required}
-        defaultValue={defaultValue ?? ""}
-        className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
-      >
-        {!defaultValue && <option value="">— select —</option>}
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
