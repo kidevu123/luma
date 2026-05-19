@@ -38,9 +38,9 @@ export default async function OperatorProductivityPage() {
       />
 
       {!hasLaborRates && (
-        <div className="rounded-md border border-slate-700/60 bg-slate-900/60 p-3 text-[12px] text-slate-400">
-          <strong className="text-slate-200">Labor cost</strong>: No labor rate configured. Add rates at{" "}
-          <Link href="/standards/labor-rates" className="text-cyan-300 hover:text-cyan-200">/standards/labor-rates</Link>{" "}
+        <div className="rounded-xl border border-border bg-surface-2/40 p-3 text-[12px] text-text-muted">
+          <strong className="text-text-strong">Labor cost</strong>: No labor rate configured. Add rates at{" "}
+          <Link href="/standards/labor-rates" className="text-brand-700 hover:text-brand-600">/standards/labor-rates</Link>{" "}
           to compute cost per operator-hour.
         </div>
       )}
@@ -58,9 +58,9 @@ export default async function OperatorProductivityPage() {
           }}
         />
       ) : (
-        <div className="rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
+        <div className="rounded-xl border border-border bg-surface overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+            <thead className="bg-surface-2/50 text-[10px] uppercase tracking-wider text-text-muted">
               <tr>
                 <th className="text-left px-3 py-2">Operator</th>
                 <th className="text-left px-3 py-2">Code</th>
@@ -105,60 +105,60 @@ export default async function OperatorProductivityPage() {
                   r.scrapUnits +
                   r.corrections;
                 return (
-                  <tr key={r.groupKey} className="border-t border-slate-800">
+                  <tr key={r.groupKey} className="border-t border-border">
                     <td className="px-3 py-2">
-                      <span className="text-slate-100">{r.displayName}</span>
+                      <span className="text-text-strong">{r.displayName}</span>
                       {r.confidence === "LOW" && (
-                        <span className="ml-2 rounded bg-amber-900/40 text-amber-200 border border-amber-700/40 px-1.5 py-0.5 text-[10px]">
+                        <span className="ml-2 rounded bg-warn-50 text-warn-700 border border-warn-200 px-1.5 py-0.5 text-[10px]">
                           legacy code only
                         </span>
                       )}
                       {qcActivity > 0 && (
                         <span
-                          className="ml-2 rounded bg-orange-900/40 text-orange-200 border border-orange-700/40 px-1.5 py-0.5 text-[10px]"
+                          className="ml-2 rounded bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 text-[10px]"
                           title="One or more QC events attributed to this operator in the window."
                         >
                           QC activity
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2 font-mono text-slate-400 text-[11px]">
+                    <td className="px-3 py-2 font-mono text-text-muted text-[11px]">
                       {r.operatorCode ?? "—"}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {r.bagsFinalized.toLocaleString()}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {minutes.toLocaleString()}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {unitsPerHour.toLocaleString()}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {r.damages.toLocaleString()}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {r.damageEvents > 0 ? r.damageEvents.toLocaleString() : "—"}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {r.reworkSent > 0 ? r.reworkSent.toLocaleString() : "—"}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {r.reworkReceived > 0 ? r.reworkReceived.toLocaleString() : "—"}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {r.scrapUnits > 0 ? r.scrapUnits.toLocaleString() : "—"}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
                       {r.corrections > 0 ? r.corrections.toLocaleString() : "—"}
                     </td>
                     <td className="px-3 py-2 text-right">
                       {hasLaborRates ? (
-                        <span className="text-slate-500 italic text-[11px]">
+                        <span className="text-text-muted italic text-[11px]">
                           per-operator role mapping needed
                         </span>
                       ) : (
-                        <span className="text-slate-400 text-[11px]">No labor rate configured</span>
+                        <span className="text-text-muted text-[11px]">No labor rate configured</span>
                       )}
                     </td>
                     <td className="px-3 py-2">
@@ -172,9 +172,9 @@ export default async function OperatorProductivityPage() {
         </div>
       )}
 
-      <div className="text-[11px] text-slate-500 leading-relaxed space-y-1">
+      <div className="text-[11px] text-text-muted leading-relaxed space-y-1">
         <p>
-          <strong className="text-slate-300">Honest disclosure:</strong>{" "}
+          <strong className="text-text-strong">Honest disclosure:</strong>{" "}
           rows marked <em>legacy code only</em> were attributed by typed
           operator code without a stable employee match — typos can
           inflate the leaderboard. New rows post-OP-1B / OP-1C key on

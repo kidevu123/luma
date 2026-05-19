@@ -12,7 +12,10 @@ import {
   productPackagingSpecs,
 } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
-import { PageHeader } from "@/components/ui/page-header";
+import { PageHeader, EmptyState } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
+import { Input, Label, Select } from "@/components/ui/input";
+import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import {
   type PackagingBomScope,
 } from "@/lib/production/packaging-bom-kinds";
@@ -21,6 +24,7 @@ import {
   savePackagingBomLineAction,
   deletePackagingBomLineAction,
 } from "./actions";
+import { Info, PackageCheck } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -31,9 +35,6 @@ export default async function PackagingBomPage({
 }) {
   await requireAdmin();
   const sp = await searchParams;
-  // PBOM-2: only load the product list here. The per-scope material
-  // dropdowns come from the compatibility matrix, not the global
-  // packaging_materials table — see ScopeBomForm below.
   const productList = await db
     .select({ id: products.id, sku: products.sku, name: products.name, kind: products.kind })
     .from(products)
@@ -67,7 +68,6 @@ export default async function PackagingBomPage({
         .orderBy(asc(productPackagingSpecs.perScope))
     : [];
 
-  // Products with no BOM (warning surface).
   const productsWithoutBom = productId
     ? []
     : await db.execute<{ id: string; sku: string; name: string }>(sql`
@@ -88,83 +88,77 @@ export default async function PackagingBomPage({
         description="Physical packaging consumed at each packaging level: per finished unit (card / bottle), per display, per master case. PVC and foil rolls are NOT configured here — they're machine consumables tracked under blister material standards + roll usage."
       />
 
-      <div className="rounded-md border border-sky-500/40 bg-sky-500/5 p-3 text-[12px] leading-relaxed text-sky-100">
-        <p className="font-semibold text-sky-100">How packaging BOM is structured:</p>
-        <ul className="mt-1 list-disc pl-5 space-y-0.5 text-sky-200/90">
-          <li>
-            <strong>Per finished unit</strong>: the printed card (CARD route) or
-            the bottle + cap + label + induction seal + desiccant (BOTTLE route).
-          </li>
-          <li>
-            <strong>Per display</strong>: 1 display box + any per-display
-            insert. A display contains N finished units (via product structure,
-            not BOM).
-          </li>
-          <li>
-            <strong>Per master case</strong>: 1 case box + any case label /
-            insert. A case contains N displays (via product structure).
-          </li>
-        </ul>
-        <p className="mt-2 text-sky-200/80">
-          PVC / foil / blister-foil rolls are calculated from{" "}
-          <Link
-            href="/settings/blister-standards"
-            className="underline hover:text-sky-50"
-          >
-            blister material standards
-          </Link>
-          {" + "}
-          <Link href="/roll-variance" className="underline hover:text-sky-50">
-            roll usage
-          </Link>
-          , not from this page.
-        </p>
+      {/* Info panel */}
+      <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3 text-[12px] leading-relaxed text-sky-800">
+        <div className="flex items-start gap-2">
+          <Info className="h-4 w-4 mt-0.5 shrink-0 text-sky-600" />
+          <div>
+            <p className="font-semibold text-sky-900">How packaging BOM is structured:</p>
+            <ul className="mt-1 list-disc pl-4 space-y-0.5 text-sky-700">
+              <li>
+                <strong>Per finished unit</strong>: the printed card (CARD route) or
+                the bottle + cap + label + induction seal + desiccant (BOTTLE route).
+              </li>
+              <li>
+                <strong>Per display</strong>: 1 display box + any per-display
+                insert. A display contains N finished units (via product structure,
+                not BOM).
+              </li>
+              <li>
+                <strong>Per master case</strong>: 1 case box + any case label /
+                insert. A case contains N displays (via product structure).
+              </li>
+            </ul>
+            <p className="mt-2 text-sky-600">
+              PVC / foil / blister-foil rolls are calculated from{" "}
+              <Link href="/settings/blister-standards" className="underline hover:text-sky-800">
+                blister material standards
+              </Link>
+              {" + "}
+              <Link href="/roll-variance" className="underline hover:text-sky-800">
+                roll usage
+              </Link>
+              , not from this page.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Product picker */}
       <form
         method="get"
-        className="rounded-md border border-slate-700/60 bg-slate-900/60 p-3 flex flex-wrap items-end gap-2"
+        className="rounded-xl border border-border bg-surface px-4 py-3 flex flex-wrap items-end gap-3"
       >
-        <label className="block flex-1 min-w-[280px]">
-          <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">Product</span>
-          <select
-            name="product"
-            defaultValue={productId ?? ""}
-            className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
-          >
+        <div className="flex-1 min-w-[280px] space-y-1">
+          <Label htmlFor="product-picker">Product</Label>
+          <Select id="product-picker" name="product" defaultValue={productId ?? ""}>
             <option value="">— pick a product —</option>
             {productList.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.sku} — {p.name} · {p.kind}
               </option>
             ))}
-          </select>
-        </label>
-        <button
-          type="submit"
-          className="h-9 px-3 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm"
-        >
-          Open
-        </button>
+          </Select>
+        </div>
+        <Button type="submit" variant="secondary">Open</Button>
       </form>
 
       {!product ? (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-4 text-sm text-amber-200 leading-relaxed">
+        <div className="rounded-xl border border-warn-200 bg-warn-50/60 px-4 py-3 text-sm text-warn-800 leading-relaxed">
           Pick a product to view + edit its packaging BOM.
           {productsWithoutBom.length > 0 && (
-            <div className="mt-3 text-amber-300">
+            <div className="mt-3">
               <strong>
                 {productsWithoutBom.length} product
                 {productsWithoutBom.length === 1 ? "" : "s"} with no BOM
               </strong>{" "}
               — packaging consumption cannot be computed until configured:
-              <ul className="mt-1.5 space-y-0.5 text-amber-100 text-[12px]">
+              <ul className="mt-1.5 space-y-0.5 text-[12px]">
                 {productsWithoutBom.slice(0, 8).map((p) => (
                   <li key={p.id} className="font-mono">
                     <Link
                       href={`/settings/packaging-bom?product=${p.id}`}
-                      className="text-cyan-300 hover:text-cyan-200"
+                      className="text-brand-700 hover:text-brand-800 underline"
                     >
                       {p.sku}
                     </Link>{" "}
@@ -172,7 +166,7 @@ export default async function PackagingBomPage({
                   </li>
                 ))}
                 {productsWithoutBom.length > 8 && (
-                  <li className="text-amber-300/70">
+                  <li className="text-warn-600">
                     …and {productsWithoutBom.length - 8} more.
                   </li>
                 )}
@@ -182,23 +176,19 @@ export default async function PackagingBomPage({
         </div>
       ) : (
         <>
-          <div className="rounded-md border border-slate-700/60 bg-slate-900/60 p-3">
-            <h2 className="text-[11px] uppercase tracking-[0.10em] text-cyan-300 font-semibold">
+          {/* Product header */}
+          <div className="rounded-xl border border-border bg-surface px-4 py-3">
+            <h2 className="text-sm font-semibold text-brand-700">
               {product.sku} — {product.name}
             </h2>
-            <p className="mt-1 text-[12px] text-slate-400">
+            <p className="mt-0.5 text-[12px] text-text-muted">
               {bomRows.length === 0
                 ? "No BOM lines yet. Add the first one below."
                 : `${bomRows.length} BOM line${bomRows.length === 1 ? "" : "s"} configured.`}
             </p>
           </div>
 
-          {/* Three scope-specific forms. PBOM-2: the material dropdown
-              for each scope is filtered by the
-              product_material_compatibility table, not by packaging-
-              material kind alone. Empty matrix → empty dropdown +
-              clear "Compatibility missing" message + a link to the
-              admin compatibility page. */}
+          {/* Three scope-specific forms */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             {await Promise.all(
               (["UNIT", "DISPLAY", "CASE"] as const).map(async (scope) => {
@@ -227,68 +217,64 @@ export default async function PackagingBomPage({
             )}
           </div>
 
-          {/* Existing rows */}
-          <div className="rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
-                <tr>
-                  <th className="text-left px-3 py-2">Material</th>
-                  <th className="text-left px-3 py-2">Kind</th>
-                  <th className="text-left px-3 py-2">Per</th>
-                  <th className="text-right px-3 py-2">Qty</th>
-                  <th className="text-right px-3 py-2">Waste %</th>
-                  <th className="text-left px-3 py-2">UoM</th>
-                  <th className="px-3 py-2"></th>
-                </tr>
-              </thead>
+          {/* Existing BOM rows */}
+          {bomRows.length === 0 ? (
+            <EmptyState
+              icon={PackageCheck}
+              title="No BOM lines yet"
+              description="Add lines using the forms above."
+            />
+          ) : (
+            <DataTable>
+              <THead>
+                <TR>
+                  <TH>Material</TH>
+                  <TH>Kind</TH>
+                  <TH>Per</TH>
+                  <TH className="text-right">Qty</TH>
+                  <TH className="text-right">Waste %</TH>
+                  <TH>UoM</TH>
+                  <TH>{""}</TH>
+                </TR>
+              </THead>
               <tbody>
-                {bomRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
-                      No BOM lines yet.
-                    </td>
-                  </tr>
-                ) : (
-                  bomRows.map((r) => (
-                    <tr key={`${r.packagingMaterialId}-${r.perScope}`} className="border-t border-slate-800">
-                      <td className="px-3 py-2 text-slate-200">
-                        <div className="font-mono text-[11px] text-slate-400">{r.materialSku}</div>
-                        <div>{r.materialName}</div>
-                      </td>
-                      <td className="px-3 py-2 text-slate-300">{r.materialKind}</td>
-                      <td className="px-3 py-2 text-slate-300">{r.perScope}</td>
-                      <td className="px-3 py-2 text-right text-slate-100 font-mono">
-                        {r.qtyPerUnit}
-                      </td>
-                      <td className="px-3 py-2 text-right text-slate-300 font-mono">
-                        {Number(r.wasteAllowancePercent ?? 0)}%
-                      </td>
-                      <td className="px-3 py-2 text-slate-300 font-mono">{r.materialUom}</td>
-                      <td className="px-3 py-2 text-right">
-                        <form
-                          action={async () => {
-                            "use server";
-                            await deletePackagingBomLineAction({
-                              productId: r.productId,
-                              packagingMaterialId: r.packagingMaterialId,
-                              perScope: r.perScope as "UNIT" | "DISPLAY" | "CASE",
-                            });
-                          }}
+                {bomRows.map((r) => (
+                  <TR key={`${r.packagingMaterialId}-${r.perScope}`}>
+                    <TD>
+                      <div className="font-mono text-[11px] text-text-muted">{r.materialSku}</div>
+                      <div className="font-medium text-text-strong">{r.materialName}</div>
+                    </TD>
+                    <TD>{r.materialKind}</TD>
+                    <TD>{r.perScope}</TD>
+                    <TD className="text-right font-mono">{r.qtyPerUnit}</TD>
+                    <TD className="text-right font-mono">
+                      {Number(r.wasteAllowancePercent ?? 0)}%
+                    </TD>
+                    <TD className="font-mono text-xs">{r.materialUom}</TD>
+                    <TD className="text-right">
+                      <form
+                        action={async () => {
+                          "use server";
+                          await deletePackagingBomLineAction({
+                            productId: r.productId,
+                            packagingMaterialId: r.packagingMaterialId,
+                            perScope: r.perScope as "UNIT" | "DISPLAY" | "CASE",
+                          });
+                        }}
+                      >
+                        <button
+                          type="submit"
+                          className="text-[11px] text-text-subtle hover:text-red-600 transition-colors"
                         >
-                          <button
-                            type="submit"
-                            className="text-[11px] text-rose-300 hover:text-rose-200"
-                          >
-                            delete
-                          </button>
-                        </form>
-                      </td>
-                    </tr>
-                  ))
-                )}
+                          delete
+                        </button>
+                      </form>
+                    </TD>
+                  </TR>
+                ))}
               </tbody>
-            </table>
-          </div>
+            </DataTable>
+          )}
         </>
       )}
     </div>
@@ -331,137 +317,62 @@ function ScopeBomForm({
         "use server";
         await savePackagingBomLineAction(fd);
       }}
-      className="rounded-md border border-slate-700/60 bg-slate-900/60 p-4 space-y-3"
+      className="rounded-xl border border-border bg-surface px-4 py-4 space-y-3"
     >
       <input type="hidden" name="productId" value={productId} />
       <input type="hidden" name="perScope" value={scope} />
-      <h3 className="text-sm font-semibold text-slate-100">
+      <h3 className="text-sm font-semibold text-text-strong">
         {labels[scope].title}
       </h3>
-      <p className="text-[11px] text-slate-400">{labels[scope].hint}</p>
+      <p className="text-[11px] text-text-muted">{labels[scope].hint}</p>
       {materials.length === 0 ? (
-        <p className="text-[12px] text-amber-300 leading-relaxed">
+        <p className="text-[12px] text-warn-700 leading-relaxed">
           <strong>Product material compatibility missing</strong> for {scope} scope.
           No materials are approved for this product yet — configure them under{" "}
           <Link
             href={`/settings/product-material-compatibility?product=${productId}`}
-            className="underline hover:text-amber-200"
+            className="underline hover:text-warn-800"
           >
             product material compatibility
           </Link>{" "}
-          first. The BOM page will not fall back to the global material list.
+          first.
         </p>
       ) : (
         <>
-          <SelectField
-            name="packagingMaterialId"
-            label="Material"
-            required
-            options={materials.map((m) => ({
-              value: m.id,
-              label: `${m.sku} — ${m.name} (${m.kind} · ${m.uom})`,
-            }))}
-          />
-          <Field
-            name="qtyPerUnit"
-            label={`Quantity per ${scope.toLowerCase()}`}
-            type="number"
-            min={1}
-            required
-          />
-          <Field
-            name="wasteAllowancePercent"
-            label="Waste %"
-            type="number"
-            min={0}
-            max={100}
-            step="0.01"
-            defaultValue="0"
-          />
-          <Field
-            name="notes"
-            label="Notes (optional)"
-            placeholder="any context…"
-          />
-          <button
-            type="submit"
-            className="h-9 px-4 rounded-md bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 text-sm font-medium"
-          >
-            Save {scope.toLowerCase()} line
-          </button>
+          <div className="space-y-1">
+            <Label htmlFor={`material-${scope}`}>Material</Label>
+            <Select id={`material-${scope}`} name="packagingMaterialId" required defaultValue="">
+              <option value="">— select —</option>
+              {materials.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.sku} — {m.name} ({m.kind} · {m.uom})
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`qty-${scope}`}>Quantity per {scope.toLowerCase()}</Label>
+            <Input id={`qty-${scope}`} name="qtyPerUnit" type="number" min={1} required />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`waste-${scope}`}>Waste %</Label>
+            <Input
+              id={`waste-${scope}`}
+              name="wasteAllowancePercent"
+              type="number"
+              min={0}
+              max={100}
+              step="0.01"
+              defaultValue="0"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`notes-${scope}`}>Notes (optional)</Label>
+            <Input id={`notes-${scope}`} name="notes" placeholder="any context…" />
+          </div>
+          <Button type="submit">Save {scope.toLowerCase()} line</Button>
         </>
       )}
     </form>
   );
 }
-
-function Field({
-  name,
-  label,
-  type = "text",
-  required,
-  placeholder,
-  defaultValue,
-  min,
-  max,
-  step,
-}: {
-  name: string;
-  label: string;
-  type?: string;
-  required?: boolean;
-  placeholder?: string;
-  defaultValue?: string;
-  min?: number;
-  max?: number;
-  step?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">{label}</span>
-      <input
-        name={name}
-        type={type}
-        required={required}
-        placeholder={placeholder}
-        defaultValue={defaultValue}
-        {...(min != null ? { min } : {})}
-        {...(max != null ? { max } : {})}
-        {...(step ? { step } : {})}
-        className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none"
-      />
-    </label>
-  );
-}
-
-function SelectField({
-  name,
-  label,
-  options,
-  required,
-}: {
-  name: string;
-  label: string;
-  options: ReadonlyArray<{ value: string; label: string }>;
-  required?: boolean;
-}) {
-  return (
-    <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">{label}</span>
-      <select
-        name={name}
-        required={required}
-        defaultValue=""
-        className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
-      >
-        <option value="">— select —</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-

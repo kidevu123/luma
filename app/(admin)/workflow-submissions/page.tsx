@@ -13,9 +13,12 @@ import {
 } from "@/lib/db/schema";
 import { eq, desc, and, or, ilike, gte, lte, count } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
-import { PageHeader } from "@/components/ui/page-header";
+import { PageHeader, EmptyState } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
+import { Input, Label, Select } from "@/components/ui/input";
 import { WorkflowTable } from "./workflow-table";
 import type { WorkflowBagRow } from "./workflow-table";
+import { ClipboardList } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -134,7 +137,6 @@ export default async function WorkflowSubmissionsPage({
     .orderBy(desc(workflowBags.startedAt))
     .limit(200);
 
-  // Map DB rows to WorkflowBagRow — ensures null safety and correct types
   const bags: WorkflowBagRow[] = rows.map((r) => ({
     id: r.id,
     receiptNumber: r.receiptNumber ?? null,
@@ -176,117 +178,78 @@ export default async function WorkflowSubmissionsPage({
         description="Search all production bags — receipt grouping, stage, operator, counts, and inline event history."
       />
 
-      {/* Filter form */}
+      {/* Filter bar */}
       <form
         method="get"
-        className="rounded-md border border-slate-800/70 bg-slate-900/50 px-4 py-3"
+        className="rounded-xl border border-border bg-surface px-4 py-3 space-y-3"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
-          {/* Search */}
-          <div className="lg:col-span-2">
-            <label className="block text-[9.5px] font-semibold uppercase tracking-[0.10em] text-slate-500 mb-1">
-              Search (receipt #, product, bag #)
-            </label>
-            <input
+          <div className="lg:col-span-2 space-y-1">
+            <Label htmlFor="q-filter">Search (receipt #, product, bag #)</Label>
+            <Input
+              id="q-filter"
               type="search"
               name="q"
               defaultValue={qVal}
               placeholder="e.g. RCP-001 or Omega-3"
-              className="w-full h-8 rounded bg-slate-950 border border-slate-700/70 px-2.5 text-[12px] text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50"
             />
           </div>
-
-          {/* Stage */}
-          <div>
-            <label className="block text-[9.5px] font-semibold uppercase tracking-[0.10em] text-slate-500 mb-1">
-              Stage
-            </label>
-            <select
-              name="stage"
-              defaultValue={stageVal}
-              className="w-full h-8 rounded bg-slate-950 border border-slate-700/70 px-2 text-[12px] text-slate-200 focus:outline-none focus:border-cyan-500/50"
-            >
+          <div className="space-y-1">
+            <Label htmlFor="stage-filter">Stage</Label>
+            <Select id="stage-filter" name="stage" defaultValue={stageVal}>
               <option value="all">All stages</option>
               {STAGES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
+                <option key={s} value={s}>{s}</option>
               ))}
-            </select>
+            </Select>
           </div>
-
-          {/* Finalized */}
-          <div>
-            <label className="block text-[9.5px] font-semibold uppercase tracking-[0.10em] text-slate-500 mb-1">
-              Finalized
-            </label>
-            <select
-              name="finalized"
-              defaultValue={finalizedVal}
-              className="w-full h-8 rounded bg-slate-950 border border-slate-700/70 px-2 text-[12px] text-slate-200 focus:outline-none focus:border-cyan-500/50"
-            >
+          <div className="space-y-1">
+            <Label htmlFor="finalized-filter">Finalized</Label>
+            <Select id="finalized-filter" name="finalized" defaultValue={finalizedVal}>
               <option value="all">All</option>
               <option value="yes">Yes</option>
               <option value="no">No</option>
-            </select>
+            </Select>
           </div>
-
-          {/* Submit */}
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              className="h-8 px-4 rounded bg-cyan-600 hover:bg-cyan-500 text-[12px] font-semibold text-white transition-colors"
-            >
-              Filter
-            </button>
-            <a
-              href="/workflow-submissions"
-              className="inline-flex items-center h-8 px-3 rounded border border-slate-700/70 bg-slate-800/40 text-[12px] text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-colors"
-            >
-              Reset
-            </a>
+          <div className="flex gap-2 items-end pb-0.5">
+            <Button type="submit">Filter</Button>
+            <Button type="button" variant="secondary" asChild>
+              <a href="/workflow-submissions">Reset</a>
+            </Button>
           </div>
         </div>
 
-        {/* Date range row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-800/60">
-          <div>
-            <label className="block text-[9.5px] font-semibold uppercase tracking-[0.10em] text-slate-500 mb-1">
-              Started from
-            </label>
-            <input
-              type="date"
-              name="from"
-              defaultValue={fromVal}
-              className="w-full h-8 rounded bg-slate-950 border border-slate-700/70 px-2.5 text-[12px] text-slate-200 focus:outline-none focus:border-cyan-500/50"
-            />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-border/60">
+          <div className="space-y-1">
+            <Label htmlFor="from-filter">Started from</Label>
+            <Input id="from-filter" type="date" name="from" defaultValue={fromVal} />
           </div>
-          <div>
-            <label className="block text-[9.5px] font-semibold uppercase tracking-[0.10em] text-slate-500 mb-1">
-              Started to
-            </label>
-            <input
-              type="date"
-              name="to"
-              defaultValue={toVal}
-              className="w-full h-8 rounded bg-slate-950 border border-slate-700/70 px-2.5 text-[12px] text-slate-200 focus:outline-none focus:border-cyan-500/50"
-            />
+          <div className="space-y-1">
+            <Label htmlFor="to-filter">Started to</Label>
+            <Input id="to-filter" type="date" name="to" defaultValue={toVal} />
           </div>
         </div>
       </form>
 
       {/* Count */}
-      <div className="text-[11px] text-slate-500">
+      <div className="text-[11px] text-text-subtle">
         Showing{" "}
-        <span className="font-mono text-slate-300">{bags.length}</span>
+        <span className="font-mono text-text-strong">{bags.length}</span>
         {bags.length === 200 && (
-          <span className="text-amber-400/80"> (limit 200 — narrow filters to see more)</span>
+          <span className="text-warn-600"> (limit 200 — narrow filters to see more)</span>
         )}{" "}
         bag{bags.length === 1 ? "" : "s"}
       </div>
 
-      {/* Table */}
-      <WorkflowTable bags={bags} />
+      {bags.length === 0 ? (
+        <EmptyState
+          icon={ClipboardList}
+          title="No bags match the current filters"
+          description="Adjust the search or date range above to broaden results."
+        />
+      ) : (
+        <WorkflowTable bags={bags} />
+      )}
     </div>
   );
 }

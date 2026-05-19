@@ -250,7 +250,7 @@ export function InvoiceAllocationActions({
                       Confirmed
                     </span>
                   ) : (
-                    <span className="text-[11px] text-slate-600 font-medium">
+                    <span className="text-[11px] text-text-subtle font-medium">
                       Rejected
                     </span>
                   )}

@@ -32,9 +32,9 @@ export default async function LaborRatesPage() {
           "use server";
           await saveLaborRateAction(fd);
         }}
-        className="rounded-md border border-slate-700/60 bg-slate-900/60 p-4 grid grid-cols-1 md:grid-cols-3 gap-3"
+        className="rounded-xl border border-border bg-surface p-4 grid grid-cols-1 md:grid-cols-3 gap-3"
       >
-        <h3 className="md:col-span-3 text-sm font-semibold text-slate-100">
+        <h3 className="md:col-span-3 text-sm font-semibold text-text-strong">
           New labor rate
         </h3>
         <Field name="role" label="Role" required placeholder="BLISTER_OPERATOR" />
@@ -61,15 +61,15 @@ export default async function LaborRatesPage() {
         <div className="md:col-span-3 flex justify-end">
           <button
             type="submit"
-            className="h-9 px-4 rounded-md bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 text-sm font-medium"
+            className="h-9 px-4 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium"
           >
             Add rate
           </button>
         </div>
       </form>
-      <div className="rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
+      <div className="rounded-xl border border-border bg-surface overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+          <thead className="bg-surface-2/50 text-[10px] uppercase tracking-wider text-text-muted">
             <tr>
               <th className="text-left px-3 py-2">Role</th>
               <th className="text-right px-3 py-2">Hourly</th>
@@ -82,27 +82,27 @@ export default async function LaborRatesPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={6} className="px-3 py-6 text-center text-text-muted">
                   No rates configured. Labor cost shows{" "}
-                  <span className="text-slate-300">No labor rate configured</span>.
+                  <span className="text-text-strong">No labor rate configured</span>.
                 </td>
               </tr>
             ) : (
               rows.map((r) => (
-                <tr key={r.id} className="border-t border-slate-800">
-                  <td className="px-3 py-2 text-slate-100 font-mono">{r.role}</td>
-                  <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                <tr key={r.id} className="border-t border-border">
+                  <td className="px-3 py-2 text-text-strong font-mono">{r.role}</td>
+                  <td className="px-3 py-2 text-right text-text-strong font-mono">
                     {formatDollars(r.hourlyRateCents)}
                   </td>
-                  <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                  <td className="px-3 py-2 text-right text-text-strong font-mono">
                     {r.burdenMultiplier}x
                   </td>
-                  <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                  <td className="px-3 py-2 text-right text-text-strong font-mono">
                     {formatDollars(
                       Math.round(r.hourlyRateCents * Number(r.burdenMultiplier)),
                     )}
                   </td>
-                  <td className="px-3 py-2 text-slate-300 font-mono text-[11px]">
+                  <td className="px-3 py-2 text-text-strong font-mono text-[11px]">
                     {r.effectiveFrom}
                     {r.effectiveTo ? ` → ${r.effectiveTo}` : " → ∞"}
                   </td>
@@ -149,7 +149,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">{label}</span>
+      <span className="text-[10px] uppercase tracking-[0.10em] text-text-muted">{label}</span>
       <input
         name={name}
         type={type}
@@ -158,7 +158,7 @@ function Field({
         defaultValue={defaultValue}
         {...(min != null ? { min } : {})}
         {...(step ? { step } : {})}
-        className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none"
+        className="mt-1 w-full h-9 px-2 rounded-md bg-surface-2 border border-border text-sm text-text-strong placeholder:text-text-subtle focus:border-brand-500 focus:outline-none"
       />
     </label>
   );

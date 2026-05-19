@@ -71,29 +71,29 @@ export default async function StandardsIndex() {
           <Link
             key={href}
             href={href}
-            className="group rounded-md border border-slate-700/60 bg-slate-900/60 p-4 hover:border-cyan-500/40 transition-colors"
+            className="group rounded-xl border border-border bg-surface p-4 hover:border-brand-300 hover:bg-surface-2/40 transition-colors"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
-                <Icon className="h-5 w-5 text-cyan-400" aria-hidden />
-                <h2 className="text-sm font-semibold text-slate-100">{label}</h2>
+                <Icon className="h-5 w-5 text-brand-600" aria-hidden />
+                <h2 className="text-sm font-semibold text-text-strong">{label}</h2>
               </div>
               <ArrowRight
-                className="h-4 w-4 text-slate-500 group-hover:text-cyan-400 transition-colors"
+                className="h-4 w-4 text-text-subtle group-hover:text-brand-600 transition-colors"
                 aria-hidden
               />
             </div>
             <div className="mt-3 flex items-baseline gap-2">
-              <div className="text-3xl font-mono tabular-nums text-slate-100">
+              <div className="text-3xl font-mono tabular-nums text-text-strong">
                 {Number(count).toLocaleString()}
               </div>
-              <div className="text-xs text-slate-500">configured</div>
+              <div className="text-xs text-text-muted">configured</div>
             </div>
-            <div className="mt-2 text-[11px] text-slate-500">
+            <div className="mt-2 text-[11px] text-text-muted">
               Required for: {blocks}
             </div>
             {count === 0 && (
-              <div className="mt-2 inline-flex items-center h-5 px-1.5 rounded-sm border bg-slate-800/60 border-slate-600/60 text-[10px] text-slate-400">
+              <div className="mt-2 inline-flex items-center h-5 px-1.5 rounded border border-warn-200 bg-warn-50/80 text-[10px] text-warn-700 font-medium">
                 NOT CONFIGURED
               </div>
             )}

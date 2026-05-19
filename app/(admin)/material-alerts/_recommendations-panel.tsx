@@ -237,7 +237,7 @@ function ActionButtons({
               type="button"
               onClick={onDismiss}
               disabled={dismissStatus.kind === "pending"}
-              className="rounded border border-slate-700 bg-slate-700 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              className="rounded border border-border bg-surface-2 px-2 py-1 text-[11px] font-semibold text-text-strong hover:bg-surface-2/80 transition-colors disabled:opacity-50"
             >
               {dismissStatus.kind === "pending" ? "…" : "Confirm dismiss"}
             </button>
@@ -383,7 +383,7 @@ export function ShortageRecommendationsPanel({
                 onClick={() => setStatusFilter(s)}
                 className={`rounded-sm border px-1.5 py-0.5 ${
                   statusFilter === s
-                    ? "bg-slate-700 text-white border-slate-700"
+                    ? "bg-brand-700 text-white border-brand-700"
                     : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                 }`}
               >
@@ -401,7 +401,7 @@ export function ShortageRecommendationsPanel({
                 onClick={toggle(severityFilter, setSeverityFilter, sv)}
                 className={`rounded-sm border px-1.5 py-0.5 ${
                   severityFilter.includes(sv)
-                    ? "bg-slate-700 text-white border-slate-700"
+                    ? "bg-brand-700 text-white border-brand-700"
                     : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                 }`}
               >
@@ -419,7 +419,7 @@ export function ShortageRecommendationsPanel({
                 onClick={toggle(confidenceFilter, setConfidenceFilter, c)}
                 className={`rounded-sm border px-1.5 py-0.5 ${
                   confidenceFilter.includes(c)
-                    ? "bg-slate-700 text-white border-slate-700"
+                    ? "bg-brand-700 text-white border-brand-700"
                     : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                 }`}
               >

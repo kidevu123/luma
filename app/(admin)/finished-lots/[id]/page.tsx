@@ -51,7 +51,7 @@ export default async function FinishedLotDetailPage({
               </StatusPill>
               <Link
                 href={`/finished-lots/${lot.lot.id}/labels`}
-                className="inline-flex items-center gap-1 rounded border border-slate-700 bg-slate-700 px-2 py-1 text-[12px] font-semibold text-white hover:bg-slate-800"
+                className="inline-flex items-center gap-1 rounded border border-border bg-surface-2 px-2 py-1 text-[12px] font-semibold text-text-strong hover:bg-surface-2/80 transition-colors"
               >
                 <Printer className="h-3.5 w-3.5" /> Print labels
               </Link>

@@ -55,9 +55,9 @@ export default async function StationStandardsPage() {
           "use server";
           await saveStationStandardAction(fd);
         }}
-        className="rounded-md border border-slate-700/60 bg-slate-900/60 p-4 grid grid-cols-1 md:grid-cols-4 gap-3"
+        className="rounded-xl border border-border bg-surface p-4 grid grid-cols-1 md:grid-cols-4 gap-3"
       >
-        <h3 className="md:col-span-4 text-sm font-semibold text-slate-100">
+        <h3 className="md:col-span-4 text-sm font-semibold text-text-strong">
           New standard
         </h3>
         <SelectField name="stationId" label="Station (optional)" options={stationOpts.map((s) => ({ value: s.id, label: s.label }))} />
@@ -86,24 +86,24 @@ export default async function StationStandardsPage() {
             type="checkbox"
             name="isActive"
             defaultChecked
-            className="h-4 w-4 accent-cyan-500"
+            className="h-4 w-4 accent-brand-500"
           />
-          <span className="text-sm text-slate-300">Active</span>
+          <span className="text-sm text-text-strong">Active</span>
         </label>
         <Field name="notes" label="Notes" placeholder="optional" />
         <div className="md:col-span-4 flex justify-end">
           <button
             type="submit"
-            className="h-9 px-4 rounded-md bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 text-sm font-medium"
+            className="h-9 px-4 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium"
           >
             Add standard
           </button>
         </div>
       </form>
 
-      <div className="rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
+      <div className="rounded-xl border border-border bg-surface overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
+          <thead className="bg-surface-2/50 text-[10px] uppercase tracking-wider text-text-muted">
             <tr>
               <th className="text-left px-3 py-2">Scope</th>
               <th className="text-left px-3 py-2">Product</th>
@@ -119,33 +119,33 @@ export default async function StationStandardsPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={9} className="px-3 py-6 text-center text-text-muted">
                   No standards configured. Performance vs. standard and OEE
-                  Performance show <span className="text-slate-300">No standard configured</span>.
+                  Performance show <span className="text-text-strong">No standard configured</span>.
                 </td>
               </tr>
             ) : (
               rows.map((r) => (
-                <tr key={r.id} className="border-t border-slate-800">
-                  <td className="px-3 py-2 text-slate-100">
+                <tr key={r.id} className="border-t border-border">
+                  <td className="px-3 py-2 text-text-strong">
                     {r.stationLabel ?? r.machineName ?? "—"}
                   </td>
-                  <td className="px-3 py-2 text-slate-300">{r.productName ?? "any"}</td>
-                  <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                  <td className="px-3 py-2 text-text-strong">{r.productName ?? "any"}</td>
+                  <td className="px-3 py-2 text-right text-text-strong font-mono">
                     {r.idealCycleSeconds ?? "—"}
                   </td>
-                  <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                  <td className="px-3 py-2 text-right text-text-strong font-mono">
                     {r.targetUnitsPerHour ?? "—"}
                   </td>
-                  <td className="px-3 py-2 text-right text-slate-300 font-mono">
+                  <td className="px-3 py-2 text-right text-text-strong font-mono">
                     {r.expectedYieldPct ?? "—"}
                   </td>
-                  <td className="px-3 py-2 text-slate-300">{r.outputUnit}</td>
-                  <td className="px-3 py-2 text-slate-300 font-mono text-[11px]">
+                  <td className="px-3 py-2 text-text-strong">{r.outputUnit}</td>
+                  <td className="px-3 py-2 text-text-strong font-mono text-[11px]">
                     {r.effectiveFrom}
                     {r.effectiveTo ? ` → ${r.effectiveTo}` : " → ∞"}
                   </td>
-                  <td className="px-3 py-2 text-slate-300">{r.isActive ? "yes" : "no"}</td>
+                  <td className="px-3 py-2 text-text-strong">{r.isActive ? "yes" : "no"}</td>
                   <td className="px-3 py-2 text-right">
                     <form
                       action={async () => {
@@ -191,7 +191,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">{label}</span>
+      <span className="text-[10px] uppercase tracking-[0.10em] text-text-muted">{label}</span>
       <input
         name={name}
         type={type}
@@ -201,7 +201,7 @@ function Field({
         {...(min != null ? { min } : {})}
         {...(max != null ? { max } : {})}
         {...(step ? { step } : {})}
-        className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 placeholder:text-slate-600 focus:border-cyan-500 focus:outline-none"
+        className="mt-1 w-full h-9 px-2 rounded-md bg-surface-2 border border-border text-sm text-text-strong placeholder:text-text-subtle focus:border-brand-500 focus:outline-none"
       />
     </label>
   );
@@ -220,12 +220,12 @@ function SelectField({
 }) {
   return (
     <label className="block">
-      <span className="text-[10px] uppercase tracking-[0.10em] text-slate-400">{label}</span>
+      <span className="text-[10px] uppercase tracking-[0.10em] text-text-muted">{label}</span>
       <select
         name={name}
         required={required}
         defaultValue=""
-        className="mt-1 w-full h-9 px-2 rounded-md bg-slate-950 border border-slate-700 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
+        className="mt-1 w-full h-9 px-2 rounded-md bg-surface-2 border border-border text-sm text-text-strong focus:border-brand-500 focus:outline-none"
       >
         <option value="">— none —</option>
         {options.map((o) => (
