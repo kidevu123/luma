@@ -56,52 +56,68 @@ export default async function FinishedLotDetailPage({
         <div className="space-y-5">
           <Card>
             <CardHeader>
-              <CardTitle>Genealogy ({lot.inputs.length})</CardTitle>
+              <CardTitle>
+                Genealogy
+                {lot.inputs.length > 0 && (
+                  <span className="ml-2 text-xs font-normal text-text-muted">
+                    {lot.inputs.length} input batch{lot.inputs.length !== 1 ? "es" : ""}
+                  </span>
+                )}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {lot.inputs.length === 0 ? (
-                <p className="text-sm text-text-muted">
-                  No input batches recorded. (Manual lots, or bags whose consumption
-                  events haven't yet been wired through the projector.)
-                </p>
+                <div className="rounded-lg border border-border/60 bg-surface-2/30 p-4 text-sm text-text-muted">
+                  <p className="font-medium text-text mb-1">No input batches recorded</p>
+                  <p className="text-xs leading-relaxed">
+                    This is a manual lot, or the consumption events have not yet been
+                    processed by the projector. Once bags are finalized and linked, their
+                    batch inputs appear here.
+                  </p>
+                </div>
               ) : (
-                <DataTable>
-                  <THead>
-                    <TR>
-                      <TH>Batch</TH>
-                      <TH>Kind</TH>
-                      <TH>Tablet / material</TH>
-                      <TH>Vendor lot</TH>
-                      <TH className="text-right">Qty consumed</TH>
-                    </TR>
-                  </THead>
-                  <tbody>
-                    {lot.inputs.map(({ input, batch, tabletName }) => (
-                      <TR key={input.id}>
-                        <TD className="font-mono text-xs">
-                          <Link
-                            href={`/batches?focus=${batch.id}`}
-                            className="hover:underline"
-                          >
-                            {batch.batchNumber}
-                          </Link>
-                        </TD>
-                        <TD>
-                          <StatusPill kind={batch.kind === "TABLET" ? "info" : "neutral"}>
-                            {batch.kind}
-                          </StatusPill>
-                        </TD>
-                        <TD>{tabletName ?? "—"}</TD>
-                        <TD className="text-text-muted text-xs">
-                          {batch.vendorLotNumber ?? "—"}
-                        </TD>
-                        <TD className="text-right tabular-nums">
-                          {input.qtyConsumed.toLocaleString()}
-                        </TD>
+                <>
+                  <DataTable>
+                    <THead>
+                      <TR>
+                        <TH>Batch #</TH>
+                        <TH>Kind</TH>
+                        <TH>Tablet / material</TH>
+                        <TH>Vendor lot</TH>
+                        <TH className="text-right">Qty consumed</TH>
                       </TR>
-                    ))}
-                  </tbody>
-                </DataTable>
+                    </THead>
+                    <tbody>
+                      {lot.inputs.map(({ input, batch, tabletName }) => (
+                        <TR key={input.id}>
+                          <TD className="font-mono text-xs">
+                            <Link
+                              href={`/batches?focus=${batch.id}`}
+                              className="text-brand-700 hover:underline"
+                            >
+                              {batch.batchNumber}
+                            </Link>
+                          </TD>
+                          <TD>
+                            <StatusPill kind={batch.kind === "TABLET" ? "info" : "neutral"}>
+                              {batch.kind}
+                            </StatusPill>
+                          </TD>
+                          <TD className="font-medium">{tabletName ?? "—"}</TD>
+                          <TD className="text-text-muted text-xs font-mono">
+                            {batch.vendorLotNumber ?? "—"}
+                          </TD>
+                          <TD className="text-right tabular-nums font-semibold">
+                            {input.qtyConsumed.toLocaleString()}
+                          </TD>
+                        </TR>
+                      ))}
+                    </tbody>
+                  </DataTable>
+                  <p className="text-[11px] text-text-subtle mt-2">
+                    Total inputs: {lot.inputs.reduce((s, i) => s + i.input.qtyConsumed, 0).toLocaleString()} units across {lot.inputs.length} batch{lot.inputs.length !== 1 ? "es" : ""}.
+                  </p>
+                </>
               )}
             </CardContent>
           </Card>
