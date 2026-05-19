@@ -6,7 +6,7 @@
 // inside the action, just like the floor PWA does. This is the admin
 // on-ramp; downstream stage events still come from station scans.
 //
-// Chrome rebuilt on the new luma-ui primitives. Data loading + form
+// Chrome rebuilt on the standard design system. Data loading + form
 // wiring unchanged.
 
 import { db } from "@/lib/db";
@@ -18,14 +18,7 @@ import {
   stations,
 } from "@/lib/db/schema";
 import { requireLead } from "@/lib/auth-guards";
-import {
-  CommandShell,
-  PageHero,
-  SectionCard,
-  WorkflowStepper,
-  type HeroBadge,
-  type StepperStep,
-} from "@/components/production/luma-ui";
+import { PageHeader } from "@/components/ui/page-header";
 import { StartProductionForm } from "./start-production-form";
 
 export const dynamic = "force-dynamic";
@@ -58,70 +51,85 @@ export default async function StartProductionPage() {
       .where(eq(products.isActive, true)),
   ]);
 
-  // Server-side workflow telemetry surfaced as hero badges and the
-  // active-tone of the stepper — gives the lead an at-a-glance read
-  // on whether they CAN start a run right now.
   const idleCardCount = idleCards.length;
   const stationCount = activeStations.length;
   const idleReady = idleCardCount > 0;
   const stationReady = stationCount > 0;
 
-  const heroBadges: HeroBadge[] = [
-    {
-      label: `${idleCardCount} idle QR card${idleCardCount === 1 ? "" : "s"}`,
-      tone: idleReady ? "info" : "crit",
-      mono: true,
-    },
-    {
-      label: `${stationCount} active station${stationCount === 1 ? "" : "s"}`,
-      tone: stationReady ? "info" : "crit",
-      mono: true,
-    },
-  ];
-
-  // Stepper labels mirror the form sequence so an operator can map
-  // the page to their physical actions before they start clicking.
-  const steps: StepperStep[] = [
-    { label: "Scan raw bag", state: "active" },
-    { label: "Pick product", state: "pending" },
-    { label: "Assign QR card", state: "pending" },
-    { label: "Pick station", state: "pending" },
-    { label: "Start run", state: "pending" },
-  ];
-
   return (
-    <CommandShell>
-      <PageHero
-        eyebrow="Floor work · On-ramp"
+    <div className="space-y-5">
+      <PageHeader
         title="Start production"
-        description={
-          <>
-            Scan a raw bag, assign a workflow QR card, pick a station, and
-            start. Workflow QR cards are reusable floor badges that track this
-            bag through every station until packaging. QR card administration
-            (add / retire / print labels) lives under{" "}
-            <span className="text-text-strong">Advanced → QR card management</span>.
-          </>
-        }
-        badges={heroBadges}
+        description="Scan a raw bag, assign a workflow QR card, pick a station, and start. QR card administration (add / retire / print labels) lives under Advanced → QR card management."
       />
 
-      <SectionCard
-        eyebrow="Run sequence"
-        title="Five steps to a live workflow card"
-        subtitle="Each step gates the next. The CARD_ASSIGNED event fires only after you click Start."
-        tone="info"
-        pad="tight"
-      >
-        <WorkflowStepper steps={steps} />
-      </SectionCard>
+      {/* Readiness badges */}
+      <div className="flex flex-wrap gap-2">
+        <span
+          className={`inline-flex items-center h-6 px-2.5 rounded-md border text-[11px] font-mono ${
+            idleReady
+              ? "border-sky-200 bg-sky-50 text-sky-700"
+              : "border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {idleCardCount} idle QR card{idleCardCount === 1 ? "" : "s"}
+        </span>
+        <span
+          className={`inline-flex items-center h-6 px-2.5 rounded-md border text-[11px] font-mono ${
+            stationReady
+              ? "border-sky-200 bg-sky-50 text-sky-700"
+              : "border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {stationCount} active station{stationCount === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {/* Workflow steps */}
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-border">
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle">Run sequence</p>
+          <p className="text-sm font-semibold text-text-strong mt-0.5">
+            Five steps to a live workflow card
+          </p>
+          <p className="text-[12px] text-text-muted mt-0.5">
+            Each step gates the next. The CARD_ASSIGNED event fires only after you click Start.
+          </p>
+        </div>
+        <ol className="px-4 py-4 flex flex-col gap-2">
+          {[
+            "Scan raw bag",
+            "Pick product",
+            "Assign QR card",
+            "Pick station",
+            "Start run",
+          ].map((stepLabel, i) => (
+            <li key={stepLabel} className="flex items-center gap-3">
+              <span
+                className={`inline-flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-semibold shrink-0 ${
+                  i === 0
+                    ? "border-brand-300 bg-brand-50 text-brand-800"
+                    : "border-border bg-surface-2 text-text-subtle"
+                }`}
+              >
+                {i + 1}
+              </span>
+              <span
+                className={`text-[13px] ${i === 0 ? "font-medium text-text-strong" : "text-text-muted"}`}
+              >
+                {stepLabel}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
 
       <StartProductionForm
         idleCards={idleCards.map((c) => ({ id: c.id, code: c.code }))}
         stations={activeStations}
         allowedProductsByTabletType={groupAllowedProductsByTabletType(allowedRows)}
       />
-    </CommandShell>
+    </div>
   );
 }
 

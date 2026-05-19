@@ -1,9 +1,8 @@
-// LUMA-UI-REBUILD-1 v2 — Owner home, rebuilt on the Operations Atelier
-// design language.
+// LUMA-UI-REBUILD-1 v3 — Owner home, rebuilt on the standard design system.
 //
-// Five owner numbers in one signature inverse ribbon, the highest-
-// stakes prediction surfaced as an architectural ActionPanel, top
-// finalized flavors in a SectionCard, quick-links as v2 record cards.
+// Five owner numbers in a stat card grid, the highest-stakes prediction
+// surfaced as a tone panel, top finalized flavors in a standard section
+// div, quick-links as simple bordered Link divs.
 // Per metrics-strategy.md §13.1 every number drives an action; vanity
 // metrics are out. Data loading logic unchanged from the prior page.
 
@@ -30,16 +29,7 @@ import {
   products,
   tabletTypes,
 } from "@/lib/db/schema";
-import {
-  ActionPanel,
-  CommandShell,
-  PageHero,
-  RibbonStrip,
-  SectionCard,
-  type HeroBadge,
-  type RibbonSegmentData,
-  type Tone,
-} from "@/components/production/luma-ui";
+import { PageHeader } from "@/components/ui/page-header";
 import { requireSession } from "@/lib/auth-guards";
 
 export const dynamic = "force-dynamic";
@@ -266,172 +256,192 @@ export default async function DashboardPage() {
   const finalizedPctDelta =
     finalized.avg7 > 0 ? (finalizedDelta / finalized.avg7) * 100 : 0;
 
-  // The live segment on the ribbon — earn it. Priority order is the
-  // same as the prediction picker; the live pip pulses on whatever
-  // matters most right now.
-  const liveSegmentIndex =
-    forgotten > 0
-      ? 2 // Activity (24h) — forgotten bags drive this segment
-      : aged.count > 0
-        ? 4 // Aged > 30 days
-        : finalized.todayN > 0
-          ? 0 // Finalized today
-          : -1;
+  const finalizedHint =
+    finalized.avg7 === 0
+      ? "no 7-day baseline yet"
+      : `${finalizedDelta >= 0 ? "+" : ""}${Math.round(finalizedPctDelta)}% vs 7-day avg (${Math.round(finalized.avg7)})`;
 
-  const heroBadges: HeroBadge[] = [
-    { label: `${eventsLast24h.toLocaleString()} events 24h`, tone: "info",  mono: true },
-    { label: `${activeCards} active QR cards`,                tone: "muted", mono: true },
-    ...(forgotten > 0
-      ? [{ label: `${forgotten} forgotten bag${forgotten === 1 ? "" : "s"}`, tone: "crit" as Tone }]
-      : []),
-  ];
+  const cashHint =
+    cash.biggest && cash.biggest.units > 0
+      ? `${cash.biggest.label} holds ${cash.biggest.bags} bags · ${cash.biggest.units.toLocaleString()} tablets`
+      : "no inventory tracked";
+
+  const activityHint = `${forgotten} forgotten bag${forgotten === 1 ? "" : "s"} right now`;
+
+  const predictedHint =
+    predicted.dailyAvg7 > 0
+      ? `~${predicted.dailyAvg7}/day · ${predicted.thisWeekSoFar} so far`
+      : "no recent throughput";
+
+  const agedHint =
+    aged.count === 0
+      ? "all inventory fresh"
+      : `${aged.units.toLocaleString()} tablets sitting`;
+
+  const PanelIcon = prediction.tone === "crit" ? AlertTriangle : Sparkles;
+
+  const panelClass =
+    prediction.tone === "crit"
+      ? "rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 text-[12px] text-red-800 flex items-start gap-2.5"
+      : prediction.tone === "warn"
+        ? "rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[12px] text-amber-800 flex items-start gap-2.5"
+        : "rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] text-sky-800 flex items-start gap-2.5";
 
   return (
-    <CommandShell>
-      <PageHero
-        eyebrow="Owner home · Today"
+    <div className="space-y-5">
+      <PageHeader
         title="Today, at a glance."
-        description={
-          <>
-            Five numbers that matter. One prediction worth acting on.
-            Everything else is a click away.
-          </>
-        }
-        badges={heroBadges}
+        description="Five numbers that matter. One prediction worth acting on. Everything else is a click away."
       />
 
-      {/* Signature ribbon — the five owner numbers, one unified
-          inverse band. The live segment pulses; quiet segments stay
-          quiet. */}
-      <RibbonStrip
-        reveal="reveal-2"
-        segments={
-          [
-            {
-              label: "Finalized today",
-              value: finalized.todayN.toLocaleString(),
-              tone: finalized.avg7 > 0 && finalizedDelta < -finalized.avg7 * 0.3 ? "warn" : "good",
-              icon: PackageCheck,
-              hint:
-                finalized.avg7 === 0
-                  ? "no 7-day baseline yet"
-                  : `${finalizedDelta >= 0 ? "+" : ""}${Math.round(finalizedPctDelta)}% vs 7-day avg (${Math.round(finalized.avg7)})`,
-              live: liveSegmentIndex === 0,
-            },
-            {
-              label: "Tablets on the floor",
-              value: cash.totalUnits.toLocaleString(),
-              tone: "muted",
-              icon: Wallet,
-              hint:
-                cash.biggest && cash.biggest.units > 0
-                  ? `${cash.biggest.label} holds ${cash.biggest.bags} bags · ${cash.biggest.units.toLocaleString()} tablets`
-                  : "no inventory tracked",
-            },
-            {
-              label: "Activity (24h)",
-              value: eventsLast24h.toLocaleString(),
-              tone: forgotten > 0 ? "crit" : "info",
-              icon: Gauge,
-              hint: `${forgotten} forgotten bag${forgotten === 1 ? "" : "s"} right now`,
-              live: liveSegmentIndex === 2,
-            },
-            {
-              label: "Predicted this week",
-              value: predicted.total.toLocaleString(),
-              tone: "info",
-              icon: TrendingUp,
-              hint:
-                predicted.dailyAvg7 > 0
-                  ? `~${predicted.dailyAvg7}/day · ${predicted.thisWeekSoFar} so far`
-                  : "no recent throughput",
-            },
-            {
-              label: "Aged > 30 days",
-              value: aged.count.toLocaleString(),
-              tone: aged.count > 0 ? "warn" : "muted",
-              icon: Hourglass,
-              hint:
-                aged.count === 0
-                  ? "all inventory fresh"
-                  : `${aged.units.toLocaleString()} tablets sitting`,
-              live: liveSegmentIndex === 4,
-            },
-          ] satisfies RibbonSegmentData[]
-        }
-      />
+      {/* Badge strip */}
+      <div className="flex flex-wrap gap-2">
+        <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
+          {eventsLast24h.toLocaleString()} events 24h
+        </span>
+        <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
+          {activeCards} active QR cards
+        </span>
+        {forgotten > 0 && (
+          <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-red-200 bg-red-50 text-[11px] font-mono text-red-700">
+            {forgotten} forgotten bag{forgotten === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
 
-      {/* The one prediction with highest financial swing this week —
-          architectural ActionPanel, tone driven by signal severity. */}
-      <ActionPanel
-        tone={prediction.tone}
-        icon={prediction.tone === "crit" ? AlertTriangle : Sparkles}
-        title={prediction.headline}
-        body={
-          <>
-            {prediction.detail ? <p>{prediction.detail}</p> : null}
-            {prediction.cta ? (
-              <Link
-                href={prediction.cta.href}
-                className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold text-brand-800 hover:text-brand-700 underline-offset-2 hover:underline"
-              >
-                {prediction.cta.label} <ArrowRight className="h-3 w-3" />
-              </Link>
-            ) : null}
-          </>
-        }
-      />
+      {/* Five owner numbers — stat card grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <PackageCheck className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Finalized today</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {finalized.todayN.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{finalizedHint}</div>
+        </div>
 
-      {/* Top finalized flavors — secondary intel, single tone (info),
-          carries the section eyebrow + 3-column grid of finished SKUs. */}
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Wallet className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Tablets on the floor</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {cash.totalUnits.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{cashHint}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Gauge className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Activity (24h)</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {eventsLast24h.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{activityHint}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <TrendingUp className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Predicted this week</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {predicted.total.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{predictedHint}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface px-4 py-3 col-span-2 sm:col-span-4">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Hourglass className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Aged &gt; 30 days</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {aged.count.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{agedHint}</div>
+        </div>
+      </div>
+
+      {/* Prediction panel */}
+      <div className={panelClass}>
+        <PanelIcon className="h-4 w-4 shrink-0 mt-0.5" />
+        <div>
+          <p className="font-semibold text-[12px]">{prediction.headline}</p>
+          {prediction.detail ? (
+            <p className="mt-1 text-[12px]">{prediction.detail}</p>
+          ) : null}
+          {prediction.cta ? (
+            <Link
+              href={prediction.cta.href}
+              className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold underline-offset-2 hover:underline"
+            >
+              {prediction.cta.label} <ArrowRight className="h-3 w-3" />
+            </Link>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Top finalized flavors */}
       {topFlavors.length > 0 ? (
-        <SectionCard
-          eyebrow="Top flavors finalized · last 30 days"
-          title="Where the throughput went"
-          subtitle="The three SKUs with the most finalized bags. Use these to spot which lines are pulling weight."
-          tone="info"
-          reveal="reveal-3"
-          actions={
+        <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-text-subtle">
+                Top flavors finalized · last 30 days
+              </p>
+              <p className="text-sm font-semibold text-text-strong mt-0.5">
+                Where the throughput went
+              </p>
+              <p className="text-[12px] text-text-muted mt-0.5">
+                The three SKUs with the most finalized bags. Use these to spot which lines are pulling weight.
+              </p>
+            </div>
             <Link
               href="/metrics"
-              className="text-[11px] font-medium text-text-muted hover:text-text underline-offset-2 hover:underline"
+              className="text-[11px] font-medium text-text-muted hover:text-text underline-offset-2 hover:underline shrink-0"
             >
               All metrics →
             </Link>
-          }
-        >
-          <ul className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {topFlavors.map((f, i) => (
-              <li
-                key={(f.tabletName ?? "") + (f.productName ?? "") + i}
-                className="surface-well px-4 py-3.5 flex flex-col gap-1.5"
-              >
-                <div className="text-[12px] font-semibold tracking-tight text-text-strong truncate">
-                  {f.productName ?? f.tabletName ?? "—"}
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="display-num text-[26px]">
-                    {f.bagsFinalized.toLocaleString()}
-                  </span>
-                  <span className="text-[11px] text-text-muted">bags</span>
-                </div>
-                <div className="text-[11px] text-text-subtle font-mono tabular">
-                  {f.unitsFinalized.toLocaleString()} tablets
-                </div>
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
+          </div>
+          <div className="px-4 py-4">
+            <ul className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {topFlavors.map((f, i) => (
+                <li
+                  key={(f.tabletName ?? "") + (f.productName ?? "") + i}
+                  className="rounded-xl border border-border bg-surface px-4 py-3.5 flex flex-col gap-1.5"
+                >
+                  <div className="text-[12px] font-semibold tracking-tight text-text-strong truncate">
+                    {f.productName ?? f.tabletName ?? "—"}
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-mono tabular-nums text-text-strong">
+                      {f.bagsFinalized.toLocaleString()}
+                    </span>
+                    <span className="text-[11px] text-text-muted">bags</span>
+                  </div>
+                  <div className="text-[11px] text-text-subtle font-mono tabular-nums">
+                    {f.unitsFinalized.toLocaleString()} tablets
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       ) : null}
 
-      {/* Quick-access strip — record cards leading to the next surface. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 reveal reveal-4">
+      {/* Quick-access strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <QuickLink href="/floor-board" label="Live floor" eyebrow="Operations" />
         <QuickLink href="/inbound" label="POs & receiving" eyebrow="Logistics" />
         <QuickLink href="/batches" label="Batches" eyebrow="Production" />
         <QuickLink href="/metrics" label="All metrics" eyebrow="Reports" />
       </div>
-    </CommandShell>
+    </div>
   );
 }
 
@@ -449,9 +459,11 @@ function QuickLink({
   return (
     <Link
       href={href}
-      className="surface-card rail rail-muted lift-on-hover relative pl-[3px] px-4 py-3.5 group"
+      className="rounded-xl border border-border bg-surface px-4 py-3.5 group flex flex-col gap-1 hover:border-brand-300 transition-colors"
     >
-      <div className="eyebrow mb-1">{eyebrow}</div>
+      <div className="text-[10px] uppercase tracking-wider text-text-subtle">
+        {eyebrow}
+      </div>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[13.5px] font-semibold tracking-tight text-text-strong">
           {label}
@@ -463,6 +475,8 @@ function QuickLink({
 }
 
 // ── Prediction picker (unchanged) ─────────────────────────────────
+
+type Tone = "crit" | "warn" | "info" | "good";
 
 type Prediction = {
   headline: string;

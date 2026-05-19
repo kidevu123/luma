@@ -285,7 +285,7 @@ export default async function PacktrackMappingPage() {
                               active
                             </span>
                           ) : (
-                            <span className="rounded bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 text-[10px]">
+                            <span className="rounded bg-slate-100 text-text-subtle border border-slate-200 px-2 py-0.5 text-[10px]">
                               inactive
                             </span>
                           )}

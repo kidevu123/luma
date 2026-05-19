@@ -1,10 +1,9 @@
-// LUMA-UI-FINAL-1 — Recall Passport search page.
+// Recall Passport search page.
 //
 // Six search axes per LOT-1A §3.1:
 //   supplier lot, internal receipt #, raw bag QR, finished lot trace
 //   code, product+date range, customer+date range.
 //
-// Chrome rebuilt on the Operations Atelier design language.
 // Search logic, parseInput, getRecallPassport, and all data loading
 // are unchanged.
 
@@ -30,16 +29,7 @@ import {
   type RecallSearchInput,
   type RecallSearchKind,
 } from "@/lib/production/recall-passport-loaders";
-import {
-  CommandShell,
-  PageHero,
-  SectionCard,
-  ActionPanel,
-  FieldGroup,
-  DataEmptyState,
-  StatusBadge,
-  type FieldRow,
-} from "@/components/production/luma-ui";
+import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -142,155 +132,161 @@ export default async function RecallPage({
     (passport.rawBags.length > 0 || passport.finishedLots.length > 0);
 
   return (
-    <CommandShell density="wide">
-      <PageHero
-        eyebrow="Traceability · Recall passport"
-        title="Recall lookup."
+    <div className="space-y-5">
+      <PageHeader
+        title="Recall lookup"
         description="Six-axis lookup across raw bags, finished lots, packaging, QC events, and shipments. Missing links are shown honestly — nothing is invented."
-        badges={[
-          { label: "Six search axes", tone: "info" },
-          { label: "Customer-safe export available", tone: "muted" },
-        ]}
+        actions={
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center h-5 px-1.5 rounded border text-[10px] font-medium bg-sky-50/80 border-sky-300/50 text-sky-700">
+              Six search axes
+            </span>
+            <span className="inline-flex items-center h-5 px-1.5 rounded border text-[10px] font-medium bg-surface-2 border-border text-text-subtle">
+              Customer-safe export available
+            </span>
+          </div>
+        }
       />
 
       {/* Search panel */}
-      <SectionCard
-        eyebrow="Search"
-        title="Choose a search axis"
-        subtitle={SEARCH_KIND_HINTS[currentKind]}
-        tone="info"
-        reveal="reveal-2"
-      >
-        <form method="get" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="block">
-              <span className="eyebrow block mb-1">Search kind</span>
-              <select
-                name="kind"
-                defaultValue={currentKind}
-                className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
-              >
-                {(Object.keys(SEARCH_KIND_LABELS) as RecallSearchKind[]).map(
-                  (k) => (
-                    <option key={k} value={k}>
-                      {SEARCH_KIND_LABELS[k]}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
-
-            {(currentKind === "supplier_lot" ||
-              currentKind === "internal_receipt_number" ||
-              currentKind === "raw_bag_qr" ||
-              currentKind === "finished_lot_trace_code") && (
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-border/60">
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle">Search</p>
+          <h2 className="text-sm font-semibold text-text-strong">Choose a search axis</h2>
+          <p className="text-[11px] text-text-muted mt-0.5">{SEARCH_KIND_HINTS[currentKind]}</p>
+        </div>
+        <div className="px-4 py-4">
+          <form method="get" className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="block">
-                <span className="eyebrow block mb-1">Value</span>
-                <input
-                  name="value"
-                  defaultValue={sp.value ?? ""}
-                  placeholder={
-                    currentKind === "supplier_lot"
-                      ? "e.g. HN-LOT-12345"
-                      : currentKind === "internal_receipt_number"
-                        ? "e.g. PO123-R1-B2-7"
-                        : currentKind === "raw_bag_qr"
-                          ? "e.g. BAG-<uuid>"
-                          : "e.g. FL-2026-001"
-                  }
-                  className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] font-mono text-text-strong placeholder:text-text-subtle placeholder:font-sans focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
-                />
+                <span className="text-[10px] uppercase tracking-wider text-text-subtle font-medium block mb-1">Search kind</span>
+                <select
+                  name="kind"
+                  defaultValue={currentKind}
+                  className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
+                >
+                  {(Object.keys(SEARCH_KIND_LABELS) as RecallSearchKind[]).map(
+                    (k) => (
+                      <option key={k} value={k}>
+                        {SEARCH_KIND_LABELS[k]}
+                      </option>
+                    ),
+                  )}
+                </select>
               </label>
+
+              {(currentKind === "supplier_lot" ||
+                currentKind === "internal_receipt_number" ||
+                currentKind === "raw_bag_qr" ||
+                currentKind === "finished_lot_trace_code") && (
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-text-subtle font-medium block mb-1">Value</span>
+                  <input
+                    name="value"
+                    defaultValue={sp.value ?? ""}
+                    placeholder={
+                      currentKind === "supplier_lot"
+                        ? "e.g. HN-LOT-12345"
+                        : currentKind === "internal_receipt_number"
+                          ? "e.g. PO123-R1-B2-7"
+                          : currentKind === "raw_bag_qr"
+                            ? "e.g. BAG-<uuid>"
+                            : "e.g. FL-2026-001"
+                    }
+                    className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] font-mono text-text-strong placeholder:text-text-subtle placeholder:font-sans focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
+                  />
+                </label>
+              )}
+            </div>
+
+            {currentKind === "product_date_range" && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-text-subtle font-medium block mb-1">Product</span>
+                  <select
+                    name="productId"
+                    defaultValue={sp.productId ?? ""}
+                    className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
+                  >
+                    <option value="">— Select product —</option>
+                    {productOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.sku} · {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-text-subtle font-medium block mb-1">From (produced on)</span>
+                  <input
+                    type="date"
+                    name="fromDate"
+                    defaultValue={sp.fromDate ?? ""}
+                    className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-text-subtle font-medium block mb-1">To (produced on)</span>
+                  <input
+                    type="date"
+                    name="toDate"
+                    defaultValue={sp.toDate ?? ""}
+                    className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
+                  />
+                </label>
+              </div>
             )}
-          </div>
 
-          {currentKind === "product_date_range" && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <label className="block">
-                <span className="eyebrow block mb-1">Product</span>
-                <select
-                  name="productId"
-                  defaultValue={sp.productId ?? ""}
-                  className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
-                >
-                  <option value="">— Select product —</option>
-                  {productOptions.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.sku} · {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="eyebrow block mb-1">From (produced on)</span>
-                <input
-                  type="date"
-                  name="fromDate"
-                  defaultValue={sp.fromDate ?? ""}
-                  className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
-                />
-              </label>
-              <label className="block">
-                <span className="eyebrow block mb-1">To (produced on)</span>
-                <input
-                  type="date"
-                  name="toDate"
-                  defaultValue={sp.toDate ?? ""}
-                  className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
-                />
-              </label>
+            {currentKind === "customer_date_range" && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-text-subtle font-medium block mb-1">Customer</span>
+                  <select
+                    name="customerId"
+                    defaultValue={sp.customerId ?? ""}
+                    className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
+                  >
+                    <option value="">— Select customer —</option>
+                    {customerOptions.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.customerCode} · {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-text-subtle font-medium block mb-1">From (shipped at)</span>
+                  <input
+                    type="date"
+                    name="fromDate"
+                    defaultValue={sp.fromDate ?? ""}
+                    className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-text-subtle font-medium block mb-1">To (shipped at)</span>
+                  <input
+                    type="date"
+                    name="toDate"
+                    defaultValue={sp.toDate ?? ""}
+                    className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div>
+              <button
+                type="submit"
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-600 hover:bg-brand-700 active:bg-brand-800 px-4 py-2 text-[12.5px] font-semibold text-white shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
+              >
+                <Search className="h-3.5 w-3.5" />
+                Run recall lookup
+              </button>
             </div>
-          )}
-
-          {currentKind === "customer_date_range" && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <label className="block">
-                <span className="eyebrow block mb-1">Customer</span>
-                <select
-                  name="customerId"
-                  defaultValue={sp.customerId ?? ""}
-                  className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
-                >
-                  <option value="">— Select customer —</option>
-                  {customerOptions.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.customerCode} · {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="eyebrow block mb-1">From (shipped at)</span>
-                <input
-                  type="date"
-                  name="fromDate"
-                  defaultValue={sp.fromDate ?? ""}
-                  className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
-                />
-              </label>
-              <label className="block">
-                <span className="eyebrow block mb-1">To (shipped at)</span>
-                <input
-                  type="date"
-                  name="toDate"
-                  defaultValue={sp.toDate ?? ""}
-                  className="w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors"
-                />
-              </label>
-            </div>
-          )}
-
-          <div>
-            <button
-              type="submit"
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 hover:bg-brand-700 active:bg-brand-800 px-4 py-2 text-[12.5px] font-semibold text-white shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60"
-            >
-              <Search className="h-3.5 w-3.5" />
-              Run recall lookup
-            </button>
-          </div>
-        </form>
-      </SectionCard>
+          </form>
+        </div>
+      </div>
 
       {/* Export / print bar */}
       {input && hasResults && (
@@ -302,23 +298,25 @@ export default async function RecallPage({
 
       {/* Result states */}
       {!input ? (
-        <DataEmptyState
-          icon={ScanLine}
-          title="Start a recall lookup"
-          body="Pick a search axis above and enter a value. The passport surfaces every linked raw bag, finished lot, packaging lot, QC event, and shipment in one view."
-          tone="muted"
-        />
+        <div className="px-4 py-8 text-center">
+          <ScanLine className="h-8 w-8 mx-auto text-text-subtle mb-3" />
+          <p className="text-sm font-medium text-text-muted">Start a recall lookup</p>
+          <p className="text-[12px] text-text-subtle mt-1">
+            Pick a search axis above and enter a value. The passport surfaces every linked raw bag, finished lot, packaging lot, QC event, and shipment in one view.
+          </p>
+        </div>
       ) : !hasResults ? (
-        <DataEmptyState
-          icon={Search}
-          title="No matches found"
-          body="No raw bags or finished lots match the supplied input. Confirm the spelling and try a partial match."
-          tone="muted"
-        />
+        <div className="px-4 py-8 text-center">
+          <Search className="h-8 w-8 mx-auto text-text-subtle mb-3" />
+          <p className="text-sm font-medium text-text-muted">No matches found</p>
+          <p className="text-[12px] text-text-subtle mt-1">
+            No raw bags or finished lots match the supplied input. Confirm the spelling and try a partial match.
+          </p>
+        </div>
       ) : (
         <RecallPassportView passport={passport!} />
       )}
-    </CommandShell>
+    </div>
   );
 }
 
@@ -389,9 +387,9 @@ function RecallPassportView({ passport }: { passport: RecallPassport }) {
 
 function ConfChip({ value }: { value: string }) {
   const map: Record<string, string> = {
-    HIGH: "bg-good-50/80 text-good-700 border-good-500/30",
-    MEDIUM: "bg-warn-50/80 text-warn-700 border-warn-500/30",
-    LOW: "bg-crit-50/80 text-crit-700 border-crit-500/30",
+    HIGH: "bg-green-50/80 text-green-700 border-green-300/50",
+    MEDIUM: "bg-amber-50/80 text-amber-700 border-amber-300/50",
+    LOW: "bg-red-50/80 text-red-700 border-red-300/50",
     MISSING: "bg-surface-2 text-text-subtle border-border",
   };
   return (
@@ -406,6 +404,12 @@ function ConfChip({ value }: { value: string }) {
   );
 }
 
+type SummaryField = {
+  label: string;
+  value: string | number | null | undefined;
+  mono?: boolean;
+};
+
 function PassportSummary({ passport }: { passport: RecallPassport }) {
   const lot = passport.finishedLots[0];
   const supplierLots = Array.from(
@@ -415,7 +419,7 @@ function PassportSummary({ passport }: { passport: RecallPassport }) {
         .filter((v): v is string => !!v),
     ),
   );
-  const fields: FieldRow[] = [
+  const fields: SummaryField[] = [
     { label: "Finished lots", value: passport.finishedLots.length, mono: true },
     { label: "Raw bags", value: passport.rawBags.length, mono: true },
     {
@@ -439,404 +443,414 @@ function PassportSummary({ passport }: { passport: RecallPassport }) {
   ];
 
   return (
-    <SectionCard
-      eyebrow="Recall passport"
-      title="Summary"
-      tone={
-        passport.confidence === "HIGH"
-          ? "good"
-          : passport.confidence === "MEDIUM"
-            ? "warn"
-            : passport.confidence === "LOW"
-              ? "crit"
-              : "muted"
-      }
-      actions={<ConfChip value={passport.confidence} />}
-      reveal="reveal-3"
-    >
-      <FieldGroup rows={fields} columns={4} />
-    </SectionCard>
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/60 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle">Recall passport</p>
+          <h2 className="text-sm font-semibold text-text-strong">Summary</h2>
+        </div>
+        <ConfChip value={passport.confidence} />
+      </div>
+      <div className="px-4 py-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-[12px]">
+          {fields.map((f) => (
+            <div key={f.label}>
+              <div className="text-text-muted">{f.label}</div>
+              <div className={cn("font-medium text-text-strong", f.mono ? "font-mono" : "")}>
+                {f.value != null && f.value !== "" ? String(f.value) : <span className="text-text-subtle font-normal not-italic">—</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
 function WarningsSection({ passport }: { passport: RecallPassport }) {
   return (
-    <SectionCard
-      eyebrow="Traceability gaps"
-      title="Warnings and missing links"
-      tone="warn"
-      reveal="reveal-3"
-    >
+    <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[12px] text-amber-800">
+      <div className="flex items-center gap-2 mb-2">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        <span className="font-semibold text-[10px] uppercase tracking-wider">Traceability gaps — Warnings and missing links</span>
+      </div>
       <div className="space-y-2">
         {passport.warnings.map((w, i) => (
           <div
             key={`w-${i}`}
-            className="flex items-start gap-2 text-[12px] text-warn-700"
+            className="flex items-start gap-2"
           >
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>{w}</span>
           </div>
         ))}
         {passport.missingLinks.map((m, i) => (
-          <div key={`m-${i}`} className="text-[12px] text-text-muted italic pl-5">
+          <div key={`m-${i}`} className="italic pl-5 text-amber-700/70">
             {m}
           </div>
         ))}
       </div>
-    </SectionCard>
+    </div>
   );
 }
 
 function RawBagsSection({ passport }: { passport: RecallPassport }) {
   return (
-    <SectionCard
-      eyebrow="Inbound traceability"
-      title={`Raw material / receiving — ${passport.rawBags.length}`}
-      tone={passport.rawBags.length > 0 ? "info" : "muted"}
-      reveal="reveal-3"
-    >
-      {passport.rawBags.length === 0 ? (
-        <p className="text-[12.5px] text-text-muted">
-          No raw bags matched this search axis.
-        </p>
-      ) : (
-        <div className="overflow-x-auto -mx-1">
-          <table className="min-w-full text-[11.5px]">
-            <thead>
-              <tr className="border-b border-border/60">
-                <Th>Internal receipt</Th>
-                <Th>Bag QR</Th>
-                <Th>Vendor barcode</Th>
-                <Th>Supplier lot</Th>
-                <Th>Receive</Th>
-                <Th align="right">Declared</Th>
-                <Th align="right">Current</Th>
-                <Th align="right">Weight (g)</Th>
-                <Th>Received</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {passport.rawBags.map((b) => (
-                <tr
-                  key={b.id}
-                  className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
-                >
-                  <Td className="font-mono font-medium text-text-strong">
-                    {b.internalReceiptNumber ?? (
-                      <span className="text-warn-700 italic">missing</span>
-                    )}
-                  </Td>
-                  <Td className="font-mono text-[10.5px] text-text-muted">
-                    {b.bagQrCode ?? (
-                      <span className="text-warn-700 italic">legacy / missing</span>
-                    )}
-                  </Td>
-                  <Td className="font-mono text-[10.5px] text-text-subtle">
-                    {b.vendorBarcode ?? "—"}
-                  </Td>
-                  <Td className="font-mono text-[11px]">
-                    {b.supplierLotNumber ?? "—"}
-                  </Td>
-                  <Td className="text-text-muted">
-                    {b.receiveName ?? "—"}
-                    {b.boxNumber != null ? ` · B${b.boxNumber}` : ""}
-                  </Td>
-                  <Td align="right" className="tabular-nums font-mono">
-                    {formatNumber(b.declaredPillCount)}
-                  </Td>
-                  <Td align="right" className="tabular-nums font-mono">
-                    {formatNumber(b.pillCount)}
-                  </Td>
-                  <Td
-                    align="right"
-                    className="tabular-nums font-mono text-text-muted"
-                  >
-                    {formatNumber(b.weightGrams)}
-                  </Td>
-                  <Td className="text-text-muted">
-                    {formatDate(b.receivedAt)}
-                  </Td>
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/60">
+        <p className="text-[10px] uppercase tracking-wider text-text-subtle">Inbound traceability</p>
+        <h2 className="text-sm font-semibold text-text-strong">Raw material / receiving — {passport.rawBags.length}</h2>
+      </div>
+      <div className="px-4 py-4">
+        {passport.rawBags.length === 0 ? (
+          <div className="px-4 py-8 text-center">
+            <Package className="h-8 w-8 mx-auto text-text-subtle mb-3" />
+            <p className="text-sm font-medium text-text-muted">No raw bags matched this search axis.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[11.5px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Internal receipt</Th>
+                  <Th>Bag QR</Th>
+                  <Th>Vendor barcode</Th>
+                  <Th>Supplier lot</Th>
+                  <Th>Receive</Th>
+                  <Th align="right">Declared</Th>
+                  <Th align="right">Current</Th>
+                  <Th align="right">Weight (g)</Th>
+                  <Th>Received</Th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </SectionCard>
+              </thead>
+              <tbody>
+                {passport.rawBags.map((b) => (
+                  <tr
+                    key={b.id}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td className="font-mono font-medium text-text-strong">
+                      {b.internalReceiptNumber ?? (
+                        <span className="text-amber-700 italic">missing</span>
+                      )}
+                    </Td>
+                    <Td className="font-mono text-[10.5px] text-text-muted">
+                      {b.bagQrCode ?? (
+                        <span className="text-amber-700 italic">legacy / missing</span>
+                      )}
+                    </Td>
+                    <Td className="font-mono text-[10.5px] text-text-subtle">
+                      {b.vendorBarcode ?? "—"}
+                    </Td>
+                    <Td className="font-mono text-[11px]">
+                      {b.supplierLotNumber ?? "—"}
+                    </Td>
+                    <Td className="text-text-muted">
+                      {b.receiveName ?? "—"}
+                      {b.boxNumber != null ? ` · B${b.boxNumber}` : ""}
+                    </Td>
+                    <Td align="right" className="tabular-nums font-mono">
+                      {formatNumber(b.declaredPillCount)}
+                    </Td>
+                    <Td align="right" className="tabular-nums font-mono">
+                      {formatNumber(b.pillCount)}
+                    </Td>
+                    <Td
+                      align="right"
+                      className="tabular-nums font-mono text-text-muted"
+                    >
+                      {formatNumber(b.weightGrams)}
+                    </Td>
+                    <Td className="text-text-muted">
+                      {formatDate(b.receivedAt)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
 function WorkflowSection({ passport }: { passport: RecallPassport }) {
   return (
-    <SectionCard
-      eyebrow="Production genealogy"
-      title={`Workflow bags — ${passport.workflowBags.length}`}
-      tone={passport.workflowBags.length > 0 ? "info" : "muted"}
-      reveal="reveal-4"
-    >
-      {passport.workflowBags.length === 0 ? (
-        <p className="text-[12.5px] text-text-muted">
-          No workflow bags linked to the matched finished lots.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {passport.workflowBags.map((wb) => (
-            <li
-              key={wb.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-surface-2/40 px-3 py-2.5 text-[12px]"
-            >
-              <span>
-                <span className="font-mono font-medium text-text-strong">
-                  {wb.receiptNumber ?? wb.id.slice(0, 8)}
-                </span>
-                <span className="text-text-muted">
-                  {" "}
-                  · started {formatDate(wb.startedAt)}
-                  {wb.finalizedAt
-                    ? ` · finalized ${formatDate(wb.finalizedAt)}`
-                    : (
-                      <span className="text-warn-700"> · not finalized</span>
-                    )}
-                </span>
-              </span>
-              <Link
-                href={`/genealogy/${wb.id}`}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[11px] text-text-muted hover:bg-surface-2 hover:text-text transition-colors"
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/60">
+        <p className="text-[10px] uppercase tracking-wider text-text-subtle">Production genealogy</p>
+        <h2 className="text-sm font-semibold text-text-strong">Workflow bags — {passport.workflowBags.length}</h2>
+      </div>
+      <div className="px-4 py-4">
+        {passport.workflowBags.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No workflow bags linked to the matched finished lots.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {passport.workflowBags.map((wb) => (
+              <li
+                key={wb.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-surface-2/40 px-3 py-2.5 text-[12px]"
               >
-                Open genealogy <ArrowRight className="h-3 w-3" />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </SectionCard>
+                <span>
+                  <span className="font-mono font-medium text-text-strong">
+                    {wb.receiptNumber ?? wb.id.slice(0, 8)}
+                  </span>
+                  <span className="text-text-muted">
+                    {" "}
+                    · started {formatDate(wb.startedAt)}
+                    {wb.finalizedAt
+                      ? ` · finalized ${formatDate(wb.finalizedAt)}`
+                      : (
+                        <span className="text-amber-700"> · not finalized</span>
+                      )}
+                  </span>
+                </span>
+                <Link
+                  href={`/genealogy/${wb.id}`}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 text-[11px] text-text-muted hover:bg-surface-2 hover:text-text transition-colors"
+                >
+                  Open genealogy <ArrowRight className="h-3 w-3" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 
 function OutputsSection({ passport }: { passport: RecallPassport }) {
   return (
-    <SectionCard
-      eyebrow="Finished output"
-      title={`Pack-out — ${passport.outputs.length}`}
-      tone={passport.outputs.length > 0 ? "good" : "muted"}
-      reveal="reveal-4"
-    >
-      {passport.outputs.length === 0 ? (
-        <p className="text-[12.5px] text-text-muted">
-          No projected outputs. Finished lot may exist without displays / cases
-          yet — the projector skips zero counts rather than fabricating rows.
-        </p>
-      ) : (
-        <div className="overflow-x-auto -mx-1">
-          <table className="min-w-full text-[11.5px]">
-            <thead>
-              <tr className="border-b border-border/60">
-                <Th>Type</Th>
-                <Th align="right">Quantity</Th>
-                <Th>Unit</Th>
-                <Th>Trace printed</Th>
-                <Th>Print payload</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {passport.outputs.map((o) => (
-                <tr
-                  key={o.id}
-                  className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
-                >
-                  <Td className="font-medium text-text-strong">
-                    {o.outputType}
-                  </Td>
-                  <Td align="right" className="tabular-nums font-mono">
-                    {formatNumber(o.quantity)}
-                  </Td>
-                  <Td className="text-text-muted">{o.unit}</Td>
-                  <Td className="font-mono text-[10.5px]">
-                    {o.traceCodePrinted ?? "—"}
-                  </Td>
-                  <Td className="font-mono text-[10px] text-text-subtle">
-                    {JSON.stringify(o.printPayload).slice(0, 80)}
-                    {JSON.stringify(o.printPayload).length > 80 ? "…" : ""}
-                  </Td>
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/60">
+        <p className="text-[10px] uppercase tracking-wider text-text-subtle">Finished output</p>
+        <h2 className="text-sm font-semibold text-text-strong">Pack-out — {passport.outputs.length}</h2>
+      </div>
+      <div className="px-4 py-4">
+        {passport.outputs.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No projected outputs. Finished lot may exist without displays / cases
+            yet — the projector skips zero counts rather than fabricating rows.
+          </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[11.5px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Type</Th>
+                  <Th align="right">Quantity</Th>
+                  <Th>Unit</Th>
+                  <Th>Trace printed</Th>
+                  <Th>Print payload</Th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </SectionCard>
+              </thead>
+              <tbody>
+                {passport.outputs.map((o) => (
+                  <tr
+                    key={o.id}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td className="font-medium text-text-strong">
+                      {o.outputType}
+                    </Td>
+                    <Td align="right" className="tabular-nums font-mono">
+                      {formatNumber(o.quantity)}
+                    </Td>
+                    <Td className="text-text-muted">{o.unit}</Td>
+                    <Td className="font-mono text-[10.5px]">
+                      {o.traceCodePrinted ?? "—"}
+                    </Td>
+                    <Td className="font-mono text-[10px] text-text-subtle">
+                      {JSON.stringify(o.printPayload).slice(0, 80)}
+                      {JSON.stringify(o.printPayload).length > 80 ? "…" : ""}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
 function PackagingSection({ passport }: { passport: RecallPassport }) {
   return (
-    <SectionCard
-      eyebrow="Materials used"
-      title={`Packaging / material — ${passport.packagingLots.length}`}
-      tone={passport.packagingLots.length > 0 ? "info" : "muted"}
-      reveal="reveal-4"
-    >
-      {passport.packagingLots.length === 0 ? (
-        <p className="text-[12.5px] text-text-muted">
-          No packaging-lot linkage projected. Either the workflow bags consumed
-          materials without packaging_lot_id stamped on the events, or the
-          projector has not run yet.
-        </p>
-      ) : (
-        <div className="overflow-x-auto -mx-1">
-          <table className="min-w-full text-[11.5px]">
-            <thead>
-              <tr className="border-b border-border/60">
-                <Th>Material</Th>
-                <Th>Kind</Th>
-                <Th>Roll #</Th>
-                <Th align="right">Qty used</Th>
-                <Th>Unit</Th>
-                <Th>Confidence</Th>
-                <Th>Source</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {passport.packagingLots.map((pl) => (
-                <tr
-                  key={pl.id}
-                  className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
-                >
-                  <Td className="font-medium text-text-strong">
-                    {pl.materialName ?? pl.packagingLotId.slice(0, 8)}
-                  </Td>
-                  <Td className="text-text-muted">{pl.materialKind ?? "—"}</Td>
-                  <Td className="font-mono text-[10.5px]">
-                    {pl.rollNumber ?? "—"}
-                  </Td>
-                  <Td align="right" className="tabular-nums font-mono">
-                    {formatNumber(pl.quantityUsed)}
-                  </Td>
-                  <Td className="text-text-muted">{pl.unit ?? "—"}</Td>
-                  <Td>
-                    <ConfChip value={pl.confidence} />
-                  </Td>
-                  <Td className="font-mono text-[10px] text-text-subtle">
-                    {pl.source}
-                  </Td>
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/60">
+        <p className="text-[10px] uppercase tracking-wider text-text-subtle">Materials used</p>
+        <h2 className="text-sm font-semibold text-text-strong">Packaging / material — {passport.packagingLots.length}</h2>
+      </div>
+      <div className="px-4 py-4">
+        {passport.packagingLots.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No packaging-lot linkage projected. Either the workflow bags consumed
+            materials without packaging_lot_id stamped on the events, or the
+            projector has not run yet.
+          </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[11.5px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Material</Th>
+                  <Th>Kind</Th>
+                  <Th>Roll #</Th>
+                  <Th align="right">Qty used</Th>
+                  <Th>Unit</Th>
+                  <Th>Confidence</Th>
+                  <Th>Source</Th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </SectionCard>
+              </thead>
+              <tbody>
+                {passport.packagingLots.map((pl) => (
+                  <tr
+                    key={pl.id}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td className="font-medium text-text-strong">
+                      {pl.materialName ?? pl.packagingLotId.slice(0, 8)}
+                    </Td>
+                    <Td className="text-text-muted">{pl.materialKind ?? "—"}</Td>
+                    <Td className="font-mono text-[10.5px]">
+                      {pl.rollNumber ?? "—"}
+                    </Td>
+                    <Td align="right" className="tabular-nums font-mono">
+                      {formatNumber(pl.quantityUsed)}
+                    </Td>
+                    <Td className="text-text-muted">{pl.unit ?? "—"}</Td>
+                    <Td>
+                      <ConfChip value={pl.confidence} />
+                    </Td>
+                    <Td className="font-mono text-[10px] text-text-subtle">
+                      {pl.source}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
 function QcSection({ passport }: { passport: RecallPassport }) {
   return (
-    <SectionCard
-      eyebrow="Quality control"
-      title={`QC events — ${passport.qcEvents.length}`}
-      tone={passport.qcEvents.length > 0 ? "warn" : "muted"}
-      reveal="reveal-5"
-    >
-      {passport.qcEvents.length === 0 ? (
-        <p className="text-[12.5px] text-text-muted">
-          No damage / rework / scrap / correction events linked to these
-          finished lots.
-        </p>
-      ) : (
-        <div className="overflow-x-auto -mx-1">
-          <table className="min-w-full text-[11.5px]">
-            <thead>
-              <tr className="border-b border-border/60">
-                <Th>Event type</Th>
-                <Th>Occurred</Th>
-                <Th>Event id</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {passport.qcEvents.map((q) => (
-                <tr
-                  key={q.id}
-                  className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
-                >
-                  <Td className="font-mono font-medium text-text-strong">
-                    {q.eventType}
-                  </Td>
-                  <Td className="text-text-muted">
-                    {formatDate(q.occurredAt)}
-                  </Td>
-                  <Td className="font-mono text-[10px] text-text-subtle">
-                    {q.workflowEventId.slice(0, 8)}
-                  </Td>
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/60">
+        <p className="text-[10px] uppercase tracking-wider text-text-subtle">Quality control</p>
+        <h2 className="text-sm font-semibold text-text-strong">QC events — {passport.qcEvents.length}</h2>
+      </div>
+      <div className="px-4 py-4">
+        {passport.qcEvents.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No damage / rework / scrap / correction events linked to these
+            finished lots.
+          </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[11.5px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Event type</Th>
+                  <Th>Occurred</Th>
+                  <Th>Event id</Th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </SectionCard>
+              </thead>
+              <tbody>
+                {passport.qcEvents.map((q) => (
+                  <tr
+                    key={q.id}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td className="font-mono font-medium text-text-strong">
+                      {q.eventType}
+                    </Td>
+                    <Td className="text-text-muted">
+                      {formatDate(q.occurredAt)}
+                    </Td>
+                    <Td className="font-mono text-[10px] text-text-subtle">
+                      {q.workflowEventId.slice(0, 8)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
 function ShipmentsSection({ passport }: { passport: RecallPassport }) {
   return (
-    <SectionCard
-      eyebrow="Customer traceability"
-      title={`Shipments / customers — ${passport.shipmentLinks.length}`}
-      tone={passport.shipmentLinks.length > 0 ? "good" : "muted"}
-      reveal="reveal-5"
-    >
-      {passport.shipmentLinks.length === 0 ? (
-        <p className="text-[12.5px] text-text-muted">
-          No shipment / customer linkage recorded yet. Recall lookup may still
-          surface the rest of the chain.
-        </p>
-      ) : (
-        <div className="overflow-x-auto -mx-1">
-          <table className="min-w-full text-[11.5px]">
-            <thead>
-              <tr className="border-b border-border/60">
-                <Th>Customer</Th>
-                <Th>Carrier</Th>
-                <Th>Tracking</Th>
-                <Th align="right">Qty</Th>
-                <Th>Unit</Th>
-                <Th>Shipped</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {passport.shipmentLinks.map((s) => (
-                <tr
-                  key={s.id}
-                  className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
-                >
-                  <Td className="font-medium text-text-strong">
-                    {s.customerName ?? (
-                      <span className="text-text-subtle">—</span>
-                    )}
-                    {s.customerCode ? (
-                      <span className="text-text-muted ml-1.5 text-[11px]">
-                        · {s.customerCode}
-                      </span>
-                    ) : null}
-                  </Td>
-                  <Td className="text-text-muted">{s.carrier ?? "—"}</Td>
-                  <Td className="font-mono text-[10.5px]">
-                    {s.trackingNumber ?? "—"}
-                  </Td>
-                  <Td align="right" className="tabular-nums font-mono">
-                    {formatNumber(s.quantity)}
-                  </Td>
-                  <Td className="text-text-muted">{s.unit ?? "—"}</Td>
-                  <Td className="text-text-muted">
-                    {formatDate(s.shippedAt)}
-                  </Td>
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-border/60">
+        <p className="text-[10px] uppercase tracking-wider text-text-subtle">Customer traceability</p>
+        <h2 className="text-sm font-semibold text-text-strong">Shipments / customers — {passport.shipmentLinks.length}</h2>
+      </div>
+      <div className="px-4 py-4">
+        {passport.shipmentLinks.length === 0 ? (
+          <p className="text-[12.5px] text-text-muted">
+            No shipment / customer linkage recorded yet. Recall lookup may still
+            surface the rest of the chain.
+          </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="min-w-full text-[11.5px]">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <Th>Customer</Th>
+                  <Th>Carrier</Th>
+                  <Th>Tracking</Th>
+                  <Th align="right">Qty</Th>
+                  <Th>Unit</Th>
+                  <Th>Shipped</Th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </SectionCard>
+              </thead>
+              <tbody>
+                {passport.shipmentLinks.map((s) => (
+                  <tr
+                    key={s.id}
+                    className="border-b border-border/30 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <Td className="font-medium text-text-strong">
+                      {s.customerName ?? (
+                        <span className="text-text-subtle">—</span>
+                      )}
+                      {s.customerCode ? (
+                        <span className="text-text-muted ml-1.5 text-[11px]">
+                          · {s.customerCode}
+                        </span>
+                      ) : null}
+                    </Td>
+                    <Td className="text-text-muted">{s.carrier ?? "—"}</Td>
+                    <Td className="font-mono text-[10.5px]">
+                      {s.trackingNumber ?? "—"}
+                    </Td>
+                    <Td align="right" className="tabular-nums font-mono">
+                      {formatNumber(s.quantity)}
+                    </Td>
+                    <Td className="text-text-muted">{s.unit ?? "—"}</Td>
+                    <Td className="text-text-muted">
+                      {formatDate(s.shippedAt)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

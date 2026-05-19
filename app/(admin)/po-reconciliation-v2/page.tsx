@@ -510,7 +510,7 @@ function DetailPanel({ row }: { row: ReconciliationV2Row }) {
           <summary className="cursor-pointer text-[11px] text-text-muted hover:text-text">
             Source snapshot
           </summary>
-          <pre className="mt-1 rounded-md bg-slate-950 border border-slate-800 p-2 text-[10px] text-slate-300 overflow-x-auto">
+          <pre className="mt-1 rounded-md bg-surface-2 border border-border p-2 text-[10px] text-text-muted overflow-x-auto">
             {JSON.stringify(row.sourceSnapshot, null, 2)}
           </pre>
         </details>

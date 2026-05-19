@@ -36,7 +36,7 @@ const SEVERITY_STYLE: Record<ShortageSeverity, string> = {
   CRITICAL: "bg-red-100 text-red-900 border-red-400",
   HIGH: "bg-orange-100 text-orange-900 border-orange-400",
   MEDIUM: "bg-amber-100 text-amber-900 border-amber-400",
-  WATCH: "bg-slate-100 text-slate-700 border-slate-300",
+  WATCH: "bg-surface-2 text-text-muted border-border",
 };
 
 function formatQty(value: number | null, unit?: string | null): string {
@@ -157,7 +157,7 @@ function ActionButtons({
           <button
             type="button"
             onClick={() => setDismissOpen((v) => !v)}
-            className="rounded border border-slate-400 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+            className="rounded border border-border bg-surface px-2 py-1 text-[11px] font-semibold text-text-muted hover:bg-surface-2"
           >
             Dismiss
           </button>
@@ -176,7 +176,7 @@ function ActionButtons({
         {sendBlockReason != null && !alreadySent && (
           <span
             title="Sending creates a recommendation in PackTrack for owner approval. Luma does not create a PO."
-            className="inline-flex items-center rounded border border-slate-300 bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-500"
+            className="inline-flex items-center rounded border border-border bg-surface-2 px-2 py-1 text-[11px] font-medium text-text-muted"
           >
             Send blocked: {sendBlockReason}
           </span>
@@ -269,7 +269,7 @@ function SendableBadge({ sendable }: { sendable: boolean }) {
       Sendable
     </span>
   ) : (
-    <span className="inline-flex items-center h-5 px-1.5 rounded-sm border border-slate-300 bg-slate-50 text-slate-700 text-[10px] font-semibold uppercase tracking-wider">
+    <span className="inline-flex items-center h-5 px-1.5 rounded-sm border border-border bg-surface-2 text-text-muted text-[10px] font-semibold uppercase tracking-wider">
       Not sendable
     </span>
   );
@@ -384,7 +384,7 @@ export function ShortageRecommendationsPanel({
                 className={`rounded-sm border px-1.5 py-0.5 ${
                   statusFilter === s
                     ? "bg-brand-700 text-white border-brand-700"
-                    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                    : "bg-surface border-border text-text-muted hover:bg-surface-2"
                 }`}
               >
                 {s.charAt(0) + s.slice(1).toLowerCase()}
@@ -402,7 +402,7 @@ export function ShortageRecommendationsPanel({
                 className={`rounded-sm border px-1.5 py-0.5 ${
                   severityFilter.includes(sv)
                     ? "bg-brand-700 text-white border-brand-700"
-                    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                    : "bg-surface border-border text-text-muted hover:bg-surface-2"
                 }`}
               >
                 {sv}
@@ -420,7 +420,7 @@ export function ShortageRecommendationsPanel({
                 className={`rounded-sm border px-1.5 py-0.5 ${
                   confidenceFilter.includes(c)
                     ? "bg-brand-700 text-white border-brand-700"
-                    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                    : "bg-surface border-border text-text-muted hover:bg-surface-2"
                 }`}
               >
                 {c}
@@ -507,7 +507,7 @@ export function ShortageRecommendationsPanel({
                         </span>
                       )}
                       {r.missingInputs.length > 0 && (
-                        <span className="inline-flex items-center h-5 px-1.5 rounded-sm border border-slate-300 bg-slate-100 text-slate-700 text-[10px] font-semibold uppercase tracking-wider">
+                        <span className="inline-flex items-center h-5 px-1.5 rounded-sm border border-border bg-surface-2 text-text-muted text-[10px] font-semibold uppercase tracking-wider">
                           Missing configuration
                         </span>
                       )}
@@ -517,7 +517,7 @@ export function ShortageRecommendationsPanel({
                         </span>
                       )}
                       {r.dismissedAt && (
-                        <span className="inline-flex items-center h-5 px-1.5 rounded-sm border border-slate-300 bg-slate-100 text-slate-500 text-[10px] font-semibold uppercase tracking-wider">
+                        <span className="inline-flex items-center h-5 px-1.5 rounded-sm border border-border bg-surface-2 text-text-subtle text-[10px] font-semibold uppercase tracking-wider">
                           Dismissed
                         </span>
                       )}
@@ -623,7 +623,7 @@ export function ShortageRecommendationsPanel({
                       </p>
                     )}
                     {r.warnings.map((w, i) => (
-                      <p key={i} className="text-slate-700">
+                      <p key={i} className="text-text-strong">
                         {w}
                       </p>
                     ))}

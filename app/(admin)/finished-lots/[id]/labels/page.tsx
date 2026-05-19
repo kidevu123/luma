@@ -298,7 +298,7 @@ function NexusStatusCard({
             className={`inline-flex items-center h-5 px-1.5 rounded-sm border text-[10px] font-semibold uppercase tracking-wider ${
               sendability.sendable
                 ? "border-emerald-400 bg-emerald-50 text-emerald-900"
-                : "border-slate-300 bg-slate-100 text-slate-700"
+                : "border-border bg-slate-100 text-text-muted"
             }`}
           >
             {sendability.sendable ? "sendable" : "not sendable"}
@@ -415,7 +415,7 @@ function LabelCard({ label }: { label: FinishedLotLabelPayload }) {
     <div
       className={`rounded border ${
         isCustomer
-          ? "border-slate-700 bg-white"
+          ? "border-border bg-white"
           : "border-amber-300 bg-amber-50"
       } p-3 text-xs font-mono`}
     >
@@ -423,7 +423,7 @@ function LabelCard({ label }: { label: FinishedLotLabelPayload }) {
         <span
           className={`inline-flex items-center h-5 px-1.5 rounded-sm border text-[9px] font-semibold uppercase tracking-wider ${
             isCustomer
-              ? "border-slate-700 bg-slate-100 text-slate-900"
+              ? "border-border bg-surface-2 text-text-strong"
               : "border-amber-500 bg-amber-100 text-amber-900"
           }`}
         >
