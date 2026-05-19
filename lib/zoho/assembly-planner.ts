@@ -3,16 +3,28 @@
 // Returns a full plan (with status previews + payload shapes) without
 // writing anything to the DB or calling Zoho.
 //
+// Two execution modes:
+//   planZohoAssemblyForFinishedLot(id)  — DB entry point (production use)
+//   computeZohoAssemblyPlan(inputs)     — pure function (unit-testable)
+//
 // Source resolution — two paths:
 //
-//   LEDGER:   raw_bag_allocation_sessions (preferred)
+//   LEDGER:   raw_bag_allocation_sessions (preferred, allocation_status IN ('CLOSED','DEPLETED'))
 //     inventory_bag → small_box → receive → po_line → zoho_line_item_id
 //     allocation_session.po_id → purchase_order → zoho_po_id
 //
-//   FALLBACK: finished_lot_inputs → batches (when no allocation sessions)
-//     Cannot resolve po_line; all TABLET_RECEIVE ops will be NEEDS_MAPPING.
+//   FALLBACK: finished_lot_inputs → batches (when no closed allocation sessions)
+//     Cannot resolve po_line; all TABLET_RECEIVE ops are NEEDS_MAPPING.
 //
-//   NONE:     No tablet source records found at all.
+//   NONE:     No tablet source records found.
+//
+// Status rules:
+//   TABLET_RECEIVE — READY when tablet type + PO + PO line all have Zoho IDs.
+//   Assembly op   — SKIPPED when qty = 0.
+//                   NEEDS_MAPPING when product Zoho item ID missing, OR any
+//                   BOM material for that scope lacks a Zoho item ID.
+//                   READY otherwise.
+// BLOCKED is not emitted by the dry-run planner (runtime scheduler concern).
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -32,15 +44,18 @@ import {
   packagingMaterials,
 } from "@/lib/db/schema";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Public types ─────────────────────────────────────────────────────────────
 
 export type ZohoAssemblyStatusPreview = "READY" | "NEEDS_MAPPING" | "SKIPPED" | "BLOCKED";
 
-export type BomIssue = {
+/** One packaging material in the BOM for an assembly op level. */
+export type BomLine = {
   materialId:   string;
   materialName: string;
   zohoItemId:   string | null;
-  issue:        string;
+  qtyPerUnit:   number;
+  expectedQty:  number;       // qtyPerUnit * assembly op quantity
+  issue:        string | null; // null when OK; reason string when not
 };
 
 export type ZohoReceivePayloadPreview = {
@@ -73,14 +88,14 @@ export type PlanTabletReceiveOp = {
 };
 
 export type PlanAssemblyOp = {
-  opKind:        "UNIT_ASSEMBLE" | "DISPLAY_ASSEMBLE" | "CASE_ASSEMBLE";
-  opSequence:    2 | 3 | 4;
+  opKind:         "UNIT_ASSEMBLE" | "DISPLAY_ASSEMBLE" | "CASE_ASSEMBLE";
+  opSequence:     2 | 3 | 4;
   idempotencyKey: string;
-  zohoItemId:    string | null;
-  quantity:      number;
-  statusPreview: ZohoAssemblyStatusPreview;
-  statusReason:  string | null;
-  bomIssues:     BomIssue[];
+  zohoItemId:     string | null;
+  quantity:       number;
+  statusPreview:  ZohoAssemblyStatusPreview;
+  statusReason:   string | null;
+  bomLines:       BomLine[];
   payloadPreview: ZohoAssemblyPayloadPreview;
 };
 
@@ -104,52 +119,72 @@ export type ZohoAssemblyPlanResult = {
   issues:        string[];
 };
 
-// ─── Planner ──────────────────────────────────────────────────────────────────
+// ─── Input types for the pure computation (exported for tests) ────────────────
 
-export async function planZohoAssemblyForFinishedLot(
-  finishedLotId: string,
-): Promise<ZohoAssemblyPlanResult | null> {
-  // 1. Load lot + product
-  const [lotRow] = await db
-    .select({ lot: finishedLots, product: products })
-    .from(finishedLots)
-    .leftJoin(products, eq(finishedLots.productId, products.id))
-    .where(eq(finishedLots.id, finishedLotId));
-  if (!lotRow) return null;
+export type PlannerLedgerRow = {
+  inventoryBagId:   string;
+  consumedQty:      number | null;
+  tabletTypeId:     string;
+  tabletZohoItemId: string | null;
+  tabletName:       string;
+  receivePoLineId:  string | null;
+  zohoLineItemId:   string | null;
+  zohoPoId:         string | null;
+  componentRole:    string | null;
+};
 
-  const { lot, product } = lotRow;
+export type PlannerFallbackRow = {
+  batchId:          string;
+  qtyConsumed:      number;
+  tabletTypeId:     string | null;
+  tabletName:       string | null;
+  tabletZohoItemId: string | null;
+};
+
+export type PlannerBomRow = {
+  perScope:           string;
+  materialId:         string;
+  materialName:       string;
+  materialZohoItemId: string | null;
+  qtyPerUnit:         number;
+};
+
+export type PlannerRawInputs = {
+  finishedLotId:    string;
+  finishedLotNumber: string;
+  unitsProduced:    number;
+  displaysProduced: number | null;
+  casesProduced:    number | null;
+  product: {
+    id:                string;
+    name:              string;
+    sku:               string;
+    kind:              string;
+    zohoItemIdUnit:    string | null;
+    zohoItemIdDisplay: string | null;
+    zohoItemIdCase:    string | null;
+  } | null;
+  ledgerRows:   PlannerLedgerRow[];
+  fallbackRows: PlannerFallbackRow[];
+  bomRows:      PlannerBomRow[];
+};
+
+// ─── Pure computation (no DB, fully unit-testable) ────────────────────────────
+
+export function computeZohoAssemblyPlan(
+  inputs: PlannerRawInputs,
+): ZohoAssemblyPlanResult {
+  const {
+    finishedLotId, finishedLotNumber, product,
+    unitsProduced, displaysProduced, casesProduced,
+    ledgerRows, fallbackRows, bomRows,
+  } = inputs;
+
   const issues: string[] = [];
   const ops: PlanOp[] = [];
-
-  // 2. Source resolution — LEDGER path via raw_bag_allocation_sessions
-  const ledgerRows = await db
-    .select({
-      inventoryBagId:  rawBagAllocationSessions.inventoryBagId,
-      poId:            rawBagAllocationSessions.poId,
-      componentRole:   rawBagAllocationSessions.componentRole,
-      consumedQty:     rawBagAllocationSessions.consumedQty,
-      tabletTypeId:    inventoryBags.tabletTypeId,
-      tabletZohoItemId: tabletTypes.zohoItemId,
-      tabletName:      tabletTypes.name,
-      receivePoLineId: receives.poLineId,
-      zohoLineItemId:  poLines.zohoLineItemId,
-      zohoPoId:        purchaseOrders.zohoPoId,
-    })
-    .from(rawBagAllocationSessions)
-    .innerJoin(inventoryBags,   eq(rawBagAllocationSessions.inventoryBagId, inventoryBags.id))
-    .innerJoin(tabletTypes,     eq(inventoryBags.tabletTypeId, tabletTypes.id))
-    .innerJoin(smallBoxes,      eq(inventoryBags.smallBoxId, smallBoxes.id))
-    .innerJoin(receives,        eq(smallBoxes.receiveId, receives.id))
-    .leftJoin(poLines,          eq(receives.poLineId, poLines.id))
-    .leftJoin(purchaseOrders,   eq(rawBagAllocationSessions.poId, purchaseOrders.id))
-    .where(
-      and(
-        eq(rawBagAllocationSessions.finishedLotId, finishedLotId),
-        inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
-      ),
-    );
-
   let sourceMethod: "LEDGER" | "FALLBACK" | "NONE";
+
+  // ── TABLET_RECEIVE ops ────────────────────────────────────────────────────
 
   if (ledgerRows.length > 0) {
     sourceMethod = "LEDGER";
@@ -184,107 +219,74 @@ export async function planZohoAssemblyForFinishedLot(
         },
       });
     }
-  } else {
-    // FALLBACK path via finished_lot_inputs
-    const fallbackRows = await db
-      .select({
-        batchId:         finishedLotInputs.batchId,
-        qtyConsumed:     finishedLotInputs.qtyConsumed,
-        tabletTypeId:    batches.tabletTypeId,
-        tabletName:      tabletTypes.name,
-        tabletZohoItemId: tabletTypes.zohoItemId,
-      })
-      .from(finishedLotInputs)
-      .innerJoin(batches,      eq(finishedLotInputs.batchId, batches.id))
-      .leftJoin(tabletTypes,   eq(batches.tabletTypeId, tabletTypes.id))
-      .where(
-        and(
-          eq(finishedLotInputs.finishedLotId, finishedLotId),
-          eq(batches.kind, "TABLET"),
-        ),
-      );
-
-    if (fallbackRows.length > 0) {
-      sourceMethod = "FALLBACK";
-      issues.push(
-        "Source resolution fell back to batch genealogy — no closed allocation sessions found. " +
-        "PO line details are unavailable; all TABLET_RECEIVE ops require manual mapping before enqueue.",
-      );
-      for (const fi of fallbackRows) {
-        if (!fi.tabletTypeId) continue;
-        const key = `luma:tablet_receive:${finishedLotId}:batch:${fi.batchId}`;
-        const missing = ["no inventory bag link — PO receive details unavailable"];
-        if (!fi.tabletZohoItemId) missing.push("tablet type has no Zoho item ID");
-        ops.push({
-          opKind:               "TABLET_RECEIVE",
-          opSequence:           1,
-          idempotencyKey:       key,
-          sourceInventoryBagId: null,
-          sourcePoLineId:       null,
-          sourceTabletTypeId:   fi.tabletTypeId,
-          tabletTypeName:       fi.tabletName ?? null,
-          zohoTabletItemId:     fi.tabletZohoItemId ?? null,
-          zohoPoId:             null,
-          zohoLineItemId:       null,
-          quantity:             fi.qtyConsumed,
-          componentRole:        null,
-          statusPreview:        "NEEDS_MAPPING",
-          statusReason:         missing.join("; "),
-          payloadPreview: {
-            zohoPoId:       null,
-            zohoLineItemId: null,
-            quantity:       fi.qtyConsumed,
-          },
-        });
-      }
-    } else {
-      sourceMethod = "NONE";
-      issues.push(
-        "No tablet source records found — neither allocation sessions nor batch inputs exist for this lot.",
-      );
+  } else if (fallbackRows.length > 0) {
+    sourceMethod = "FALLBACK";
+    issues.push(
+      "Source resolution fell back to batch genealogy — no closed allocation sessions found. " +
+      "PO line details are unavailable; all TABLET_RECEIVE ops require manual mapping before enqueue.",
+    );
+    for (const fi of fallbackRows) {
+      if (!fi.tabletTypeId) continue;
+      // Fallback keys use `batch:` prefix — never match the official enqueue format.
+      const key = `luma:tablet_receive:${finishedLotId}:batch:${fi.batchId}`;
+      const missing = ["no inventory bag link — PO receive details unavailable"];
+      if (!fi.tabletZohoItemId) missing.push("tablet type has no Zoho item ID");
+      ops.push({
+        opKind:               "TABLET_RECEIVE",
+        opSequence:           1,
+        idempotencyKey:       key,
+        sourceInventoryBagId: null,
+        sourcePoLineId:       null,
+        sourceTabletTypeId:   fi.tabletTypeId,
+        tabletTypeName:       fi.tabletName ?? null,
+        zohoTabletItemId:     fi.tabletZohoItemId ?? null,
+        zohoPoId:             null,
+        zohoLineItemId:       null,
+        quantity:             fi.qtyConsumed,
+        componentRole:        null,
+        statusPreview:        "NEEDS_MAPPING",
+        statusReason:         missing.join("; "),
+        payloadPreview: {
+          zohoPoId:       null,
+          zohoLineItemId: null,
+          quantity:       fi.qtyConsumed,
+        },
+      });
     }
+  } else {
+    sourceMethod = "NONE";
+    issues.push(
+      "No tablet source records found — neither allocation sessions nor batch inputs exist for this lot.",
+    );
   }
 
-  // 3. BOM specs for assembly-op issue detection
-  const bomSpecs = product
-    ? await db
-        .select({
-          perScope:          productPackagingSpecs.perScope,
-          materialId:        packagingMaterials.id,
-          materialName:      packagingMaterials.name,
-          materialZohoItemId: packagingMaterials.zohoItemId,
-        })
-        .from(productPackagingSpecs)
-        .innerJoin(
-          packagingMaterials,
-          eq(productPackagingSpecs.packagingMaterialId, packagingMaterials.id),
-        )
-        .where(eq(productPackagingSpecs.productId, product.id))
-    : [];
+  // ── BOM helper ────────────────────────────────────────────────────────────
 
-  function bomIssuesFor(scope: string): BomIssue[] {
-    return bomSpecs
-      .filter((s) => s.perScope === scope && !s.materialZohoItemId)
-      .map((s) => ({
-        materialId:   s.materialId,
-        materialName: s.materialName,
-        zohoItemId:   s.materialZohoItemId,
-        issue:        "Missing Zoho item ID on packaging material",
+  function bomLinesFor(scope: string, assemblyQty: number): BomLine[] {
+    return bomRows
+      .filter((r) => r.perScope === scope)
+      .map((r) => ({
+        materialId:   r.materialId,
+        materialName: r.materialName,
+        zohoItemId:   r.materialZohoItemId,
+        qtyPerUnit:   r.qtyPerUnit,
+        expectedQty:  r.qtyPerUnit * assemblyQty,
+        issue:        r.materialZohoItemId
+          ? null
+          : "Missing Zoho item ID on packaging material",
       }));
   }
 
-  // 4. Assembly ops — UNIT / DISPLAY / CASE
-  const unitsProduced    = lot.unitsProduced;
-  const displaysProduced = lot.displaysProduced;
-  const casesProduced    = lot.casesProduced;
+  // ── Assembly ops ──────────────────────────────────────────────────────────
 
   const unitZohoItemId    = product?.zohoItemIdUnit    ?? null;
   const displayZohoItemId = product?.zohoItemIdDisplay ?? null;
   const caseZohoItemId    = product?.zohoItemIdCase    ?? null;
 
-  // UNIT_ASSEMBLE
+  // UNIT_ASSEMBLE (sequence 2)
   {
-    const bomIssues   = bomIssuesFor("UNIT");
+    const bomLines = bomLinesFor("UNIT", unitsProduced);
+    const bomMissing = bomLines.some((l) => l.issue !== null);
     let statusPreview: ZohoAssemblyStatusPreview;
     let statusReason: string | null = null;
     if (unitsProduced <= 0) {
@@ -293,6 +295,9 @@ export async function planZohoAssemblyForFinishedLot(
     } else if (!unitZohoItemId) {
       statusPreview = "NEEDS_MAPPING";
       statusReason  = "Product has no Zoho item ID for unit level";
+    } else if (bomMissing) {
+      statusPreview = "NEEDS_MAPPING";
+      statusReason  = "One or more unit-level BOM materials lack a Zoho item ID";
     } else {
       statusPreview = "READY";
     }
@@ -304,26 +309,30 @@ export async function planZohoAssemblyForFinishedLot(
       quantity:       unitsProduced,
       statusPreview,
       statusReason,
-      bomIssues,
+      bomLines,
       payloadPreview: { zohoItemId: unitZohoItemId, quantity: unitsProduced },
     });
   }
 
-  // DISPLAY_ASSEMBLE
+  // DISPLAY_ASSEMBLE (sequence 3)
   {
-    const bomIssues   = bomIssuesFor("DISPLAY");
+    const qty      = displaysProduced ?? 0;
+    const bomLines = bomLinesFor("DISPLAY", qty);
+    const bomMissing = bomLines.some((l) => l.issue !== null);
     let statusPreview: ZohoAssemblyStatusPreview;
     let statusReason: string | null = null;
-    if (!displaysProduced || displaysProduced <= 0) {
+    if (qty <= 0) {
       statusPreview = "SKIPPED";
       statusReason  = "No displays produced";
     } else if (!displayZohoItemId) {
       statusPreview = "NEEDS_MAPPING";
       statusReason  = "Product has no Zoho item ID for display level";
+    } else if (bomMissing) {
+      statusPreview = "NEEDS_MAPPING";
+      statusReason  = "One or more display-level BOM materials lack a Zoho item ID";
     } else {
       statusPreview = "READY";
     }
-    const qty = displaysProduced ?? 0;
     ops.push({
       opKind:         "DISPLAY_ASSEMBLE",
       opSequence:     3,
@@ -332,26 +341,30 @@ export async function planZohoAssemblyForFinishedLot(
       quantity:       qty,
       statusPreview,
       statusReason,
-      bomIssues,
+      bomLines,
       payloadPreview: { zohoItemId: displayZohoItemId, quantity: qty },
     });
   }
 
-  // CASE_ASSEMBLE
+  // CASE_ASSEMBLE (sequence 4)
   {
-    const bomIssues   = bomIssuesFor("CASE");
+    const qty      = casesProduced ?? 0;
+    const bomLines = bomLinesFor("CASE", qty);
+    const bomMissing = bomLines.some((l) => l.issue !== null);
     let statusPreview: ZohoAssemblyStatusPreview;
     let statusReason: string | null = null;
-    if (!casesProduced || casesProduced <= 0) {
+    if (qty <= 0) {
       statusPreview = "SKIPPED";
       statusReason  = "No cases produced";
     } else if (!caseZohoItemId) {
       statusPreview = "NEEDS_MAPPING";
       statusReason  = "Product has no Zoho item ID for case level";
+    } else if (bomMissing) {
+      statusPreview = "NEEDS_MAPPING";
+      statusReason  = "One or more case-level BOM materials lack a Zoho item ID";
     } else {
       statusPreview = "READY";
     }
-    const qty = casesProduced ?? 0;
     ops.push({
       opKind:         "CASE_ASSEMBLE",
       opSequence:     4,
@@ -360,12 +373,13 @@ export async function planZohoAssemblyForFinishedLot(
       quantity:       qty,
       statusPreview,
       statusReason,
-      bomIssues,
+      bomLines,
       payloadPreview: { zohoItemId: caseZohoItemId, quantity: qty },
     });
   }
 
-  // 5. Overall status — worst across all non-SKIPPED ops
+  // ── Overall status — worst across all non-SKIPPED ops ────────────────────
+
   const nonSkipped = ops.filter((o) => o.statusPreview !== "SKIPPED");
   let overallStatus: ZohoAssemblyStatusPreview;
   if (nonSkipped.some(
@@ -380,7 +394,7 @@ export async function planZohoAssemblyForFinishedLot(
 
   return {
     finishedLotId,
-    finishedLotNumber: lot.finishedLotNumber,
+    finishedLotNumber,
     product: product
       ? {
           id:                product.id,
@@ -397,4 +411,123 @@ export async function planZohoAssemblyForFinishedLot(
     overallStatus,
     issues,
   };
+}
+
+// ─── DB entry point ───────────────────────────────────────────────────────────
+
+export async function planZohoAssemblyForFinishedLot(
+  finishedLotId: string,
+): Promise<ZohoAssemblyPlanResult | null> {
+  // 1. Load lot + product
+  const [lotRow] = await db
+    .select({ lot: finishedLots, product: products })
+    .from(finishedLots)
+    .leftJoin(products, eq(finishedLots.productId, products.id))
+    .where(eq(finishedLots.id, finishedLotId));
+  if (!lotRow) return null;
+
+  const { lot, product } = lotRow;
+
+  // 2. LEDGER path — raw_bag_allocation_sessions
+  const ledgerRows = await db
+    .select({
+      inventoryBagId:  rawBagAllocationSessions.inventoryBagId,
+      consumedQty:     rawBagAllocationSessions.consumedQty,
+      tabletTypeId:    inventoryBags.tabletTypeId,
+      tabletZohoItemId: tabletTypes.zohoItemId,
+      tabletName:      tabletTypes.name,
+      receivePoLineId: receives.poLineId,
+      zohoLineItemId:  poLines.zohoLineItemId,
+      zohoPoId:        purchaseOrders.zohoPoId,
+      componentRole:   rawBagAllocationSessions.componentRole,
+    })
+    .from(rawBagAllocationSessions)
+    .innerJoin(inventoryBags,  eq(rawBagAllocationSessions.inventoryBagId, inventoryBags.id))
+    .innerJoin(tabletTypes,    eq(inventoryBags.tabletTypeId, tabletTypes.id))
+    .innerJoin(smallBoxes,     eq(inventoryBags.smallBoxId, smallBoxes.id))
+    .innerJoin(receives,       eq(smallBoxes.receiveId, receives.id))
+    .leftJoin(poLines,         eq(receives.poLineId, poLines.id))
+    .leftJoin(purchaseOrders,  eq(rawBagAllocationSessions.poId, purchaseOrders.id))
+    .where(
+      and(
+        eq(rawBagAllocationSessions.finishedLotId, finishedLotId),
+        inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+      ),
+    );
+
+  // 3. FALLBACK path — only fetched when LEDGER is empty
+  const fallbackRows = ledgerRows.length > 0
+    ? []
+    : await db
+        .select({
+          batchId:          finishedLotInputs.batchId,
+          qtyConsumed:      finishedLotInputs.qtyConsumed,
+          tabletTypeId:     batches.tabletTypeId,
+          tabletName:       tabletTypes.name,
+          tabletZohoItemId: tabletTypes.zohoItemId,
+        })
+        .from(finishedLotInputs)
+        .innerJoin(batches,    eq(finishedLotInputs.batchId, batches.id))
+        .leftJoin(tabletTypes, eq(batches.tabletTypeId, tabletTypes.id))
+        .where(
+          and(
+            eq(finishedLotInputs.finishedLotId, finishedLotId),
+            eq(batches.kind, "TABLET"),
+          ),
+        );
+
+  // 4. BOM specs
+  const bomRows = product
+    ? await db
+        .select({
+          perScope:           productPackagingSpecs.perScope,
+          materialId:         packagingMaterials.id,
+          materialName:       packagingMaterials.name,
+          materialZohoItemId: packagingMaterials.zohoItemId,
+          qtyPerUnit:         productPackagingSpecs.qtyPerUnit,
+        })
+        .from(productPackagingSpecs)
+        .innerJoin(
+          packagingMaterials,
+          eq(productPackagingSpecs.packagingMaterialId, packagingMaterials.id),
+        )
+        .where(eq(productPackagingSpecs.productId, product.id))
+    : [];
+
+  return computeZohoAssemblyPlan({
+    finishedLotId,
+    finishedLotNumber: lot.finishedLotNumber,
+    unitsProduced:     lot.unitsProduced,
+    displaysProduced:  lot.displaysProduced,
+    casesProduced:     lot.casesProduced,
+    product: product
+      ? {
+          id:                product.id,
+          name:              product.name,
+          sku:               product.sku,
+          kind:              product.kind,
+          zohoItemIdUnit:    product.zohoItemIdUnit    ?? null,
+          zohoItemIdDisplay: product.zohoItemIdDisplay ?? null,
+          zohoItemIdCase:    product.zohoItemIdCase    ?? null,
+        }
+      : null,
+    ledgerRows:  ledgerRows.map((r) => ({
+      ...r,
+      tabletZohoItemId: r.tabletZohoItemId ?? null,
+      receivePoLineId:  r.receivePoLineId  ?? null,
+      zohoLineItemId:   r.zohoLineItemId   ?? null,
+      zohoPoId:         r.zohoPoId         ?? null,
+      componentRole:    r.componentRole    ?? null,
+    })),
+    fallbackRows: fallbackRows.map((r) => ({
+      ...r,
+      tabletTypeId:     r.tabletTypeId     ?? null,
+      tabletName:       r.tabletName       ?? null,
+      tabletZohoItemId: r.tabletZohoItemId ?? null,
+    })),
+    bomRows: bomRows.map((r) => ({
+      ...r,
+      materialZohoItemId: r.materialZohoItemId ?? null,
+    })),
+  });
 }

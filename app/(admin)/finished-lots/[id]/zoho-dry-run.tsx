@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
   ZohoAssemblyPlanResult,
   PlanOp,
+  BomLine,
   ZohoAssemblyStatusPreview,
 } from "@/lib/zoho/assembly-planner";
 
@@ -139,19 +140,35 @@ function OpRow({ op }: { op: PlanOp }) {
             </p>
           )}
 
-          {/* BOM issues (assembly ops) */}
-          {!isTabletReceive && op.bomIssues.length > 0 && (
+          {/* BOM lines (assembly ops) */}
+          {!isTabletReceive && op.bomLines.length > 0 && (
             <div className="mt-1 space-y-0.5">
-              <p className="text-[10px] uppercase tracking-wider font-semibold text-text-subtle">BOM issues</p>
-              {op.bomIssues.map((bi) => (
-                <p key={bi.materialId} className="text-[11px] text-warn-700">
-                  {bi.materialName} — {bi.issue}
-                </p>
+              <p className="text-[10px] uppercase tracking-wider font-semibold text-text-subtle">
+                BOM ({op.bomLines.length} material{op.bomLines.length !== 1 ? "s" : ""})
+              </p>
+              {op.bomLines.map((bl) => (
+                <BomLineRow key={bl.materialId} line={bl} />
               ))}
             </div>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function BomLineRow({ line }: { line: BomLine }) {
+  return (
+    <div className="flex items-baseline gap-2 text-[11px]">
+      <span className="text-text shrink-0 min-w-[120px]">{line.materialName}</span>
+      <span className="tabular-nums text-text-muted shrink-0">
+        {line.expectedQty.toLocaleString()}
+      </span>
+      {line.zohoItemId ? (
+        <span className="font-mono text-text-subtle text-[10px] truncate">{line.zohoItemId}</span>
+      ) : (
+        <span className="text-warn-700 font-medium text-[10px]">Missing Zoho item ID</span>
+      )}
     </div>
   );
 }
