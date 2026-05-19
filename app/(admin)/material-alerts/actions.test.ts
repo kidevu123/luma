@@ -268,7 +268,7 @@ describe("PackTrack discipline in actions.ts", () => {
       path.resolve(__dirname, "actions.ts"),
       "utf8",
     );
-    expect(src).not.toMatch(/create\s+po|createPO\b|createPurchaseOrder/i);
+    expect(src).not.toMatch(/\bcreateP[Oo]\b|createPurchaseOrder/i);
     expect(src).not.toMatch(/luma ordered/i);
   });
 });

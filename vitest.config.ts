@@ -16,7 +16,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["lib/**/*.test.ts", "components/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "components/**/*.test.ts", "app/**/*.test.ts"],
     environment: "node",
     globals: false,
     // The metric API imports the live db client; we mock it per-
