@@ -21,7 +21,7 @@
 
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { zohoAssemblyOps } from "@/lib/db/schema";
+import { finishedLots, products, zohoAssemblyOps } from "@/lib/db/schema";
 import type { ZohoAssemblyOp } from "@/lib/db/schema";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -55,6 +55,13 @@ export type SetZohoAssemblyOpStatusInput = {
   startedAt?:       Date | null;
   succeededAt?:     Date | null;
   failedAt?:        Date | null;
+};
+
+export type ZohoAssemblyOpWithLot = {
+  op:                ZohoAssemblyOp;
+  finishedLotNumber: string;
+  productName:       string | null;
+  productSku:        string | null;
 };
 
 // ─── Reads ────────────────────────────────────────────────────────────────────
@@ -231,5 +238,86 @@ export async function resolveZohoAssemblyOpManually(
     .where(eq(zohoAssemblyOps.id, id))
     .returning();
   if (!row) throw new Error(`resolveZohoAssemblyOpManually: row ${id} not found`);
+  return row;
+}
+
+/** Lists ops joined to their finished lot and product for the admin UI.
+ *  opKind filter is intentionally omitted — the admin list page filters by status,
+ *  not kind; use listZohoAssemblyOps for kind-specific lookups. */
+export async function listZohoAssemblyOpsWithLot(opts?: {
+  finishedLotId?: string;
+  status?: ZohoAssemblyOpStatus;
+  limit?: number;
+}): Promise<ZohoAssemblyOpWithLot[]> {
+  let query = db
+    .select({
+      op:                zohoAssemblyOps,
+      finishedLotNumber: finishedLots.finishedLotNumber,
+      productName:       products.name,
+      productSku:        products.sku,
+    })
+    .from(zohoAssemblyOps)
+    .innerJoin(finishedLots, eq(zohoAssemblyOps.finishedLotId, finishedLots.id))
+    .leftJoin(products, eq(finishedLots.productId, products.id))
+    .$dynamic();
+
+  if (opts?.finishedLotId && opts.status) {
+    query = query.where(
+      and(
+        eq(zohoAssemblyOps.finishedLotId, opts.finishedLotId),
+        eq(zohoAssemblyOps.status, opts.status),
+      ),
+    );
+  } else if (opts?.finishedLotId) {
+    query = query.where(eq(zohoAssemblyOps.finishedLotId, opts.finishedLotId));
+  } else if (opts?.status) {
+    query = query.where(eq(zohoAssemblyOps.status, opts.status));
+  }
+
+  // Newest-enqueued lots first (UI view); within each enqueuedAt, preserve op_sequence order.
+  query = query.orderBy(
+    desc(zohoAssemblyOps.enqueuedAt),
+    asc(zohoAssemblyOps.opSequence),
+  );
+
+  if (opts?.limit) {
+    query = query.limit(opts.limit);
+  }
+
+  const rows = await query;
+  return rows.map((r) => ({
+    op:                r.op,
+    finishedLotNumber: r.finishedLotNumber,
+    productName:       r.productName,
+    productSku:        r.productSku,
+  }));
+}
+
+/** Reset a FAILED or NEEDS_MAPPING op back to PENDING so the worker retries it.
+ *  Preserves retryCount (historical record of prior attempts).
+ *  Throws a descriptive error if the op is in any other status. */
+export async function resetZohoAssemblyOpToPending(
+  id: string,
+): Promise<ZohoAssemblyOp> {
+  const [row] = await db
+    .update(zohoAssemblyOps)
+    .set({ status: "PENDING", lastError: null, failedAt: null })
+    .where(
+      and(
+        eq(zohoAssemblyOps.id, id),
+        inArray(zohoAssemblyOps.status, ["FAILED", "NEEDS_MAPPING"]),
+      ),
+    )
+    .returning();
+  if (!row) {
+    // Either op not found, or status was not FAILED/NEEDS_MAPPING at update time.
+    const current = await getZohoAssemblyOp(id);
+    if (!current) throw new Error(`resetZohoAssemblyOpToPending: op ${id} not found`);
+    throw new Error(
+      `resetZohoAssemblyOpToPending: cannot reset op in status ${current.status} — only FAILED and NEEDS_MAPPING ops can be reset to PENDING`,
+    );
+  }
+  // Note: resolvedManually / resolvedNote / resolvedByUserId are intentionally
+  // preserved as a historical record of prior manual intervention.
   return row;
 }
