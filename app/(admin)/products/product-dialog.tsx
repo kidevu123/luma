@@ -1,33 +1,32 @@
 "use client";
 
 import * as React from "react";
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { Product } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { saveProductAction } from "./actions";
+import { saveProductAction, deleteProductAction } from "./actions";
 
-type Row = (Product & { allowedCount?: number; allowedTabletIds?: string[] }) | undefined;
+type Row = (Product & { allowedCount?: number }) | undefined;
 
 // Note: triggerIcon must be a JSX node (not a component reference).
 // Next.js 15 disallows passing function values as props from server
-// components to client components — see digest 3173940408. The page
-// renders <ProductDialog triggerIcon={<Plus className="h-4 w-4" />} />
-// and we render {triggerIcon} directly.
+// components to client components — see digest 3173940408.
 export function ProductDialog({
   row,
   triggerLabel,
   triggerIcon,
-  tabletTypes,
 }: {
   row?: Row;
   triggerLabel: string;
   triggerIcon?: React.ReactNode;
-  tabletTypes: Array<{ id: string; name: string }>;
 }) {
+  const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [kind, setKind] = React.useState<Product["kind"]>(row?.kind ?? "CARD");
   const isEdit = !!row;
 
@@ -74,8 +73,13 @@ export function ProductDialog({
                 setError(null);
                 const r = await saveProductAction(form);
                 setPending(false);
-                if (r?.error) setError(r.error);
-                else setOpen(false);
+                if (r?.error) { setError(r.error); return; }
+                if (r?.id) {
+                  // New product — go straight to BOM editor
+                  router.push(`/products/${r.id}`);
+                } else {
+                  setOpen(false);
+                }
               }}
               className="p-5 space-y-4"
             >
@@ -160,25 +164,6 @@ export function ProductDialog({
                   />
                 </div>
               </div>
-              {tabletTypes.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label>Allowed tablet types</Label>
-                  <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-border bg-surface/50 p-2.5">
-                    {tabletTypes.map((t) => (
-                      <label key={t.id} className="flex items-center gap-2 text-xs text-text cursor-pointer">
-                        <input
-                          type="checkbox"
-                          name="tabletTypeIds"
-                          value={t.id}
-                          defaultChecked={row?.allowedTabletIds?.includes(t.id) ?? false}
-                          className="h-4 w-4 rounded border-border accent-brand-700"
-                        />
-                        {t.name}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
               <label className="flex items-center gap-2 text-xs text-text-muted">
                 <input
                   type="checkbox"
@@ -188,18 +173,64 @@ export function ProductDialog({
                 />
                 Active
               </label>
+              {!isEdit && (
+                <p className="text-xs text-text-subtle bg-surface-2 border border-border/60 rounded-md px-3 py-2">
+                  After creating, you'll be taken to the product page to configure allowed tablets and packaging materials.
+                </p>
+              )}
               {error && (
                 <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
                   {error}
                 </p>
               )}
-              <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="ghost" onClick={() => !pending && setOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={pending}>
-                  {pending ? "Saving…" : isEdit ? "Save" : "Create"}
-                </Button>
+              <div className="flex items-center justify-between pt-1">
+                {isEdit && row?.id ? (
+                  confirmDelete ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-text-muted">Delete this product?</span>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={async () => {
+                          setPending(true);
+                          const r = await deleteProductAction(row.id);
+                          setPending(false);
+                          if (r?.error) { setError(r.error); setConfirmDelete(false); }
+                          else { setOpen(false); router.refresh(); }
+                        }}
+                        className="text-xs text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
+                      >
+                        Yes, delete
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(false)}
+                        className="text-xs text-text-muted hover:text-text"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      className="flex items-center gap-1 text-xs text-text-subtle hover:text-red-600"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </button>
+                  )
+                ) : (
+                  <span />
+                )}
+                <div className="flex gap-2">
+                  <Button type="button" variant="ghost" onClick={() => !pending && setOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={pending}>
+                    {pending ? "Saving…" : isEdit ? "Save" : "Create"}
+                  </Button>
+                </div>
               </div>
             </form>
           </div>

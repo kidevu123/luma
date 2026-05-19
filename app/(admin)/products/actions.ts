@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth-guards";
-import { createProduct, updateProduct, setAllowedTablets } from "@/lib/db/queries/products";
+import { createProduct, updateProduct, deleteProduct } from "@/lib/db/queries/products";
 
 const schema = z.object({
   id: z.string().uuid().optional(),
@@ -16,12 +16,11 @@ const schema = z.object({
   defaultShelfLifeDays: z.coerce.number().int().min(0).optional().nullable(),
   zohoItemId: z.string().max(60).optional().nullable(),
   isActive: z.coerce.boolean().optional(),
-  tabletTypeIds: z.array(z.string().uuid()).optional(),
 });
 
 export async function saveProductAction(
   formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
+): Promise<{ error?: string; ok?: true; id?: string }> {
   const actor = await requireAdmin();
   const parsed = schema.safeParse({
     id: formData.get("id") || undefined,
@@ -34,25 +33,40 @@ export async function saveProductAction(
     defaultShelfLifeDays: formData.get("defaultShelfLifeDays") || null,
     zohoItemId: formData.get("zohoItemId") || null,
     isActive: formData.get("isActive") === "on",
-    tabletTypeIds: formData.getAll("tabletTypeIds"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
-  const { id, tabletTypeIds, ...input } = parsed.data;
+  const { id, ...input } = parsed.data;
   try {
-    let productId = id;
     if (id) {
       await updateProduct(id, input, actor);
+      revalidatePath("/products");
+      return { ok: true };
     } else {
       const row = await createProduct(input, actor);
-      productId = row.id;
-    }
-    if (productId !== undefined && tabletTypeIds !== undefined) {
-      await setAllowedTablets(productId, tabletTypeIds, actor);
+      revalidatePath("/products");
+      return { ok: true, id: row.id };
     }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Save failed." };
+  }
+}
+
+export async function deleteProductAction(
+  id: string,
+): Promise<{ error?: string; ok?: true }> {
+  const actor = await requireAdmin();
+  const parsed = z.string().uuid().safeParse(id);
+  if (!parsed.success) return { error: "Invalid product ID." };
+  try {
+    await deleteProduct(parsed.data, actor);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Delete failed.";
+    if (msg.includes("foreign key") || msg.includes("violates") || msg.includes("constraint")) {
+      return { error: "This product has production records and cannot be deleted. Deactivate it instead." };
+    }
+    return { error: msg };
   }
   revalidatePath("/products");
   return { ok: true };

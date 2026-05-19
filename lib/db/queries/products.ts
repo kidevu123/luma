@@ -272,6 +272,25 @@ export async function upsertPackagingSpec(input: PackagingSpecInput, actor: Curr
   });
 }
 
+export async function deleteProduct(id: string, actor: CurrentUser) {
+  return db.transaction(async (tx) => {
+    const [before] = await tx.select().from(products).where(eq(products.id, id));
+    if (!before) throw new Error("Product not found.");
+    await tx.delete(products).where(eq(products.id, id));
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "product.delete",
+        targetType: "Product",
+        targetId: id,
+        before,
+      },
+      tx,
+    );
+  });
+}
+
 export async function deletePackagingSpec(
   args: { productId: string; packagingMaterialId: string; perScope: string },
   actor: CurrentUser,
