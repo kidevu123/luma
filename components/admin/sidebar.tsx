@@ -60,7 +60,7 @@ const SECTIONS: Section[] = [
     heading: "Management",
     items: [
       { href: "/packaging-inventory", label: "Inventory", icon: Boxes },
-      { href: "/inbound", label: "POs & receiving", icon: Truck },
+      { href: "/inbound", label: "Purchase orders", icon: Truck },
       { href: "/material-alerts", label: "Material alerts", icon: TrendingUp },
       { href: "/invoice-allocations", label: "Invoice allocations", icon: Receipt },
       { href: "/reports", label: "Production reports", icon: BarChart3 },
@@ -96,8 +96,16 @@ const SECTIONS: Section[] = [
   },
 ];
 
+// Routes where a child path has its own dedicated sidebar entry.
+// For these, only exact match counts — otherwise two items light up
+// at the same time (e.g. /inbound highlights both "Purchase orders"
+// and "Receive packaging" because /inbound/packaging-materials starts
+// with /inbound/).
+const EXACT_MATCH_HREFS = new Set(["/inbound", "/settings"]);
+
 function isActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/dashboard" || pathname === "/";
+  if (EXACT_MATCH_HREFS.has(href)) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
