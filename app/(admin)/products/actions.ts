@@ -26,6 +26,9 @@ const schema = z.object({
   defaultShelfLifeDays: z.coerce.number().int().min(0).optional().nullable(),
   zohoItemId: z.string().max(60).optional().nullable(),
   isActive: z.coerce.boolean().optional(),
+  zohoItemIdUnit:    z.string().max(100).optional().nullable(),
+  zohoItemIdDisplay: z.string().max(100).optional().nullable(),
+  zohoItemIdCase:    z.string().max(100).optional().nullable(),
 });
 
 export async function saveProductAction(
@@ -43,6 +46,9 @@ export async function saveProductAction(
     defaultShelfLifeDays: formData.get("defaultShelfLifeDays") || null,
     zohoItemId: formData.get("zohoItemId") || null,
     isActive: formData.get("isActive") === "on",
+    zohoItemIdUnit:    formData.get("zohoItemIdUnit") || null,
+    zohoItemIdDisplay: formData.get("zohoItemIdDisplay") || null,
+    zohoItemIdCase:    formData.get("zohoItemIdCase") || null,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
