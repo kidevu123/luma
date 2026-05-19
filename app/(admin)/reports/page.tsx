@@ -265,37 +265,57 @@ export default async function ReportsPage() {
             </CardHeader>
             <CardContent>
               {materials30.length === 0 ? (
-                <p className="text-sm text-text-muted">
-                  No data yet. Material burn populates from product BOM × units
-                  produced when a finished lot is issued.
-                </p>
+                <div className="rounded-lg border border-border/60 bg-surface-2/30 p-4 text-sm text-text-muted">
+                  <p className="font-medium text-text mb-1">No burn data yet</p>
+                  <p className="text-xs leading-relaxed">
+                    Material burn populates from product BOM × units produced when a finished lot is issued.
+                  </p>
+                </div>
               ) : (
-                <DataTable>
-                  <THead>
-                    <TR>
-                      <TH>Material</TH>
-                      <TH>SKU</TH>
-                      <TH>UoM</TH>
-                      <TH className="text-right">Consumed</TH>
-                    </TR>
-                  </THead>
-                  <tbody>
-                    {materials30.map((m) => (
-                      <TR key={m.packagingMaterialId ?? "_"}>
-                        <TD className="font-medium">{m.materialName ?? "—"}</TD>
-                        <TD className="font-mono text-xs text-text-muted">
-                          {m.materialSku ?? "—"}
-                        </TD>
-                        <TD className="text-text-muted text-xs">
-                          {m.uom ?? "—"}
-                        </TD>
-                        <TD className="text-right tabular-nums font-semibold">
-                          {m.consumed.toLocaleString()}
-                        </TD>
+                <>
+                  <DataTable>
+                    <THead>
+                      <TR>
+                        <TH>Material</TH>
+                        <TH>SKU</TH>
+                        <TH className="text-right">Consumed</TH>
+                        <TH>UoM</TH>
                       </TR>
-                    ))}
-                  </tbody>
-                </DataTable>
+                    </THead>
+                    <tbody>
+                      {materials30.map((m) => (
+                        <TR key={m.packagingMaterialId ?? "_"}>
+                          <TD className="font-medium">{m.materialName ?? "—"}</TD>
+                          <TD className="font-mono text-xs text-text-muted">
+                            {m.materialSku ?? "—"}
+                          </TD>
+                          <TD className="text-right tabular-nums font-semibold">
+                            {m.consumed.toLocaleString()}
+                          </TD>
+                          <TD className="text-text-muted text-xs">{m.uom ?? "—"}</TD>
+                        </TR>
+                      ))}
+                    </tbody>
+                    {materials30.length > 1 && (
+                      <tfoot>
+                        <TR className="border-t-2 border-border/60 bg-surface-2/20">
+                          <TD className="text-xs font-semibold text-text-subtle" colSpan={2}>
+                            Total ({materials30.length} materials)
+                          </TD>
+                          <TD className="text-right tabular-nums font-bold">
+                            —
+                          </TD>
+                          <TD />
+                        </TR>
+                      </tfoot>
+                    )}
+                  </DataTable>
+                  <p className="text-[11px] text-text-subtle mt-2 leading-relaxed">
+                    Figures reflect consumption recorded via finished lot issuance (BOM × units produced).
+                    For detailed runway analysis, see{" "}
+                    <a href="/metrics/forecast" className="underline">Forecast</a>.
+                  </p>
+                </>
               )}
             </CardContent>
           </Card>
