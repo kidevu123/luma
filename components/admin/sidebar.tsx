@@ -1,22 +1,13 @@
 "use client";
 
-// LUMA-UI-REBUILD-1 — premium command-surface sidebar.
+// SIDEBAR-REORG-1 — flatten the navigation so daily-use pages are
+// always visible.
 //
-// Preserves the WORKFLOW-UX-1 structure (four sections, advanced
-// collapsed, every prior route reachable, distinct labels for Start
-// production vs QR card management) and the WORKFLOW-CLEANUP-2 +
-// COMMERCIAL-TRACE-5 link additions. Only the chrome changes:
-//
-//   - Inverse (dark) command-bar header anchors the brand. The header
-//     is the one place the sidebar carries the inverse surface; the
-//     rest stays on the light canvas for floor visibility.
-//   - Active route is anchored by the 3px brand-accent rail (same
-//     signature motif as the rest of the design system). Inactive
-//     rows are quiet, fast to scan.
-//   - Section headings: small uppercase eyebrow + 1px hairline,
-//     replacing the floating label that read as flat.
-//   - Footer band carries Luma → Production Command + a hairline
-//     environment readout slot.
+// Key change: Advanced collapses from 11 → 7 items by promoting
+// Finished lots, Active rolls, Metrics into Management (operations
+// oversight) and Product requirements into Configuration (setup).
+// Floor work and the four section names are untouched so every
+// sidebar.test.ts invariant still passes.
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -74,12 +65,16 @@ const SECTIONS: Section[] = [
       { href: "/invoice-allocations", label: "Invoice allocations", icon: Receipt },
       { href: "/reports", label: "Production reports", icon: BarChart3 },
       { href: "/operator-productivity", label: "Operator productivity", icon: Users },
+      { href: "/finished-lots", label: "Finished lots", icon: PackageCheck },
+      { href: "/active-rolls", label: "Active rolls", icon: Activity },
+      { href: "/metrics", label: "Metrics", icon: BarChart3 },
     ],
   },
   {
     heading: "Configuration",
     items: [
       { href: "/products", label: "Products & packaging rules", icon: PackageCheck },
+      { href: "/product-packaging-requirements", label: "Product requirements", icon: PackageCheck },
       { href: "/standards", label: "Standards & targets", icon: Gauge },
       { href: "/settings/integrations/zoho", label: "Integrations", icon: Plug },
       { href: "/workflow-validation", label: "Workflow validation", icon: ShieldCheck },
@@ -92,13 +87,9 @@ const SECTIONS: Section[] = [
     items: [
       { href: "/qr-cards", label: "QR card management", icon: QrCode },
       { href: "/genealogy", label: "Bag genealogy", icon: History },
-      { href: "/finished-lots", label: "Finished lots", icon: PackageCheck },
       { href: "/material-reconciliation", label: "Material reconciliation", icon: Scale },
       { href: "/roll-variance", label: "Roll variance", icon: Scale },
       { href: "/po-reconciliation", label: "PO reconciliation", icon: Truck },
-      { href: "/product-packaging-requirements", label: "Product requirements", icon: PackageCheck },
-      { href: "/active-rolls", label: "Active rolls", icon: Activity },
-      { href: "/metrics", label: "Metrics", icon: TrendingUp },
       { href: "/packaging-receipts", label: "Packaging receipts", icon: Truck },
       { href: "/batches", label: "Batches", icon: ShieldCheck },
     ],
