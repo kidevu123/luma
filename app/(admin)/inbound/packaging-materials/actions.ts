@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { compact } from "@/lib/db/compact";
 import { requireAdmin } from "@/lib/auth-guards";
@@ -385,5 +385,45 @@ export async function receiveRollAction(
     return { ok: true, ...(lotId ? { lotId } : {}) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Receive failed." };
+  }
+}
+
+// ─── Void / scrap a lot (test-data cleanup or correction) ───────
+
+export async function voidPackagingLotAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true }> {
+  const actor = await requireAdmin();
+  const parsed = z.string().uuid().safeParse(formData.get("id"));
+  if (!parsed.success) return { error: "Invalid lot ID." };
+
+  try {
+    await db.transaction(async (tx) => {
+      const [lot] = await tx
+        .select({ id: packagingLots.id, packagingMaterialId: packagingLots.packagingMaterialId })
+        .from(packagingLots)
+        .where(eq(packagingLots.id, parsed.data))
+        .limit(1);
+      if (!lot) throw new Error("Lot not found.");
+      await tx
+        .update(packagingLots)
+        .set({ status: "SCRAPPED" })
+        .where(eq(packagingLots.id, parsed.data));
+      await tx.insert(materialInventoryEvents).values({
+        eventType: "MATERIAL_SCRAPPED",
+        packagingMaterialId: lot.packagingMaterialId,
+        packagingLotId: lot.id,
+        actorUserId: actor.id,
+        quantityUnits: 0,
+        unitOfMeasure: "each",
+        payload: { reason: "voided_by_admin" },
+        source: "admin.void_lot",
+      });
+    });
+    revalidatePath("/inbound/packaging-materials");
+    revalidatePath("/settings/blister-standards");
+    return { ok: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Void failed." };
   }
 }

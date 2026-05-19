@@ -5,7 +5,7 @@
 
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { eq, asc, desc, sql } from "drizzle-orm";
+import { eq, asc, desc, sql, ne } from "drizzle-orm";
 import { packagingMaterials, packagingLots } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
 import {
@@ -22,6 +22,7 @@ import {
 import {
   receivePackagingMaterialAction,
   receiveRollAction,
+  voidPackagingLotAction,
 } from "./actions";
 import { isQaTestMaterial } from "@/lib/production/material-filters";
 import {
@@ -30,6 +31,7 @@ import {
   Layers,
   Inbox,
   PackageCheck,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -97,6 +99,7 @@ export default async function ReceivePackagingPage({
         packagingMaterials,
         eq(packagingMaterials.id, packagingLots.packagingMaterialId),
       )
+      .where(ne(packagingLots.status, "SCRAPPED"))
       .orderBy(desc(packagingLots.receivedAt))
       .limit(20),
   ]);
@@ -250,19 +253,11 @@ export default async function ReceivePackagingPage({
         }
       >
         {tab === "count" ? (
-          countMaterials.length === 0 ? (
+          countMaterialsRaw.length === 0 ? (
             <DataEmptyState
               icon={PackageCheck}
-              title={
-                showQa
-                  ? "No count-based materials configured"
-                  : "No active count-based materials"
-              }
-              body={
-                showQa
-                  ? "Add materials at Settings → Materials."
-                  : "Add materials at Settings → Materials, or show QA materials using the toggle above."
-              }
+              title="No count-based materials configured"
+              body="Add materials at Settings → Materials."
               tone="muted"
             />
           ) : (
@@ -278,7 +273,7 @@ export default async function ReceivePackagingPage({
                 label="Material"
                 required
                 type="select"
-                options={countMaterials.map((m) => ({
+                options={countMaterialsRaw.map((m) => ({
                   value: m.id,
                   label: `${m.sku} — ${m.name} (${m.kind} · ${m.uom})`,
                 }))}
@@ -331,19 +326,11 @@ export default async function ReceivePackagingPage({
               gross/net weight, optional width and thickness, and is consumed
               gradually through roll-usage events at the blister machine.
             </div>
-            {rollMaterials.length === 0 ? (
+            {rollMaterialsRaw.length === 0 ? (
               <DataEmptyState
                 icon={Layers}
-                title={
-                  showQa
-                    ? "No PVC/foil materials configured"
-                    : "No active roll materials"
-                }
-                body={
-                  showQa
-                    ? "Add roll materials at Settings → Materials."
-                    : "Add roll materials at Settings → Materials, or show QA materials using the toggle above."
-                }
+                title="No PVC/foil materials configured"
+                body="Add roll materials at Settings → Materials."
                 tone="muted"
               />
             ) : (
@@ -359,7 +346,7 @@ export default async function ReceivePackagingPage({
                   label="Roll material"
                   required
                   type="select"
-                  options={rollMaterials.map((m) => ({
+                  options={rollMaterialsRaw.map((m) => ({
                     value: m.id,
                     label: `${m.sku} — ${m.name} (${m.kind})`,
                   }))}
@@ -488,6 +475,7 @@ export default async function ReceivePackagingPage({
                   <th className="text-left px-3 py-2 text-[10px] uppercase tracking-[0.12em] text-text-subtle font-semibold">
                     Conf.
                   </th>
+                  <th className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
@@ -535,6 +523,24 @@ export default async function ReceivePackagingPage({
                     </td>
                     <td className="px-3 py-2.5">
                       <ConfidenceChip value={l.confidence} />
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <form
+                        action={async (fd) => {
+                          "use server";
+                          await voidPackagingLotAction(fd);
+                        }}
+                      >
+                        <input type="hidden" name="id" value={l.id} />
+                        <button
+                          type="submit"
+                          className="inline-flex items-center gap-1 text-[11px] text-text-subtle hover:text-red-600 transition-colors px-1 py-0.5 rounded"
+                          title="Delete this lot"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      </form>
                     </td>
                   </tr>
                 ))}
