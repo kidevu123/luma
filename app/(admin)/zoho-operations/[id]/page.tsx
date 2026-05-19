@@ -59,7 +59,7 @@ export default async function ZohoOpDetailPage({
     .from(finishedLots)
     .where(eq(finishedLots.id, op.finishedLotId))
     .limit(1);
-  const finishedLotNumber = lotRow?.finishedLotNumber ?? op.finishedLotId;
+  const finishedLotNumber = lotRow?.finishedLotNumber ?? "(lot not found)";
 
   // Determine the completion timestamp (whichever is set).
   const completionDate = op.succeededAt ?? op.failedAt ?? null;
@@ -77,7 +77,7 @@ export default async function ZohoOpDetailPage({
 
       <PageHeader
         title="Zoho Operation"
-        description={`${op.opKind.replace(/_/g, " ")} — Lot ${finishedLotNumber}`}
+        description={`${op.opKind.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())} — Lot ${finishedLotNumber}`}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">

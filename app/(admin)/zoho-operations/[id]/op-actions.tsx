@@ -14,7 +14,8 @@ export function OpActionsPanel({
   status: ZohoAssemblyOpStatus;
 }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [isResetPending, startResetTransition] = useTransition();
+  const [isResolvePending, startResolveTransition] = useTransition();
 
   const [resetError, setResetError] = useState<string | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
@@ -26,7 +27,8 @@ export function OpActionsPanel({
 
   function handleReset() {
     setResetError(null);
-    startTransition(async () => {
+    setResolveError(null);
+    startResetTransition(async () => {
       const result = await resetToPendingAction(id);
       if (result.error) {
         setResetError(result.error);
@@ -39,6 +41,7 @@ export function OpActionsPanel({
   function handleResolve(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setResolveError(null);
+    setResetError(null);
     setNoteValidationError(null);
 
     if (!note.trim()) {
@@ -46,11 +49,12 @@ export function OpActionsPanel({
       return;
     }
 
-    startTransition(async () => {
+    startResolveTransition(async () => {
       const result = await resolveManuallyAction(id, note);
       if (result.error) {
         setResolveError(result.error);
       } else {
+        setNote("");
         router.refresh();
       }
     });
@@ -77,10 +81,10 @@ export function OpActionsPanel({
             <button
               type="button"
               onClick={handleReset}
-              disabled={isPending}
+              disabled={isResetPending}
               className="h-9 w-full rounded-md bg-brand-700 hover:bg-brand-800 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
-              {isPending ? "Resetting…" : "Reset to Pending"}
+              {isResetPending ? "Resetting…" : "Reset to Pending"}
             </button>
           </CardContent>
         </Card>
@@ -109,7 +113,7 @@ export function OpActionsPanel({
                   onChange={(e) => setNote(e.target.value)}
                   rows={3}
                   placeholder="Describe how this was resolved…"
-                  disabled={isPending}
+                  disabled={isResolvePending}
                   className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-subtle focus:border-brand-700 focus:outline-none focus:ring-1 focus:ring-brand-700/20 disabled:opacity-50 resize-none"
                 />
                 {noteValidationError && (
@@ -123,10 +127,10 @@ export function OpActionsPanel({
               )}
               <button
                 type="submit"
-                disabled={isPending}
+                disabled={isResolvePending}
                 className="h-9 w-full rounded-md border border-border bg-surface hover:bg-surface-2 disabled:opacity-50 text-sm font-medium text-text transition-colors"
               >
-                {isPending ? "Saving…" : "Mark Resolved"}
+                {isResolvePending ? "Saving…" : "Mark Resolved"}
               </button>
             </form>
           </CardContent>
