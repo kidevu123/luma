@@ -1,9 +1,25 @@
-// ZOHO-ASSY-1 — Query helpers for zoho_assembly_ops.
-// Phase 1: CRUD only.  No workers, no Zoho calls wired here.
-// Future phases will add enqueue logic, status polling, and retry
-// orchestration on top of these primitives.
+// ZOHO-ASSY-1 / ZOHO-ASSY-1b — Query helpers for zoho_assembly_ops.
+// Phase 1+1b: CRUD only.  No workers, no Zoho calls, no enqueue logic.
+// Future phases add the planner (Phase 2) and worker/retry (Phase 3).
+//
+// ─── Idempotency key formats (enforced by callers, not DB) ───────────────────
+//
+//   TABLET_RECEIVE:
+//     luma:tablet_receive:{finishedLotId}:{inventoryBagId}
+//     One op per source bag per lot.  Variety packs yield N ops.
+//
+//   UNIT_ASSEMBLE:
+//     luma:unit_assemble:{finishedLotId}
+//
+//   DISPLAY_ASSEMBLE:
+//     luma:display_assemble:{finishedLotId}
+//
+//   CASE_ASSEMBLE:
+//     luma:case_assemble:{finishedLotId}
+//
+// ─────────────────────────────────────────────────────────────────────────────
 
-import { desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { zohoAssemblyOps } from "@/lib/db/schema";
 import type { ZohoAssemblyOp } from "@/lib/db/schema";
@@ -14,22 +30,28 @@ export type ZohoAssemblyOpKind = ZohoAssemblyOp["opKind"];
 export type ZohoAssemblyOpStatus = ZohoAssemblyOp["status"];
 
 export type CreateZohoAssemblyOpInput = {
-  finishedLotId: string;
-  opKind: ZohoAssemblyOpKind;
-  zohoItemId?: string | null;
-  quantity: number;
-  idempotencyKey: string;
+  finishedLotId:        string;
+  opKind:               ZohoAssemblyOpKind;
+  zohoItemId?:          string | null;
+  quantity:             number;
+  idempotencyKey:       string;
+  opSequence?:          number | null;
+  // Source fields — required for TABLET_RECEIVE; null for assembly ops.
+  sourceInventoryBagId?: string | null;
+  sourcePoLineId?:       string | null;
+  sourceTabletTypeId?:   string | null;
+  componentRole?:        string | null;
 };
 
 export type SetZohoAssemblyOpStatusInput = {
-  status: ZohoAssemblyOpStatus;
+  status:           ZohoAssemblyOpStatus;
   zohoReferenceId?: string | null;
-  requestPayload?: unknown;
+  requestPayload?:  unknown;
   responsePayload?: unknown;
-  lastError?: string | null;
-  startedAt?: Date | null;
-  succeededAt?: Date | null;
-  failedAt?: Date | null;
+  lastError?:       string | null;
+  startedAt?:       Date | null;
+  succeededAt?:     Date | null;
+  failedAt?:        Date | null;
 };
 
 // ─── Reads ────────────────────────────────────────────────────────────────────
@@ -37,6 +59,7 @@ export type SetZohoAssemblyOpStatusInput = {
 export async function listZohoAssemblyOps(opts?: {
   finishedLotId?: string;
   status?: ZohoAssemblyOpStatus;
+  opKind?: ZohoAssemblyOpKind;
   limit?: number;
 }): Promise<ZohoAssemblyOp[]> {
   let query = db.select().from(zohoAssemblyOps).$dynamic();
@@ -46,7 +69,13 @@ export async function listZohoAssemblyOps(opts?: {
   if (opts?.status) {
     query = query.where(eq(zohoAssemblyOps.status, opts.status));
   }
-  query = query.orderBy(desc(zohoAssemblyOps.enqueuedAt));
+  if (opts?.opKind) {
+    query = query.where(eq(zohoAssemblyOps.opKind, opts.opKind));
+  }
+  query = query.orderBy(
+    asc(zohoAssemblyOps.opSequence),
+    asc(zohoAssemblyOps.enqueuedAt),
+  );
   if (opts?.limit) {
     query = query.limit(opts.limit);
   }
@@ -73,6 +102,42 @@ export async function getZohoAssemblyOpByIdempotencyKey(
   return row ?? null;
 }
 
+/** Returns all TABLET_RECEIVE ops for a lot, ordered by op_sequence then
+ *  enqueued_at.  Used by the planner dependency check:
+ *  all TABLET_RECEIVE must be SUCCEEDED/SKIPPED before UNIT_ASSEMBLE starts. */
+export async function listTabletReceiveOpsForLot(
+  finishedLotId: string,
+): Promise<ZohoAssemblyOp[]> {
+  return db
+    .select()
+    .from(zohoAssemblyOps)
+    .where(
+      and(
+        eq(zohoAssemblyOps.finishedLotId, finishedLotId),
+        eq(zohoAssemblyOps.opKind, "TABLET_RECEIVE"),
+      ),
+    )
+    .orderBy(asc(zohoAssemblyOps.opSequence), asc(zohoAssemblyOps.enqueuedAt));
+}
+
+/** Returns ops for a lot whose status blocks progression (PENDING, IN_PROGRESS,
+ *  FAILED, NEEDS_MAPPING) at a given op_sequence level. */
+export async function listBlockingOpsForLot(
+  finishedLotId: string,
+  beforeSequence: number,
+): Promise<ZohoAssemblyOp[]> {
+  return db
+    .select()
+    .from(zohoAssemblyOps)
+    .where(
+      and(
+        eq(zohoAssemblyOps.finishedLotId, finishedLotId),
+        inArray(zohoAssemblyOps.status, ["PENDING", "IN_PROGRESS", "FAILED", "NEEDS_MAPPING"]),
+        sql`${zohoAssemblyOps.opSequence} < ${beforeSequence}`,
+      ),
+    );
+}
+
 // ─── Writes ───────────────────────────────────────────────────────────────────
 
 export async function createZohoAssemblyOp(
@@ -81,11 +146,16 @@ export async function createZohoAssemblyOp(
   const [row] = await db
     .insert(zohoAssemblyOps)
     .values({
-      finishedLotId:  input.finishedLotId,
-      opKind:         input.opKind,
-      zohoItemId:     input.zohoItemId ?? null,
-      quantity:       input.quantity,
-      idempotencyKey: input.idempotencyKey,
+      finishedLotId:        input.finishedLotId,
+      opKind:               input.opKind,
+      zohoItemId:           input.zohoItemId          ?? null,
+      quantity:             input.quantity,
+      idempotencyKey:       input.idempotencyKey,
+      opSequence:           input.opSequence          ?? null,
+      sourceInventoryBagId: input.sourceInventoryBagId ?? null,
+      sourcePoLineId:       input.sourcePoLineId       ?? null,
+      sourceTabletTypeId:   input.sourceTabletTypeId   ?? null,
+      componentRole:        input.componentRole        ?? null,
     })
     .returning();
   if (!row) throw new Error("createZohoAssemblyOp: insert returned no row");
@@ -111,16 +181,16 @@ export async function setZohoAssemblyOpStatus(
     status: update.status,
   };
   if (update.zohoReferenceId !== undefined) patch.zohoReferenceId = update.zohoReferenceId;
-  if (update.lastError !== undefined) patch.lastError = update.lastError;
-  if (update.requestPayload !== undefined)
-    patch.requestPayload = update.requestPayload as ZohoAssemblyOp["requestPayload"];
+  if (update.lastError       !== undefined) patch.lastError       = update.lastError;
+  if (update.requestPayload  !== undefined)
+    patch.requestPayload  = update.requestPayload  as ZohoAssemblyOp["requestPayload"];
   if (update.responsePayload !== undefined)
     patch.responsePayload = update.responsePayload as ZohoAssemblyOp["responsePayload"];
 
-  if (update.status === "IN_PROGRESS")  patch.startedAt  = update.startedAt  ?? now;
-  if (update.status === "SUCCEEDED")    patch.succeededAt = update.succeededAt ?? now;
-  if (update.status === "FAILED")       patch.failedAt    = update.failedAt    ?? now;
-  if (update.status === "NEEDS_MAPPING") patch.failedAt   = update.failedAt    ?? now;
+  if (update.status === "IN_PROGRESS")   patch.startedAt   = update.startedAt   ?? now;
+  if (update.status === "SUCCEEDED")     patch.succeededAt = update.succeededAt ?? now;
+  if (update.status === "FAILED")        patch.failedAt    = update.failedAt    ?? now;
+  if (update.status === "NEEDS_MAPPING") patch.failedAt    = update.failedAt    ?? now;
 
   const [row] = await db
     .update(zohoAssemblyOps)
