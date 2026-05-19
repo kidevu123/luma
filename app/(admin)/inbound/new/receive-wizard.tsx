@@ -28,9 +28,21 @@ type Box = {
   pillCountPerBag: number;
 };
 
+function uid(): string {
+  // crypto.randomUUID requires a secure context (HTTPS). Fall back to
+  // Math.random when running over HTTP in dev/staging.
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 function blankBox(boxNumber: number, tabletTypeId: string): Box {
   return {
-    uid: crypto.randomUUID(),
+    uid: uid(),
     boxNumber,
     tabletTypeId,
     batchNumber: "",
