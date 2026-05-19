@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, FileText, Activity, Printer } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
 import { getFinishedLot } from "@/lib/db/queries/finished-lots";
+import { planZohoAssemblyForFinishedLot } from "@/lib/zoho/assembly-planner";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { StatusActions } from "./status-actions";
+import { ZohoDryRunCard } from "./zoho-dry-run";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +27,10 @@ export default async function FinishedLotDetailPage({
 }) {
   await requireSession();
   const { id } = await params;
-  const lot = await getFinishedLot(id);
+  const [lot, zohoplan] = await Promise.all([
+    getFinishedLot(id),
+    planZohoAssemblyForFinishedLot(id),
+  ]);
   if (!lot) notFound();
 
   return (
@@ -129,6 +134,8 @@ export default async function FinishedLotDetailPage({
               )}
             </CardContent>
           </Card>
+
+          {zohoplan && <ZohoDryRunCard plan={zohoplan} />}
 
           {lot.lot.notes && (
             <Card>
