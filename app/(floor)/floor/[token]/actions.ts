@@ -333,6 +333,13 @@ const eventSchema = z.object({
     "BOTTLE_STICKER_COMPLETE",
   ]),
   countTotal: z.coerce.number().int().min(0).max(100000).optional(),
+  /** Cards/packs that started the station run but weren't completed
+   *  into a full unit — loose cards at sealing, partial blister sheets,
+   *  etc. Stored in the event payload for reconciliation. */
+  packsRemaining: z.coerce.number().int().min(0).max(100000).optional(),
+  /** Cards that were opened/damaged and returned to the prior stage
+   *  or scrapped. Stored in the event payload for loss tracking. */
+  cardsReopened: z.coerce.number().int().min(0).max(100000).optional(),
   clientEventId: clientEventIdField,
   /** OP-1C per-form supervisor override. Resolved by the
    *  station-operator-session helper; falls back to the active
@@ -356,6 +363,8 @@ export async function fireStageEventAction(
     stationId: formData.get("stationId"),
     eventType: formData.get("eventType"),
     countTotal: formData.get("countTotal") || 0,
+    packsRemaining: formData.get("packsRemaining") || 0,
+    cardsReopened: formData.get("cardsReopened") || 0,
     clientEventId: pickClientEventId(formData),
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
@@ -366,6 +375,8 @@ export async function fireStageEventAction(
     stationId,
     eventType,
     countTotal,
+    packsRemaining,
+    cardsReopened,
     clientEventId,
     overrideEmployeeCode,
   } = parsed.data;
@@ -425,7 +436,11 @@ export async function fireStageEventAction(
         workflowBagId,
         stationId,
         eventType,
-        payload: countTotal ? { count_total: countTotal } : {},
+        payload: {
+          ...(countTotal ? { count_total: countTotal } : {}),
+          ...(packsRemaining ? { packs_remaining: packsRemaining } : {}),
+          ...(cardsReopened ? { cards_reopened: cardsReopened } : {}),
+        },
         ...(clientEventId ? { clientEventId } : {}),
         enteredByUserId: accountability.enteredByUserId,
         accountableEmployeeId: accountability.accountableEmployeeId,

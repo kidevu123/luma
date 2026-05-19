@@ -1,4 +1,5 @@
 import type { ReactNode, CSSProperties } from "react";
+import type { Viewport } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { Fraunces } from "next/font/google";
@@ -23,6 +24,16 @@ const fraunces = Fraunces({
 export const metadata = {
   title: "Luma — Production Command",
   description: "Manufacturing intelligence for the production floor",
+};
+
+// viewport-fit=cover lets the floor PWA use the full screen on notched
+// iPhones (Face ID models) without white bars. interactiveWidget keeps
+// the layout stable when the software keyboard appears.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-visual",
 };
 
 const fontVars: CSSProperties = {} as CSSProperties;

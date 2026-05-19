@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth-guards";
-import { createProduct, updateProduct } from "@/lib/db/queries/products";
+import { createProduct, updateProduct, setAllowedTablets } from "@/lib/db/queries/products";
 
 const schema = z.object({
   id: z.string().uuid().optional(),
@@ -16,6 +16,7 @@ const schema = z.object({
   defaultShelfLifeDays: z.coerce.number().int().min(0).optional().nullable(),
   zohoItemId: z.string().max(60).optional().nullable(),
   isActive: z.coerce.boolean().optional(),
+  tabletTypeIds: z.array(z.string().uuid()).optional(),
 });
 
 export async function saveProductAction(
@@ -33,14 +34,23 @@ export async function saveProductAction(
     defaultShelfLifeDays: formData.get("defaultShelfLifeDays") || null,
     zohoItemId: formData.get("zohoItemId") || null,
     isActive: formData.get("isActive") === "on",
+    tabletTypeIds: formData.getAll("tabletTypeIds"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
-  const { id, ...input } = parsed.data;
+  const { id, tabletTypeIds, ...input } = parsed.data;
   try {
-    if (id) await updateProduct(id, input, actor);
-    else await createProduct(input, actor);
+    let productId = id;
+    if (id) {
+      await updateProduct(id, input, actor);
+    } else {
+      const row = await createProduct(input, actor);
+      productId = row.id;
+    }
+    if (productId !== undefined && tabletTypeIds !== undefined) {
+      await setAllowedTablets(productId, tabletTypeIds, actor);
+    }
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Save failed." };
   }

@@ -42,6 +42,7 @@ import {
   Plug,
   Receipt,
   ChevronDown,
+  ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -58,6 +59,7 @@ const SECTIONS: Section[] = [
       { href: "/receiving/raw-bags", label: "Receive raw pills", icon: Inbox },
       { href: "/inbound/packaging-materials", label: "Receive packaging", icon: Boxes },
       { href: "/production/start", label: "Start production", icon: QrCode },
+      { href: "/workflow-submissions", label: "Workflow submissions", icon: ClipboardList },
       { href: "/packaging-output", label: "Packaging / pack-out", icon: Package },
       { href: "/qc-review", label: "QC review", icon: ShieldAlert },
       { href: "/recall", label: "Lookup receipt / batch", icon: Search },

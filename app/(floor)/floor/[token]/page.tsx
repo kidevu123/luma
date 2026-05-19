@@ -18,8 +18,10 @@ import {
   readBagState,
   readStationLive,
   products,
+  productPackagingSpecs,
+  packagingMaterials,
 } from "@/lib/db/schema";
-import { eq, and, inArray, isNotNull, sql, desc } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, sql, desc, asc } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
 import { STATION_PICKUP_FROM_STAGE } from "@/lib/production/stage-progression";
@@ -141,8 +143,30 @@ export default async function FloorStationPage({
             ),
           );
 
+  // Load the product's packaging BOM so the packaging close-out form
+  // can preview expected material consumption as the operator types.
+  const currentProductId = currentAtStation?.bag.productId ?? null;
+  const packagingSpecsForForm =
+    currentProductId != null &&
+    (station.station.kind === "PACKAGING" || station.station.kind === "COMBINED")
+      ? await db
+          .select({
+            materialName: packagingMaterials.name,
+            materialKind: packagingMaterials.kind,
+            qtyPerUnit: productPackagingSpecs.qtyPerUnit,
+            perScope: productPackagingSpecs.perScope,
+          })
+          .from(productPackagingSpecs)
+          .innerJoin(
+            packagingMaterials,
+            eq(productPackagingSpecs.packagingMaterialId, packagingMaterials.id),
+          )
+          .where(eq(productPackagingSpecs.productId, currentProductId))
+          .orderBy(asc(productPackagingSpecs.perScope))
+      : [];
+
   return (
-    <main className="min-h-dvh bg-page p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
+    <main className="min-h-dvh bg-page p-4 sm:p-6 pb-[calc(1rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-5">
       <header className="flex items-baseline justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-subtle">
@@ -160,13 +184,13 @@ export default async function FloorStationPage({
       </header>
 
       <nav className="flex flex-wrap gap-2 text-xs">
-        <a href={`/floor/${token}/rolls`} className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page">
+        <a href={`/floor/${token}/rolls`} className="inline-flex items-center rounded border border-border/70 bg-surface px-4 min-h-[44px] hover:bg-page">
           Rolls
         </a>
-        <a href={`/floor/${token}/bag-allocation`} className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page">
+        <a href={`/floor/${token}/bag-allocation`} className="inline-flex items-center rounded border border-border/70 bg-surface px-4 min-h-[44px] hover:bg-page">
           Bag allocation
         </a>
-        <a href={`/floor/${token}/variety-pack`} className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page">
+        <a href={`/floor/${token}/variety-pack`} className="inline-flex items-center rounded border border-border/70 bg-surface px-4 min-h-[44px] hover:bg-page">
           Variety pack
         </a>
       </nav>
@@ -281,6 +305,10 @@ export default async function FloorStationPage({
               workflowBagId={currentAtStation.bag.id}
               isPaused={currentAtStation.state?.isPaused ?? false}
               currentStage={currentAtStation.state?.stage ?? null}
+              productKind={currentAtStation.product?.kind ?? null}
+              unitsPerDisplay={currentAtStation.product?.unitsPerDisplay ?? null}
+              displaysPerCase={currentAtStation.product?.displaysPerCase ?? null}
+              packagingSpecs={packagingSpecsForForm}
             />
             {/* Help operator pick the next action when the bag has
              *  already advanced past this station's stage. The

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { saveProductAction } from "./actions";
 
-type Row = (Product & { allowedCount?: number }) | undefined;
+type Row = (Product & { allowedCount?: number; allowedTabletIds?: string[] }) | undefined;
 
 // Note: triggerIcon must be a JSX node (not a component reference).
 // Next.js 15 disallows passing function values as props from server
@@ -18,10 +18,12 @@ export function ProductDialog({
   row,
   triggerLabel,
   triggerIcon,
+  tabletTypes,
 }: {
   row?: Row;
   triggerLabel: string;
   triggerIcon?: React.ReactNode;
+  tabletTypes: Array<{ id: string; name: string }>;
 }) {
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -158,6 +160,25 @@ export function ProductDialog({
                   />
                 </div>
               </div>
+              {tabletTypes.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label>Allowed tablet types</Label>
+                  <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-border bg-surface/50 p-2.5">
+                    {tabletTypes.map((t) => (
+                      <label key={t.id} className="flex items-center gap-2 text-xs text-text cursor-pointer">
+                        <input
+                          type="checkbox"
+                          name="tabletTypeIds"
+                          value={t.id}
+                          defaultChecked={row?.allowedTabletIds?.includes(t.id) ?? false}
+                          className="h-4 w-4 rounded border-border accent-brand-700"
+                        />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-xs text-text-muted">
                 <input
                   type="checkbox"

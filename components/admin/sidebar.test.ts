@@ -172,6 +172,29 @@ describe("WORKFLOW-UX-1 · new sidebar entries", () => {
   });
 });
 
+describe("TABLETTRACKER-STANDARD-RESET-1 · workflow center sidebar", () => {
+  function inFloorWork(s: string): boolean {
+    const start = sidebarSrc.indexOf('heading: "Floor work"');
+    const next = sidebarSrc.indexOf('heading: "Management"');
+    const at = sidebarSrc.indexOf(s);
+    return start > -1 && at > start && at < next;
+  }
+
+  it("workflow-submissions is linked from the sidebar", () => {
+    expect(sidebarSrc).toMatch(/href:\s*"\/workflow-submissions"/);
+  });
+  it("Workflow submissions label is in Floor work", () => {
+    expect(sidebarSrc).toMatch(/label:\s*"Workflow submissions"/);
+    expect(inFloorWork('label: "Workflow submissions"')).toBe(true);
+  });
+  it("/workflow-submissions is NOT in the DB-style Advanced section", () => {
+    const advancedAt = sidebarSrc.indexOf('heading: "Advanced"');
+    const at = sidebarSrc.indexOf('href: "/workflow-submissions"');
+    expect(at).toBeGreaterThan(-1);
+    expect(at).toBeLessThan(advancedAt);
+  });
+});
+
 describe("WORKFLOW-CLEANUP-2 · Start production vs QR card management", () => {
   it("Start production points to /production/start", () => {
     expect(sidebarSrc).toMatch(/href:\s*"\/production\/start"/);

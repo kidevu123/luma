@@ -12,17 +12,35 @@ import { compact } from "@/lib/db/compact";
 import type { CurrentUser } from "@/lib/auth";
 
 export async function listProducts() {
-  const rows = await db
-    .select({
-      product: products,
-      allowedCount: db.$count(
-        productAllowedTablets,
-        eq(productAllowedTablets.productId, products.id),
-      ),
-    })
-    .from(products)
-    .orderBy(asc(products.name));
-  return rows.map((r) => ({ ...r.product, allowedCount: r.allowedCount }));
+  const [rows, allAllowed] = await Promise.all([
+    db
+      .select({
+        product: products,
+        allowedCount: db.$count(
+          productAllowedTablets,
+          eq(productAllowedTablets.productId, products.id),
+        ),
+      })
+      .from(products)
+      .orderBy(asc(products.name)),
+    db
+      .select({
+        productId: productAllowedTablets.productId,
+        tabletTypeId: productAllowedTablets.tabletTypeId,
+      })
+      .from(productAllowedTablets),
+  ]);
+  const allowedByProduct = new Map<string, string[]>();
+  for (const a of allAllowed) {
+    const arr = allowedByProduct.get(a.productId) ?? [];
+    arr.push(a.tabletTypeId);
+    allowedByProduct.set(a.productId, arr);
+  }
+  return rows.map((r) => ({
+    ...r.product,
+    allowedCount: r.allowedCount,
+    allowedTabletIds: allowedByProduct.get(r.product.id) ?? [],
+  }));
 }
 
 export async function getProductWithAllowed(id: string) {
@@ -138,6 +156,34 @@ export async function getProductWithBom(id: string) {
       .orderBy(asc(packagingMaterials.name)),
   ]);
   return { ...product, allowed, specs };
+}
+
+export async function setAllowedTablets(
+  productId: string,
+  tabletTypeIds: string[],
+  actor: CurrentUser,
+) {
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(productAllowedTablets)
+      .where(eq(productAllowedTablets.productId, productId));
+    if (tabletTypeIds.length > 0) {
+      await tx.insert(productAllowedTablets).values(
+        tabletTypeIds.map((tabletTypeId) => ({ productId, tabletTypeId, isPrimary: false })),
+      );
+    }
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "product.allowed.set",
+        targetType: "Product",
+        targetId: productId,
+        after: { tabletTypeIds },
+      },
+      tx,
+    );
+  });
 }
 
 export async function setAllowedTablet(

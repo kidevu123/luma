@@ -124,6 +124,13 @@
     text-rendering: optimizeLegibility;
   }
 
+  /* Eliminate the 300ms tap delay on Android Chrome and older mobile
+     browsers. Safe: does not disable scroll — only prevents double-tap
+     zoom on interactive elements. */
+  button, a, [role="button"], select, input, textarea, summary {
+    touch-action: manipulation;
+  }
+
   body {
     background: rgb(var(--bg-canvas));
     color: rgb(var(--text));

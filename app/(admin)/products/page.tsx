@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Plus, Boxes } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
 import { listProducts } from "@/lib/db/queries/products";
+import { listTabletTypes } from "@/lib/db/queries/tablet-types";
 import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { ProductDialog } from "./product-dialog";
@@ -10,13 +11,14 @@ export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
   await requireAdmin();
-  const rows = await listProducts();
+  const [rows, tabletTypes] = await Promise.all([listProducts(), listTabletTypes()]);
+  const tabletTypeOptions = tabletTypes.map((t) => ({ id: t.id, name: t.name }));
   return (
     <div className="space-y-5">
       <PageHeader
         title="Products"
         description="Finished goods. Each product has a kind (card, bottle, variety) and packaging spec (tablets/unit, units/display, displays/case)."
-        actions={<ProductDialog triggerLabel="New product" triggerIcon={<Plus className="h-4 w-4" aria-hidden />} />}
+        actions={<ProductDialog triggerLabel="New product" triggerIcon={<Plus className="h-4 w-4" aria-hidden />} tabletTypes={tabletTypeOptions} />}
       />
 
       {rows.length === 0 ? (
@@ -24,7 +26,7 @@ export default async function ProductsPage() {
           icon={Boxes}
           title="No products yet"
           description="Create your first product so receiving + packaging have something to point at."
-          action={<ProductDialog triggerLabel="Create product" triggerIcon={<Plus className="h-4 w-4" aria-hidden />} />}
+          action={<ProductDialog triggerLabel="Create product" triggerIcon={<Plus className="h-4 w-4" aria-hidden />} tabletTypes={tabletTypeOptions} />}
         />
       ) : (
         <DataTable>
@@ -65,7 +67,7 @@ export default async function ProductsPage() {
                   </StatusPill>
                 </TD>
                 <TD className="text-right">
-                  <ProductDialog row={r} triggerLabel="Edit" />
+                  <ProductDialog row={r} triggerLabel="Edit" tabletTypes={tabletTypeOptions} />
                 </TD>
               </TR>
             ))}

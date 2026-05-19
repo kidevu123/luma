@@ -113,7 +113,7 @@ function ActiveSessionView({
           type="button"
           onClick={endShift}
           disabled={pending}
-          className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors disabled:opacity-60 ${
+          className={`min-h-[44px] rounded-lg px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-60 ${
             confirming
               ? "bg-rose-700 text-white hover:bg-rose-800"
               : "bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-100"
@@ -197,7 +197,9 @@ function OpenSessionForm({
           enter your full name. Required before submitting any count.
         </p>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {/* Stacked single-column layout on all sizes — easier to tap
+       *  accurately on a phone held in one hand. */}
+      <div className="flex flex-col gap-2">
         <select
           value={picked}
           onChange={(e) => {
@@ -206,7 +208,7 @@ function OpenSessionForm({
             setFreeText("");
           }}
           disabled={pending}
-          className="h-11 px-3 rounded-lg bg-surface border border-border text-sm"
+          className="h-12 px-3 rounded-lg bg-surface border border-border text-base"
         >
           <option value="">— Pick employee —</option>
           {employeeOptions.map((o) => (
@@ -227,7 +229,7 @@ function OpenSessionForm({
           }}
           placeholder="Op code"
           disabled={pending}
-          className="h-11 px-3 rounded-lg bg-surface border border-border text-sm tabular-nums"
+          className="h-12 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
         />
       </div>
       <input
@@ -242,12 +244,12 @@ function OpenSessionForm({
         }}
         placeholder="Full name (last resort — marked LOW confidence)"
         disabled={pending}
-        className="h-11 w-full px-3 rounded-lg bg-surface border border-border text-sm"
+        className="h-12 w-full px-3 rounded-lg bg-surface border border-border text-base"
       />
       <button
         type="submit"
         disabled={pending || (!picked && !code && !freeText)}
-        className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-sm font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60"
+        className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-base font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60"
       >
         {pending ? "Opening shift…" : "Open shift"}
       </button>
