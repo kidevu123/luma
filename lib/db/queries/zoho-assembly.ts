@@ -41,6 +41,9 @@ export type CreateZohoAssemblyOpInput = {
   sourcePoLineId?:       string | null;
   sourceTabletTypeId?:   string | null;
   componentRole?:        string | null;
+  // Optional overrides — if omitted, defaults apply (PENDING / null).
+  status?:              ZohoAssemblyOpStatus;
+  requestPayload?:      unknown;
 };
 
 export type SetZohoAssemblyOpStatusInput = {
@@ -156,6 +159,10 @@ export async function createZohoAssemblyOp(
       sourcePoLineId:       input.sourcePoLineId       ?? null,
       sourceTabletTypeId:   input.sourceTabletTypeId   ?? null,
       componentRole:        input.componentRole        ?? null,
+      status:               input.status              ?? "PENDING",
+      requestPayload:       input.requestPayload !== undefined
+                              ? (input.requestPayload as ZohoAssemblyOp["requestPayload"])
+                              : null,
     })
     .returning();
   if (!row) throw new Error("createZohoAssemblyOp: insert returned no row");
