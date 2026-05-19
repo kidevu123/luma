@@ -8,7 +8,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
-  const loginUrl = new URL("/login", request.url);
+
+  const appBase = process.env.APP_URL ?? "http://localhost:3000";
+  const loginUrl = new URL("/login", appBase);
 
   const cookieHeader = request.headers.get("cookie") ?? "";
   const raw = cookieHeader.split(";").find((c) => c.trim().startsWith("oidc_state="))?.split("=").slice(1).join("=") ?? "";
@@ -24,7 +26,6 @@ export async function GET(request: Request) {
   const issuer = process.env.AUTHENTIK_ISSUER!;
   const clientId = process.env.AUTHENTIK_CLIENT_ID!;
   const clientSecret = process.env.AUTHENTIK_CLIENT_SECRET!;
-  const appBase = process.env.APP_URL ?? "http://localhost:3000";
   const redirectUri = `${appBase}/api/auth/callback`;
 
   const meta = await fetch(`${issuer}/.well-known/openid-configuration`).then((r) => r.json()) as {
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
   }
 
   const { name, value, options } = await createSessionCookie({ id: user.id, role: user.role, email: user.email });
-  const response = NextResponse.redirect(new URL(nextUrl || "/dashboard", request.url));
+  const response = NextResponse.redirect(new URL(nextUrl || "/dashboard", appBase));
   response.cookies.delete("oidc_state");
   response.cookies.set(name, value, options);
   return response;
