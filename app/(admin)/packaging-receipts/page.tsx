@@ -10,7 +10,7 @@
 // the lifecycle of each lot at a glance.
 
 import { db } from "@/lib/db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -57,24 +57,20 @@ export default async function PackagingReceiptsPage({
   await requireAdmin();
   const sp = await searchParams;
 
-  const conditions: string[] = ["1 = 1"];
-  if (sp.source) conditions.push(`pl.source_system = '${sp.source.replace(/'/g, "''")}'`);
-  if (sp.confidence)
-    conditions.push(`pl.confidence = '${sp.confidence.replace(/'/g, "''")}'`);
-  if (sp.variance === "1")
-    conditions.push(
-      `(pl.counted_quantity IS NOT NULL AND pl.declared_quantity IS NOT NULL AND pl.counted_quantity <> pl.declared_quantity)`,
-    );
-  if (sp.packtrack === "1")
-    conditions.push(`pl.packtrack_receipt_id IS NOT NULL`);
-  if (sp.supplier)
-    conditions.push(`pl.supplier ILIKE '%${sp.supplier.replace(/'/g, "''")}%'`);
-  if (sp.from)
-    conditions.push(`pl.received_at >= '${sp.from.replace(/'/g, "''")}'`);
-  if (sp.to)
-    conditions.push(`pl.received_at <= '${sp.to.replace(/'/g, "''")}'`);
+  const isDateStr = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
-  const whereClause = sql.raw(conditions.join(" AND "));
+  const clauses: SQL[] = [];
+  if (sp.source) clauses.push(sql`pl.source_system = ${sp.source}`);
+  if (sp.confidence) clauses.push(sql`pl.confidence = ${sp.confidence}`);
+  if (sp.variance === "1")
+    clauses.push(sql`(pl.counted_quantity IS NOT NULL AND pl.declared_quantity IS NOT NULL AND pl.counted_quantity <> pl.declared_quantity)`);
+  if (sp.packtrack === "1")
+    clauses.push(sql`pl.packtrack_receipt_id IS NOT NULL`);
+  if (sp.supplier) clauses.push(sql`pl.supplier ILIKE ${"%" + sp.supplier + "%"}`);
+  if (sp.from && isDateStr(sp.from)) clauses.push(sql`pl.received_at >= ${sp.from}::timestamptz`);
+  if (sp.to && isDateStr(sp.to)) clauses.push(sql`pl.received_at <= ${sp.to}::timestamptz`);
+
+  const whereClause = clauses.length > 0 ? sql.join(clauses, sql` AND `) : sql`1 = 1`;
 
   const rowsQ = await db.execute<ReceiptRow>(sql`
     SELECT

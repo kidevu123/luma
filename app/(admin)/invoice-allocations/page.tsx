@@ -69,7 +69,7 @@ function fmtDate(d: Date | string | null | undefined): string {
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
   ];
-  return `${months[date.getUTCMonth()]} ${date.getUTCDate()} ${date.getUTCFullYear()}`;
+  return `${months[date.getUTCMonth()] ?? "?"} ${date.getUTCDate()} ${date.getUTCFullYear()}`;
 }
 
 export default async function InvoiceAllocationsPage({
