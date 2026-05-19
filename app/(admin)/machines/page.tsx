@@ -35,7 +35,7 @@ export default async function MachinesPage() {
                 <TR>
                   <TH>Name</TH>
                   <TH>Kind</TH>
-                  <TH className="text-right">Cards / turn</TH>
+                  <TH className="text-right">Units / cycle</TH>
                   <TH>Status</TH>
                 </TR>
               </THead>
