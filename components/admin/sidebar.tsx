@@ -47,8 +47,7 @@ const SECTIONS: Section[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/floor-board", label: "Live floor", icon: Activity },
-      { href: "/receiving/raw-bags", label: "Receive raw pills", icon: Inbox },
-      { href: "/inbound/packaging-materials", label: "Receive packaging", icon: Boxes },
+      { href: "/inbound", label: "Receiving", icon: Inbox },
       { href: "/production/start", label: "Start production", icon: QrCode },
       { href: "/workflow-submissions", label: "Workflow submissions", icon: ClipboardList },
       { href: "/packaging-output", label: "Packaging / pack-out", icon: Package },
@@ -60,7 +59,6 @@ const SECTIONS: Section[] = [
     heading: "Management",
     items: [
       { href: "/packaging-inventory", label: "Inventory", icon: Boxes },
-      { href: "/inbound", label: "Purchase orders", icon: Truck },
       { href: "/material-alerts", label: "Material alerts", icon: TrendingUp },
       { href: "/invoice-allocations", label: "Invoice allocations", icon: Receipt },
       { href: "/reports", label: "Production reports", icon: BarChart3 },
@@ -101,11 +99,13 @@ const SECTIONS: Section[] = [
 // at the same time (e.g. /inbound highlights both "Purchase orders"
 // and "Receive packaging" because /inbound/packaging-materials starts
 // with /inbound/).
-const EXACT_MATCH_HREFS = new Set(["/inbound", "/settings"]);
+const EXACT_MATCH_HREFS = new Set(["/settings"]);
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/dashboard" || pathname === "/";
   if (EXACT_MATCH_HREFS.has(href)) return pathname === href;
+  // "Receiving" hub covers the raw-bags page which lives under a different path prefix
+  if (href === "/inbound" && pathname.startsWith("/receiving/raw-bags")) return true;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

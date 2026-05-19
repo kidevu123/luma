@@ -48,14 +48,12 @@ describe("WORKFLOW-UX-1 · Floor work entries", () => {
     expect(sidebarSrc).toMatch(/label:\s*"Live floor"/);
     expect(inFloorWork('label: "Live floor"')).toBe(true);
   });
-  it("Receive raw pills entry exists + points at /receiving/raw-bags", () => {
-    expect(sidebarSrc).toMatch(/href:\s*"\/receiving\/raw-bags"/);
-    expect(sidebarSrc).toMatch(/label:\s*"Receive raw pills"/);
-    expect(inFloorWork('label: "Receive raw pills"')).toBe(true);
-  });
-  it("Receive packaging entry exists", () => {
-    expect(sidebarSrc).toMatch(/label:\s*"Receive packaging"/);
-    expect(inFloorWork('label: "Receive packaging"')).toBe(true);
+  it("Receiving hub entry exists in Floor work and points at /inbound", () => {
+    expect(sidebarSrc).toMatch(/label:\s*"Receiving"/);
+    expect(inFloorWork('label: "Receiving"')).toBe(true);
+    const receivingAt = sidebarSrc.indexOf('label: "Receiving"');
+    const slice = sidebarSrc.slice(Math.max(0, receivingAt - 200), receivingAt);
+    expect(slice).toMatch(/href:\s*"\/inbound"/);
   });
   it("Start production entry exists + points at /production/start (not /qr-cards)", () => {
     expect(sidebarSrc).toMatch(/label:\s*"Start production"/);
@@ -131,7 +129,6 @@ describe("WORKFLOW-UX-1 · no routes deleted from the sidebar", () => {
     "/dashboard",
     "/floor-board",
     "/inbound",
-    "/inbound/packaging-materials",
     "/batches",
     "/finished-lots",
     "/qr-cards",
@@ -163,8 +160,9 @@ describe("WORKFLOW-UX-1 · no routes deleted from the sidebar", () => {
 // ─── New routes added in this phase ─────────────────────────────────────
 
 describe("WORKFLOW-UX-1 · new sidebar entries", () => {
-  it("/receiving/raw-bags is a new sidebar destination", () => {
-    expect(sidebarSrc).toMatch(/href:\s*"\/receiving\/raw-bags"/);
+  it("Receiving hub consolidates raw-bags and packaging-materials under /inbound", () => {
+    expect(sidebarSrc).toMatch(/href:\s*"\/inbound"/);
+    expect(sidebarSrc).toMatch(/label:\s*"Receiving"/);
   });
   it("integrations gets a direct entry", () => {
     expect(sidebarSrc).toMatch(/label:\s*"Integrations"/);

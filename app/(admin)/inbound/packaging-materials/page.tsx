@@ -33,6 +33,7 @@ import {
   PackageCheck,
   Trash2,
 } from "lucide-react";
+import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -163,6 +164,7 @@ export default async function ReceivePackagingPage({
 
   return (
     <CommandShell density="wide">
+      <ReceivingTabs />
       <PageHero
         eyebrow="Inbound · Packaging & Materials"
         title="Receive packaging."

@@ -29,6 +29,7 @@ import {
 } from "@/lib/integrations/zoho/gateway";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { RawBagIntakeForm } from "./raw-bag-intake-form";
+import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,7 @@ export default async function ReceiveRawBagsPage() {
 
   return (
     <CommandShell>
+      <ReceivingTabs />
       <PageHero
         eyebrow="Inbound · Raw-pill receiving"
         title="Raw bag intake"

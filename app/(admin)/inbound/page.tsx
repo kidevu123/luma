@@ -5,6 +5,7 @@ import { listReceives } from "@/lib/db/queries/receives";
 import { PageHeader, EmptyState } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
+import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,9 @@ export default async function InboundPage() {
   const rows = await listReceives();
   return (
     <div className="space-y-5">
+      <ReceivingTabs />
       <PageHeader
-        title="POs & receiving"
+        title="Purchase orders"
         description="Every truckload becomes a Receive row with N boxes and bags inside. Each box auto-creates (or reuses) the right Quarantine batch."
         actions={
           <Button asChild>
