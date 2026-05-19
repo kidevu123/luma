@@ -34,6 +34,7 @@ import {
   Receipt,
   ChevronDown,
   ClipboardList,
+  UserCog,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -75,6 +76,7 @@ const SECTIONS: Section[] = [
       { href: "/product-packaging-requirements", label: "Product requirements", icon: PackageCheck },
       { href: "/standards", label: "Standards & targets", icon: Gauge },
       { href: "/settings/integrations/zoho", label: "Integrations", icon: Plug },
+      { href: "/settings/users", label: "Users", icon: UserCog },
       { href: "/workflow-validation", label: "Workflow validation", icon: ShieldCheck },
       { href: "/settings", label: "Settings", icon: Sliders },
     ],

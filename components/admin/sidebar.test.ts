@@ -148,6 +148,7 @@ describe("WORKFLOW-UX-1 · no routes deleted from the sidebar", () => {
     "/material-alerts",
     "/po-reconciliation",
     "/workflow-validation",
+    "/settings/users",
     "/settings",
   ];
   for (const route of previouslyShippedRoutes) {
@@ -227,6 +228,25 @@ describe("WORKFLOW-UX-1 · banned-phrase guard", () => {
   it("does not introduce QC banned phrases", () => {
     expect(sidebarSrc).not.toMatch(/production loss/i);
     expect(sidebarSrc).not.toMatch(/supplier shortage/i);
+  });
+});
+
+describe("USER-MGMT-1 · users link", () => {
+  it("Users is linked under Configuration (not Floor work)", () => {
+    const floorAt = sidebarSrc.indexOf('heading: "Floor work"');
+    const mgmtAt = sidebarSrc.indexOf('heading: "Management"');
+    const configAt = sidebarSrc.indexOf('heading: "Configuration"');
+    const advAt = sidebarSrc.indexOf('heading: "Advanced"');
+    const labelAt = sidebarSrc.indexOf('label: "Users"');
+    expect(labelAt).toBeGreaterThan(-1);
+    // Sits between Configuration and Advanced.
+    expect(labelAt).toBeGreaterThan(configAt);
+    expect(labelAt).toBeLessThan(advAt);
+    // NOT in Floor work or Management.
+    expect(labelAt < floorAt || labelAt > mgmtAt).toBe(true);
+  });
+  it("Users points to /settings/users", () => {
+    expect(sidebarSrc).toMatch(/href:\s*"\/settings\/users"/);
   });
 });
 
