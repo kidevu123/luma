@@ -20,6 +20,7 @@ import {
   STATION_PICKUP_FROM_STAGE,
   STATIONS_THAT_FINALIZE,
 } from "@/lib/production/stage-progression";
+import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
 
 // First-op count submissions where accountability is mandatory (the
@@ -867,6 +868,19 @@ export async function packagingCompleteAction(
         accountableEmployeeNameSnapshot:
           accountability.accountableEmployeeNameSnapshot,
       });
+      const consumption = await emitCountBasedPackagingConsumption(tx, {
+        workflowBagId: parsed.data.workflowBagId,
+        stationId: parsed.data.stationId,
+        payload: {
+          master_cases: parsed.data.masterCases,
+          displays_made: parsed.data.displaysMade,
+          loose_cards: parsed.data.looseCards,
+          damaged_packaging: parsed.data.damagedPackaging,
+          ripped_cards: parsed.data.rippedCards,
+        },
+        occurredAt: new Date(),
+      });
+      void consumption;
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Failed." };

@@ -49,8 +49,10 @@ export default async function PackagingOutputPage() {
   await requireSession();
   const range = lastNDays(7);
 
+  const ROLL_KINDS_FOR_EXCLUSION = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"];
+
   // Run all queries in parallel — pack-out queue alongside existing metrics.
-  const [packaging, finished, awaitingLot, awaitingFinalize] = await Promise.all([
+  const [packaging, finished, awaitingLot, awaitingFinalize, materialBurnRaw] = await Promise.all([
     derivePackagingMetrics(range),
     deriveFinishedGoodsMetrics(range),
 
@@ -95,6 +97,31 @@ export default async function PackagingOutputPage() {
       .where(eq(readBagState.stage, "PACKAGED"))
       .orderBy(desc(workflowBags.startedAt))
       .limit(20),
+
+    // Material burn: actual + estimated consumption last 7 days, excluding rolls.
+    db.execute<{
+      packaging_material_id: string;
+      material_name: string;
+      material_kind: string;
+      actual_qty: number;
+      estimated_qty: number;
+      last_consumed_at: string;
+    }>(sql`
+      SELECT
+        mie.packaging_material_id::text,
+        pm.name AS material_name,
+        pm.kind::text AS material_kind,
+        COALESCE(SUM(CASE WHEN mie.event_type = 'MATERIAL_CONSUMED_ACTUAL' THEN mie.quantity_units ELSE 0 END), 0)::int AS actual_qty,
+        COALESCE(SUM(CASE WHEN mie.event_type = 'MATERIAL_CONSUMED_ESTIMATED' THEN mie.quantity_units ELSE 0 END), 0)::int AS estimated_qty,
+        MAX(mie.occurred_at)::text AS last_consumed_at
+      FROM material_inventory_events mie
+      JOIN packaging_materials pm ON pm.id = mie.packaging_material_id
+      WHERE mie.event_type IN ('MATERIAL_CONSUMED_ACTUAL', 'MATERIAL_CONSUMED_ESTIMATED')
+        AND mie.occurred_at >= NOW() - INTERVAL '7 days'
+        AND pm.kind::text NOT IN (${ROLL_KINDS_FOR_EXCLUSION[0]}, ${ROLL_KINDS_FOR_EXCLUSION[1]}, ${ROLL_KINDS_FOR_EXCLUSION[2]})
+      GROUP BY mie.packaging_material_id, pm.name, pm.kind
+      ORDER BY MAX(mie.occurred_at) DESC
+    `),
   ]);
 
   const releasedLotsRaw = finished.releasedLots?.value ?? null;
@@ -406,6 +433,80 @@ export default async function PackagingOutputPage() {
             metric={finished.onTimeCompletionPct ?? FALLBACK}
           />
         </div>
+      </SectionCard>
+
+      {/* Material consumption burn — last 7 days, no rolls */}
+      <SectionCard
+        eyebrow="Material consumption"
+        title="Recent material burn — last 7 days"
+        subtitle="Actual = deducted from inventory. Estimated = BOM-calculated but no lot found. PVC/foil tracked separately via roll counter."
+        tone="info"
+        reveal="reveal-5"
+      >
+        {(materialBurnRaw as unknown as Array<{
+          packaging_material_id: string;
+          material_name: string;
+          material_kind: string;
+          actual_qty: number;
+          estimated_qty: number;
+          last_consumed_at: string;
+        }>).length === 0 ? (
+          <DataEmptyState
+            title="No consumption events in last 7 days"
+            body="Material deductions are written when PACKAGING_COMPLETE fires. Check that packaging specs (BOM) are configured for active products."
+            tone="muted"
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="text-[12.5px] w-full">
+              <thead>
+                <tr className="border-b border-border/60">
+                  <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Material</th>
+                  <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Actual qty</th>
+                  <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Estimated qty</th>
+                  <th className="text-left py-1.5 font-medium text-text-muted text-[11px] uppercase tracking-wide">Last consumed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(materialBurnRaw as unknown as Array<{
+                  packaging_material_id: string;
+                  material_name: string;
+                  material_kind: string;
+                  actual_qty: number;
+                  estimated_qty: number;
+                  last_consumed_at: string;
+                }>).map((row) => (
+                  <tr key={row.packaging_material_id} className="border-b border-border/30 last:border-0">
+                    <td className="py-2 pr-4">
+                      <div className="text-text-strong">{row.material_name}</div>
+                      <div className="font-mono text-[10.5px] text-text-muted">{row.material_kind}</div>
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular-nums text-text-strong">
+                      {row.actual_qty > 0 ? row.actual_qty.toLocaleString() : <span className="text-text-subtle">—</span>}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular-nums">
+                      {row.estimated_qty > 0 ? (
+                        <span className="text-amber-700">{row.estimated_qty.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-text-subtle">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 text-[11.5px] text-text-muted tabular-nums whitespace-nowrap">
+                      {row.last_consumed_at
+                        ? new Date(row.last_consumed_at).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </SectionCard>
 
       {/* Data source note */}

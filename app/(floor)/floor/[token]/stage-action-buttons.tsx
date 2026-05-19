@@ -575,6 +575,23 @@ function PackagingCompleteForm({
         </div>
       )}
 
+      {packagingSpecs && packagingSpecs.length > 0 && (
+        <div className="text-[11px] text-text-subtle space-y-0.5 border-t border-border/40 pt-2 mt-1">
+          {packagingSpecs
+            .filter(s => !["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(s.materialKind))
+            .map(s => (
+              <div key={`${s.materialName}|${s.perScope}`} className="flex items-center justify-between">
+                <span className="truncate">{s.materialName}</span>
+                <span className="text-text-subtle/70">Pending — deducted on save</span>
+              </div>
+            ))
+          }
+          {packagingSpecs.some(s => ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(s.materialKind)) && (
+            <div className="text-text-subtle/50">PVC/foil tracked via roll counter</div>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
