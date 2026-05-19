@@ -1,4 +1,4 @@
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   products,
@@ -120,12 +120,27 @@ export async function updateProduct(
   });
 }
 
+export type LotSourceSummary = {
+  packtrack: number;
+  manual: number;
+  totalQty: number;
+};
+
 /** Get a product with both allowed-tablets and packaging-spec rows so
- *  the BOM editor can render in one fetch. */
+ *  the BOM editor can render in one fetch. Also returns lot source
+ *  summary per packaging material for data-honesty labels. */
 export async function getProductWithBom(id: string) {
   const [product] = await db.select().from(products).where(eq(products.id, id));
   if (!product) return null;
-  const [allowed, specs] = await Promise.all([
+
+  type LotSummaryRow = {
+    packaging_material_id: string;
+    source_system: string;
+    lot_count: number;
+    total_qty: number;
+  };
+
+  const [allowed, specs, lotSummaryRows] = await Promise.all([
     db
       .select({
         tabletTypeId: productAllowedTablets.tabletTypeId,
@@ -154,8 +169,36 @@ export async function getProductWithBom(id: string) {
       )
       .where(eq(productPackagingSpecs.productId, id))
       .orderBy(asc(packagingMaterials.name)),
+    db.execute<LotSummaryRow>(sql`
+      SELECT
+        packaging_material_id::text,
+        COALESCE(source_system::text, 'MANUAL_LUMA') as source_system,
+        COUNT(*)::int as lot_count,
+        COALESCE(SUM(accepted_quantity), 0)::int as total_qty
+      FROM packaging_lots
+      WHERE status IN ('AVAILABLE','IN_USE')
+        OR status IS NULL
+      GROUP BY packaging_material_id, source_system
+    `),
   ]);
-  return { ...product, allowed, specs };
+
+  const lotSummary = new Map<string, LotSourceSummary>();
+  for (const row of lotSummaryRows as unknown as LotSummaryRow[]) {
+    const existing = lotSummary.get(row.packaging_material_id) ?? {
+      packtrack: 0,
+      manual: 0,
+      totalQty: 0,
+    };
+    if (row.source_system === "PACKTRACK") {
+      existing.packtrack += row.lot_count;
+    } else {
+      existing.manual += row.lot_count;
+    }
+    existing.totalQty += row.total_qty;
+    lotSummary.set(row.packaging_material_id, existing);
+  }
+
+  return { ...product, allowed, specs, lotSummary };
 }
 
 export async function setAllowedTablets(

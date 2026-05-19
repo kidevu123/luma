@@ -73,6 +73,7 @@ export default async function ProductBomPage({
           }))}
           allowed={product.allowed}
           specs={product.specs}
+          {...(product.lotSummary ? { lotSummary: product.lotSummary } : {})}
         />
       </div>
     </div>
