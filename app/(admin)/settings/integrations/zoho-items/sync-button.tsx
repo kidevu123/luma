@@ -7,7 +7,7 @@ import { runZohoItemsSyncAction } from "./actions";
 export function SyncButton() {
   const [pending, setPending] = React.useState(false);
   const [result, setResult] = React.useState<
-    | { ok: true; scanned: number; created: number; updated: number }
+    | { ok: true; scanned: number; created: number; updated: number; materialsCreated: number }
     | { error: string }
     | null
   >(null);
@@ -35,7 +35,8 @@ export function SyncButton() {
       )}
       {result && "ok" in result && (
         <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
-          Sync complete — {result.scanned} scanned, {result.created} new, {result.updated} updated
+          Sync complete — {result.scanned} scanned, {result.created} new mappings, {result.updated} updated
+          {result.materialsCreated > 0 && `, ${result.materialsCreated} packaging material${result.materialsCreated !== 1 ? "s" : ""} created`}
         </p>
       )}
     </div>
