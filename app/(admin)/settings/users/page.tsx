@@ -128,7 +128,7 @@ export default async function UsersPage() {
                 </TD>
                 <TD className="text-right">
                   <UserRowActions
-                    user={u}
+                    user={{ id: u.id, email: u.email, role: u.role, disabled: u.disabledAt !== null }}
                     currentUserId={me.id}
                     currentUserRole={me.role}
                   />

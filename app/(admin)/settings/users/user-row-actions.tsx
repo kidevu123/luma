@@ -12,7 +12,7 @@ type UserRow = {
   id: string;
   email: string;
   role: Role;
-  disabledAt: Date | null;
+  disabled: boolean;
 };
 
 export function UserRowActions({
@@ -57,7 +57,7 @@ export function UserRowActions({
     const fd = new FormData();
     fd.set("userId", user.id);
     startToggleTransition(async () => {
-      const action = user.disabledAt ? enableUserAction : disableUserAction;
+      const action = user.disabled ? enableUserAction : disableUserAction;
       const result = await action(fd);
       if ("error" in result) setToggleError(result.error);
     });
@@ -121,12 +121,12 @@ export function UserRowActions({
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
           <Button
             size="sm"
-            variant={user.disabledAt ? "secondary" : "ghost"}
+            variant={user.disabled ? "secondary" : "ghost"}
             onClick={handleToggle}
             disabled={togglePending}
-            className={`h-7 text-[12px] ${!user.disabledAt ? "text-red-600 hover:bg-red-50" : ""}`}
+            className={`h-7 text-[12px] ${!user.disabled ? "text-red-600 hover:bg-red-50" : ""}`}
           >
-            {togglePending ? "…" : user.disabledAt ? "Enable" : "Disable"}
+            {togglePending ? "…" : user.disabled ? "Enable" : "Disable"}
           </Button>
           <Button
             size="sm"
