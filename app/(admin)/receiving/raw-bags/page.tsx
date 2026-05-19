@@ -5,7 +5,7 @@
 // verification badge shows the honest state). Hands everything to a
 // client form that handles the three sections + save flow.
 //
-// Chrome rebuilt on the new luma-ui primitive library. Data loading
+// Chrome rebuilt on the standard design system. Data loading
 // + form wiring unchanged from INTAKE-WORKFLOW-1.
 
 import { db } from "@/lib/db";
@@ -17,12 +17,6 @@ import {
 } from "@/lib/db/schema";
 import { requireLead } from "@/lib/auth-guards";
 import {
-  ActionPanel,
-  CommandShell,
-  PageHero,
-  type HeroBadge,
-} from "@/components/production/luma-ui";
-import {
   checkZohoGatewayHealth,
   deriveZohoReadiness,
   fetchZohoBrandStatus,
@@ -30,6 +24,7 @@ import {
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { RawBagIntakeForm } from "./raw-bag-intake-form";
 import { ReceivingTabs } from "@/components/ui/receiving-tabs";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -75,61 +70,56 @@ export default async function ReceiveRawBagsPage() {
   const { readiness } = deriveZohoReadiness({ health, brand });
   const zohoReady = readiness === "READY_FOR_DRY_RUN";
 
-  const heroBadges: HeroBadge[] = [
-    {
-      label: `${pos.length} PO${pos.length === 1 ? "" : "s"} loaded`,
-      tone: "info",
-      mono: true,
-    },
-    {
-      label: `${tablets.length} active tablet type${tablets.length === 1 ? "" : "s"}`,
-      tone: "muted",
-      mono: true,
-    },
-    {
-      label: zohoReady ? "Zoho: ready" : `Zoho: ${readiness}`,
-      tone: zohoReady ? "good" : "warn",
-    },
-  ];
-
   return (
-    <CommandShell>
+    <div className="space-y-5">
       <ReceivingTabs />
-      <PageHero
-        eyebrow="Inbound · Raw-pill receiving"
-        title="Raw bag intake"
-        description={
-          <>
-            Single-screen receiving for raw-pill bags. Pick the PO, capture
-            supplier lot + bag count + receipt range, scan each QR. One save
-            creates every <code className="font-mono text-text-strong">inventory_bag</code>{" "}
-            in a single transaction.
-          </>
-        }
-        badges={heroBadges}
+      <PageHeader
+        title="Receive pills"
+        description="Single-screen receiving for raw-pill bags. Pick the PO, capture supplier lot + bag count + receipt range. One save creates every inventory_bag in a single transaction."
       />
 
+      {/* Badge strip */}
+      <div className="flex flex-wrap gap-2">
+        <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
+          {pos.length} PO{pos.length === 1 ? "" : "s"} loaded
+        </span>
+        <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
+          {tablets.length} active tablet type{tablets.length === 1 ? "" : "s"}
+        </span>
+        <span
+          className={`inline-flex items-center h-6 px-2.5 rounded-md border text-[11px] font-mono ${
+            zohoReady
+              ? "border-sky-200 bg-sky-50/60 text-sky-800"
+              : "border-warn-200 bg-warn-50/60 text-warn-800"
+          }`}
+        >
+          {zohoReady ? "Zoho: ready" : `Zoho: ${readiness}`}
+        </span>
+      </div>
+
       {!zohoReady ? (
-        <ActionPanel
-          tone="warn"
-          icon={ShieldAlert}
-          title="Zoho PO sync not ready — manual fallback in use"
-          body={
-            <>
+        <div className="rounded-xl border border-warn-200 bg-warn-50/60 px-4 py-3 text-[12px] text-warn-800 flex items-start gap-2.5">
+          <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">Zoho PO sync not ready — manual fallback in use</p>
+            <p className="mt-0.5">
               Live Zoho PO data is unavailable right now (readiness:{" "}
-              <code className="font-mono text-text-strong">{readiness}</code>).
+              <code className="font-mono text-[11px]">{readiness}</code>).
               The form falls back to the local Luma PO list and a manual PO
               reference path. Receiving is never blocked by Zoho token state.
-            </>
-          }
-        />
+            </p>
+          </div>
+        </div>
       ) : (
-        <ActionPanel
-          tone="good"
-          icon={ShieldCheck}
-          title="Zoho PO sync online"
-          body="Live PO lookup is available. The picker will surface the freshest PO list. Manual PO entry stays available as a fallback."
-        />
+        <div className="rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] text-sky-800 flex items-start gap-2.5">
+          <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">Zoho PO sync online</p>
+            <p className="mt-0.5">
+              Live PO lookup is available. The picker will surface the freshest PO list. Manual PO entry stays available as a fallback.
+            </p>
+          </div>
+        </div>
       )}
 
       <RawBagIntakeForm
@@ -138,6 +128,6 @@ export default async function ReceiveRawBagsPage() {
         tabletTypes={tablets}
         zohoReadiness={readiness}
       />
-    </CommandShell>
+    </div>
   );
 }
