@@ -78,8 +78,8 @@ export default async function RollVariancePage() {
                       <td className="p-2 text-right tabular-nums">
                         {r.varianceGrams != null ? `${r.varianceGrams} g` : "Missing"}
                       </td>
-                      <td className="p-2">{r.varianceSeverity}</td>
-                      <td className="p-2">{r.estimateActualLabel}</td>
+                      <td className="p-2"><SeverityBadge severity={r.varianceSeverity} /></td>
+                      <td className="p-2 text-[11px] text-text-muted">{r.estimateActualLabel}</td>
                       <td className="p-2 font-mono text-[10px]">{r.sourceSystem}</td>
                       <td className="p-2"><ConfidenceBadge confidence={r.confidence} /></td>
                       <td className="p-2 text-[10px] text-text-muted">
@@ -133,7 +133,7 @@ export default async function RollVariancePage() {
                           <td className="p-2 text-right tabular-nums">
                             {v.value} {v.unit}
                           </td>
-                          <td className="p-2">{v.severity}</td>
+                          <td className="p-2 text-[11px] text-text-muted">{v.severity}</td>
                           <td className="p-2"><ConfidenceBadge confidence={v.confidence} /></td>
                         </tr>
                       )),
@@ -150,9 +150,23 @@ export default async function RollVariancePage() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-border/60 bg-page px-3 py-2">
-      <div className="text-[10px] uppercase text-text-muted tracking-wider">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
+    <div className="rounded-xl border border-border/60 bg-surface px-3 py-2.5">
+      <div className="text-[10px] uppercase text-text-subtle tracking-wider font-semibold">{label}</div>
+      <div className="mt-1 text-lg font-semibold tabular-nums text-text-strong">{value}</div>
     </div>
+  );
+}
+
+function SeverityBadge({ severity }: { severity: "NONE" | "LOW" | "MEDIUM" | "HIGH" | "MISSING" }) {
+  const cls =
+    severity === "HIGH"    ? "bg-crit-50 text-crit-700 border-crit-500/40" :
+    severity === "MEDIUM"  ? "bg-warn-50 text-warn-700 border-warn-500/40" :
+    severity === "LOW"     ? "bg-warn-50 text-warn-700 border-warn-500/40" :
+    severity === "MISSING" ? "bg-muted-50 text-muted-700 border-muted-500/40" :
+                             "bg-good-50 text-good-700 border-good-500/40";
+  return (
+    <span className={`inline-flex items-center h-5 px-1.5 rounded-sm border text-[10px] font-medium uppercase tracking-wider ${cls}`}>
+      {severity}
+    </span>
   );
 }

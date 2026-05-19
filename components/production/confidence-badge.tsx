@@ -1,16 +1,16 @@
-// Confidence pill — every MetricResult gets one. Dark command-
-// center palette: cyan border, subtle fill, semantic color per
-// confidence level. The pill is intentionally compact (h-5) so a
-// dense KPI strip can fit one per card without crowding.
+// Confidence pill — semantic-token palette (good/warn/crit/muted)
+// reads cleanly on both light admin surfaces and the dark floor-board.
+// Filled chip (solid light bg + dark text) beats translucent tints for
+// accessibility on any background.
 
 import { cn } from "@/lib/utils";
 import type { Confidence } from "@/lib/production/types";
 
 const STYLES: Record<Confidence, string> = {
-  HIGH:    "bg-emerald-500/10 text-emerald-300 border-emerald-500/40",
-  MEDIUM:  "bg-amber-500/10 text-amber-200 border-amber-500/40",
-  LOW:     "bg-orange-500/10 text-orange-200 border-orange-500/40",
-  MISSING: "bg-slate-700/50 text-slate-400 border-slate-600/60",
+  HIGH:    "bg-good-50 text-good-700 border-good-500/40",
+  MEDIUM:  "bg-warn-50 text-warn-700 border-warn-500/40",
+  LOW:     "bg-crit-50 text-crit-700 border-crit-500/40",
+  MISSING: "bg-muted-50 text-muted-700 border-muted-500/40",
 };
 
 const LABELS: Record<Confidence, string> = {

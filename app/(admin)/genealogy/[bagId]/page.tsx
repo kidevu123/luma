@@ -16,28 +16,29 @@ import {
 import { requireSession } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
-import { MetricCard } from "@/components/production/metric-card";
 import { MissingState } from "@/components/production/missing-state";
 import { deriveBagGenealogy } from "@/lib/production/metrics";
+import type { MetricResult } from "@/lib/production/types";
 
 export const dynamic = "force-dynamic";
 
+// Light-surface badge styles per event type.
 const STAGE_BADGES: Record<string, { label: string; cls: string }> = {
-  CARD_ASSIGNED: { label: "Started", cls: "bg-cyan-500/10 text-cyan-300 border-cyan-500/40" },
-  BLISTER_COMPLETE: { label: "Blister", cls: "bg-cyan-500/10 text-cyan-300 border-cyan-500/40" },
-  SEALING_COMPLETE: { label: "Seal", cls: "bg-cyan-500/10 text-cyan-300 border-cyan-500/40" },
-  PACKAGING_SNAPSHOT: { label: "Pack", cls: "bg-cyan-500/10 text-cyan-300 border-cyan-500/40" },
-  PACKAGING_COMPLETE: { label: "Pack", cls: "bg-cyan-500/10 text-cyan-300 border-cyan-500/40" },
-  BAG_PAUSED: { label: "Pause", cls: "bg-amber-500/10 text-amber-200 border-amber-500/40" },
-  BAG_RESUMED: { label: "Resume", cls: "bg-emerald-500/10 text-emerald-300 border-emerald-500/40" },
-  BAG_FINALIZED: { label: "Finalized", cls: "bg-emerald-500/10 text-emerald-300 border-emerald-500/40" },
-  CARD_FORCE_RELEASED: { label: "Force release", cls: "bg-rose-500/10 text-rose-300 border-rose-500/40" },
-  PACKAGING_DAMAGE_RETURN: { label: "Damage", cls: "bg-rose-500/10 text-rose-300 border-rose-500/40" },
-  REWORK_SENT: { label: "Rework sent", cls: "bg-sky-500/10 text-sky-300 border-sky-500/40" },
-  REWORK_RECEIVED: { label: "Rework rec", cls: "bg-sky-500/10 text-sky-300 border-sky-500/40" },
-  SCRAP_RECORDED: { label: "Scrap", cls: "bg-rose-700/20 text-rose-200 border-rose-700/60" },
-  SUBMISSION_CORRECTED: { label: "Corrected", cls: "bg-amber-500/10 text-amber-200 border-amber-500/40" },
-  FINISHED_GOODS_RELEASED: { label: "Released", cls: "bg-emerald-500/10 text-emerald-300 border-emerald-500/40" },
+  CARD_ASSIGNED:           { label: "Started",      cls: "bg-info-50 text-info-700 border-info-500/40" },
+  BLISTER_COMPLETE:        { label: "Blister",       cls: "bg-info-50 text-info-700 border-info-500/40" },
+  SEALING_COMPLETE:        { label: "Seal",          cls: "bg-info-50 text-info-700 border-info-500/40" },
+  PACKAGING_SNAPSHOT:      { label: "Pack",          cls: "bg-info-50 text-info-700 border-info-500/40" },
+  PACKAGING_COMPLETE:      { label: "Pack",          cls: "bg-info-50 text-info-700 border-info-500/40" },
+  BAG_PAUSED:              { label: "Pause",         cls: "bg-warn-50 text-warn-700 border-warn-500/40" },
+  BAG_RESUMED:             { label: "Resume",        cls: "bg-good-50 text-good-700 border-good-500/40" },
+  BAG_FINALIZED:           { label: "Finalized",     cls: "bg-good-50 text-good-700 border-good-500/40" },
+  CARD_FORCE_RELEASED:     { label: "Force release", cls: "bg-crit-50 text-crit-700 border-crit-500/40" },
+  PACKAGING_DAMAGE_RETURN: { label: "Damage",        cls: "bg-crit-50 text-crit-700 border-crit-500/40" },
+  REWORK_SENT:             { label: "Rework sent",   cls: "bg-info-50 text-info-700 border-info-500/40" },
+  REWORK_RECEIVED:         { label: "Rework rec",    cls: "bg-info-50 text-info-700 border-info-500/40" },
+  SCRAP_RECORDED:          { label: "Scrap",         cls: "bg-crit-50 text-crit-700 border-crit-500/40" },
+  SUBMISSION_CORRECTED:    { label: "Corrected",     cls: "bg-warn-50 text-warn-700 border-warn-500/40" },
+  FINISHED_GOODS_RELEASED: { label: "Released",      cls: "bg-good-50 text-good-700 border-good-500/40" },
 };
 
 export default async function BagGenealogyPage({
@@ -78,7 +79,7 @@ export default async function BagGenealogyPage({
     <div className="space-y-5">
       <Link
         href="/genealogy"
-        className="inline-flex items-center gap-1 text-[12px] text-slate-400 hover:text-cyan-300"
+        className="inline-flex items-center gap-1 text-[12px] text-text-muted hover:text-text"
       >
         <ChevronLeft className="h-3.5 w-3.5" />
         all bags
@@ -92,11 +93,12 @@ export default async function BagGenealogyPage({
         }
       />
 
+      {/* Summary stat strip */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
-        <MetricCard label="Events" metric={genealogy.summary.eventCount} size="sm" />
-        <MetricCard label="Span" metric={genealogy.summary.spanMinutes} size="sm" />
-        <MetricCard label="Stations" metric={genealogy.summary.distinctStations} size="sm" />
-        <MetricCard
+        <BagStat label="Events" metric={genealogy.summary.eventCount} />
+        <BagStat label="Span" metric={genealogy.summary.spanMinutes} />
+        <BagStat label="Stations" metric={genealogy.summary.distinctStations} />
+        <BagStat
           label="Stage"
           metric={{
             value: bag.stage ?? "—",
@@ -104,9 +106,8 @@ export default async function BagGenealogyPage({
             confidence: bag.stage ? "HIGH" : "MISSING",
             missingInputs: bag.stage ? [] : ["read_bag_state"],
           }}
-          size="sm"
         />
-        <MetricCard
+        <BagStat
           label="Received"
           metric={{
             value: bag.receivedQty ?? "—",
@@ -114,22 +115,21 @@ export default async function BagGenealogyPage({
             confidence: bag.receivedQty != null ? "HIGH" : "MISSING",
             missingInputs: bag.receivedQty != null ? [] : ["inventory_bag"],
           }}
-          size="sm"
         />
       </div>
 
       {bag.isFinalized && (
-        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200">
+        <div className="rounded-xl border border-good-500/30 bg-good-50 px-3 py-2 text-sm text-good-700 font-medium">
           Finalized at {bag.finalizedAt?.toISOString().replace("T", " ").slice(0, 19)}
         </div>
       )}
       {bag.isPaused && (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm text-amber-200">
+        <div className="rounded-xl border border-warn-500/30 bg-warn-50 px-3 py-2 text-sm text-warn-700 font-medium">
           Currently paused
         </div>
       )}
 
-      <h2 className="text-sm font-semibold text-slate-200 mt-6">Timeline</h2>
+      <h2 className="text-sm font-semibold text-text-strong mt-2">Timeline</h2>
 
       {genealogy.confidence === "MISSING" || genealogy.events.length === 0 ? (
         <MissingState
@@ -142,20 +142,20 @@ export default async function BagGenealogyPage({
           }}
         />
       ) : (
-        <ol className="relative border-l-2 border-slate-800 pl-5 space-y-3">
+        <ol className="relative border-l-2 border-border pl-5 space-y-3">
           {genealogy.events.map((e) => {
             const badge = STAGE_BADGES[e.eventType];
             return (
               <li key={e.eventId} className="relative">
                 <span
-                  className="absolute -left-[11px] top-1.5 h-3.5 w-3.5 rounded-full bg-slate-900 border-2 border-cyan-500"
+                  className="absolute -left-[11px] top-1.5 h-3.5 w-3.5 rounded-full bg-surface border-2 border-brand-700"
                   aria-hidden
                 />
-                <div className="flex flex-wrap items-baseline gap-2 text-[12px] text-slate-300">
-                  <span className="font-mono text-slate-400">
+                <div className="flex flex-wrap items-baseline gap-2 text-[12px] text-text">
+                  <span className="font-mono text-text-muted">
                     {e.occurredAt.toISOString().replace("T", " ").slice(0, 19)}
                   </span>
-                  <span className="font-mono text-[11px] text-slate-500">
+                  <span className="font-mono text-[11px] text-text-subtle">
                     #{e.sequence}
                   </span>
                   {badge ? (
@@ -166,33 +166,31 @@ export default async function BagGenealogyPage({
                     </span>
                   ) : (
                     <span
-                      className="inline-flex items-center h-5 px-1.5 rounded-sm border text-[10px] font-medium uppercase tracking-wider border-slate-700 bg-slate-800/60 text-slate-300 font-mono"
+                      className="inline-flex items-center h-5 px-1.5 rounded-sm border text-[10px] font-medium uppercase tracking-wider border-border bg-surface-2 text-text-muted font-mono"
                       title="Generic workflow event — no styled badge mapped."
                     >
                       {e.eventType}
                     </span>
                   )}
                   {e.machineName && (
-                    <span className="text-slate-300">{e.machineName}</span>
+                    <span className="text-text">{e.machineName}</span>
                   )}
                   {e.stationLabel && e.stationLabel !== e.machineName && (
-                    <span className="text-slate-500">· {e.stationLabel}</span>
+                    <span className="text-text-muted">· {e.stationLabel}</span>
                   )}
                   {e.employeeName && (
-                    <span className="text-slate-400">· {e.employeeName}</span>
+                    <span className="text-text-muted">· {e.employeeName}</span>
                   )}
                 </div>
                 {e.notes && (
-                  <div className="mt-0.5 text-[11px] text-slate-500">
-                    {e.notes}
-                  </div>
+                  <div className="mt-0.5 text-[11px] text-text-subtle">{e.notes}</div>
                 )}
                 {!!e.payload && Object.keys(e.payload as Record<string, unknown>).length > 0 && (
                   <details className="mt-1 text-[11px]">
-                    <summary className="cursor-pointer text-slate-500 hover:text-slate-300">
+                    <summary className="cursor-pointer text-text-subtle hover:text-text-muted">
                       payload
                     </summary>
-                    <pre className="mt-1 rounded-md bg-slate-950 border border-slate-800 p-2 text-[10px] text-slate-300 overflow-x-auto">
+                    <pre className="mt-1 rounded-xl bg-surface-2 border border-border p-2 text-[10px] text-text overflow-x-auto">
                       {JSON.stringify(e.payload, null, 2)}
                     </pre>
                   </details>
@@ -203,9 +201,32 @@ export default async function BagGenealogyPage({
         </ol>
       )}
 
-      <div className="flex items-center gap-2 text-[11px] text-slate-500 pt-3">
+      <div className="flex items-center gap-2 text-[11px] text-text-subtle pt-3">
         <ConfidenceBadge confidence={genealogy.confidence} /> Sourced direct
         from workflow_events for bag {bagId.slice(0, 8)}…
+      </div>
+    </div>
+  );
+}
+
+function BagStat({ label, metric }: { label: string; metric: MetricResult }) {
+  const isMissing = metric.confidence === "MISSING";
+  return (
+    <div className="rounded-xl border border-border/60 bg-surface-2/40 px-3 py-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-[0.10em] font-semibold text-text-subtle">
+          {label}
+        </span>
+        <ConfidenceBadge confidence={metric.confidence} />
+      </div>
+      <div
+        className={`mt-1.5 text-lg font-semibold tabular-nums ${
+          isMissing ? "text-text-subtle" : "text-text-strong"
+        }`}
+      >
+        {isMissing
+          ? (metric.label ?? "—")
+          : `${metric.value ?? "—"}${metric.unit ? ` ${metric.unit}` : ""}`}
       </div>
     </div>
   );

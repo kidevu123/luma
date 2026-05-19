@@ -1,11 +1,11 @@
-// Material reconciliation page. One row per bag: received, finished,
-// scrap, remaining, variance. Honest about confidence — every row
-// shows its own confidence pill, and rows where the projector had
-// to estimate inputs are tagged "estimated".
+// Material reconciliation — per-bag pill-count audit. One row per bag:
+// received, finished, scrap, remaining, variance. Honest about
+// confidence — rows where the projector had to estimate inputs are
+// tagged "estimated". Variance signals recording gaps or typos.
 
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { desc, eq, gt } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import {
   readMaterialReconciliation,
   workflowBags,
@@ -13,6 +13,8 @@ import {
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable, THead, TR, TH, TD, EmptyRow } from "@/components/ui/table";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { MissingState } from "@/components/production/missing-state";
 
@@ -41,11 +43,17 @@ export default async function MaterialReconciliationPage() {
     .orderBy(desc(readMaterialReconciliation.updatedAt))
     .limit(200);
 
+  // Summary computed from loaded rows (no extra query needed).
+  const withVariance = rows.filter((r) => Math.abs(Number(r.variancePct ?? 0)) > 1).length;
+  const highVariance = rows.filter((r) => Math.abs(Number(r.variancePct ?? 0)) > 5).length;
+  const estimated = rows.filter((r) => r.isEstimated).length;
+  const missing = rows.filter((r) => r.received == null).length;
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="Material reconciliation"
-        description="Per-bag pill-count audit. Variance signals recording gaps (missed counter, unrecorded scrap) or counter typos. Estimated rows are computed today from received − finished − damaged because explicit consumed/scrap/remaining events haven't been wired yet."
+        description="Per-bag pill-count audit. Variance signals recording gaps, missed counter reads, or counter typos."
       />
 
       {rows.length === 0 ? (
@@ -61,97 +69,153 @@ export default async function MaterialReconciliationPage() {
           }}
         />
       ) : (
-        <div className="rounded-md border border-slate-700/60 bg-slate-900/60 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-900 text-[10px] uppercase tracking-wider text-slate-400">
-              <tr>
-                <th className="text-left px-3 py-2">Bag</th>
-                <th className="text-left px-3 py-2">Product</th>
-                <th className="text-right px-3 py-2">Received</th>
-                <th className="text-right px-3 py-2">Finished</th>
-                <th className="text-right px-3 py-2">Scrap</th>
-                <th className="text-right px-3 py-2">Remaining</th>
-                <th className="text-right px-3 py-2">Variance</th>
-                <th className="text-right px-3 py-2">Variance %</th>
-                <th className="text-left px-3 py-2">Confidence</th>
-                <th className="text-left px-3 py-2">Missing inputs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const confidence: "HIGH" | "MEDIUM" | "LOW" | "MISSING" =
-                  r.received == null
-                    ? "MISSING"
-                    : r.isEstimated
-                      ? "LOW"
-                      : Math.abs(Number(r.variancePct ?? 0)) <= 1
-                        ? "HIGH"
-                        : Math.abs(Number(r.variancePct ?? 0)) <= 5
-                          ? "MEDIUM"
-                          : "LOW";
-                const varianceCls =
-                  Math.abs(Number(r.variancePct ?? 0)) > 5
-                    ? "text-rose-300"
-                    : Math.abs(Number(r.variancePct ?? 0)) > 1
-                      ? "text-amber-300"
-                      : "text-slate-300";
-                return (
-                  <tr key={r.bagId} className="border-t border-slate-800">
-                    <td className="px-3 py-2 text-slate-300 font-mono text-[11px]">
-                      <Link
-                        href={`/genealogy/${r.bagId}`}
-                        className="text-cyan-300 hover:text-cyan-200"
-                      >
-                        {r.bagId.slice(0, 8)}…
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2 text-slate-300">
-                      {r.productName ?? "—"}
-                      {r.productSku && (
-                        <div className="text-[10px] text-slate-500 font-mono">
-                          {r.productSku}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
-                      {r.received ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-300 font-mono">
-                      {r.finished ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-500 font-mono">
-                      {r.scrap ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-500 font-mono">
-                      {r.remaining ?? "—"}
-                    </td>
-                    <td className={`px-3 py-2 text-right font-mono ${varianceCls}`}>
-                      {r.variance ?? "—"}
-                    </td>
-                    <td className={`px-3 py-2 text-right font-mono ${varianceCls}`}>
-                      {r.variancePct != null ? `${Number(r.variancePct).toFixed(2)}%` : "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      <ConfidenceBadge confidence={confidence} />
-                    </td>
-                    <td className="px-3 py-2 text-[10px] text-slate-500">
-                      {r.missingInputs ?? "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+        <>
+          {/* Summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label="Rows loaded" value={String(rows.length)} />
+            <StatCard label="Variance > 1%" value={String(withVariance)} tone={withVariance > 0 ? "warn" : "good"} />
+            <StatCard label="Variance > 5%" value={String(highVariance)} tone={highVariance > 0 ? "crit" : "good"} />
+            <StatCard label="Estimated" value={String(estimated)} tone={estimated > 0 ? "warn" : "good"} />
+          </div>
 
-      <div className="text-[11px] text-slate-500 leading-relaxed">
-        <strong className="text-slate-300">Honest disclosure:</strong> until
-        explicit MATERIAL_CONSUMED, SCRAP_RECORDED, and remaining-inventory
-        events are emitted by the floor, the projector tags every row{" "}
-        <span className="text-slate-300">estimated</span>. Variance shown is{" "}
-        <code className="text-slate-300">received − finished − damaged − scrap − remaining</code>.
-      </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Per-bag detail</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 pb-1">
+              <DataTable className="border-0 rounded-none">
+                <THead>
+                  <TR>
+                    <TH>Bag</TH>
+                    <TH>Product</TH>
+                    <TH className="text-right">Received</TH>
+                    <TH className="text-right">Finished</TH>
+                    <TH className="text-right">Scrap</TH>
+                    <TH className="text-right">Remaining</TH>
+                    <TH className="text-right">Variance</TH>
+                    <TH className="text-right">Var %</TH>
+                    <TH>Confidence</TH>
+                    <TH>Missing inputs</TH>
+                  </TR>
+                </THead>
+                <tbody>
+                  {rows.map((r) => {
+                    const pct = Math.abs(Number(r.variancePct ?? 0));
+                    const confidence: "HIGH" | "MEDIUM" | "LOW" | "MISSING" =
+                      r.received == null
+                        ? "MISSING"
+                        : r.isEstimated
+                          ? "LOW"
+                          : pct <= 1
+                            ? "HIGH"
+                            : pct <= 5
+                              ? "MEDIUM"
+                              : "LOW";
+                    const varianceCls =
+                      pct > 5
+                        ? "text-crit-700 font-semibold"
+                        : pct > 1
+                          ? "text-warn-700"
+                          : r.variance != null
+                            ? "text-good-700"
+                            : "text-text-subtle";
+
+                    return (
+                      <TR key={r.bagId}>
+                        <TD>
+                          <Link
+                            href={`/genealogy/${r.bagId}`}
+                            className="font-mono text-[11px] text-brand-700 hover:text-brand-800"
+                          >
+                            {r.bagId.slice(0, 8)}…
+                          </Link>
+                        </TD>
+                        <TD>
+                          <div className="font-medium text-text text-[13px]">
+                            {r.productName ?? "—"}
+                          </div>
+                          {r.productSku && (
+                            <div className="text-[10px] text-text-subtle font-mono">{r.productSku}</div>
+                          )}
+                        </TD>
+                        <TD className="text-right font-mono text-[12px] text-text">
+                          {r.received ?? "—"}
+                        </TD>
+                        <TD className="text-right font-mono text-[12px] text-text">
+                          {r.finished ?? "—"}
+                        </TD>
+                        <TD className="text-right font-mono text-[12px] text-text-muted">
+                          {r.scrap ?? "—"}
+                        </TD>
+                        <TD className="text-right font-mono text-[12px] text-text-muted">
+                          {r.remaining ?? "—"}
+                        </TD>
+                        <TD className={`text-right font-mono text-[12px] ${varianceCls}`}>
+                          {r.variance ?? "—"}
+                        </TD>
+                        <TD className={`text-right font-mono text-[12px] ${varianceCls}`}>
+                          {r.variancePct != null
+                            ? `${Number(r.variancePct).toFixed(2)}%`
+                            : "—"}
+                        </TD>
+                        <TD>
+                          <ConfidenceBadge confidence={confidence} />
+                        </TD>
+                        <TD>
+                          {r.missingInputs ? (
+                            <span className="text-[10px] font-mono text-text-subtle">
+                              {r.missingInputs}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-text-subtle">—</span>
+                          )}
+                        </TD>
+                      </TR>
+                    );
+                  })}
+                </tbody>
+              </DataTable>
+            </CardContent>
+          </Card>
+
+          <div className="rounded-xl border border-border/60 bg-surface-2/30 px-4 py-3 text-[11px] text-text-muted leading-relaxed">
+            <span className="font-semibold text-text">Estimation note:</span> Until explicit{" "}
+            <code className="font-mono">MATERIAL_CONSUMED</code>,{" "}
+            <code className="font-mono">SCRAP_RECORDED</code>, and remaining-inventory events are
+            emitted by the floor, the projector tags every row <em>estimated</em>. Variance shown
+            is{" "}
+            <code className="font-mono">received − finished − damaged − scrap − remaining</code>.
+            {missing > 0 && (
+              <span className="block mt-1 text-text-subtle">
+                {missing} {missing === 1 ? "row is" : "rows are"} missing received quantity — these
+                show confidence: no data.
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "good" | "warn" | "crit" | "neutral";
+}) {
+  const valueCls =
+    tone === "good" ? "text-good-700" :
+    tone === "warn" ? "text-warn-700" :
+    tone === "crit" ? "text-crit-700" :
+    "text-text-strong";
+  return (
+    <div className="rounded-xl border border-border/60 bg-surface px-4 py-3">
+      <div className="text-[10px] uppercase tracking-[0.12em] font-semibold text-text-subtle">{label}</div>
+      <div className={`mt-1 text-2xl font-semibold tabular-nums ${valueCls}`}>{value}</div>
     </div>
   );
 }
