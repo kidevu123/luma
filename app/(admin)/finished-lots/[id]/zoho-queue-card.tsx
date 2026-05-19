@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Clock, XCircle, AlertCircle, MinusCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, XCircle, AlertCircle, MinusCircle, ArrowRight } from "lucide-react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
@@ -38,6 +39,67 @@ function KindLabel({ opKind }: { opKind: ZohoAssemblyOp["opKind"] }) {
     CASE_ASSEMBLE:   "Case assembly",
   };
   return <span className="text-xs font-medium">{labels[opKind]}</span>;
+}
+
+// ─── Status counts strip ──────────────────────────────────────────────────────
+
+type OpStatus = ZohoAssemblyOp["status"];
+
+const STATUS_PILL_CFG: Record<OpStatus, { cls: string; label: string }> = {
+  PENDING:       { cls: "bg-surface-2 text-text-muted",              label: "Pending"       },
+  IN_PROGRESS:   { cls: "bg-surface-2 text-text-muted",              label: "In progress"   },
+  NEEDS_MAPPING: { cls: "bg-warn-100 text-warn-700",                  label: "Needs mapping" },
+  FAILED:        { cls: "bg-danger-50 text-danger-700",               label: "Failed"        },
+  SUCCEEDED:     { cls: "bg-good-50 text-good-700",                   label: "Succeeded"     },
+  SKIPPED:       { cls: "bg-surface-2 text-text-muted",              label: "Skipped"       },
+};
+
+const STATUS_ORDER: OpStatus[] = [
+  "PENDING",
+  "IN_PROGRESS",
+  "NEEDS_MAPPING",
+  "FAILED",
+  "SUCCEEDED",
+  "SKIPPED",
+];
+
+function StatusCountsStrip({ ops }: { ops: ZohoAssemblyOp[] }) {
+  if (ops.length === 0) return null;
+
+  const allSucceeded = ops.every((op) => op.status === "SUCCEEDED");
+  if (allSucceeded) {
+    return (
+      <div className="flex flex-wrap gap-2 mb-4">
+        <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-good-50 text-good-700">
+          <CheckCircle2 className="h-3 w-3" />
+          All synced
+        </span>
+      </div>
+    );
+  }
+
+  const counts = ops.reduce<Partial<Record<OpStatus, number>>>((acc, op) => {
+    acc[op.status] = (acc[op.status] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const pills = STATUS_ORDER.filter((s) => (counts[s] ?? 0) > 0);
+
+  return (
+    <div className="flex flex-wrap gap-2 mb-4">
+      {pills.map((s) => {
+        const cfg = STATUS_PILL_CFG[s];
+        return (
+          <span
+            key={s}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${cfg.cls}`}
+          >
+            {counts[s]} {cfg.label}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -76,6 +138,7 @@ export function ZohoQueueCard({
         <CardTitle>Zoho Operation Queue</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <StatusCountsStrip ops={existingOps} />
         {existingOps.length > 0 ? (
           <DataTable>
             <THead>
@@ -142,6 +205,14 @@ export function ZohoQueueCard({
             {error}
           </p>
         )}
+
+        <Link
+          href={`/zoho-operations?lotId=${lotId}`}
+          className="inline-flex items-center gap-1 text-xs text-brand-700 hover:underline font-medium"
+        >
+          View all in Zoho Operations
+          <ArrowRight className="h-3 w-3" />
+        </Link>
       </CardContent>
     </Card>
   );
