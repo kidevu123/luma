@@ -45,6 +45,13 @@ services:
       # the gateway should use on this Luma deployment. Sent on every
       # protected call as X-Brand. Required for ZOHO-2 onward.
       ZOHO_BRAND: ${ZOHO_BRAND:-}
+      # ZOHO-GW-3: bearer-auth assembly service client (lib/zoho/assembly-service-client.ts).
+      # ZOHO_SERVICE_BEARER_SECRET — the rotated per-deployment token.
+      # ZOHO_DRY_RUN_WRITES_ENABLED — must be exactly "true" to allow write calls.
+      # ZOHO_WAREHOUSE_ID — optional; omit or leave empty to skip warehouse header.
+      ZOHO_SERVICE_BEARER_SECRET: ${ZOHO_SERVICE_BEARER_SECRET:-}
+      ZOHO_DRY_RUN_WRITES_ENABLED: ${ZOHO_DRY_RUN_WRITES_ENABLED:-false}
+      ZOHO_WAREHOUSE_ID: ${ZOHO_WAREHOUSE_ID:-}
       AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER:-}
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
