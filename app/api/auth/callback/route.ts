@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     loginUrl.searchParams.set("error", "sso_userinfo");
     return NextResponse.redirect(loginUrl);
   }
-  const userinfo = await userinfoResp.json() as { sub: string; email?: string };
+  const userinfo = await userinfoResp.json() as { sub: string; email?: string; name?: string; preferred_username?: string };
 
   const email = userinfo.email?.toLowerCase().trim();
   if (!email) {
@@ -59,7 +59,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const [user] = await db.select().from(users).where(sql`lower(${users.email}) = ${email}`);
+  let [user] = await db.select().from(users).where(sql`lower(${users.email}) = ${email}`);
+
+  if (!user) {
+    // JIT provision: first SSO login auto-creates the account with STAFF role.
+    // Admin assigns the correct role afterward in the office UI.
+    [user] = await db
+      .insert(users)
+      .values({ email, role: "STAFF", authentikSubject: userinfo.sub })
+      .returning();
+  }
+
   if (!user || user.disabledAt) {
     loginUrl.searchParams.set("error", "sso_no_account");
     return NextResponse.redirect(loginUrl);
