@@ -18,6 +18,7 @@
 
 export const ZOHO_BEARER_SECRET_ENV = "ZOHO_SERVICE_BEARER_SECRET";
 export const ZOHO_DRY_RUN_ENABLED_ENV = "ZOHO_DRY_RUN_WRITES_ENABLED";
+export const ZOHO_WAREHOUSE_ID_ENV = "ZOHO_WAREHOUSE_ID";
 
 // ─── Error class ──────────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ export class ZohoAssemblyServiceError extends Error {
 // ─── Config validation ────────────────────────────────────────────────────────
 
 export type AssemblyServiceConfig =
-  | { ok: true; baseUrl: string; bearerSecret: string; brand: string; dryRunEnabled: boolean }
+  | { ok: true; baseUrl: string; bearerSecret: string; brand: string; dryRunEnabled: boolean; warehouseId: string | null }
   | { ok: false; reason: string };
 
 /**
@@ -49,6 +50,10 @@ export function validateAssemblyServiceConfig(
   const rawUrl = env["ZOHO_INTEGRATION_URL"];
   const rawBearer = env[ZOHO_BEARER_SECRET_ENV];
   const rawBrand = env["ZOHO_BRAND"];
+  const rawWarehouseId = env[ZOHO_WAREHOUSE_ID_ENV];
+  const warehouseId = rawWarehouseId && rawWarehouseId.trim().length > 0
+    ? rawWarehouseId.trim()
+    : null;
 
   // URL must be present and valid (same service, different path)
   if (!rawUrl || rawUrl.trim().length === 0) {
@@ -85,6 +90,7 @@ export function validateAssemblyServiceConfig(
     bearerSecret: rawBearer.trim(),
     brand,
     dryRunEnabled,
+    warehouseId,
   };
 }
 

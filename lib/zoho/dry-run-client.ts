@@ -115,6 +115,7 @@ export async function dryRunZohoAssemblyOperation(
 ): Promise<DryRunOperationResult> {
   // Step 1: Guard check
   const env = opts?.env ?? process.env;
+  const warehouseId = env["ZOHO_WAREHOUSE_ID"] ?? null;
   if (!isZohoAssemblyDryRunEnabled(env)) {
     return {
       kind: "GUARD_DISABLED",
@@ -146,6 +147,7 @@ export async function dryRunZohoAssemblyOperation(
       quantity: op.quantity,
       date: new Date().toISOString().slice(0, 10),
       internalIdempotencyKey: op.idempotencyKey,
+      warehouseId: warehouseId || null,
     };
     buildResult = buildTabletReceivePayload(input);
     path = "/zoho/purchase_receives/create";
@@ -174,6 +176,7 @@ export async function dryRunZohoAssemblyOperation(
       date: new Date().toISOString().slice(0, 10),
       upstreamReceiveOpId: null,
       upstreamAssemblyOpId: null,
+      warehouseId: warehouseId || null,
     };
     buildResult = buildAssemblyPayload(input);
     path = "/zoho/assemblies/create";

@@ -29,6 +29,8 @@ export type TabletReceiveInput = {
   date: string;
   /** zoho_assembly_ops.idempotencyKey — internal planning key */
   internalIdempotencyKey: string;
+  /** Zoho warehouse ID for haute_brands, if configured. */
+  warehouseId?: string | null;
 };
 
 /** Enriched data needed to build an assembly dry-run payload. */
@@ -49,6 +51,8 @@ export type AssemblyInput = {
   upstreamReceiveOpId: string | null;
   /** Optional: ID of the upstream assembly op (UNIT→DISPLAY chain) */
   upstreamAssemblyOpId: string | null;
+  /** Zoho warehouse ID for haute_brands, if configured. */
+  warehouseId?: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -80,6 +84,7 @@ export type PurchaseReceivePayload = {
   luma_workflow_session_id: string;
   purchaseorder_id: string;
   date: string;
+  warehouse_id?: string;
   line_items: Array<{
     line_item_id: string | null;
     item_id: string;
@@ -98,6 +103,7 @@ export type AssemblyPayload = {
   composite_item_id: string;
   quantity: number;
   date: string;
+  warehouse_id?: string;
   is_backorder_allowed: false;
 };
 
@@ -174,6 +180,7 @@ export function buildTabletReceivePayload(
     luma_workflow_session_id: input.finishedLotId,
     purchaseorder_id: input.zohoPoId as string,
     date: input.date,
+    ...(input.warehouseId ? { warehouse_id: input.warehouseId } : {}),
     line_items: [
       {
         line_item_id: input.zohoLineItemId ?? null,
@@ -223,6 +230,7 @@ export function buildAssemblyPayload(
     composite_item_id: input.zohoCompositeItemId as string,
     quantity: input.quantity,
     date: input.date,
+    ...(input.warehouseId ? { warehouse_id: input.warehouseId } : {}),
     is_backorder_allowed: false,
   };
 
