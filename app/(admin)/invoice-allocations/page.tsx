@@ -360,7 +360,7 @@ export default async function InvoiceAllocationsPage({
           <p className="text-[11px] text-text-muted mt-0.5">HIGH confidence, in Nexus</p>
         </div>
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
-          <p className="text-[10px] uppercase tracking-wider text-text-subtle font-medium">Rejected / Missing</p>
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle font-medium">Rejected / Missing data</p>
           <p className="text-2xl font-mono tabular-nums text-text-strong mt-1">{summary.rejected.toLocaleString()} / {summary.missing.toLocaleString()}</p>
           <p className="text-[11px] text-text-muted mt-0.5">Kept for audit trail / quantity absent</p>
         </div>
@@ -455,8 +455,8 @@ export default async function InvoiceAllocationsPage({
                 </div>
               ) : (
                 <div className="px-4 py-8 text-center">
-                  <p className="text-sm font-medium text-text-muted">No Zoho invoice lines available yet</p>
-                  <p className="text-[12px] text-text-subtle mt-1">Invoice rows arrive via the apply phase. Once invoice lines are seeded, every line surfaces here and the suggestion engine can be invoked per-line.</p>
+                  <p className="text-sm font-medium text-text-muted">No Zoho invoice lines available yet. Invoice rows arrive via the apply phase</p>
+                  <p className="text-[12px] text-text-subtle mt-1">Once invoice lines are seeded, every line surfaces here and the suggestion engine can be invoked per-line.</p>
                 </div>
               )
             ) : (

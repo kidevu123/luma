@@ -409,6 +409,7 @@ export async function voidPackagingLotAction(
         .update(packagingLots)
         .set({ status: "SCRAPPED" })
         .where(eq(packagingLots.id, parsed.data));
+      const accountability = await resolveAdminAccountability(tx, { actor });
       await tx.insert(materialInventoryEvents).values({
         eventType: "MATERIAL_SCRAPPED",
         packagingMaterialId: lot.packagingMaterialId,
@@ -416,7 +417,7 @@ export async function voidPackagingLotAction(
         actorUserId: actor.id,
         quantityUnits: 0,
         unitOfMeasure: "each",
-        payload: { reason: "voided_by_admin" },
+        payload: withAccountabilityPayload({ reason: "voided_by_admin" }, accountability),
         source: "admin.void_lot",
       });
     });
