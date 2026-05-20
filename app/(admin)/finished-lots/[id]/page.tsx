@@ -3,10 +3,14 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, FileText, Activity, Printer } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
 import { getFinishedLot } from "@/lib/db/queries/finished-lots";
+import { planZohoAssemblyForFinishedLot } from "@/lib/zoho/assembly-planner";
+import { listZohoAssemblyOps } from "@/lib/db/queries/zoho-assembly";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { StatusActions } from "./status-actions";
+import { ZohoDryRunCard } from "./zoho-dry-run";
+import { ZohoQueueCard } from "./zoho-queue-card";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +29,11 @@ export default async function FinishedLotDetailPage({
 }) {
   await requireSession();
   const { id } = await params;
-  const lot = await getFinishedLot(id);
+  const [lot, zohoplan, existingZohoOps] = await Promise.all([
+    getFinishedLot(id),
+    planZohoAssemblyForFinishedLot(id),
+    listZohoAssemblyOps({ finishedLotId: id }),
+  ]);
   if (!lot) notFound();
 
   return (
@@ -129,6 +137,18 @@ export default async function FinishedLotDetailPage({
               )}
             </CardContent>
           </Card>
+
+          {zohoplan && <ZohoDryRunCard plan={zohoplan} />}
+
+          <ZohoQueueCard
+            existingOps={existingZohoOps}
+            lotId={id}
+            planHasNonSkippedOps={
+              zohoplan
+                ? zohoplan.ops.some((op) => op.statusPreview !== "SKIPPED")
+                : false
+            }
+          />
 
           {lot.lot.notes && (
             <Card>

@@ -35,6 +35,7 @@ import {
   ChevronDown,
   ClipboardList,
   UserCog,
+  Webhook,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -87,6 +88,7 @@ const SECTIONS: Section[] = [
     items: [
       { href: "/qr-cards", label: "QR card management", icon: QrCode },
       { href: "/genealogy", label: "Bag genealogy", icon: History },
+      { href: "/zoho-operations", label: "Zoho Operations", icon: Webhook },
       { href: "/material-reconciliation", label: "Material reconciliation", icon: Scale },
       { href: "/roll-variance", label: "Roll variance", icon: Scale },
       { href: "/po-reconciliation", label: "PO reconciliation", icon: Truck },

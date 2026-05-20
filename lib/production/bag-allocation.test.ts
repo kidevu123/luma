@@ -15,6 +15,8 @@ import {
   reduceLedger,
   reduceOpenAllocation,
   classifyBagConfidence,
+  resolveReopenStartingBalance,
+  checkOverAllocation,
 } from "./bag-allocation";
 import {
   computeExpectedComponentQty,
@@ -586,5 +588,94 @@ describe("H.x3.6 invariants", () => {
     expect(labels).not.toContain("shortage");
     expect(labels).not.toContain("over-delivery");
     expect(labels).not.toContain("supplier short");
+  });
+});
+
+// ─── resolveReopenStartingBalance ────────────────────────────
+
+describe("resolveReopenStartingBalance", () => {
+  it("uses endingBalanceQty when available", () => {
+    expect(
+      resolveReopenStartingBalance(
+        { endingBalanceQty: 7000, startingBalanceQty: 10000, consumedQty: 3000 },
+        10000,
+      ),
+    ).toBe(7000);
+  });
+
+  it("computes startingQty - consumedQty when no endingBalance", () => {
+    expect(
+      resolveReopenStartingBalance(
+        { endingBalanceQty: null, startingBalanceQty: 10000, consumedQty: 3000 },
+        10000,
+      ),
+    ).toBe(7000);
+  });
+
+  it("clamps to 0 when consumedQty exceeds startingQty", () => {
+    expect(
+      resolveReopenStartingBalance(
+        { endingBalanceQty: null, startingBalanceQty: 5000, consumedQty: 8000 },
+        10000,
+      ),
+    ).toBe(0);
+  });
+
+  it("falls back to pillCount when no prior session (first open)", () => {
+    expect(resolveReopenStartingBalance(null, 10000)).toBe(10000);
+  });
+
+  it("falls back to pillCount when session has no balance info at all", () => {
+    expect(
+      resolveReopenStartingBalance(
+        { endingBalanceQty: null, startingBalanceQty: null, consumedQty: null },
+        10000,
+      ),
+    ).toBe(10000);
+  });
+
+  it("returns null when no session and no pillCount", () => {
+    expect(resolveReopenStartingBalance(null, null)).toBeNull();
+  });
+
+  it("supports the full reuse chain: 10000 -> 7000 -> 3000", () => {
+    const afterSessionA = resolveReopenStartingBalance(
+      { endingBalanceQty: null, startingBalanceQty: 10000, consumedQty: 3000 },
+      10000,
+    );
+    expect(afterSessionA).toBe(7000);
+
+    const afterSessionB = resolveReopenStartingBalance(
+      { endingBalanceQty: null, startingBalanceQty: afterSessionA, consumedQty: 4000 },
+      10000,
+    );
+    expect(afterSessionB).toBe(3000);
+  });
+});
+
+// ─── checkOverAllocation ─────────────────────────────────────
+
+describe("checkOverAllocation", () => {
+  it("returns null when consumedQty is within the starting balance", () => {
+    expect(checkOverAllocation(3000, 10000)).toBeNull();
+  });
+
+  it("returns null when consumedQty equals the starting balance (full use)", () => {
+    expect(checkOverAllocation(10000, 10000)).toBeNull();
+  });
+
+  it("returns an error string when consumedQty exceeds starting balance", () => {
+    const result = checkOverAllocation(11000, 10000);
+    expect(result).toMatch(/exceeds/i);
+    expect(result).toMatch(/11,000/);
+    expect(result).toMatch(/10,000/);
+  });
+
+  it("returns null when startingBalanceQty is null (cannot validate)", () => {
+    expect(checkOverAllocation(5000, null)).toBeNull();
+  });
+
+  it("returns null when startingBalanceQty is undefined", () => {
+    expect(checkOverAllocation(5000, undefined)).toBeNull();
   });
 });
