@@ -368,3 +368,8 @@ export function preflightRawBagIntake(
   }
   return { ok: true, input, issues: [] };
 }
+
+// Statuses that can still accept new raw bag receipts.
+// DRAFT/RECEIVED/CLOSED/CANCELLED are excluded.
+export const RECEIVABLE_PO_STATUSES = ["OPEN", "RECEIVING"] as const;
+export type ReceivablePoStatus = (typeof RECEIVABLE_PO_STATUSES)[number];

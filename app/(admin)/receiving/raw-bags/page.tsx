@@ -9,12 +9,13 @@
 // + form wiring unchanged from INTAKE-WORKFLOW-1.
 
 import { db } from "@/lib/db";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import {
   poLines,
   purchaseOrders,
   tabletTypes,
 } from "@/lib/db/schema";
+import { RECEIVABLE_PO_STATUSES } from "@/lib/production/raw-bag-intake";
 import { requireLead } from "@/lib/auth-guards";
 import {
   checkZohoGatewayHealth,
@@ -41,6 +42,7 @@ export default async function ReceiveRawBagsPage() {
         status: purchaseOrders.status,
       })
       .from(purchaseOrders)
+      .where(inArray(purchaseOrders.status, [...RECEIVABLE_PO_STATUSES]))
       .orderBy(asc(purchaseOrders.poNumber)),
     db
       .select({
@@ -81,7 +83,7 @@ export default async function ReceiveRawBagsPage() {
       {/* Badge strip */}
       <div className="flex flex-wrap gap-2">
         <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
-          {pos.length} PO{pos.length === 1 ? "" : "s"} loaded
+          {pos.length} open/receiving PO{pos.length === 1 ? "" : "s"}
         </span>
         <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
           {tablets.length} active tablet type{tablets.length === 1 ? "" : "s"}

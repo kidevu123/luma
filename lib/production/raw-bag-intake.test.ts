@@ -432,3 +432,28 @@ describe("Acceptance — PO-1234 / 10 bags / 20000 each / start 1001", () => {
     expect(v.variance).toBe(0);
   });
 });
+
+// ─── RECEIVABLE_PO_STATUSES ────────────────────────────────────────────────
+
+import { RECEIVABLE_PO_STATUSES } from "@/lib/production/raw-bag-intake";
+
+describe("RECEIVABLE_PO_STATUSES", () => {
+  it("includes OPEN", () => {
+    expect(RECEIVABLE_PO_STATUSES).toContain("OPEN");
+  });
+  it("includes RECEIVING", () => {
+    expect(RECEIVABLE_PO_STATUSES).toContain("RECEIVING");
+  });
+  it("excludes CLOSED", () => {
+    expect(RECEIVABLE_PO_STATUSES).not.toContain("CLOSED");
+  });
+  it("excludes CANCELLED", () => {
+    expect(RECEIVABLE_PO_STATUSES).not.toContain("CANCELLED");
+  });
+  it("excludes DRAFT", () => {
+    expect(RECEIVABLE_PO_STATUSES).not.toContain("DRAFT");
+  });
+  it("excludes RECEIVED", () => {
+    expect(RECEIVABLE_PO_STATUSES).not.toContain("RECEIVED");
+  });
+});
