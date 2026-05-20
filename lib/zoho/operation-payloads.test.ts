@@ -336,3 +336,49 @@ describe("type safety — literal constants", () => {
     expect(result.payload.is_backorder_allowed).toStrictEqual(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// warehouse_id — optional field threading
+// ---------------------------------------------------------------------------
+
+describe("warehouse_id — optional field", () => {
+  it("PurchaseReceivePayload includes warehouse_id when warehouseId is set", () => {
+    const result = buildTabletReceivePayload({
+      ...BASE_TABLET_INPUT,
+      warehouseId: "WH-HAUTE-001",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.warehouse_id).toBe("WH-HAUTE-001");
+  });
+
+  it("PurchaseReceivePayload omits warehouse_id when warehouseId is null", () => {
+    const result = buildTabletReceivePayload({
+      ...BASE_TABLET_INPUT,
+      warehouseId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect("warehouse_id" in result.payload).toBe(false);
+  });
+
+  it("AssemblyPayload includes warehouse_id when warehouseId is set", () => {
+    const result = buildAssemblyPayload({
+      ...BASE_ASSEMBLY_INPUT,
+      warehouseId: "WH-HAUTE-001",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.warehouse_id).toBe("WH-HAUTE-001");
+  });
+
+  it("AssemblyPayload omits warehouse_id when warehouseId is null", () => {
+    const result = buildAssemblyPayload({
+      ...BASE_ASSEMBLY_INPUT,
+      warehouseId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect("warehouse_id" in result.payload).toBe(false);
+  });
+});
