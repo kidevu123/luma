@@ -15,6 +15,8 @@ import { z } from "zod";
 import { eq, and, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { stations, varietyRuns, rawBagAllocationSessions } from "@/lib/db/schema";
+import { writeAudit } from "@/lib/db/audit";
+import { resolveStationAccountability } from "@/lib/production/station-operator-session";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -81,25 +83,57 @@ export async function startOrResumeVarietyRunAction(
       .limit(1);
 
     if (existing[0]) {
+      // Resume path — write audit inside a transaction.
+      await db.transaction(async (tx) => {
+        const accountability = await resolveStationAccountability(tx, {
+          stationId: d.stationId,
+        });
+        await writeAudit(
+          {
+            actorId: accountability.enteredByUserId ?? null,
+            actorRole: null,
+            action: "RESUME_VARIETY_RUN",
+            targetType: "variety_run",
+            targetId: existing[0]!.id,
+          },
+          tx,
+        );
+      });
       return { ok: true, runId: existing[0].id, resumed: true };
     }
 
     // No OPEN run — insert a new one.
-    const inserted = await db
-      .insert(varietyRuns)
-      .values({
-        parentScanToken: trimmedToken,
-        ...(d.productId && d.productId !== ""
-          ? { productId: d.productId }
-          : {}),
-        status: "OPEN",
-      })
-      .returning({ id: varietyRuns.id });
-
-    const newRow = inserted[0];
-    if (!newRow) throw new Error("Insert returned no row.");
-
-    return { ok: true, runId: newRow.id, resumed: false };
+    let newId = "";
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: d.stationId,
+      });
+      const inserted = await tx
+        .insert(varietyRuns)
+        .values({
+          parentScanToken: trimmedToken,
+          ...(d.productId && d.productId !== ""
+            ? { productId: d.productId }
+            : {}),
+          status: "OPEN",
+        })
+        .returning({ id: varietyRuns.id });
+      const newRow = inserted[0];
+      if (!newRow) throw new Error("Insert returned no row.");
+      newId = newRow.id;
+      await writeAudit(
+        {
+          actorId: accountability.enteredByUserId ?? null,
+          actorRole: null,
+          action: "START_VARIETY_RUN",
+          targetType: "variety_run",
+          targetId: newId,
+        },
+        tx,
+      );
+    });
+    if (!newId) throw new Error("No run ID after insert.");
+    return { ok: true, runId: newId, resumed: false };
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Start variety run failed.",
@@ -165,15 +199,32 @@ export async function closeVarietyRunAction(
       };
     }
 
-    // Close the run.
-    await db
-      .update(varietyRuns)
-      .set({
-        status: "CLOSED",
-        closedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(varietyRuns.id, d.varietyRunId));
+    // Close the run inside a transaction and write audit.
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: d.stationId,
+      });
+
+      await tx
+        .update(varietyRuns)
+        .set({
+          status: "CLOSED",
+          closedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(varietyRuns.id, d.varietyRunId));
+
+      await writeAudit(
+        {
+          actorId: accountability.enteredByUserId ?? null,
+          actorRole: null,
+          action: "CLOSE_VARIETY_RUN",
+          targetType: "variety_run",
+          targetId: d.varietyRunId,
+        },
+        tx,
+      );
+    });
 
     return { ok: true };
   } catch (err) {

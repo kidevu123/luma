@@ -20,6 +20,47 @@ let insertSpy: ReturnType<typeof vi.fn>;
 let updateSetSpy: ReturnType<typeof vi.fn>;
 let insertResults: unknown[] = [];
 
+// A minimal tx object that mirrors the db mock shape, used inside
+// db.transaction callbacks. It shares the same spies so assertions work.
+const mockTx = {
+  select: (_fields?: unknown) => ({
+    from: (_table?: unknown) => ({
+      where: (_cond?: unknown) => {
+        const idx = callIdx++;
+        const rows = (selectResults[idx] ?? []) as unknown[];
+        return {
+          then: (resolve: (v: unknown[]) => void, reject: (e: unknown) => void) => {
+            Promise.resolve(rows).then(resolve, reject);
+          },
+          limit: async (_n?: number) => rows,
+        };
+      },
+    }),
+  }),
+
+  insert: (_table?: unknown) => ({
+    values: (_vals?: unknown) => ({
+      returning: async (_fields?: unknown) => {
+        insertSpy();
+        return insertResults;
+      },
+      // writeAudit calls tx.insert(auditLog).values(payload) without
+      // .returning(), so we need a thenable on .values() itself too.
+      then: (resolve: (v: unknown) => void, reject: (e: unknown) => void) => {
+        Promise.resolve(undefined).then(resolve, reject);
+      },
+    }),
+  }),
+
+  update: (_table?: unknown) => ({
+    set: (vals: Record<string, unknown>) => ({
+      where: async (_cond?: unknown) => {
+        updateSetSpy(vals);
+      },
+    }),
+  }),
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (_fields?: unknown) => ({
@@ -59,6 +100,10 @@ vi.mock("@/lib/db", () => ({
         },
       }),
     }),
+
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      return fn(mockTx);
+    },
   },
 }));
 
@@ -66,12 +111,27 @@ vi.mock("@/lib/db/schema", () => ({
   stations: {},
   varietyRuns: {},
   rawBagAllocationSessions: {},
+  auditLog: {},
 }));
 
 vi.mock("drizzle-orm", () => ({
   eq: (a: unknown, b: unknown) => ({ eq: [a, b] }),
   and: (...args: unknown[]) => ({ and: args }),
   count: () => "count()",
+}));
+
+vi.mock("@/lib/db/audit", () => ({
+  writeAudit: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/production/station-operator-session", () => ({
+  resolveStationAccountability: vi.fn().mockResolvedValue({
+    enteredByUserId: "test-operator-id",
+    accountableEmployeeId: null,
+    accountabilitySource: null,
+    accountableEmployeeNameSnapshot: null,
+    isStable: false,
+  }),
 }));
 
 // ── Import actions AFTER mocks ────────────────────────────────────────
@@ -251,5 +311,26 @@ describe("closeVarietyRunAction", () => {
     // Exactly one db.update() call — the variety run itself.
     // rawBagAllocationSessions must NOT be updated.
     expect(updateSetSpy).toHaveBeenCalledOnce();
+  });
+
+  it("writes audit log when closing a variety run", async () => {
+    const { writeAudit } = await import("@/lib/db/audit");
+
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = [
+      { id: "00000000-0000-0000-0000-000000000010", status: "OPEN" },
+    ];
+    selectResults[2] = [{ count: 0 }];
+
+    const result = await closeVarietyRunAction(validCloseForm());
+
+    expect(result).toHaveProperty("ok", true);
+    expect(writeAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "CLOSE_VARIETY_RUN",
+        targetType: "variety_run",
+      }),
+      expect.anything(), // tx
+    );
   });
 });
