@@ -845,15 +845,19 @@ export async function derivePoSupplierDisputePacket(
  *
  *  - No session (legacy/untracked bag): release.
  *  - CLOSED, endingBalanceQty > 0: hold — partial remaining.
- *  - CLOSED, endingBalanceQty null: hold — unknown (conservative).
- *  - CLOSED, endingBalanceQty = 0: release — operator confirmed empty.
- *  - DEPLETED / RETURNED_TO_STOCK / VOIDED: release.
+ *  - CLOSED/RETURNED_TO_STOCK, endingBalanceQty null: hold — unknown.
+ *  - CLOSED/RETURNED_TO_STOCK, endingBalanceQty = 0: release — empty.
+ *  - CLOSED/RETURNED_TO_STOCK, endingBalanceQty > 0: hold — partial bag.
+ *  - DEPLETED / VOIDED: release.
  */
 export function shouldReleaseQrAtFinalization(
   session: { allocationStatus: string; endingBalanceQty: number | null } | null | undefined,
 ): boolean {
   if (!session) return true;
-  if (session.allocationStatus === "CLOSED") {
+  if (
+    session.allocationStatus === "CLOSED" ||
+    session.allocationStatus === "RETURNED_TO_STOCK"
+  ) {
     if (session.endingBalanceQty == null) return false;
     return session.endingBalanceQty <= 0;
   }
@@ -875,12 +879,18 @@ export function deriveBagStatusAfterClose(
   return "EMPTIED";
 }
 
-/** True when a finalized workflow_bag's CLOSED session still has
- *  remaining tablets — the QR should stay assigned and be resumable. */
+/** True when a finalized workflow_bag's allocation session still has
+ *  remaining tablets — the QR should stay assigned and be resumable.
+ *  Covers both CLOSED (with endingBalance > 0) and RETURNED_TO_STOCK. */
 export function isPartialBagResume(
   session: { allocationStatus: string; endingBalanceQty: number | null } | null | undefined,
 ): boolean {
   if (!session) return false;
-  if (session.allocationStatus !== "CLOSED") return false;
+  if (
+    session.allocationStatus !== "CLOSED" &&
+    session.allocationStatus !== "RETURNED_TO_STOCK"
+  ) {
+    return false;
+  }
   return session.endingBalanceQty == null || session.endingBalanceQty > 0;
 }

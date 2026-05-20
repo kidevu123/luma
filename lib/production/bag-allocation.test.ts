@@ -724,10 +724,10 @@ describe("shouldReleaseQrAtFinalization", () => {
     })).toBe(true);
   });
 
-  it("returns true when RETURNED_TO_STOCK", () => {
+  it("returns true when RETURNED_TO_STOCK with endingBalanceQty = 0", () => {
     expect(shouldReleaseQrAtFinalization({
       allocationStatus: "RETURNED_TO_STOCK",
-      endingBalanceQty: 500,
+      endingBalanceQty: 0,
     })).toBe(true);
   });
 
@@ -736,6 +736,36 @@ describe("shouldReleaseQrAtFinalization", () => {
       allocationStatus: "VOIDED",
       endingBalanceQty: null,
     })).toBe(true);
+  });
+
+  it("RETURNED_TO_STOCK with endingBalanceQty > 0 holds QR (partial bag to holding)", () => {
+    expect(
+      shouldReleaseQrAtFinalization({ allocationStatus: "RETURNED_TO_STOCK", endingBalanceQty: 5000 }),
+    ).toBe(false);
+  });
+
+  it("RETURNED_TO_STOCK with endingBalanceQty = 0 releases QR", () => {
+    expect(
+      shouldReleaseQrAtFinalization({ allocationStatus: "RETURNED_TO_STOCK", endingBalanceQty: 0 }),
+    ).toBe(true);
+  });
+
+  it("RETURNED_TO_STOCK with null endingBalanceQty holds QR (conservative)", () => {
+    expect(
+      shouldReleaseQrAtFinalization({ allocationStatus: "RETURNED_TO_STOCK", endingBalanceQty: null }),
+    ).toBe(false);
+  });
+
+  it("DEPLETED always releases QR", () => {
+    expect(
+      shouldReleaseQrAtFinalization({ allocationStatus: "DEPLETED", endingBalanceQty: 0 }),
+    ).toBe(true);
+  });
+
+  it("VOIDED releases QR", () => {
+    expect(
+      shouldReleaseQrAtFinalization({ allocationStatus: "VOIDED", endingBalanceQty: null }),
+    ).toBe(true);
   });
 });
 
@@ -806,10 +836,34 @@ describe("isPartialBagResume", () => {
     })).toBe(false);
   });
 
-  it("returns false when RETURNED_TO_STOCK", () => {
+  it("returns true when RETURNED_TO_STOCK with endingBalanceQty > 0 (partial to holding)", () => {
     expect(isPartialBagResume({
       allocationStatus: "RETURNED_TO_STOCK",
       endingBalanceQty: 500,
-    })).toBe(false);
+    })).toBe(true);
+  });
+
+  it("RETURNED_TO_STOCK with endingBalanceQty > 0 is a partial resume", () => {
+    expect(
+      isPartialBagResume({ allocationStatus: "RETURNED_TO_STOCK", endingBalanceQty: 5000 }),
+    ).toBe(true);
+  });
+
+  it("RETURNED_TO_STOCK with endingBalanceQty = 0 is not a partial resume", () => {
+    expect(
+      isPartialBagResume({ allocationStatus: "RETURNED_TO_STOCK", endingBalanceQty: 0 }),
+    ).toBe(false);
+  });
+
+  it("RETURNED_TO_STOCK with null endingBalanceQty is treated as partial resume (conservative)", () => {
+    expect(
+      isPartialBagResume({ allocationStatus: "RETURNED_TO_STOCK", endingBalanceQty: null }),
+    ).toBe(true);
+  });
+
+  it("DEPLETED is not a partial resume", () => {
+    expect(
+      isPartialBagResume({ allocationStatus: "DEPLETED", endingBalanceQty: 0 }),
+    ).toBe(false);
   });
 });
