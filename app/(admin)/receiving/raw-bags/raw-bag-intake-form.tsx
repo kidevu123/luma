@@ -542,10 +542,13 @@ function PoLineCards({
             <option value="">— Select PO —</option>
             {purchaseOrders.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.poNumber} — {p.vendorName ?? "no vendor"}
+                {p.poNumber} · {p.vendorName ?? "no vendor"} [{p.status}]
               </option>
             ))}
           </Select>
+          <p className="text-[11px] text-text-muted">
+            Sorted newest first · {purchaseOrders.length} open/receiving PO{purchaseOrders.length === 1 ? "" : "s"} · draft/closed/cancelled hidden
+          </p>
         </div>
         <div className="space-y-1">
           <Label>Vendor</Label>

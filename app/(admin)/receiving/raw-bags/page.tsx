@@ -9,7 +9,7 @@
 // + form wiring unchanged from INTAKE-WORKFLOW-1.
 
 import { db } from "@/lib/db";
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import {
   poLines,
   purchaseOrders,
@@ -43,7 +43,7 @@ export default async function ReceiveRawBagsPage() {
       })
       .from(purchaseOrders)
       .where(inArray(purchaseOrders.status, [...RECEIVABLE_PO_STATUSES]))
-      .orderBy(asc(purchaseOrders.poNumber)),
+      .orderBy(desc(purchaseOrders.openedAt)),
     db
       .select({
         id: poLines.id,
