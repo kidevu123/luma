@@ -8,6 +8,13 @@
 // the live reconciliation preview (expected vs actual per role)
 // using deriveVarietyPackReconciliation.
 //
+// Three-state page flow:
+//   State A — No product selected: show product picker only.
+//   State B — productId in URL, no varietyRunId: show product picker
+//             + "Start / Resume Variety Run" panel.
+//   State C — productId + varietyRunId in URL: show run info header,
+//             component slots, close button.
+//
 // Empty-state vocabulary:
 //   • "No variety pack products configured" (no products with
 //     product_component_requirements rows)
@@ -16,10 +23,11 @@
 //   • "No finished lot yet — preview will populate once one is
 //     created" (rec preview when no lot)
 
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { QrCode } from "lucide-react";
 import { db } from "@/lib/db";
 import { stations, machines } from "@/lib/db/schema";
 import {
@@ -28,6 +36,10 @@ import {
   returnRawBagAction,
   markBagDepletedAction,
 } from "../bag-allocation-actions";
+import {
+  startOrResumeVarietyRunAction,
+  closeVarietyRunAction,
+} from "../variety-run-actions";
 import {
   deriveVarietyPackComponentRequirements,
   deriveVarietyPackReconciliation,
@@ -47,7 +59,7 @@ export default async function VarietyPackPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ productId?: string; finishedLotId?: string }>;
+  searchParams: Promise<{ productId?: string; finishedLotId?: string; varietyRunId?: string; error?: string }>;
 }) {
   const { token } = await params;
   const sp = await searchParams;
@@ -83,13 +95,31 @@ export default async function VarietyPackPage({
 
   const selectedProductId = sp.productId ?? varietyProducts[0]?.id ?? null;
 
+  // ── State C: load and validate variety run ──────────────────────────
+  type RunRow = { id: string; parentScanToken: string; status: string; openedAt: string; productId: string | null };
+  let activeRun: RunRow | null = null;
+
+  if (sp.varietyRunId && selectedProductId) {
+    const runRows = await db.execute<RunRow>(sql`
+      SELECT id::text, parent_scan_token AS "parentScanToken", status, opened_at::text AS "openedAt", product_id::text AS "productId"
+      FROM variety_runs WHERE id = ${sp.varietyRunId} LIMIT 1
+    `);
+    const run = runRows[0] ?? null;
+    // If not found or already closed/void, redirect back without varietyRunId
+    if (!run || run.status === "CLOSED" || run.status === "VOID") {
+      redirect(`/floor/${token}/variety-pack?productId=${selectedProductId}`);
+    }
+    activeRun = run;
+  }
+
   // Per-component allocation state (open sessions + matching available bags).
   let requirements: Awaited<ReturnType<typeof deriveVarietyPackComponentRequirements>> = [];
   let openSessionsByRole: Map<string, OpenSession[]> = new Map();
   let availableBagsByItemId: Map<string, AvailableBag[]> = new Map();
   let reconciliation: Awaited<ReturnType<typeof deriveVarietyPackReconciliation>> = null;
 
-  if (selectedProductId) {
+  // Only load sessions and reconciliation in State C (varietyRunId present)
+  if (selectedProductId && activeRun) {
     requirements = await deriveVarietyPackComponentRequirements(selectedProductId);
 
     type SessRow = OpenSession & { component_role: string | null };
@@ -100,6 +130,7 @@ export default async function VarietyPackPage({
         s.component_role                 AS component_role,
         ib.bag_number                    AS bag_number,
         ib.vendor_barcode                AS vendor_barcode,
+        ib.bag_qr_code                   AS bag_qr_code,
         ib.tablet_type_id::text          AS tablet_type_id,
         tt.name                          AS raw_item_name,
         s.starting_balance_qty           AS starting_balance_qty,
@@ -108,7 +139,7 @@ export default async function VarietyPackPage({
       FROM raw_bag_allocation_sessions s
       JOIN inventory_bags ib ON ib.id = s.inventory_bag_id
       LEFT JOIN tablet_types tt ON tt.id = ib.tablet_type_id
-      WHERE s.product_id = ${selectedProductId}
+      WHERE s.variety_run_id = ${activeRun.id}
         AND s.allocation_status = 'OPEN'
       ORDER BY s.opened_at DESC
     `)) as unknown as SessRow[];
@@ -157,6 +188,12 @@ export default async function VarietyPackPage({
     );
   }
 
+  // Compute openSessionCount for the Close Variety Run section
+  let openSessionCount = 0;
+  for (const sessions of openSessionsByRole.values()) {
+    openSessionCount += sessions.length;
+  }
+
   return (
     <main className="min-h-dvh bg-page p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
       <header>
@@ -171,7 +208,7 @@ export default async function VarietyPackPage({
         <FloorNav token={token} />
       </header>
 
-      {/* Product picker */}
+      {/* Product picker — shown in all states */}
       <Section title="Variety pack product">
         {varietyProducts.length === 0 ? (
           <Empty>
@@ -201,8 +238,71 @@ export default async function VarietyPackPage({
         )}
       </Section>
 
-      {selectedProductId && (
+      {/* State B — product selected but no variety run yet */}
+      {selectedProductId && !activeRun && (
+        <Section title="Start / Resume Variety Run">
+          {sp.error && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {decodeURIComponent(sp.error)}
+            </div>
+          )}
+          <form
+            action={async (fd) => {
+              "use server";
+              const result = await startOrResumeVarietyRunAction(fd);
+              if ("error" in result) {
+                redirect(
+                  `/floor/${token}/variety-pack?productId=${selectedProductId}&error=${encodeURIComponent(result.error)}`,
+                );
+              }
+              redirect(
+                `/floor/${token}/variety-pack?productId=${selectedProductId}&varietyRunId=${result.runId}`,
+              );
+            }}
+            className="space-y-3"
+          >
+            <input type="hidden" name="token" value={token} />
+            <input type="hidden" name="stationId" value={station.id} />
+            <input type="hidden" name="productId" value={selectedProductId} />
+            <input type="hidden" name="clientEventId" value={randomUUID()} />
+            <SmallField label="Parent variety card token">
+              <input
+                type="text"
+                name="parentScanToken"
+                placeholder="Scan or type variety card token"
+                required
+                className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
+              />
+            </SmallField>
+            <Submit>Start / Resume Run</Submit>
+          </form>
+        </Section>
+      )}
+
+      {/* State C — product + active variety run */}
+      {selectedProductId && activeRun && (
         <>
+          {/* Run info header */}
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 space-y-1">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
+                Variety run
+              </span>
+              <span className="font-mono text-emerald-900">
+                Token: {activeRun.parentScanToken}
+              </span>
+              <span className="text-text-muted">
+                Run ID: {activeRun.id.slice(0, 8)}
+              </span>
+              <span className="text-text-muted">
+                Opened: {activeRun.openedAt}
+              </span>
+              <span className="rounded bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 text-[11px] font-medium">
+                {activeRun.status}
+              </span>
+            </div>
+          </div>
+
           {/* Component slots */}
           <Section title="Component slots">
             {requirements.length === 0 ? (
@@ -218,6 +318,7 @@ export default async function VarietyPackPage({
                       token={token}
                       stationId={station.id}
                       productId={selectedProductId}
+                      varietyRunId={activeRun.id}
                       requirement={req}
                       openSessions={open}
                       candidateBags={candidateBags}
@@ -274,6 +375,39 @@ export default async function VarietyPackPage({
               </div>
             )}
           </Section>
+
+          {/* Close variety run */}
+          <Section title="Close variety run">
+            {openSessionCount > 0 ? (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {openSessionCount} source bag session{openSessionCount === 1 ? "" : "s"} still OPEN.
+                Close each source bag before closing the variety run.
+              </p>
+            ) : (
+              <form
+                action={async (fd) => {
+                  "use server";
+                  const result = await closeVarietyRunAction(fd);
+                  if ("error" in result) {
+                    redirect(
+                      `/floor/${token}/variety-pack?productId=${selectedProductId}&varietyRunId=${sp.varietyRunId}&error=${encodeURIComponent(result.error)}`,
+                    );
+                  }
+                  redirect(`/floor/${token}/variety-pack?productId=${selectedProductId}`);
+                }}
+              >
+                <input type="hidden" name="token" value={token} />
+                <input type="hidden" name="stationId" value={station.id} />
+                <input type="hidden" name="varietyRunId" value={activeRun.id} />
+                <input type="hidden" name="clientEventId" value={randomUUID()} />
+                <p className="text-xs text-text-muted mb-3">
+                  All source bag sessions are closed. Closing this run releases the variety
+                  card for future use.
+                </p>
+                <Submit variant="danger">Close variety run</Submit>
+              </form>
+            )}
+          </Section>
         </>
       )}
     </main>
@@ -285,6 +419,7 @@ type OpenSession = {
   inventory_bag_id: string;
   bag_number: number | null;
   vendor_barcode: string | null;
+  bag_qr_code: string | null;
   tablet_type_id: string | null;
   raw_item_name: string | null;
   starting_balance_qty: number | null;
@@ -307,6 +442,7 @@ function ComponentSlot({
   token,
   stationId,
   productId,
+  varietyRunId,
   requirement,
   openSessions,
   candidateBags,
@@ -314,6 +450,7 @@ function ComponentSlot({
   token: string;
   stationId: string;
   productId: string;
+  varietyRunId: string;
   requirement: {
     id: string;
     componentItemId: string;
@@ -366,6 +503,7 @@ function ComponentSlot({
           <input type="hidden" name="stationId" value={stationId} />
           <input type="hidden" name="productId" value={productId} />
           <input type="hidden" name="componentRole" value={requirement.componentRole} />
+          <input type="hidden" name="varietyRunId" value={varietyRunId} />
           <input type="hidden" name="clientEventId" value={randomUUID()} />
           <SmallField label="Pick a bag (matches required component)">
             {candidateBags.length === 0 ? (
@@ -399,10 +537,21 @@ function ComponentSlot({
         <div className="space-y-3">
           {openSessions.map((s) => (
             <div key={s.session_id} className="rounded border border-border/60 bg-page p-3 space-y-2">
-              <div className="text-xs text-text-muted">
-                Bag #{s.bag_number ?? "?"} ·{" "}
-                {s.vendor_barcode ?? s.inventory_bag_id.slice(0, 8)} ·{" "}
-                {s.starting_balance_qty ?? "—"} units
+              <div className="text-xs text-text-muted flex flex-wrap items-center gap-1">
+                <span>Bag #{s.bag_number ?? "?"}</span>
+                <span>·</span>
+                <QrCode className="w-3 h-3 inline-block" />
+                {s.bag_qr_code ? (
+                  <span className="font-mono">{s.bag_qr_code}</span>
+                ) : (
+                  <span className="rounded bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 text-[10px] font-medium">
+                    No QR on bag
+                  </span>
+                )}
+                <span>·</span>
+                <span>{s.vendor_barcode ?? s.inventory_bag_id.slice(0, 8)}</span>
+                <span>·</span>
+                <span>{s.starting_balance_qty ?? "—"} units</span>
               </div>
 
               <details className="rounded border border-border/60 bg-surface">
@@ -545,11 +694,15 @@ function SmallField({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-function Submit({ children }: { children: React.ReactNode }) {
+function Submit({ children, variant }: { children: React.ReactNode; variant?: "default" | "danger" }) {
+  const colorClass =
+    variant === "danger"
+      ? "bg-rose-600 hover:bg-rose-700 active:bg-rose-800"
+      : "bg-brand-600 hover:bg-brand-700 active:bg-brand-800";
   return (
     <button
       type="submit"
-      className="w-full rounded-lg bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white text-sm font-medium px-4 py-2.5 transition-colors"
+      className={`w-full rounded-lg ${colorClass} text-white text-sm font-medium px-4 py-2.5 transition-colors`}
     >
       {children}
     </button>
