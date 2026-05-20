@@ -507,6 +507,85 @@ describe("Scenario I — BOM expectedQty math with qtyPerUnit > 1", () => {
   });
 });
 
+// ─── Partial bag reuse — LEDGER vs FALLBACK ──────────────────────────────────
+
+describe("partial bag reuse — LEDGER vs FALLBACK", () => {
+  it("LEDGER path uses consumedQty (partial bag scenario)", () => {
+    const inputs: PlannerRawInputs = {
+      finishedLotId:    LOT_ID,
+      finishedLotNumber: "LOT-001",
+      unitsProduced:    3000,
+      displaysProduced: null,
+      casesProduced:    null,
+      product:          BASE_PRODUCT,
+      ledgerRows: [
+        {
+          ...GOOD_LEDGER_ROW,
+          consumedQty: 3000,   // partial — only 3000 of 10000 bag
+        },
+      ],
+      fallbackRows: [],
+      bomRows:      [UNIT_BOM_ROW],
+    };
+    const plan = computeZohoAssemblyPlan(inputs);
+    expect(plan.sourceMethod).toBe("LEDGER");
+    const receiveOp = plan.ops.find((o) => o.opKind === "TABLET_RECEIVE");
+    expect(receiveOp).toBeDefined();
+    expect(receiveOp!.quantity).toBe(3000);
+    expect(receiveOp!.statusPreview).toBe("READY");
+  });
+
+  it("LEDGER path with two partial bags sums correctly", () => {
+    const inputs: PlannerRawInputs = {
+      finishedLotId:    LOT_ID,
+      finishedLotNumber: "LOT-002",
+      unitsProduced:    7000,
+      displaysProduced: null,
+      casesProduced:    null,
+      product:          BASE_PRODUCT,
+      ledgerRows: [
+        { ...GOOD_LEDGER_ROW, inventoryBagId: BAG_A, consumedQty: 3000 },
+        { ...GOOD_LEDGER_ROW, inventoryBagId: BAG_B, consumedQty: 4000 },
+      ],
+      fallbackRows: [],
+      bomRows:      [UNIT_BOM_ROW],
+    };
+    const plan = computeZohoAssemblyPlan(inputs);
+    expect(plan.sourceMethod).toBe("LEDGER");
+    const receiveOps = plan.ops.filter((o) => o.opKind === "TABLET_RECEIVE");
+    expect(receiveOps).toHaveLength(2);
+    expect(receiveOps[0]!.quantity).toBe(3000);
+    expect(receiveOps[1]!.quantity).toBe(4000);
+  });
+
+  it("FALLBACK path still produces NEEDS_MAPPING (guarded)", () => {
+    const inputs: PlannerRawInputs = {
+      finishedLotId:    LOT_ID,
+      finishedLotNumber: "LOT-003",
+      unitsProduced:    5000,
+      displaysProduced: null,
+      casesProduced:    null,
+      product:          BASE_PRODUCT,
+      ledgerRows:   [],
+      fallbackRows: [
+        {
+          batchId:          BATCH_X,
+          qtyConsumed:      10000,  // full pillCount — this is the bug scenario, but planner guards it
+          tabletTypeId:     "tttttttt-0000-0000-0000-000000000001",
+          tabletName:       "DHA 400mg",
+          tabletZohoItemId: "ZTAB-001",
+        },
+      ],
+      bomRows: [UNIT_BOM_ROW],
+    };
+    const plan = computeZohoAssemblyPlan(inputs);
+    expect(plan.sourceMethod).toBe("FALLBACK");
+    const receiveOp = plan.ops.find((o) => o.opKind === "TABLET_RECEIVE");
+    expect(receiveOp).toBeDefined();
+    expect(receiveOp!.statusPreview).toBe("NEEDS_MAPPING");
+  });
+});
+
 // ─── Idempotency key format contract ─────────────────────────────────────────
 
 describe("idempotency key format contract", () => {
