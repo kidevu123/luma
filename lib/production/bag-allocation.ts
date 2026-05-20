@@ -480,6 +480,53 @@ export async function deriveOpenBagAllocations(): Promise<OpenAllocation[]> {
   }));
 }
 
+// ─── Pure helpers for allocation session lifecycle ───────────────
+
+/**
+ * Pure helper — exported for testing.
+ * Determines the default starting balance when opening a NEW allocation
+ * session on a bag that has prior sessions.
+ *
+ * Precedence:
+ *  1. If the last closed session has endingBalanceQty → use it (most authoritative).
+ *  2. Else compute: lastSession.startingBalanceQty - lastSession.consumedQty (clamped ≥ 0).
+ *  3. No prior session → fall back to pillCount (first-time open).
+ */
+export function resolveReopenStartingBalance(
+  lastClosedSession: {
+    endingBalanceQty: number | null;
+    startingBalanceQty: number | null;
+    consumedQty: number | null;
+  } | null | undefined,
+  pillCount: number | null | undefined,
+): number | null {
+  if (!lastClosedSession) return pillCount ?? null;
+  if (lastClosedSession.endingBalanceQty != null) return lastClosedSession.endingBalanceQty;
+  const start = lastClosedSession.startingBalanceQty ?? pillCount;
+  if (start != null) {
+    return Math.max(0, start - (lastClosedSession.consumedQty ?? 0));
+  }
+  return pillCount ?? null;
+}
+
+/**
+ * Pure helper — exported for testing.
+ * Returns an error string if consumedQty would exceed the session's
+ * starting balance; null if OK or if starting balance is unknown.
+ */
+export function checkOverAllocation(
+  consumedQty: number,
+  startingBalanceQty: number | null | undefined,
+): string | null {
+  if (startingBalanceQty != null && consumedQty > startingBalanceQty) {
+    return (
+      `Consumed quantity (${consumedQty.toLocaleString()}) exceeds session starting ` +
+      `balance (${startingBalanceQty.toLocaleString()}). Check your consumed count.`
+    );
+  }
+  return null;
+}
+
 // ─── PO-level allocation reports ────────────────────────────────
 
 export type PoBagAllocationRow = RawBagBalance & {
