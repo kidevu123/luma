@@ -9,6 +9,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { finishedLots } from "@/lib/db/schema";
 import { getZohoAssemblyOp } from "@/lib/db/queries/zoho-assembly";
+import { isZohoAssemblyDryRunEnabled } from "@/lib/zoho/assembly-service-client";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ZohoOpStatusChip, ZohoOpKindChip } from "../_status-chip";
@@ -17,6 +18,15 @@ import { OpActionsPanel } from "./op-actions";
 export const dynamic = "force-dynamic";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function isDryRunResponse(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    !Array.isArray(payload) &&
+    (payload as Record<string, unknown>)["dry_run"] === true
+  );
+}
 
 function fmtDate(d: Date | null | undefined): string {
   if (!d) return "—";
@@ -52,6 +62,8 @@ export default async function ZohoOpDetailPage({
 
   const op = await getZohoAssemblyOp(id);
   if (!op) notFound();
+
+  const dryRunEnabled = isZohoAssemblyDryRunEnabled();
 
   // Fetch lot number via a direct db query (one extra call is fine per spec).
   const [lotRow] = await db
@@ -200,7 +212,14 @@ export default async function ZohoOpDetailPage({
           {op.responsePayload != null && (
             <Card>
               <CardHeader>
-                <CardTitle>Response Payload</CardTitle>
+                <CardTitle>
+                  Response Payload
+                  {isDryRunResponse(op.responsePayload) && (
+                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      DRY RUN
+                    </span>
+                  )}
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <pre className="overflow-x-auto max-h-64 text-xs bg-surface-2 rounded p-3 text-text-muted">
@@ -254,7 +273,7 @@ export default async function ZohoOpDetailPage({
 
         {/* ── Sidebar ────────────────────────────────────────────────────── */}
         <div className="space-y-4">
-          <OpActionsPanel id={op.id} status={op.status} />
+          <OpActionsPanel id={op.id} status={op.status} dryRunEnabled={dryRunEnabled} />
 
           {/* Timeline */}
           <Card>
