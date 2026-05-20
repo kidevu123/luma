@@ -12,11 +12,13 @@ export async function GET(request: Request) {
   const appBase = process.env.APP_URL ?? "http://localhost:3000";
   const loginUrl = new URL("/login", appBase);
 
-  const cookieHeader = request.headers.get("cookie") ?? "";
-  const raw = cookieHeader.split(";").find((c) => c.trim().startsWith("oidc_state="))?.split("=").slice(1).join("=") ?? "";
+  // Use request.cookies.get() — it decodes the value, so the ":" separator is literal.
+  // Manual Cookie-header parsing fails because Next.js encodeURIComponent's the value
+  // in Set-Cookie, turning ":" into "%3A", which indexOf(":") can't find.
+  const raw = request.cookies.get("oidc_state")?.value ?? "";
   const colonIdx = raw.indexOf(":");
   const storedState = colonIdx >= 0 ? raw.slice(0, colonIdx) : raw;
-  const nextUrl = colonIdx >= 0 ? decodeURIComponent(raw.slice(colonIdx + 1)) : "/dashboard";
+  const nextUrl = colonIdx >= 0 ? raw.slice(colonIdx + 1) : "/dashboard";
 
   if (!code || !state || state !== storedState) {
     loginUrl.searchParams.set("error", "sso_state");

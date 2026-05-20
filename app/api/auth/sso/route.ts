@@ -3,7 +3,7 @@ import * as crypto from "crypto";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const next = encodeURIComponent(searchParams.get("next") ?? "/dashboard");
+  const next = searchParams.get("next") ?? "/dashboard";
 
   const issuer = process.env.AUTHENTIK_ISSUER!;
   const clientId = process.env.AUTHENTIK_CLIENT_ID!;
