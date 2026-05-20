@@ -68,6 +68,10 @@ export type ProductInput = {
   displaysPerCase?: number | null | undefined;
   defaultShelfLifeDays?: number | null | undefined;
   zohoItemId?: string | null | undefined;
+  /** ZOHO-ASSY-1 — composite-item IDs for each packaging level. */
+  zohoItemIdUnit?: string | null | undefined;
+  zohoItemIdDisplay?: string | null | undefined;
+  zohoItemIdCase?: string | null | undefined;
   isActive?: boolean | undefined;
 };
 

@@ -260,6 +260,20 @@
       "when": 1781600000000,
       "tag": "0036_commercial_trace_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1781700000000,
+      "tag": "0037_zoho_assembly_ops",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1781800000000,
+      "tag": "0038_zoho_assembly_ops_source_fields",
+      "breakpoints": true
     }
   ]
 }

@@ -480,6 +480,53 @@ export async function deriveOpenBagAllocations(): Promise<OpenAllocation[]> {
   }));
 }
 
+// ─── Pure helpers for allocation session lifecycle ───────────────
+
+/**
+ * Pure helper — exported for testing.
+ * Determines the default starting balance when opening a NEW allocation
+ * session on a bag that has prior sessions.
+ *
+ * Precedence:
+ *  1. If the last closed session has endingBalanceQty → use it (most authoritative).
+ *  2. Else compute: lastSession.startingBalanceQty - lastSession.consumedQty (clamped ≥ 0).
+ *  3. No prior session → fall back to pillCount (first-time open).
+ */
+export function resolveReopenStartingBalance(
+  lastClosedSession: {
+    endingBalanceQty: number | null;
+    startingBalanceQty: number | null;
+    consumedQty: number | null;
+  } | null | undefined,
+  pillCount: number | null | undefined,
+): number | null {
+  if (!lastClosedSession) return pillCount ?? null;
+  if (lastClosedSession.endingBalanceQty != null) return lastClosedSession.endingBalanceQty;
+  const start = lastClosedSession.startingBalanceQty ?? pillCount;
+  if (start != null) {
+    return Math.max(0, start - (lastClosedSession.consumedQty ?? 0));
+  }
+  return pillCount ?? null;
+}
+
+/**
+ * Pure helper — exported for testing.
+ * Returns an error string if consumedQty would exceed the session's
+ * starting balance; null if OK or if starting balance is unknown.
+ */
+export function checkOverAllocation(
+  consumedQty: number,
+  startingBalanceQty: number | null | undefined,
+): string | null {
+  if (startingBalanceQty != null && consumedQty > startingBalanceQty) {
+    return (
+      `Consumed quantity (${consumedQty.toLocaleString()}) exceeds session starting ` +
+      `balance (${startingBalanceQty.toLocaleString()}). Check your consumed count.`
+    );
+  }
+  return null;
+}
+
 // ─── PO-level allocation reports ────────────────────────────────
 
 export type PoBagAllocationRow = RawBagBalance & {
@@ -789,4 +836,61 @@ export async function derivePoSupplierDisputePacket(
     combinedConfidence,
     narrative,
   };
+}
+
+// ─── QR lifecycle helpers ────────────────────────────────────────
+
+/** Determines whether the QR traveler card should be released to IDLE
+ *  at BAG_FINALIZED time, based on the most-recent allocation session.
+ *
+ *  - No session (legacy/untracked bag): release.
+ *  - CLOSED, endingBalanceQty > 0: hold — partial remaining.
+ *  - CLOSED/RETURNED_TO_STOCK, endingBalanceQty null: hold — unknown.
+ *  - CLOSED/RETURNED_TO_STOCK, endingBalanceQty = 0: release — empty.
+ *  - CLOSED/RETURNED_TO_STOCK, endingBalanceQty > 0: hold — partial bag.
+ *  - DEPLETED / VOIDED: release.
+ */
+export function shouldReleaseQrAtFinalization(
+  session: { allocationStatus: string; endingBalanceQty: number | null } | null | undefined,
+): boolean {
+  if (!session) return true;
+  if (
+    session.allocationStatus === "CLOSED" ||
+    session.allocationStatus === "RETURNED_TO_STOCK"
+  ) {
+    if (session.endingBalanceQty == null) return false;
+    return session.endingBalanceQty <= 0;
+  }
+  return true;
+}
+
+/** The inventory_bags.status to set after closeAllocationSessionAction.
+ *  Returns null if the bag status should not change (leave as IN_USE).
+ *
+ *  - endingBalanceQty > 0  → AVAILABLE (partial; can reopen)
+ *  - endingBalanceQty = 0  → EMPTIED (operator confirmed empty on close)
+ *  - endingBalanceQty null → null (leave IN_USE; operator must mark depleted separately)
+ */
+export function deriveBagStatusAfterClose(
+  endingBalanceQty: number | null | undefined,
+): "AVAILABLE" | "EMPTIED" | null {
+  if (endingBalanceQty == null) return null;
+  if (endingBalanceQty > 0) return "AVAILABLE";
+  return "EMPTIED";
+}
+
+/** True when a finalized workflow_bag's allocation session still has
+ *  remaining tablets — the QR should stay assigned and be resumable.
+ *  Covers both CLOSED (with endingBalance > 0) and RETURNED_TO_STOCK. */
+export function isPartialBagResume(
+  session: { allocationStatus: string; endingBalanceQty: number | null } | null | undefined,
+): boolean {
+  if (!session) return false;
+  if (
+    session.allocationStatus !== "CLOSED" &&
+    session.allocationStatus !== "RETURNED_TO_STOCK"
+  ) {
+    return false;
+  }
+  return session.endingBalanceQty == null || session.endingBalanceQty > 0;
 }

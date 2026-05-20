@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   qrCards,
@@ -12,7 +12,9 @@ import {
   batches,
   readBagState,
   products,
+  rawBagAllocationSessions,
 } from "@/lib/db/schema";
+import { isPartialBagResume } from "@/lib/production/bag-allocation";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
 import {
@@ -261,9 +263,110 @@ export async function scanCardAction(
           .from(readBagState)
           .where(eq(readBagState.workflowBagId, bagId));
         if (state?.isFinalized) {
-          throw new Error(
-            "Bag is already finalized — scan a fresh card to start a new bag.",
+          // Check for a partial-bag resume: QR was held because the prior
+          // allocation session closed with remaining tablets.
+          const [heldSession] = await tx
+            .select({
+              allocationStatus: rawBagAllocationSessions.allocationStatus,
+              endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+            })
+            .from(rawBagAllocationSessions)
+            .where(eq(rawBagAllocationSessions.workflowBagId, bagId))
+            .orderBy(desc(rawBagAllocationSessions.openedAt))
+            .limit(1);
+
+          if (!isPartialBagResume(heldSession ?? null)) {
+            throw new Error(
+              "Bag is already finalized — scan a fresh card to start a new bag.",
+            );
+          }
+
+          // Partial-bag resume: same as a fresh IDLE scan — create a new
+          // workflow_bag and reassign the QR to it. The prior allocation
+          // session's endingBalanceQty becomes the starting balance for the
+          // next openAllocationSessionAction call.
+          const productLookup = pickedProductId
+            ? (
+                await tx
+                  .select({
+                    id: products.id,
+                    sku: products.sku,
+                    name: products.name,
+                    kind: products.kind,
+                    isActive: products.isActive,
+                  })
+                  .from(products)
+                  .where(eq(products.id, pickedProductId))
+              )[0] ?? null
+            : null;
+          const firstOp = checkFirstOpProductSelection({
+            stationKind: station.kind,
+            cardStatus: "IDLE",
+            pickedProductId,
+            product: productLookup,
+          });
+          if (!firstOp.ok) throw new Error(firstOp.reason);
+
+          const productIdToSet = firstOp.productId;
+          const [resumeBag] = await tx
+            .insert(workflowBags)
+            .values(productIdToSet ? { productId: productIdToSet } : {})
+            .returning();
+          if (!resumeBag) throw new Error("Could not create workflow bag for partial-bag resume.");
+
+          await tx
+            .update(qrCards)
+            .set({ assignedWorkflowBagId: resumeBag.id })
+            .where(eq(qrCards.id, cardId));
+
+          await projectEvent(tx, {
+            workflowBagId: resumeBag.id,
+            stationId: station.id,
+            eventType: "CARD_ASSIGNED",
+            payload: { qr_card_id: cardId, station_kind: station.kind },
+            enteredByUserId: accountability.enteredByUserId,
+            accountableEmployeeId: accountability.accountableEmployeeId,
+            accountabilitySource: accountability.accountabilitySource,
+            accountableEmployeeNameSnapshot:
+              accountability.accountableEmployeeNameSnapshot,
+          });
+          if (productIdToSet && productLookup) {
+            await projectEvent(tx, {
+              workflowBagId: resumeBag.id,
+              stationId: station.id,
+              eventType: "PRODUCT_MAPPED",
+              payload: {
+                product_id: productIdToSet,
+                product_sku: productLookup.sku,
+                product_name: productLookup.name,
+                product_kind: productLookup.kind,
+                station_kind: station.kind,
+                source: "FIRST_OPERATION_SELECTION",
+              },
+              enteredByUserId: accountability.enteredByUserId,
+              accountableEmployeeId: accountability.accountableEmployeeId,
+              accountabilitySource: accountability.accountabilitySource,
+              accountableEmployeeNameSnapshot:
+                accountability.accountableEmployeeNameSnapshot,
+            });
+          }
+          await writeAudit(
+            {
+              actorId: null,
+              actorRole: null,
+              action: "floor.card_assigned",
+              targetType: "WorkflowBag",
+              targetId: resumeBag.id,
+              after: {
+                card_id: cardId,
+                station_id: stationId,
+                product_id: productIdToSet,
+                product_sku: productLookup?.sku ?? null,
+              },
+            },
+            tx,
           );
+          return;
         }
         const allowedStages =
           STATION_PICKUP_FROM_STAGE[station.kind] ?? [];

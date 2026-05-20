@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, isNull, sql } from "drizzle-orm";
+import { eq, desc, asc, and, isNull, sql, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   finishedLots,
@@ -11,6 +11,7 @@ import {
   workflowBags,
   workflowEvents,
   inventoryBags,
+  rawBagAllocationSessions,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
@@ -87,6 +88,33 @@ export type CreateFinishedLotInput = {
   inputs?: { batchId: string; qtyConsumed: number }[];
 };
 
+/**
+ * Pure helper — exported for testing.
+ * Determines the quantity to record in finished_lot_inputs.qtyConsumed
+ * for a raw bag used in a finished lot.
+ *
+ * Precedence:
+ *  1. If an OPEN session exists → throw (lot must not be created while bag is still being counted).
+ *  2. If a CLOSED/DEPLETED session exists → use its consumedQty.
+ *  3. Legacy fallback → use pillCount (may be wrong for partial bags; acceptable for old data).
+ */
+export function resolveFinishedLotTabletQty(
+  openSession: { id: string } | null | undefined,
+  closedSession: { consumedQty: number | null } | null | undefined,
+  pillCount: number | null | undefined,
+): number {
+  if (openSession) {
+    throw new Error(
+      "Cannot create finished lot: the source raw bag has an open allocation session. " +
+      "Close or deplete the allocation session before creating the lot so the consumed quantity is known.",
+    );
+  }
+  if (closedSession?.consumedQty != null) {
+    return closedSession.consumedQty;
+  }
+  return pillCount ?? 0;
+}
+
 /** Create a finished lot transactionally: insert the lot row, copy
  *  inputs (explicit OR derived from inventory_bags linked to the
  *  workflow_bag's consumption events), and write audit. */
@@ -147,9 +175,34 @@ export async function createFinishedLot(
             ),
           );
         if (invBag?.batchId) {
+          // Check for OPEN allocation session — block lot creation if bag is mid-count.
+          const [openSession] = await tx
+            .select({ id: rawBagAllocationSessions.id })
+            .from(rawBagAllocationSessions)
+            .where(
+              and(
+                eq(rawBagAllocationSessions.inventoryBagId, bagRow.inventoryBagId),
+                eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+              ),
+            )
+            .limit(1);
+
+          // Find the most recent CLOSED or DEPLETED session for this bag.
+          const [closedSession] = await tx
+            .select({ consumedQty: rawBagAllocationSessions.consumedQty })
+            .from(rawBagAllocationSessions)
+            .where(
+              and(
+                eq(rawBagAllocationSessions.inventoryBagId, bagRow.inventoryBagId),
+                inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+              ),
+            )
+            .orderBy(desc(rawBagAllocationSessions.closedAt))
+            .limit(1);
+
           inputRows.push({
             batchId: invBag.batchId,
-            qtyConsumed: invBag.pillCount ?? 0,
+            qtyConsumed: resolveFinishedLotTabletQty(openSession, closedSession, invBag.pillCount),
             eventId: finalizedEv?.id ?? null,
           });
         }

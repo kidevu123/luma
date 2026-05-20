@@ -8,6 +8,7 @@ import { listPackagingMaterials } from "@/lib/db/queries/packaging";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { BomEditor } from "./bom-editor";
+import { ZohoMappingForm } from "./zoho-mapping-form";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +77,28 @@ export default async function ProductBomPage({
           {...(product.lotSummary ? { lotSummary: product.lotSummary } : {})}
         />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Zoho assembly mapping</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-[11px] text-text-muted mb-4 leading-relaxed">
+            These IDs map Luma product levels to existing Zoho composite items. Luma will use
+            these later for tablet receiving and assembly jobs. They must match the Zoho item IDs
+            exactly — Luma does not create or validate Zoho items.
+          </p>
+          <ZohoMappingForm
+            productId={product.id}
+            kind={product.kind}
+            unitsPerDisplay={product.unitsPerDisplay ?? null}
+            displaysPerCase={product.displaysPerCase ?? null}
+            zohoItemIdUnit={product.zohoItemIdUnit ?? null}
+            zohoItemIdDisplay={product.zohoItemIdDisplay ?? null}
+            zohoItemIdCase={product.zohoItemIdCase ?? null}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

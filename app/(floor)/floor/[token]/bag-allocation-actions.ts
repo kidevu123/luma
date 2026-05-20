@@ -16,7 +16,7 @@
 // idempotent against the floor's clientEventId.
 
 import { z } from "zod";
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql, and, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   stations,
@@ -28,6 +28,7 @@ import {
   resolveStationAccountability,
   withAccountabilityPayload,
 } from "@/lib/production/station-operator-session";
+import { resolveReopenStartingBalance, checkOverAllocation, deriveBagStatusAfterClose } from "@/lib/production/bag-allocation";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -88,6 +89,7 @@ const openSchema = z.object({
   routeId: z.string().uuid().optional().nullable().or(z.literal("")),
   workflowBagId: z.string().uuid().optional().nullable().or(z.literal("")),
   componentRole: z.string().max(40).optional().nullable(),
+  varietyRunId: z.string().uuid().optional().nullable().or(z.literal("")),
   startingBalanceQty: z.coerce.number().int().min(0).optional().nullable(),
   startingBalanceSource: z.string().max(40).optional().nullable(),
   notes: z.string().max(500).optional().nullable(),
@@ -105,6 +107,7 @@ export async function openAllocationSessionAction(
     routeId: formData.get("routeId") || undefined,
     workflowBagId: formData.get("workflowBagId") || undefined,
     componentRole: formData.get("componentRole") || undefined,
+    varietyRunId: formData.get("varietyRunId") || undefined,
     startingBalanceQty: formData.get("startingBalanceQty") || undefined,
     startingBalanceSource: formData.get("startingBalanceSource") || undefined,
     notes: formData.get("notes") || undefined,
@@ -137,13 +140,38 @@ export async function openAllocationSessionAction(
       return { error: "Bag already has an open allocation. Close it first." };
     }
 
+    // For reopened bags (prior sessions exist), derive remaining balance from
+    // the last closed session rather than resetting to the full pill_count.
+    const lastClosedSession = d.startingBalanceQty == null
+      ? await db
+          .select({
+            endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+            startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
+            consumedQty: rawBagAllocationSessions.consumedQty,
+          })
+          .from(rawBagAllocationSessions)
+          .where(
+            and(
+              eq(rawBagAllocationSessions.inventoryBagId, d.inventoryBagId),
+              eq(rawBagAllocationSessions.allocationStatus, "CLOSED"),
+            ),
+          )
+          .orderBy(desc(rawBagAllocationSessions.closedAt))
+          .limit(1)
+          .then((rows) => rows[0] ?? null)
+      : null;
+
     const startingBalance =
       d.startingBalanceQty != null
         ? d.startingBalanceQty
-        : bag.pill_count;
+        : resolveReopenStartingBalance(lastClosedSession, bag.pill_count);
     const startingSource =
       d.startingBalanceSource ??
-      (d.startingBalanceQty != null ? "MANUAL_ENTRY" : "VENDOR_DECLARED");
+      (d.startingBalanceQty != null
+        ? "MANUAL_ENTRY"
+        : lastClosedSession != null
+          ? "LEDGER_DERIVED"
+          : "VENDOR_DECLARED");
 
     let sessionId = "";
     await db.transaction(async (tx) => {
@@ -159,6 +187,7 @@ export async function openAllocationSessionAction(
           ...(d.productId && d.productId !== "" ? { productId: d.productId } : {}),
           ...(d.routeId && d.routeId !== "" ? { routeId: d.routeId } : {}),
           ...(d.componentRole ? { componentRole: d.componentRole } : {}),
+          ...(d.varietyRunId && d.varietyRunId !== "" ? { varietyRunId: d.varietyRunId } : {}),
           allocationStatus: "OPEN",
           ...(startingBalance != null ? { startingBalanceQty: startingBalance } : {}),
           ...(startingSource ? { startingBalanceSource: startingSource } : {}),
@@ -253,6 +282,11 @@ export async function closeAllocationSessionAction(
       return { error: `Session is ${session.allocationStatus} — cannot close.` };
     }
 
+    if (d.consumedQty != null) {
+      const overAllocError = checkOverAllocation(d.consumedQty, session.startingBalanceQty);
+      if (overAllocError) return { error: overAllocError };
+    }
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: d.stationId,
@@ -304,6 +338,15 @@ export async function closeAllocationSessionAction(
         .update(rawBagAllocationSessions)
         .set(updates)
         .where(eq(rawBagAllocationSessions.id, session.id));
+
+      // Update inventory bag status based on operator-confirmed ending balance.
+      const newBagStatus = deriveBagStatusAfterClose(d.endingBalanceQty);
+      if (newBagStatus != null) {
+        await tx
+          .update(inventoryBags)
+          .set({ status: newBagStatus })
+          .where(eq(inventoryBags.id, session.inventoryBagId));
+      }
     });
 
     return { ok: true };
@@ -438,6 +481,11 @@ export async function markBagDepletedAction(
     if (!session) return { error: "Session not found." };
     if (session.allocationStatus !== "OPEN") {
       return { error: `Session is ${session.allocationStatus} — cannot deplete.` };
+    }
+
+    if (d.finalConsumedQty != null) {
+      const overAllocError = checkOverAllocation(d.finalConsumedQty, session.startingBalanceQty);
+      if (overAllocError) return { error: overAllocError };
     }
 
     await db.transaction(async (tx) => {

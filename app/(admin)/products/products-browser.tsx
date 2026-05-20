@@ -18,6 +18,9 @@ export type ProductRow = {
   displaysPerCase: number | null;
   defaultShelfLifeDays: number | null;
   zohoItemId: string | null;
+  zohoItemIdUnit: string | null;
+  zohoItemIdDisplay: string | null;
+  zohoItemIdCase: string | null;
   isActive: boolean;
   createdAt: Date;
   allowedCount: number;

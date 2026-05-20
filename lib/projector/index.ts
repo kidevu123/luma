@@ -15,7 +15,7 @@
 // the only place that's allowed to insert into workflow_events going
 // forward.
 
-import { eq, sql, and, asc, inArray } from "drizzle-orm";
+import { eq, sql, and, asc, inArray, desc } from "drizzle-orm";
 import type { db as Db } from "@/lib/db";
 import {
   workflowEvents,
@@ -29,7 +29,9 @@ import {
   qrCards,
   inventoryBags,
   products,
+  rawBagAllocationSessions,
 } from "@/lib/db/schema";
+import { shouldReleaseQrAtFinalization } from "@/lib/production/bag-allocation";
 import {
   refreshQueueState,
   QUEUE_REFRESH_EVENTS,
@@ -332,10 +334,27 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       .update(workflowBags)
       .set({ finalizedAt: occurredAt })
       .where(eq(workflowBags.id, ev.workflowBagId));
-    await tx
-      .update(qrCards)
-      .set({ status: "IDLE", assignedWorkflowBagId: null })
-      .where(eq(qrCards.assignedWorkflowBagId, ev.workflowBagId));
+
+    // Check the most-recent allocation session for this workflow_bag.
+    // Only release the QR if the bag is confirmed empty; hold it for partial bags.
+    const [wfSession] = await tx
+      .select({
+        allocationStatus: rawBagAllocationSessions.allocationStatus,
+        endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+      })
+      .from(rawBagAllocationSessions)
+      .where(eq(rawBagAllocationSessions.workflowBagId, ev.workflowBagId))
+      .orderBy(desc(rawBagAllocationSessions.openedAt))
+      .limit(1);
+
+    if (shouldReleaseQrAtFinalization(wfSession ?? null)) {
+      await tx
+        .update(qrCards)
+        .set({ status: "IDLE", assignedWorkflowBagId: null })
+        .where(eq(qrCards.assignedWorkflowBagId, ev.workflowBagId));
+    }
+    // else: QR remains ASSIGNED to the finalized bag; resumable via scanCardAction.
+
     await projectMetricsForFinalizedBag(tx, ev.workflowBagId, occurredAt);
   }
 

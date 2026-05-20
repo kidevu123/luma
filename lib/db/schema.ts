@@ -284,6 +284,12 @@ export const zohoSyncRunStatusEnum = pgEnum("zoho_sync_run_status", [
   "FAILED",
 ]);
 
+export const varietyRunStatusEnum = pgEnum("variety_run_status", [
+  "OPEN",
+  "CLOSED",
+  "VOID",
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth + tenancy (single-tenant for v1, columns ready for multi)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -384,6 +390,11 @@ export const products = pgTable(
      *  is computed as min(tablet batch expiry, manufactured + this). */
     defaultShelfLifeDays: integer("default_shelf_life_days"),
     zohoItemId: text("zoho_item_id"),
+    /** ZOHO-ASSY-1 — Zoho composite item IDs for each packaging level.
+     *  Unit = single card/bottle, Display = retail tray, Case = shipper. */
+    zohoItemIdUnit:    text("zoho_item_id_unit"),
+    zohoItemIdDisplay: text("zoho_item_id_display"),
+    zohoItemIdCase:    text("zoho_item_id_case"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2079,6 +2090,46 @@ export const externalInventorySnapshots = pgTable(
   ],
 );
 
+// ─── VARIETY-RUNS-1 — Parent variety run entity ────────────────────────────
+// A reusable physical variety card identifies a parent variety run.
+// One OPEN run per card at a time (enforced by partial unique index).
+// When the run closes the card is free for reuse.
+
+export const varietyRuns = pgTable(
+  "variety_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Scan token from the reusable physical variety card. Not a FK to
+     *  qr_cards — availability determined by status = 'OPEN'. */
+    parentScanToken: text("parent_scan_token").notNull(),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    status: varietyRunStatusEnum("status").notNull().default("OPEN"),
+    openedAt: timestamp("opened_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("variety_runs_token_status_idx").on(t.parentScanToken, t.status),
+    index("variety_runs_product_status_idx").on(t.productId, t.status),
+    uniqueIndex("variety_runs_one_open_per_token_idx")
+      .on(t.parentScanToken)
+      .where(sql`status = 'OPEN'`),
+  ],
+);
+
 // ─── Phase H.x3.6 — Raw bag allocation ledger + variety-pack components ───
 // Turns inventory_bag from a single-shot consumed flag into a balance
 // ledger. A bag can be opened, partially consumed, returned to stock,
@@ -2132,6 +2183,9 @@ export const rawBagAllocationSessions = pgTable(
     unitOfMeasure: text("unit_of_measure").notNull().default("tablets"),
     confidence: text("confidence").notNull().default("LOW"),
     notes: text("notes"),
+    varietyRunId: uuid("variety_run_id").references(() => varietyRuns.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2144,6 +2198,9 @@ export const rawBagAllocationSessions = pgTable(
     index("rba_sessions_po_idx").on(t.poId),
     index("rba_sessions_product_idx").on(t.productId, t.allocationStatus),
     index("rba_sessions_workflow_idx").on(t.workflowBagId),
+    index("rba_sessions_variety_run_idx")
+      .on(t.varietyRunId)
+      .where(sql`variety_run_id IS NOT NULL`),
   ],
 );
 
@@ -3594,3 +3651,82 @@ export type ZohoInvoice = typeof zohoInvoices.$inferSelect;
 export type ZohoInvoiceLine = typeof zohoInvoiceLines.$inferSelect;
 export type FinishedLotInvoiceAllocation =
   typeof finishedLotInvoiceAllocations.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ZOHO-ASSY-1 — Assembly operation tracking
+// Phase 1: schema-only. No workers or live Zoho calls wired here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const zohoAssemblyOpKindEnum = pgEnum("zoho_assembly_op_kind", [
+  "TABLET_RECEIVE",
+  "UNIT_ASSEMBLE",
+  "DISPLAY_ASSEMBLE",
+  "CASE_ASSEMBLE",
+]);
+
+export const zohoAssemblyOpStatusEnum = pgEnum("zoho_assembly_op_status", [
+  "PENDING",
+  "IN_PROGRESS",
+  "SUCCEEDED",
+  "FAILED",
+  "NEEDS_MAPPING",
+  "SKIPPED",
+]);
+
+/** One row per atomic Zoho operation per finished lot.  The unique index on
+ *  idempotency_key ("{finished_lot_id}:{op_kind}") guarantees at-most-one
+ *  operation of each kind per lot, making retries safe. */
+export const zohoAssemblyOps = pgTable(
+  "zoho_assembly_ops",
+  {
+    id:               uuid("id").primaryKey().defaultRandom(),
+    finishedLotId:    uuid("finished_lot_id")
+                        .notNull()
+                        .references(() => finishedLots.id, { onDelete: "restrict" }),
+    opKind:           zohoAssemblyOpKindEnum("op_kind").notNull(),
+    zohoItemId:       text("zoho_item_id"),
+    quantity:         integer("quantity").notNull(),
+    status:           zohoAssemblyOpStatusEnum("status").notNull().default("PENDING"),
+    idempotencyKey:   text("idempotency_key").notNull(),
+    zohoReferenceId:  text("zoho_reference_id"),
+    requestPayload:   jsonb("request_payload"),
+    responsePayload:  jsonb("response_payload"),
+    lastError:        text("last_error"),
+    retryCount:       integer("retry_count").notNull().default(0),
+    enqueuedAt:       timestamp("enqueued_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt:        timestamp("started_at", { withTimezone: true }),
+    succeededAt:      timestamp("succeeded_at", { withTimezone: true }),
+    failedAt:         timestamp("failed_at", { withTimezone: true }),
+    resolvedManually: boolean("resolved_manually").notNull().default(false),
+    resolvedNote:     text("resolved_note"),
+    resolvedByUserId: uuid("resolved_by_user_id"),
+    /** ZOHO-ASSY-1b — Per-source fields for TABLET_RECEIVE operations.
+     *  Null for UNIT/DISPLAY/CASE assembly ops.
+     *  Enables the planner to reconstruct the exact Zoho PO receive call
+     *  at execution/retry time without re-querying the entire genealogy. */
+    sourceInventoryBagId: uuid("source_inventory_bag_id")
+                            .references(() => inventoryBags.id, { onDelete: "set null" }),
+    sourcePoLineId:       uuid("source_po_line_id")
+                            .references(() => poLines.id, { onDelete: "set null" }),
+    sourceTabletTypeId:   uuid("source_tablet_type_id")
+                            .references(() => tabletTypes.id, { onDelete: "set null" }),
+    /** Variety-pack component slot (PRIMARY, FLAVOR_A, …). Matches
+     *  raw_bag_allocation_sessions.component_role. Null for non-variety. */
+    componentRole:        text("component_role"),
+    /** Execution order within a lot's op set.
+     *  TABLET_RECEIVE = 1, UNIT_ASSEMBLE = 2, DISPLAY = 3, CASE = 4.
+     *  All ops at sequence N must be SUCCEEDED/SKIPPED before N+1 starts. */
+    opSequence:           integer("op_sequence"),
+  },
+  (t) => [
+    uniqueIndex("zoho_assembly_ops_idem_unique").on(t.idempotencyKey),
+    index("zoho_assembly_ops_lot_idx").on(t.finishedLotId),
+    index("zoho_assembly_ops_status_idx").on(t.status),
+    index("zoho_assembly_ops_inv_bag_idx")
+      .on(t.sourceInventoryBagId)
+      .where(sql`source_inventory_bag_id IS NOT NULL`),
+  ],
+);
+
+export type ZohoAssemblyOp = typeof zohoAssemblyOps.$inferSelect;
+export type VarietyRun = typeof varietyRuns.$inferSelect;
