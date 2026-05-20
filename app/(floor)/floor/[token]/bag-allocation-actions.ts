@@ -28,7 +28,7 @@ import {
   resolveStationAccountability,
   withAccountabilityPayload,
 } from "@/lib/production/station-operator-session";
-import { resolveReopenStartingBalance, checkOverAllocation } from "@/lib/production/bag-allocation";
+import { resolveReopenStartingBalance, checkOverAllocation, deriveBagStatusAfterClose } from "@/lib/production/bag-allocation";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -335,6 +335,15 @@ export async function closeAllocationSessionAction(
         .update(rawBagAllocationSessions)
         .set(updates)
         .where(eq(rawBagAllocationSessions.id, session.id));
+
+      // Update inventory bag status based on operator-confirmed ending balance.
+      const newBagStatus = deriveBagStatusAfterClose(d.endingBalanceQty);
+      if (newBagStatus != null) {
+        await tx
+          .update(inventoryBags)
+          .set({ status: newBagStatus })
+          .where(eq(inventoryBags.id, session.inventoryBagId));
+      }
     });
 
     return { ok: true };

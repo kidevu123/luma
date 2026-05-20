@@ -837,3 +837,50 @@ export async function derivePoSupplierDisputePacket(
     narrative,
   };
 }
+
+// ─── QR lifecycle helpers ────────────────────────────────────────
+
+/** Determines whether the QR traveler card should be released to IDLE
+ *  at BAG_FINALIZED time, based on the most-recent allocation session.
+ *
+ *  - No session (legacy/untracked bag): release.
+ *  - CLOSED, endingBalanceQty > 0: hold — partial remaining.
+ *  - CLOSED, endingBalanceQty null: hold — unknown (conservative).
+ *  - CLOSED, endingBalanceQty = 0: release — operator confirmed empty.
+ *  - DEPLETED / RETURNED_TO_STOCK / VOIDED: release.
+ */
+export function shouldReleaseQrAtFinalization(
+  session: { allocationStatus: string; endingBalanceQty: number | null } | null | undefined,
+): boolean {
+  if (!session) return true;
+  if (session.allocationStatus === "CLOSED") {
+    if (session.endingBalanceQty == null) return false;
+    return session.endingBalanceQty <= 0;
+  }
+  return true;
+}
+
+/** The inventory_bags.status to set after closeAllocationSessionAction.
+ *  Returns null if the bag status should not change (leave as IN_USE).
+ *
+ *  - endingBalanceQty > 0  → AVAILABLE (partial; can reopen)
+ *  - endingBalanceQty = 0  → EMPTIED (operator confirmed empty on close)
+ *  - endingBalanceQty null → null (leave IN_USE; operator must mark depleted separately)
+ */
+export function deriveBagStatusAfterClose(
+  endingBalanceQty: number | null | undefined,
+): "AVAILABLE" | "EMPTIED" | null {
+  if (endingBalanceQty == null) return null;
+  if (endingBalanceQty > 0) return "AVAILABLE";
+  return "EMPTIED";
+}
+
+/** True when a finalized workflow_bag's CLOSED session still has
+ *  remaining tablets — the QR should stay assigned and be resumable. */
+export function isPartialBagResume(
+  session: { allocationStatus: string; endingBalanceQty: number | null } | null | undefined,
+): boolean {
+  if (!session) return false;
+  if (session.allocationStatus !== "CLOSED") return false;
+  return session.endingBalanceQty == null || session.endingBalanceQty > 0;
+}

@@ -17,6 +17,9 @@ import {
   classifyBagConfidence,
   resolveReopenStartingBalance,
   checkOverAllocation,
+  shouldReleaseQrAtFinalization,
+  deriveBagStatusAfterClose,
+  isPartialBagResume,
 } from "./bag-allocation";
 import {
   computeExpectedComponentQty,
@@ -677,5 +680,136 @@ describe("checkOverAllocation", () => {
 
   it("returns null when startingBalanceQty is undefined", () => {
     expect(checkOverAllocation(5000, undefined)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shouldReleaseQrAtFinalization
+// ---------------------------------------------------------------------------
+
+describe("shouldReleaseQrAtFinalization", () => {
+  it("returns true when session is null (legacy/untracked bag)", () => {
+    expect(shouldReleaseQrAtFinalization(null)).toBe(true);
+  });
+
+  it("returns true when session is undefined", () => {
+    expect(shouldReleaseQrAtFinalization(undefined)).toBe(true);
+  });
+
+  it("returns false when CLOSED with endingBalanceQty > 0 (partial remaining)", () => {
+    expect(shouldReleaseQrAtFinalization({
+      allocationStatus: "CLOSED",
+      endingBalanceQty: 7000,
+    })).toBe(false);
+  });
+
+  it("returns false when CLOSED with endingBalanceQty null (unknown remaining, conservative)", () => {
+    expect(shouldReleaseQrAtFinalization({
+      allocationStatus: "CLOSED",
+      endingBalanceQty: null,
+    })).toBe(false);
+  });
+
+  it("returns true when CLOSED with endingBalanceQty = 0 (operator confirmed empty)", () => {
+    expect(shouldReleaseQrAtFinalization({
+      allocationStatus: "CLOSED",
+      endingBalanceQty: 0,
+    })).toBe(true);
+  });
+
+  it("returns true when DEPLETED", () => {
+    expect(shouldReleaseQrAtFinalization({
+      allocationStatus: "DEPLETED",
+      endingBalanceQty: 0,
+    })).toBe(true);
+  });
+
+  it("returns true when RETURNED_TO_STOCK", () => {
+    expect(shouldReleaseQrAtFinalization({
+      allocationStatus: "RETURNED_TO_STOCK",
+      endingBalanceQty: 500,
+    })).toBe(true);
+  });
+
+  it("returns true when VOIDED", () => {
+    expect(shouldReleaseQrAtFinalization({
+      allocationStatus: "VOIDED",
+      endingBalanceQty: null,
+    })).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deriveBagStatusAfterClose
+// ---------------------------------------------------------------------------
+
+describe("deriveBagStatusAfterClose", () => {
+  it("returns AVAILABLE when endingBalanceQty > 0", () => {
+    expect(deriveBagStatusAfterClose(7000)).toBe("AVAILABLE");
+  });
+
+  it("returns AVAILABLE when endingBalanceQty = 1 (minimum partial)", () => {
+    expect(deriveBagStatusAfterClose(1)).toBe("AVAILABLE");
+  });
+
+  it("returns EMPTIED when endingBalanceQty = 0 (confirmed empty on close)", () => {
+    expect(deriveBagStatusAfterClose(0)).toBe("EMPTIED");
+  });
+
+  it("returns null when endingBalanceQty is null (operator did not confirm)", () => {
+    expect(deriveBagStatusAfterClose(null)).toBeNull();
+  });
+
+  it("returns null when endingBalanceQty is undefined", () => {
+    expect(deriveBagStatusAfterClose(undefined)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isPartialBagResume
+// ---------------------------------------------------------------------------
+
+describe("isPartialBagResume", () => {
+  it("returns false when session is null", () => {
+    expect(isPartialBagResume(null)).toBe(false);
+  });
+
+  it("returns false when session is undefined", () => {
+    expect(isPartialBagResume(undefined)).toBe(false);
+  });
+
+  it("returns true when CLOSED with endingBalanceQty > 0", () => {
+    expect(isPartialBagResume({
+      allocationStatus: "CLOSED",
+      endingBalanceQty: 7000,
+    })).toBe(true);
+  });
+
+  it("returns true when CLOSED with endingBalanceQty null (conservative)", () => {
+    expect(isPartialBagResume({
+      allocationStatus: "CLOSED",
+      endingBalanceQty: null,
+    })).toBe(true);
+  });
+
+  it("returns false when CLOSED with endingBalanceQty = 0 (empty confirmed)", () => {
+    expect(isPartialBagResume({
+      allocationStatus: "CLOSED",
+      endingBalanceQty: 0,
+    })).toBe(false);
+  });
+
+  it("returns false when DEPLETED (use shouldReleaseQr path, not resume)", () => {
+    expect(isPartialBagResume({
+      allocationStatus: "DEPLETED",
+      endingBalanceQty: 0,
+    })).toBe(false);
+  });
+
+  it("returns false when RETURNED_TO_STOCK", () => {
+    expect(isPartialBagResume({
+      allocationStatus: "RETURNED_TO_STOCK",
+      endingBalanceQty: 500,
+    })).toBe(false);
   });
 });
