@@ -284,6 +284,12 @@ export const zohoSyncRunStatusEnum = pgEnum("zoho_sync_run_status", [
   "FAILED",
 ]);
 
+export const varietyRunStatusEnum = pgEnum("variety_run_status", [
+  "OPEN",
+  "CLOSED",
+  "VOID",
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth + tenancy (single-tenant for v1, columns ready for multi)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2084,6 +2090,46 @@ export const externalInventorySnapshots = pgTable(
   ],
 );
 
+// ─── VARIETY-RUNS-1 — Parent variety run entity ────────────────────────────
+// A reusable physical variety card identifies a parent variety run.
+// One OPEN run per card at a time (enforced by partial unique index).
+// When the run closes the card is free for reuse.
+
+export const varietyRuns = pgTable(
+  "variety_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Scan token from the reusable physical variety card. Not a FK to
+     *  qr_cards — availability determined by status = 'OPEN'. */
+    parentScanToken: text("parent_scan_token").notNull(),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    status: varietyRunStatusEnum("status").notNull().default("OPEN"),
+    openedAt: timestamp("opened_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("variety_runs_token_status_idx").on(t.parentScanToken, t.status),
+    index("variety_runs_product_status_idx").on(t.productId, t.status),
+    uniqueIndex("variety_runs_one_open_per_token_idx")
+      .on(t.parentScanToken)
+      .where(sql`status = 'OPEN'`),
+  ],
+);
+
 // ─── Phase H.x3.6 — Raw bag allocation ledger + variety-pack components ───
 // Turns inventory_bag from a single-shot consumed flag into a balance
 // ledger. A bag can be opened, partially consumed, returned to stock,
@@ -2137,6 +2183,9 @@ export const rawBagAllocationSessions = pgTable(
     unitOfMeasure: text("unit_of_measure").notNull().default("tablets"),
     confidence: text("confidence").notNull().default("LOW"),
     notes: text("notes"),
+    varietyRunId: uuid("variety_run_id").references(() => varietyRuns.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -2149,6 +2198,9 @@ export const rawBagAllocationSessions = pgTable(
     index("rba_sessions_po_idx").on(t.poId),
     index("rba_sessions_product_idx").on(t.productId, t.allocationStatus),
     index("rba_sessions_workflow_idx").on(t.workflowBagId),
+    index("rba_sessions_variety_run_idx")
+      .on(t.varietyRunId)
+      .where(sql`variety_run_id IS NOT NULL`),
   ],
 );
 
@@ -3677,3 +3729,4 @@ export const zohoAssemblyOps = pgTable(
 );
 
 export type ZohoAssemblyOp = typeof zohoAssemblyOps.$inferSelect;
+export type VarietyRun = typeof varietyRuns.$inferSelect;
