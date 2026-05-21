@@ -464,6 +464,7 @@ describe("verificationStatusLabel — data-honesty copy", () => {
 const validRow = {
   bagSequence: 1,
   receiptNumber: "1001",
+  supplierLotNumber: "LOT-TEST-001",
   bagQrCode: "QR-001",
   declaredCount: 20000,
 };
@@ -687,5 +688,34 @@ describe("QR assignment edge cases — RECEIVE-2", () => {
     const trimmed = assigned.filter((_, idx) => idx < 5);
     expect(trimmed).toHaveLength(5);
     expect(trimmed.every((r) => r.bagQrCode != null)).toBe(true);
+  });
+});
+
+// ─── RECEIVE-3: per-row supplier lot seeding ──────────────────────────
+describe("generateBagRowSeed — supplierLotNumber seeding", () => {
+  it("seeds all rows with the provided supplierLotNumber", () => {
+    const rows = generateBagRowSeed({
+      count: 3,
+      receiptStart: "1001",
+      supplierLotNumber: "LOT-ABC-2026",
+    });
+    expect(rows.every((r) => r.supplierLotNumber === "LOT-ABC-2026")).toBe(true);
+  });
+
+  it("seeds empty string when supplierLotNumber is not provided", () => {
+    const rows = generateBagRowSeed({ count: 2, receiptStart: "1001" });
+    expect(rows.every((r) => r.supplierLotNumber === "")).toBe(true);
+  });
+
+  it("assignQrCodesFromPool preserves supplierLotNumber through spread", () => {
+    const pool = [{ scanToken: "bag-card-1" }, { scanToken: "bag-card-2" }];
+    const rows = generateBagRowSeed({
+      count: 2,
+      receiptStart: "1001",
+      supplierLotNumber: "LOT-XYZ",
+    });
+    const assigned = assignQrCodesFromPool(rows, pool);
+    expect(assigned[0]?.supplierLotNumber).toBe("LOT-XYZ");
+    expect(assigned[1]?.supplierLotNumber).toBe("LOT-XYZ");
   });
 });

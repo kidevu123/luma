@@ -17,6 +17,7 @@ export type RawBagRowSeed = {
   bagQrCode: string | null;
   declaredCount: number | null;
   weightGrams: number | null;
+  supplierLotNumber: string;
   notes: string | null;
 };
 
@@ -58,6 +59,7 @@ export function generateBagRowSeed(input: {
   declaredCount?: number | null;    // broadcast to all rows (backward compat)
   declaredTotal?: number | null;    // distribute evenly across rows (new)
   weightGrams?: number | null;
+  supplierLotNumber?: string | null;
 }): RawBagRowSeed[] {
   const count = Math.max(0, Math.floor(input.count));
   if (count === 0) return [];
@@ -73,6 +75,7 @@ export function generateBagRowSeed(input: {
     ? distributeDeclaredTotal(input.declaredTotal, count)
     : Array(count).fill(input.declaredCount ?? null);
   const wt = input.weightGrams ?? null;
+  const lot = input.supplierLotNumber?.trim() ?? "";
   return Array.from({ length: count }, (_, i) => {
     const n = startNum + i;
     const padded = pad > 0 ? String(n).padStart(pad, "0") : String(n);
@@ -82,6 +85,7 @@ export function generateBagRowSeed(input: {
       bagQrCode: null,
       declaredCount: counts[i] ?? null,
       weightGrams: wt,
+      supplierLotNumber: lot,
       notes: null,
     };
   });
@@ -332,6 +336,7 @@ export const rawBagIntakeInputSchema = z.object({
       z.object({
         bagSequence: z.number().int().positive(),
         receiptNumber: z.string().trim().min(1).max(120),
+        supplierLotNumber: z.string().trim().min(1).max(80),
         bagQrCode: z.string().trim().max(120).nullable().optional(),
         declaredCount: z.number().int().positive().nullable().optional(),
         weightGrams: z.number().int().nullable().optional(),
@@ -378,6 +383,7 @@ export function preflightRawBagIntake(
     bagQrCode: r.bagQrCode ?? null,
     declaredCount: r.declaredCount ?? null,
     weightGrams: r.weightGrams ?? null,
+    supplierLotNumber: r.supplierLotNumber,
     notes: r.notes ?? null,
   }));
   const issues = validateBagRowSeeds(rowSeeds, {
