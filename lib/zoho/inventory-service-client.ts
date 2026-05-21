@@ -26,6 +26,7 @@ export type ZohoPurchaseOrderSummary = {
   total: number;
   received_status: string; // "to_be_received" | "received" | "partially_received"
   quantity_yet_to_receive: number;
+  app_flags?: ZohoLumaAppFlags;
 };
 
 /** Line item within a PO detail response */
@@ -49,6 +50,7 @@ export type ZohoPurchaseOrderDetail = {
   date: string;
   received_status: string;
   line_items: ZohoPoLineItem[];
+  app_flags?: ZohoLumaAppFlags;
 };
 
 /** Item from GET /zoho/items/search */
@@ -77,6 +79,21 @@ export type ZohoResponseMeta = {
   per_page?: number;
   has_more?: boolean;
 };
+
+/** Normalized Luma-specific flags injected by Zoho Integration Service. */
+export type ZohoLumaAppFlags = {
+  luma?: {
+    is_tablet_po?: boolean;
+  };
+};
+
+/**
+ * Pure: return true iff app_flags.luma.is_tablet_po === true.
+ * Treats missing/null/false as not eligible for raw bag intake.
+ */
+export function extractIsTabletPo(po: { app_flags?: ZohoLumaAppFlags }): boolean {
+  return po.app_flags?.luma?.is_tablet_po === true;
+}
 
 // ─── Error class ──────────────────────────────────────────────────────────────
 
@@ -250,6 +267,7 @@ async function getInventoryEndpoint(opts: {
  * Response shape: { data: { purchaseorders: ZohoPurchaseOrderSummary[] }, meta: {...} }
  */
 export async function listInventoryPurchaseOrders(opts?: {
+  tabletOnly?: boolean;
   env?: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -257,9 +275,12 @@ export async function listInventoryPurchaseOrders(opts?: {
   const env = opts?.env ?? process.env;
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const timeoutMs = opts?.timeoutMs ?? 15_000;
+  const path = opts?.tabletOnly === true
+    ? "/zoho/purchaseorders_inv/list?luma_tablet_only=true"
+    : "/zoho/purchaseorders_inv/list";
 
   const result = await getInventoryEndpoint({
-    path: "/zoho/purchaseorders_inv/list",
+    path,
     env,
     fetchImpl,
     timeoutMs,

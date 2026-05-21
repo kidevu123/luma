@@ -6,6 +6,7 @@ import {
   getInventoryPurchaseOrder,
   searchZohoItems,
   listWarehouses,
+  extractIsTabletPo,
 } from "./inventory-service-client";
 
 // ─── Test env ─────────────────────────────────────────────────────────────────
@@ -490,5 +491,84 @@ describe("non-JSON response body", () => {
     expect(result.httpStatus).toBe(503);
     // body should be the plain text fallback
     expect(result.body).toBe("Service Unavailable");
+  });
+});
+
+// ─── tabletOnly option ────────────────────────────────────────────────────────
+
+describe("listInventoryPurchaseOrders — tabletOnly option", () => {
+  it("calls ?luma_tablet_only=true when tabletOnly: true", async () => {
+    let capturedUrl: string | null = null;
+
+    const captureFetch: typeof fetch = ((url: string, _init?: RequestInit) => {
+      capturedUrl = url;
+      return Promise.resolve({
+        status: 200,
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: { purchaseorders: [] },
+            meta: SAMPLE_META,
+          }),
+        text: () => Promise.resolve(""),
+      });
+    }) as unknown as typeof fetch;
+
+    await listInventoryPurchaseOrders({
+      tabletOnly: true,
+      env: VALID_ENV,
+      fetchImpl: captureFetch,
+    });
+
+    expect(capturedUrl).not.toBeNull();
+    expect(capturedUrl).toContain("/zoho/purchaseorders_inv/list");
+    expect(capturedUrl).toContain("luma_tablet_only=true");
+  });
+
+  it("does NOT include luma_tablet_only when tabletOnly is omitted", async () => {
+    let capturedUrl: string | null = null;
+
+    const captureFetch: typeof fetch = ((url: string, _init?: RequestInit) => {
+      capturedUrl = url;
+      return Promise.resolve({
+        status: 200,
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: { purchaseorders: [] },
+            meta: SAMPLE_META,
+          }),
+        text: () => Promise.resolve(""),
+      });
+    }) as unknown as typeof fetch;
+
+    await listInventoryPurchaseOrders({ env: VALID_ENV, fetchImpl: captureFetch });
+
+    expect(capturedUrl).not.toBeNull();
+    expect(capturedUrl).not.toContain("luma_tablet_only");
+  });
+});
+
+// ─── extractIsTabletPo helper ─────────────────────────────────────────────────
+
+describe("extractIsTabletPo", () => {
+  it("returns true when app_flags.luma.is_tablet_po is true", () => {
+    expect(extractIsTabletPo({ app_flags: { luma: { is_tablet_po: true } } })).toBe(true);
+  });
+
+  it("returns false when app_flags is missing", () => {
+    expect(extractIsTabletPo({})).toBe(false);
+  });
+
+  it("returns false when luma block is missing", () => {
+    expect(extractIsTabletPo({ app_flags: {} })).toBe(false);
+  });
+
+  it("returns false when is_tablet_po is false", () => {
+    expect(extractIsTabletPo({ app_flags: { luma: { is_tablet_po: false } } })).toBe(false);
+  });
+
+  it("returns false when is_tablet_po is undefined", () => {
+    expect(extractIsTabletPo({ app_flags: { luma: {} } })).toBe(false);
   });
 });
