@@ -103,26 +103,37 @@ export default async function ReceiveRawBagsPage() {
         <SyncPoButton />
       </div>
 
-      {!zohoReady ? (
-        <div className="rounded-xl border border-warn-200 bg-warn-50/60 px-4 py-3 text-[12px] text-warn-800 flex items-start gap-2.5">
-          <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-semibold">Zoho PO sync not ready — manual fallback in use</p>
-            <p className="mt-0.5">
-              Live Zoho PO data is unavailable right now (readiness:{" "}
-              <code className="font-mono text-[11px]">{readiness}</code>).
-              The form falls back to the local Luma PO list and a manual PO
-              reference path. Receiving is never blocked by Zoho token state.
-            </p>
-          </div>
-        </div>
-      ) : (
+      {/* Zoho readiness banner — three-tier */}
+      {zohoReady ? (
         <div className="rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] text-sky-800 flex items-start gap-2.5">
           <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
             <p className="font-semibold">Zoho PO sync online</p>
             <p className="mt-0.5">
               Live PO lookup is available. The picker will surface the freshest PO list. Manual PO entry stays available as a fallback.
+            </p>
+          </div>
+        </div>
+      ) : pos.length > 0 ? (
+        <div className="rounded-xl border border-border bg-surface/60 px-4 py-3 text-[12px] text-text-muted flex items-start gap-2.5">
+          <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold text-text">Using synced PO data from Luma</p>
+            <p className="mt-0.5">
+              Live Zoho sync is offline ({readiness}), but {pos.length} PO{pos.length === 1 ? "" : "s"} and
+              their line items are available locally. Use the &ldquo;Sync POs from Zoho&rdquo; button to
+              refresh when Zoho is available.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[12px] text-amber-800 flex items-start gap-2.5">
+          <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">No local PO data — use manual PO reference</p>
+            <p className="mt-0.5">
+              Live Zoho sync is offline ({readiness}) and no POs have been synced yet.
+              Use the manual PO reference tab in the form below, or sync POs from Zoho when available.
             </p>
           </div>
         </div>
