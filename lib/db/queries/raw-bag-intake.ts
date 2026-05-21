@@ -264,63 +264,79 @@ export async function createRawBagIntakeAtomic(
       return { ok: false, error: "Selected tablet type not found." };
     }
 
-    // ── Upsert batch by (kind, tablet_type, batch_number = supplier
-    // lot). Reuses existing batch when the same supplier lot has been
-    // received before; otherwise creates a fresh QUARANTINE batch.
-    const [existingBatch] = await tx
-      .select()
-      .from(batches)
-      .where(
-        and(
-          eq(batches.kind, "TABLET"),
-          eq(batches.batchNumber, input.supplierLotNumber),
-          eq(batches.tabletTypeId, input.tabletTypeId),
-        ),
-      )
-      .limit(1);
-    let batchId: string;
-    const declaredPerBag = input.rows[0]?.declaredCount ?? 0;
+    // ── One batch per unique supplier lot.  Rows within the same lot
+    // share a batch; rows with different lots get separate batches.
+    const uniqueLots = [...new Set(input.rows.map((r) => r.supplierLotNumber))];
+    const batchIdByLot = new Map<string, string>();
     const totalDeclared = input.rows.reduce((sum, r) => sum + (r.declaredCount ?? 0), 0);
-    if (existingBatch) {
-      batchId = existingBatch.id;
-      await tx
-        .update(batches)
-        .set({
-          qtyReceived: existingBatch.qtyReceived + totalDeclared,
-          qtyOnHand: existingBatch.qtyOnHand + totalDeclared,
-        })
-        .where(eq(batches.id, batchId));
-    } else {
-      const [batch] = await tx
-        .insert(batches)
-        .values(
-          compact({
-            kind: "TABLET" as const,
-            batchNumber: input.supplierLotNumber,
-            tabletTypeId: input.tabletTypeId,
-            vendorName: resolvedVendor ?? null,
-            vendorLotNumber: input.supplierLotNumber,
-            qtyReceived: totalDeclared,
-            qtyOnHand: totalDeclared,
-            status: "QUARANTINE" as const,
-            statusChangedById: actor.id,
-          }),
-        )
-        .returning();
-      if (!batch) throw new Error("intake: batch insert empty");
-      batchId = batch.id;
-      await writeAudit(
-        {
-          actorId: actor.id,
-          actorRole: actor.role,
-          action: "batch.create",
-          targetType: "Batch",
-          targetId: batch.id,
-          after: batch,
-        },
-        tx,
+
+    for (const lot of uniqueLots) {
+      const lotRows = input.rows.filter((r) => r.supplierLotNumber === lot);
+      const lotDeclared = lotRows.reduce(
+        (sum, r) => sum + (r.declaredCount ?? 0),
+        0,
       );
+
+      const [existingBatch] = await tx
+        .select()
+        .from(batches)
+        .where(
+          and(
+            eq(batches.kind, "TABLET"),
+            eq(batches.batchNumber, lot),
+            eq(batches.tabletTypeId, input.tabletTypeId),
+          ),
+        )
+        .limit(1);
+
+      if (existingBatch) {
+        await tx
+          .update(batches)
+          .set({
+            qtyReceived: existingBatch.qtyReceived + lotDeclared,
+            qtyOnHand: existingBatch.qtyOnHand + lotDeclared,
+          })
+          .where(eq(batches.id, existingBatch.id));
+        batchIdByLot.set(lot, existingBatch.id);
+      } else {
+        const [newBatch] = await tx
+          .insert(batches)
+          .values(
+            compact({
+              kind: "TABLET" as const,
+              batchNumber: lot,
+              tabletTypeId: input.tabletTypeId,
+              vendorName: resolvedVendor ?? null,
+              vendorLotNumber: lot,
+              qtyReceived: lotDeclared,
+              qtyOnHand: lotDeclared,
+              status: "QUARANTINE" as const,
+              statusChangedById: actor.id,
+            }),
+          )
+          .returning();
+        if (!newBatch) throw new Error(`intake: batch insert empty for lot ${lot}`);
+        batchIdByLot.set(lot, newBatch.id);
+        await writeAudit(
+          {
+            actorId: actor.id,
+            actorRole: actor.role,
+            action: "batch.create",
+            targetType: "Batch",
+            targetId: newBatch.id,
+            after: newBatch,
+          },
+          tx,
+        );
+      }
     }
+
+    // defaultBatchId for the box = batch for the setup-level lot.
+    // Falls back to first unique lot if no row uses the setup lot exactly.
+    const firstBatchId = batchIdByLot.values().next().value as string | undefined;
+    const defaultBatchId =
+      batchIdByLot.get(input.supplierLotNumber) ?? firstBatchId;
+    if (!defaultBatchId) throw new Error("intake: no batch resolved");
 
     // ── Insert receive with a deterministic name. {PO}-R{seq}; seq
     // computed from existing receives for this PO.
@@ -357,7 +373,7 @@ export async function createRawBagIntakeAtomic(
       .values({
         receiveId: receiveRow.id,
         boxNumber: 1,
-        defaultBatchId: batchId,
+        defaultBatchId: defaultBatchId,
         defaultTabletTypeId: input.tabletTypeId,
         totalBags: input.rows.length,
       })
@@ -370,7 +386,7 @@ export async function createRawBagIntakeAtomic(
       smallBoxId: box.id,
       bagNumber: r.bagSequence,
       tabletTypeId: input.tabletTypeId,
-      batchId,
+      batchId: batchIdByLot.get(r.supplierLotNumber) ?? defaultBatchId,
       pillCount: r.declaredCount ?? null,
       declaredPillCount: r.declaredCount ?? null,
       weightGrams: r.weightGrams ?? null,
