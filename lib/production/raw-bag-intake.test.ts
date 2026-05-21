@@ -10,6 +10,7 @@ import {
   distributeDeclaredTotal,
   generateBagRowSeed,
   preflightRawBagIntake,
+  rawBagIntakeInputSchema,
   splitReceiptStart,
   validateBagRowSeeds,
   verificationStatusLabel,
@@ -717,5 +718,99 @@ describe("generateBagRowSeed — supplierLotNumber seeding", () => {
     const assigned = assignQrCodesFromPool(rows, pool);
     expect(assigned[0]?.supplierLotNumber).toBe("LOT-XYZ");
     expect(assigned[1]?.supplierLotNumber).toBe("LOT-XYZ");
+  });
+
+  it("seeds supplierLotNumber from input", () => {
+    const rows = generateBagRowSeed({
+      count: 3,
+      receiptStart: "1001",
+      supplierLotNumber: "LOT-ABC-001",
+    });
+    expect(rows.every((r) => r.supplierLotNumber === "LOT-ABC-001")).toBe(true);
+  });
+
+  it("trims supplierLotNumber whitespace", () => {
+    const rows = generateBagRowSeed({
+      count: 2,
+      receiptStart: "1001",
+      supplierLotNumber: "  LOT-TRIM  ",
+    });
+    expect(rows.every((r) => r.supplierLotNumber === "LOT-TRIM")).toBe(true);
+  });
+
+  it("defaults supplierLotNumber to empty string when not provided", () => {
+    const rows = generateBagRowSeed({ count: 2, receiptStart: "1001" });
+    expect(rows.every((r) => r.supplierLotNumber === "")).toBe(true);
+  });
+});
+
+// ─── RECEIVE-3: rawBagIntakeInputSchema per-row supplierLotNumber ──────
+
+describe("rawBagIntakeInputSchema — per-row supplierLotNumber", () => {
+  const basePayload = {
+    poMode: "LOCAL_PO" as const,
+    poId: "00000000-0000-0000-0000-000000000001",
+    poLineId: null,
+    poNumberManual: null,
+    vendorNameManual: null,
+    orderedQuantity: null,
+    tabletTypeId: "00000000-0000-0000-0000-000000000002",
+    supplierLotNumber: "LOT-MAIN-001",
+    rows: [
+      {
+        bagSequence: 1,
+        receiptNumber: "REC-001",
+        bagQrCode: "bag-card-1",
+        declaredCount: 1000,
+        weightGrams: 500,
+        supplierLotNumber: "LOT-MAIN-001",
+        notes: null,
+      },
+    ],
+  };
+
+  it("accepts valid payload with per-row supplierLotNumber", () => {
+    const result = rawBagIntakeInputSchema.safeParse(basePayload);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects when row supplierLotNumber is blank", () => {
+    const payload = {
+      ...basePayload,
+      rows: [{ ...basePayload.rows[0]!, supplierLotNumber: "" }],
+    };
+    const result = rawBagIntakeInputSchema.safeParse(payload);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects when row supplierLotNumber is missing", () => {
+    const { supplierLotNumber: _, ...rowWithoutLot } = basePayload.rows[0]!;
+    const payload = { ...basePayload, rows: [rowWithoutLot] };
+    const result = rawBagIntakeInputSchema.safeParse(payload);
+    expect(result.success).toBe(false);
+  });
+
+  it("rows can have different supplierLotNumbers independently", () => {
+    const payload = {
+      ...basePayload,
+      rows: [
+        { ...basePayload.rows[0]!, bagSequence: 1, receiptNumber: "REC-001", supplierLotNumber: "LOT-A" },
+        { ...basePayload.rows[0]!, bagSequence: 2, receiptNumber: "REC-002", supplierLotNumber: "LOT-B" },
+      ],
+    };
+    const result = rawBagIntakeInputSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.rows[0]?.supplierLotNumber).toBe("LOT-A");
+      expect(result.data.rows[1]?.supplierLotNumber).toBe("LOT-B");
+    }
+  });
+
+  it("preflightRawBagIntake maps row supplierLotNumber", () => {
+    const result = preflightRawBagIntake(basePayload);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.input.rows[0]?.supplierLotNumber).toBe("LOT-MAIN-001");
+    }
   });
 });
