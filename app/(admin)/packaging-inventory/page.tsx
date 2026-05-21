@@ -5,17 +5,22 @@ import { loadPackagingInventoryPanel } from "@/lib/production/material-panels";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
+import { scrapLotAction, deleteLotAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function PackagingInventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string; status?: string }>;
+  searchParams: Promise<{ kind?: string; status?: string; showScrapped?: string }>;
 }) {
   await requireAdmin();
   const sp = await searchParams;
+  const showScrapped = sp.showScrapped === "1";
   const panel = await loadPackagingInventoryPanel(undefined, sp);
+  const visibleLots = showScrapped
+    ? panel.lots
+    : panel.lots.filter((l) => l.status !== "SCRAPPED");
 
   return (
     <div className="space-y-5">
@@ -83,10 +88,16 @@ export default async function PackagingInventoryPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Lots</CardTitle>
+          <CardTitle>Lots ({visibleLots.length})</CardTitle>
+          <a
+            href={showScrapped ? "/packaging-inventory" : "/packaging-inventory?showScrapped=1"}
+            className="text-xs text-text-muted hover:text-text transition-colors"
+          >
+            {showScrapped ? "Hide scrapped" : "Show scrapped"}
+          </a>
         </CardHeader>
         <CardContent>
-          {panel.lots.length === 0 ? (
+          {visibleLots.length === 0 ? (
             <p className="text-sm text-text-muted">No lots received yet for the current filter.</p>
           ) : (
             <div className="overflow-x-auto">
@@ -103,10 +114,11 @@ export default async function PackagingInventoryPage({
                     <th className="text-left p-2">Source</th>
                     <th className="text-left p-2">Conf.</th>
                     <th className="text-left p-2">Warnings</th>
+                    <th className="text-right p-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {panel.lots.map((l) => (
+                  {visibleLots.map((l) => (
                     <tr key={l.lotId} className="border-t border-border/40">
                       <td className="p-2">
                         <div className="font-mono text-[10px]">{l.lotId.slice(0, 8)}</div>
@@ -155,6 +167,34 @@ export default async function PackagingInventoryPage({
                       </td>
                       <td className="p-2 text-[10px] text-text-muted">
                         {l.warnings.length > 0 ? l.warnings.join(", ") : "None"}
+                      </td>
+                      <td className="p-2 text-right">
+                        <div className="flex items-center justify-end gap-3">
+                          {l.status !== "SCRAPPED" && (
+                            <form
+                              action={async (fd) => {
+                                "use server";
+                                await scrapLotAction(fd);
+                              }}
+                            >
+                              <input type="hidden" name="id" value={l.lotId} />
+                              <button type="submit" className="text-[10px] text-text-subtle hover:text-amber-600 transition-colors">
+                                Scrap
+                              </button>
+                            </form>
+                          )}
+                          <form
+                            action={async (fd) => {
+                              "use server";
+                              await deleteLotAction(fd);
+                            }}
+                          >
+                            <input type="hidden" name="id" value={l.lotId} />
+                            <button type="submit" className="text-[10px] text-text-subtle hover:text-red-600 transition-colors">
+                              Delete
+                            </button>
+                          </form>
+                        </div>
                       </td>
                     </tr>
                   ))}

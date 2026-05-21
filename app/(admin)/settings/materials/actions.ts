@@ -15,6 +15,7 @@ import { packagingMaterials } from "@/lib/db/schema";
 // + map DISPLAY/CASE → DISPLAY_BOX/MASTER_CASE labels in the UI.
 
 const MATERIAL_KINDS = [
+  "BLISTER_CARD",
   "DISPLAY",
   "CASE",
   "LABEL",

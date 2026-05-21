@@ -80,7 +80,8 @@ export const productKindEnum = pgEnum("product_kind", [
 ]);
 
 export const packagingMaterialKindEnum = pgEnum("packaging_material_kind", [
-  "BLISTER_FOIL",
+  "BLISTER_CARD",  // printed product-specific blister card (e.g. "4ct Choco Drift Blister Card")
+  "BLISTER_FOIL",  // legacy — raw blister foil rolls; use PVC_ROLL or FOIL_ROLL for new entries
   "HEAT_SEAL_FILM",
   "BOTTLE",
   "CAP",

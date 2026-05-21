@@ -16,6 +16,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const KIND_LABELS: Record<string, string> = {
+  BLISTER_CARD: "Blister card",
   DISPLAY: "Display box",
   CASE: "Master case",
   LABEL: "Label",
@@ -26,7 +27,7 @@ const KIND_LABELS: Record<string, string> = {
   SHRINK_BAND: "Shrink band",
   PVC_ROLL: "PVC roll",
   FOIL_ROLL: "Foil roll",
-  BLISTER_FOIL: "Blister foil",
+  BLISTER_FOIL: "Blister foil (legacy)",
   HEAT_SEAL_FILM: "Heat-seal film",
   DESICCANT: "Desiccant",
   COTTON: "Cotton",
