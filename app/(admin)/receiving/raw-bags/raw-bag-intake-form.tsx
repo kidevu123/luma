@@ -20,6 +20,7 @@ import {
   ProductionSection,
 } from "@/components/production/ui";
 import {
+  assignQrCodesFromPool,
   computeReceivedTotal,
   computeVariance,
   derivePoVerificationStatus,
@@ -135,10 +136,7 @@ export function RawBagIntakeForm({
       // no weightGrams — operator enters per-row in kg
     });
     // Auto-assign QR codes from available pool (sequential, first-come-first-served).
-    const assigned = seed.map((row, i) => ({
-      ...row,
-      bagQrCode: availableQrCards[i]?.scanToken ?? null,
-    }));
+    const assigned = assignQrCodesFromPool(seed, availableQrCards);
     setRows(assigned);
     setErrorMessage(null);
   }

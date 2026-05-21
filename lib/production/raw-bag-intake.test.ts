@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  assignQrCodesFromPool,
   computeReceivedTotal,
   computeVariance,
   derivePoVerificationStatus,
@@ -186,6 +187,92 @@ describe("distributeDeclaredTotal", () => {
       const arr = distributeDeclaredTotal(total!, count!);
       expect(arr.reduce((a, b) => a + b, 0)).toBe(total);
     }
+  });
+});
+
+// ─── assignQrCodesFromPool ────────────────────────────────────────────
+
+describe("assignQrCodesFromPool", () => {
+  it("assigns pool tokens to rows in order", () => {
+    const rows = generateBagRowSeed({ count: 3, receiptStart: "1001" });
+    const pool = [
+      { scanToken: "bag-card-1" },
+      { scanToken: "bag-card-2" },
+      { scanToken: "bag-card-3" },
+    ];
+    const result = assignQrCodesFromPool(rows, pool);
+    expect(result.map((r) => r.bagQrCode)).toEqual([
+      "bag-card-1",
+      "bag-card-2",
+      "bag-card-3",
+    ]);
+  });
+
+  it("fills with null when pool is smaller than rows", () => {
+    const rows = generateBagRowSeed({ count: 5, receiptStart: "1001" });
+    const pool = [{ scanToken: "bag-card-1" }, { scanToken: "bag-card-2" }];
+    const result = assignQrCodesFromPool(rows, pool);
+    expect(result.map((r) => r.bagQrCode)).toEqual([
+      "bag-card-1",
+      "bag-card-2",
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it("fills all nulls when pool is empty", () => {
+    const rows = generateBagRowSeed({ count: 3, receiptStart: "1001" });
+    const result = assignQrCodesFromPool(rows, []);
+    expect(result.every((r) => r.bagQrCode === null)).toBe(true);
+  });
+
+  it("all rows assigned when pool is larger than rows", () => {
+    const rows = generateBagRowSeed({ count: 2, receiptStart: "1001" });
+    const pool = [
+      { scanToken: "bag-card-1" },
+      { scanToken: "bag-card-2" },
+      { scanToken: "bag-card-3" }, // extra — not used
+    ];
+    const result = assignQrCodesFromPool(rows, pool);
+    expect(result.map((r) => r.bagQrCode)).toEqual(["bag-card-1", "bag-card-2"]);
+  });
+
+  it("returns empty array for empty rows", () => {
+    const result = assignQrCodesFromPool([], [{ scanToken: "bag-card-1" }]);
+    expect(result).toHaveLength(0);
+  });
+
+  it("does not mutate input rows", () => {
+    const rows = generateBagRowSeed({ count: 2, receiptStart: "1001" });
+    const originalQrCodes = rows.map((r) => r.bagQrCode);
+    assignQrCodesFromPool(rows, [{ scanToken: "bag-card-1" }]);
+    expect(rows.map((r) => r.bagQrCode)).toEqual(originalQrCodes);
+  });
+});
+
+// ─── kg/grams round-trip conversion ──────────────────────────────────
+
+describe("kg/grams round-trip conversion", () => {
+  it("12.5 kg → 12500 g", () => {
+    expect(Math.round(12.5 * 1000)).toBe(12500);
+  });
+
+  it("0.001 kg → 1 g (minimum precision)", () => {
+    expect(Math.round(0.001 * 1000)).toBe(1);
+  });
+
+  it("12500 g → 12.5 kg", () => {
+    expect(12500 / 1000).toBe(12.5);
+  });
+
+  it("1 g → 0.001 kg", () => {
+    expect(1 / 1000).toBe(0.001);
+  });
+
+  it("NaN input is guarded (form contract)", () => {
+    const g = Math.round(Number("abc") * 1000);
+    expect(Number.isFinite(g)).toBe(false);
   });
 });
 

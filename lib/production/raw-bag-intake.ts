@@ -390,6 +390,20 @@ export function preflightRawBagIntake(
   return { ok: true, input, issues: [] };
 }
 
+/** Pure: assign QR codes from a pool to bag rows sequentially.
+ *  Pool cards are assigned by index; rows beyond pool.length get null.
+ *  Existing bagQrCode values are overwritten.
+ */
+export function assignQrCodesFromPool(
+  rows: RawBagRowSeed[],
+  pool: readonly { scanToken: string }[],
+): RawBagRowSeed[] {
+  return rows.map((row, i) => ({
+    ...row,
+    bagQrCode: pool[i]?.scanToken ?? null,
+  }));
+}
+
 // Statuses that can still accept new raw bag receipts.
 // DRAFT/RECEIVED/CLOSED/CANCELLED are excluded.
 export const RECEIVABLE_PO_STATUSES = ["OPEN", "RECEIVING"] as const;
