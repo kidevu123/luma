@@ -23,6 +23,7 @@ import {
   QrCode,
   Search,
   TrendingUp,
+  Factory,
   Gauge,
   History,
   Scale,
@@ -61,6 +62,7 @@ const SECTIONS: Section[] = [
     heading: "Management",
     items: [
       { href: "/packaging-inventory", label: "Inventory", icon: Boxes },
+      { href: "/production-capacity", label: "Production capacity", icon: Factory },
       { href: "/material-alerts", label: "Material alerts", icon: TrendingUp },
       { href: "/invoice-allocations", label: "Invoice allocations", icon: Receipt },
       { href: "/reports", label: "Production reports", icon: BarChart3 },
