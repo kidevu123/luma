@@ -133,6 +133,7 @@ export function RawBagIntakeForm({
       receiptStart: receiptStart.trim(),
       receiptPrefix: receiptPrefix.trim() || null,
       declaredTotal: declared,
+      supplierLotNumber: supplierLot.trim(),
       // no weightGrams — operator enters per-row in kg
     });
     // Auto-assign QR codes from available pool (sequential, first-come-first-served).
@@ -174,6 +175,7 @@ export function RawBagIntakeForm({
         bagQrCode: r.bagQrCode?.trim() || null,
         declaredCount: r.declaredCount,
         weightGrams: r.weightGrams,
+        supplierLotNumber: r.supplierLotNumber.trim(),
         notes: r.notes,
       })),
     };
@@ -379,6 +381,7 @@ export function RawBagIntakeForm({
                   <th className="text-left px-2 py-1.5">Receipt #</th>
                   <th className="text-right px-2 py-1.5">Declared</th>
                   <th className="text-right px-2 py-1.5">Weight (kg)</th>
+                  <th className="text-left px-2 py-1.5">Supplier lot #</th>
                   <th className="text-left px-2 py-1.5">Notes</th>
                   <th className="text-left px-2 py-1.5 w-8"></th>
                 </tr>
@@ -432,6 +435,13 @@ export function RawBagIntakeForm({
                           })
                         }
                         className="text-right tabular-nums text-xs"
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <Input
+                        value={r.supplierLotNumber}
+                        onChange={(e) => patchRow(i, { supplierLotNumber: e.target.value })}
+                        className={`text-xs font-mono${r.supplierLotNumber !== supplierLot.trim() && r.supplierLotNumber.trim().length > 0 ? " border-amber-400 bg-amber-50/40" : ""}`}
                       />
                     </td>
                     <td className="px-2 py-1.5">
