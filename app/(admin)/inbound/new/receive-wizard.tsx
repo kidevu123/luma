@@ -28,9 +28,21 @@ type Box = {
   pillCountPerBag: number;
 };
 
+function uid(): string {
+  // crypto.randomUUID requires a secure context (HTTPS). Fall back to
+  // Math.random when running over HTTP in dev/staging.
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 function blankBox(boxNumber: number, tabletTypeId: string): Box {
   return {
-    uid: crypto.randomUUID(),
+    uid: uid(),
     boxNumber,
     tabletTypeId,
     batchNumber: "",
@@ -250,6 +262,18 @@ export function ReceiveWizard({
                         {(Number(b.bagCount || 0) * Number(b.pillCountPerBag || 0)).toLocaleString()} pills
                       </span>
                     </p>
+                    {receiveName && b.bagCount > 0 && (
+                      <p className="text-[10px] text-text-subtle italic">
+                        Each bag will be issued an internal receipt
+                        number like{" "}
+                        <span className="font-mono text-text">
+                          {receiveName}-B{b.boxNumber}-1
+                        </span>{" "}
+                        and a Luma raw-bag QR (BAG-prefix). The vendor's
+                        own barcode on the bag sticker stays untouched.
+                        Declared pill count = pills/bag.
+                      </p>
+                    )}
                   </div>
                 ))
               )}

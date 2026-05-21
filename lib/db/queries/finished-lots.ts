@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, isNull, sql } from "drizzle-orm";
+import { eq, desc, asc, and, isNull, sql, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   finishedLots,
@@ -11,9 +11,12 @@ import {
   workflowBags,
   workflowEvents,
   inventoryBags,
+  rawBagAllocationSessions,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
+import { projectEvent } from "@/lib/projector";
+import { projectFinishedLotPassportForLot } from "@/lib/projector/finished-lot-passport";
 
 export async function listFinishedLots() {
   return db
@@ -85,6 +88,33 @@ export type CreateFinishedLotInput = {
   inputs?: { batchId: string; qtyConsumed: number }[];
 };
 
+/**
+ * Pure helper — exported for testing.
+ * Determines the quantity to record in finished_lot_inputs.qtyConsumed
+ * for a raw bag used in a finished lot.
+ *
+ * Precedence:
+ *  1. If an OPEN session exists → throw (lot must not be created while bag is still being counted).
+ *  2. If a CLOSED/DEPLETED session exists → use its consumedQty.
+ *  3. Legacy fallback → use pillCount (may be wrong for partial bags; acceptable for old data).
+ */
+export function resolveFinishedLotTabletQty(
+  openSession: { id: string } | null | undefined,
+  closedSession: { consumedQty: number | null } | null | undefined,
+  pillCount: number | null | undefined,
+): number {
+  if (openSession) {
+    throw new Error(
+      "Cannot create finished lot: the source raw bag has an open allocation session. " +
+      "Close or deplete the allocation session before creating the lot so the consumed quantity is known.",
+    );
+  }
+  if (closedSession?.consumedQty != null) {
+    return closedSession.consumedQty;
+  }
+  return pillCount ?? 0;
+}
+
 /** Create a finished lot transactionally: insert the lot row, copy
  *  inputs (explicit OR derived from inventory_bags linked to the
  *  workflow_bag's consumption events), and write audit. */
@@ -145,9 +175,34 @@ export async function createFinishedLot(
             ),
           );
         if (invBag?.batchId) {
+          // Check for OPEN allocation session — block lot creation if bag is mid-count.
+          const [openSession] = await tx
+            .select({ id: rawBagAllocationSessions.id })
+            .from(rawBagAllocationSessions)
+            .where(
+              and(
+                eq(rawBagAllocationSessions.inventoryBagId, bagRow.inventoryBagId),
+                eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+              ),
+            )
+            .limit(1);
+
+          // Find the most recent CLOSED or DEPLETED session for this bag.
+          const [closedSession] = await tx
+            .select({ consumedQty: rawBagAllocationSessions.consumedQty })
+            .from(rawBagAllocationSessions)
+            .where(
+              and(
+                eq(rawBagAllocationSessions.inventoryBagId, bagRow.inventoryBagId),
+                inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+              ),
+            )
+            .orderBy(desc(rawBagAllocationSessions.closedAt))
+            .limit(1);
+
           inputRows.push({
             batchId: invBag.batchId,
-            qtyConsumed: invBag.pillCount ?? 0,
+            qtyConsumed: resolveFinishedLotTabletQty(openSession, closedSession, invBag.pillCount),
             eventId: finalizedEv?.id ?? null,
           });
         }
@@ -230,6 +285,11 @@ export async function createFinishedLot(
       `);
     }
 
+    // LOT-1C — project the recall passport (trace_code, raw-bag M:N,
+    // outputs, packaging-lot rollup, QC-event index) for this lot.
+    // Idempotent; safe to re-run via the rebuilder later.
+    await projectFinishedLotPassportForLot(tx, lot.id);
+
     return { lot, inputs: inputRows };
   });
 }
@@ -267,6 +327,27 @@ export async function setFinishedLotStatus(
       },
       tx,
     );
+    // Fire FINISHED_GOODS_RELEASED on the transition into RELEASED.
+    // Decoupled from BAG_FINALIZED — a lot can pass QC days after
+    // production completes. Only fires when the lot is linked to a
+    // workflow_bag (the projector key); free-form lots created
+    // without a bag are not tracked through workflow_events.
+    if (
+      next === "RELEASED" &&
+      before.status !== "RELEASED" &&
+      row?.workflowBagId
+    ) {
+      await projectEvent(tx, {
+        workflowBagId: row.workflowBagId,
+        eventType: "FINISHED_GOODS_RELEASED",
+        payload: {
+          finished_lot_id: id,
+          finished_lot_number: row.finishedLotNumber,
+          ...(reason ? { reason } : {}),
+          previous_status: before.status,
+        },
+      });
+    }
     return row;
   });
 }

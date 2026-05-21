@@ -15,7 +15,7 @@
 // the only place that's allowed to insert into workflow_events going
 // forward.
 
-import { eq, sql, and, asc } from "drizzle-orm";
+import { eq, sql, and, asc, inArray, desc } from "drizzle-orm";
 import type { db as Db } from "@/lib/db";
 import {
   workflowEvents,
@@ -29,11 +29,37 @@ import {
   qrCards,
   inventoryBags,
   products,
+  rawBagAllocationSessions,
 } from "@/lib/db/schema";
+import { shouldReleaseQrAtFinalization } from "@/lib/production/bag-allocation";
+import {
+  refreshQueueState,
+  QUEUE_REFRESH_EVENTS,
+} from "./queue-state";
+import { refreshSkuDailyForBag } from "./sku-daily";
+import { refreshMaterialReconciliationForBag } from "./material-reconciliation";
+import { refreshStationDailyForBag } from "./station-daily";
+import { emitMaterialConsumedFromBlister } from "./material-consumption-hook";
+import { attributeFinalizedBag } from "./operator-daily-attribution";
+import { projectQcEvent, isQcEventType } from "./qc-events";
+import { projectFinishedLotForFinalizedBag } from "./finished-lot-passport";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
 type WorkflowEventType = typeof workflowEvents.$inferInsert["eventType"];
+
+/** OP-1B: how an accountable employee was identified for a count
+ *  submission. Used to band confidence on operator productivity
+ *  metrics and audit lineage. */
+export type AccountabilitySource =
+  | "LOGGED_IN_USER"
+  | "EMPLOYEE_PICKER"
+  | "EMPLOYEE_CODE"
+  | "BADGE_SCAN"
+  | "SUPERVISOR_OVERRIDE"
+  | "STATION_OPERATOR_SESSION"
+  | "LEGACY_TEXT"
+  | "MANUAL_TEXT";
 
 type EventInput = {
   workflowBagId: string;
@@ -46,6 +72,15 @@ type EventInput = {
    *  index we swallow the conflict — the action becomes a no-op
    *  on retry instead of double-firing the stage. */
   clientEventId?: string | null;
+  /** OP-1B accountability — additive, optional, fully backwards
+   *  compatible. enteredByUserId / accountableEmployeeId land in
+   *  the corresponding workflow_events FK columns. accountability
+   *  source + name snapshot are merged into payload so audit
+   *  consumers can read them without a second join. */
+  enteredByUserId?: string | null;
+  accountableEmployeeId?: string | null;
+  accountabilitySource?: AccountabilitySource | null;
+  accountableEmployeeNameSnapshot?: string | null;
 };
 
 const STAGE_FOR_EVENT: Record<string, string> = {
@@ -80,6 +115,24 @@ const THROUGHPUT_COLUMN: Record<string, string> = {
 export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
   const occurredAt = ev.occurredAt ?? new Date();
 
+  // Merge OP-1B accountability metadata into payload alongside any
+  // caller-supplied fields. The FK columns get the stable IDs; the
+  // payload carries the source label + readable name snapshot so
+  // genealogy / audit can render without a second join.
+  const basePayload = ev.payload ?? {};
+  const accountabilityPayload: Record<string, unknown> = {};
+  if (ev.accountabilitySource) {
+    accountabilityPayload.accountability_source = ev.accountabilitySource;
+  }
+  if (ev.accountableEmployeeNameSnapshot) {
+    accountabilityPayload.accountable_employee_name_snapshot =
+      ev.accountableEmployeeNameSnapshot;
+  }
+  const mergedPayload =
+    Object.keys(accountabilityPayload).length > 0
+      ? { ...basePayload, ...accountabilityPayload }
+      : basePayload;
+
   // Idempotency: if the floor sent a clientEventId, the partial
   // unique index (workflow_bag_id, event_type, client_event_id)
   // catches retries. onConflictDoNothing → empty RETURNING means
@@ -91,17 +144,34 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       workflowBagId: ev.workflowBagId,
       stationId: ev.stationId ?? null,
       eventType: ev.eventType,
-      payload: ev.payload ?? {},
+      payload: mergedPayload,
       occurredAt,
       clientEventId: ev.clientEventId ?? null,
+      employeeId: ev.accountableEmployeeId ?? null,
+      userId: ev.enteredByUserId ?? null,
     })
     .onConflictDoNothing()
     .returning({ id: workflowEvents.id });
   if (inserted.length === 0) return;
 
-  // 1. read_station_live — only meaningful when the event has a station
-  //    AND the bag isn't being finalized (finalize releases the station).
-  if (ev.stationId && ev.eventType !== "BAG_FINALIZED") {
+  // 1. read_station_live — track which bag is "currently at" each
+  //    station. Three classes of event affect this read model:
+  //
+  //    a. Forward stage events with a stationId (and not BAG_FINALIZED
+  //       and not BAG_RELEASED) keep the station pinned to the bag.
+  //
+  //    b. BAG_RELEASED clears THIS station's slot only. The bag is
+  //       still alive and the QR card is still ASSIGNED to it; the
+  //       next station picks it up by scanning the card (which fires
+  //       BAG_PICKED_UP).
+  //
+  //    c. BAG_FINALIZED clears EVERY station's slot for this bag and
+  //       returns the QR card to IDLE. End of cycle.
+  if (
+    ev.stationId &&
+    ev.eventType !== "BAG_FINALIZED" &&
+    ev.eventType !== "BAG_RELEASED"
+  ) {
     await tx
       .insert(readStationLive)
       .values({
@@ -120,6 +190,24 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
           updatedAt: occurredAt,
         },
       });
+  } else if (ev.eventType === "BAG_RELEASED" && ev.stationId) {
+    // Release THIS station's slot, leave others alone (they shouldn't
+    // hold this bag anyway in the single-station-at-a-time model, but
+    // be defensive: only touch the firing station).
+    await tx
+      .update(readStationLive)
+      .set({
+        currentWorkflowBagId: null,
+        lastEventType: "BAG_RELEASED",
+        lastEventAt: occurredAt,
+        updatedAt: occurredAt,
+      })
+      .where(
+        and(
+          eq(readStationLive.stationId, ev.stationId),
+          eq(readStationLive.currentWorkflowBagId, ev.workflowBagId),
+        ),
+      );
   } else if (ev.eventType === "BAG_FINALIZED") {
     // Release any station that was pinned to this bag.
     await tx
@@ -246,10 +334,27 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       .update(workflowBags)
       .set({ finalizedAt: occurredAt })
       .where(eq(workflowBags.id, ev.workflowBagId));
-    await tx
-      .update(qrCards)
-      .set({ status: "IDLE", assignedWorkflowBagId: null })
-      .where(eq(qrCards.assignedWorkflowBagId, ev.workflowBagId));
+
+    // Check the most-recent allocation session for this workflow_bag.
+    // Only release the QR if the bag is confirmed empty; hold it for partial bags.
+    const [wfSession] = await tx
+      .select({
+        allocationStatus: rawBagAllocationSessions.allocationStatus,
+        endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+      })
+      .from(rawBagAllocationSessions)
+      .where(eq(rawBagAllocationSessions.workflowBagId, ev.workflowBagId))
+      .orderBy(desc(rawBagAllocationSessions.openedAt))
+      .limit(1);
+
+    if (shouldReleaseQrAtFinalization(wfSession ?? null)) {
+      await tx
+        .update(qrCards)
+        .set({ status: "IDLE", assignedWorkflowBagId: null })
+        .where(eq(qrCards.assignedWorkflowBagId, ev.workflowBagId));
+    }
+    // else: QR remains ASSIGNED to the finalized bag; resumable via scanCardAction.
+
     await projectMetricsForFinalizedBag(tx, ev.workflowBagId, occurredAt);
   }
 
@@ -287,6 +392,59 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
                       updated_at = ${occurredAtIso}::timestamptz
       `);
     }
+  }
+
+  // ── Phase C read-model extensions ─────────────────────────────
+  // read_queue_state — refresh the per-stage queue snapshot any
+  // time a bag's stage might change. Cheap (small WIP), worth it
+  // to keep the floor board in lock-step.
+  if (QUEUE_REFRESH_EVENTS.has(ev.eventType)) {
+    await refreshQueueState(tx);
+  }
+  // At BAG_FINALIZED time, populate the per-bag SKU rollup, the
+  // material reconciliation row, and the per-(day, machine, product)
+  // quality rollup. All three operate off read_bag_metrics which
+  // projectMetricsForFinalizedBag has already written above.
+  if (ev.eventType === "BAG_FINALIZED") {
+    await refreshSkuDailyForBag(tx, ev.workflowBagId);
+    await refreshMaterialReconciliationForBag(tx, ev.workflowBagId);
+    await refreshStationDailyForBag(tx, ev.workflowBagId);
+    // LOT-1C — enrich the recall passport when a finished_lots row
+    // already names this workflow_bag. No-op when the operator hasn't
+    // created the finished_lots row yet — createFinishedLot() invokes
+    // the same projector at insert time.
+    await projectFinishedLotForFinalizedBag(tx, ev.workflowBagId, occurredAt);
+  }
+
+  // QC-5: project QC events into per-day rollups (operator, SKU,
+  // station-quality) and bag-state flags. Lives in a sibling module
+  // so the dispatch stays out of this already-large file.
+  if (isQcEventType(ev.eventType)) {
+    await projectQcEvent(tx, {
+      workflowBagId: ev.workflowBagId,
+      eventType: ev.eventType as Parameters<typeof projectQcEvent>[1]["eventType"],
+      occurredAt,
+      employeeId: ev.accountableEmployeeId ?? null,
+      stationId: ev.stationId ?? null,
+      payload: mergedPayload as Record<string, unknown>,
+    });
+  }
+
+  // Phase H.x3 — When a BLISTER_COMPLETE event lands and an active
+  // PVC/foil roll is mounted on the station's machine, emit a
+  // MATERIAL_CONSUMED_ESTIMATED row per role using the configured-
+  // or-learned standard. The hook is silent when any required
+  // input (counter, mounted roll, standard) is missing — the UI
+  // surfaces the gap via the metric API, the projector never
+  // fabricates a number.
+  if (ev.eventType === "BLISTER_COMPLETE" && ev.stationId) {
+    await emitMaterialConsumedFromBlister(tx, {
+      workflowBagId: ev.workflowBagId,
+      stationId: ev.stationId,
+      payload: ev.payload ?? {},
+      occurredAt,
+      upstreamClientEventId: ev.clientEventId ?? null,
+    });
   }
 
   // 4. pg_notify on a single channel — the SSE relay LISTENs on this
@@ -506,10 +664,14 @@ async function projectMetricsForFinalizedBag(
   );
   let machineIds: string[] = [];
   if (stationIds.length > 0) {
+    // Drizzle's inArray handles both single- and multi-element JS
+    // arrays cleanly. The previous `${arr}::uuid[]` cast pattern
+    // failed under postgres-js when the array had only one element
+    // because the driver bound it as a scalar text param.
     const stationRows = await tx
       .select({ machineId: stations.machineId })
       .from(stations)
-      .where(sql`${stations.id} = ANY(${stationIds}::uuid[])`);
+      .where(inArray(stations.id, stationIds));
     machineIds = Array.from(
       new Set(
         stationRows.map((r) => r.machineId).filter((m): m is string => !!m),
@@ -551,22 +713,67 @@ async function projectMetricsForFinalizedBag(
     })
     .onConflictDoNothing({ target: readBagMetrics.workflowBagId });
 
-  // Per-(day, operator) rollup for the leaderboard.
-  if (operatorCodes.length > 0) {
+  // Per-(day, operator) rollup for the leaderboard. OP-1E: prefers
+  // stable employee_id when accountability landed on the events;
+  // falls back to free-text operator_code only for legacy bags whose
+  // events never carried an employee_id. The pure helper enforces
+  // "no double-counting": a code that travelled with an employee
+  // tags the employee row, never produces a separate code-only row.
+  const attribution = attributeFinalizedBag(
+    events.map((e) => {
+      const p = (e.payload ?? {}) as Record<string, unknown>;
+      return {
+        employeeId: e.employeeId ?? null,
+        operatorCode: typeof p.operator_code === "string" ? p.operator_code : null,
+      };
+    }),
+  );
+  const damageCount = damagedPackaging + rippedCards;
+  if (attribution.employees.size > 0 || attribution.codeOnly.size > 0) {
     const day = finalizedAt.toISOString().slice(0, 10);
     const finalizedAtIso = finalizedAt.toISOString();
-    for (const code of operatorCodes) {
-      // ::timestamptz cast forces postgres-js to bind the parameter
-      // as text — passing a bare Date instance triggers the
-      // 'Received an instance of Date' Bind crash.
+    // Employee-keyed rows. ON CONFLICT targets the partial unique on
+    // (day, employee_id) WHERE employee_id IS NOT NULL.
+    for (const [employeeId, info] of attribution.employees) {
       await tx.execute(sql`
-        INSERT INTO read_operator_daily (day, operator_code, bags_finalized, active_seconds_total, damage_count_total, updated_at)
-        VALUES (${day}, ${code}, 1, ${activeSeconds}, ${damagedPackaging + rippedCards}, ${finalizedAtIso}::timestamptz)
-        ON CONFLICT (day, operator_code)
+        INSERT INTO read_operator_daily (
+          day, employee_id, operator_code, bags_finalized,
+          active_seconds_total, damage_count_total, updated_at
+        )
+        VALUES (
+          ${day}, ${employeeId}::uuid, ${info.operatorCode}, 1,
+          ${activeSeconds}, ${damageCount}, ${finalizedAtIso}::timestamptz
+        )
+        ON CONFLICT (day, employee_id)
+        WHERE employee_id IS NOT NULL
         DO UPDATE SET
           bags_finalized = read_operator_daily.bags_finalized + 1,
           active_seconds_total = read_operator_daily.active_seconds_total + ${activeSeconds},
-          damage_count_total = read_operator_daily.damage_count_total + ${damagedPackaging + rippedCards},
+          damage_count_total = read_operator_daily.damage_count_total + ${damageCount},
+          operator_code = COALESCE(read_operator_daily.operator_code, EXCLUDED.operator_code),
+          updated_at = ${finalizedAtIso}::timestamptz
+      `);
+    }
+    // Legacy code-only rows. ON CONFLICT targets the partial unique on
+    // (day, operator_code) WHERE employee_id IS NULL AND
+    // operator_code IS NOT NULL. These rows render as LOW confidence
+    // downstream so the operator-productivity surface can flag them.
+    for (const code of attribution.codeOnly) {
+      await tx.execute(sql`
+        INSERT INTO read_operator_daily (
+          day, employee_id, operator_code, bags_finalized,
+          active_seconds_total, damage_count_total, updated_at
+        )
+        VALUES (
+          ${day}, NULL, ${code}, 1,
+          ${activeSeconds}, ${damageCount}, ${finalizedAtIso}::timestamptz
+        )
+        ON CONFLICT (day, operator_code)
+        WHERE employee_id IS NULL AND operator_code IS NOT NULL
+        DO UPDATE SET
+          bags_finalized = read_operator_daily.bags_finalized + 1,
+          active_seconds_total = read_operator_daily.active_seconds_total + ${activeSeconds},
+          damage_count_total = read_operator_daily.damage_count_total + ${damageCount},
           updated_at = ${finalizedAtIso}::timestamptz
       `);
     }

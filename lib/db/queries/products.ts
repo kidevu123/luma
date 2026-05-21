@@ -1,4 +1,4 @@
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   products,
@@ -12,17 +12,35 @@ import { compact } from "@/lib/db/compact";
 import type { CurrentUser } from "@/lib/auth";
 
 export async function listProducts() {
-  const rows = await db
-    .select({
-      product: products,
-      allowedCount: db.$count(
-        productAllowedTablets,
-        eq(productAllowedTablets.productId, products.id),
-      ),
-    })
-    .from(products)
-    .orderBy(asc(products.name));
-  return rows.map((r) => ({ ...r.product, allowedCount: r.allowedCount }));
+  const [rows, allAllowed] = await Promise.all([
+    db
+      .select({
+        product: products,
+        allowedCount: db.$count(
+          productAllowedTablets,
+          eq(productAllowedTablets.productId, products.id),
+        ),
+      })
+      .from(products)
+      .orderBy(asc(products.name)),
+    db
+      .select({
+        productId: productAllowedTablets.productId,
+        tabletTypeId: productAllowedTablets.tabletTypeId,
+      })
+      .from(productAllowedTablets),
+  ]);
+  const allowedByProduct = new Map<string, string[]>();
+  for (const a of allAllowed) {
+    const arr = allowedByProduct.get(a.productId) ?? [];
+    arr.push(a.tabletTypeId);
+    allowedByProduct.set(a.productId, arr);
+  }
+  return rows.map((r) => ({
+    ...r.product,
+    allowedCount: r.allowedCount,
+    allowedTabletIds: allowedByProduct.get(r.product.id) ?? [],
+  }));
 }
 
 export async function getProductWithAllowed(id: string) {
@@ -50,6 +68,10 @@ export type ProductInput = {
   displaysPerCase?: number | null | undefined;
   defaultShelfLifeDays?: number | null | undefined;
   zohoItemId?: string | null | undefined;
+  /** ZOHO-ASSY-1 — composite-item IDs for each packaging level. */
+  zohoItemIdUnit?: string | null | undefined;
+  zohoItemIdDisplay?: string | null | undefined;
+  zohoItemIdCase?: string | null | undefined;
   isActive?: boolean | undefined;
 };
 
@@ -102,12 +124,27 @@ export async function updateProduct(
   });
 }
 
+export type LotSourceSummary = {
+  packtrack: number;
+  manual: number;
+  totalQty: number;
+};
+
 /** Get a product with both allowed-tablets and packaging-spec rows so
- *  the BOM editor can render in one fetch. */
+ *  the BOM editor can render in one fetch. Also returns lot source
+ *  summary per packaging material for data-honesty labels. */
 export async function getProductWithBom(id: string) {
   const [product] = await db.select().from(products).where(eq(products.id, id));
   if (!product) return null;
-  const [allowed, specs] = await Promise.all([
+
+  type LotSummaryRow = {
+    packaging_material_id: string;
+    source_system: string;
+    lot_count: number;
+    total_qty: number;
+  };
+
+  const [allowed, specs, lotSummaryRows] = await Promise.all([
     db
       .select({
         tabletTypeId: productAllowedTablets.tabletTypeId,
@@ -136,8 +173,64 @@ export async function getProductWithBom(id: string) {
       )
       .where(eq(productPackagingSpecs.productId, id))
       .orderBy(asc(packagingMaterials.name)),
+    db.execute<LotSummaryRow>(sql`
+      SELECT
+        packaging_material_id::text,
+        COALESCE(source_system::text, 'MANUAL_LUMA') as source_system,
+        COUNT(*)::int as lot_count,
+        COALESCE(SUM(accepted_quantity), 0)::int as total_qty
+      FROM packaging_lots
+      WHERE status IN ('AVAILABLE','IN_USE')
+        OR status IS NULL
+      GROUP BY packaging_material_id, source_system
+    `),
   ]);
-  return { ...product, allowed, specs };
+
+  const lotSummary = new Map<string, LotSourceSummary>();
+  for (const row of lotSummaryRows as unknown as LotSummaryRow[]) {
+    const existing = lotSummary.get(row.packaging_material_id) ?? {
+      packtrack: 0,
+      manual: 0,
+      totalQty: 0,
+    };
+    if (row.source_system === "PACKTRACK") {
+      existing.packtrack += row.lot_count;
+    } else {
+      existing.manual += row.lot_count;
+    }
+    existing.totalQty += row.total_qty;
+    lotSummary.set(row.packaging_material_id, existing);
+  }
+
+  return { ...product, allowed, specs, lotSummary };
+}
+
+export async function setAllowedTablets(
+  productId: string,
+  tabletTypeIds: string[],
+  actor: CurrentUser,
+) {
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(productAllowedTablets)
+      .where(eq(productAllowedTablets.productId, productId));
+    if (tabletTypeIds.length > 0) {
+      await tx.insert(productAllowedTablets).values(
+        tabletTypeIds.map((tabletTypeId) => ({ productId, tabletTypeId, isPrimary: false })),
+      );
+    }
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "product.allowed.set",
+        targetType: "Product",
+        targetId: productId,
+        after: { tabletTypeIds },
+      },
+      tx,
+    );
+  });
 }
 
 export async function setAllowedTablet(
@@ -220,6 +313,25 @@ export async function upsertPackagingSpec(input: PackagingSpecInput, actor: Curr
         targetType: "Product",
         targetId: input.productId,
         after: input,
+      },
+      tx,
+    );
+  });
+}
+
+export async function deleteProduct(id: string, actor: CurrentUser) {
+  return db.transaction(async (tx) => {
+    const [before] = await tx.select().from(products).where(eq(products.id, id));
+    if (!before) throw new Error("Product not found.");
+    await tx.delete(products).where(eq(products.id, id));
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "product.delete",
+        targetType: "Product",
+        targetId: id,
+        before,
       },
       tx,
     );

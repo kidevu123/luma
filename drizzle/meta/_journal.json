@@ -57,6 +57,244 @@
       "when": 1778700000000,
       "tag": "0007_legacy_tt_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778800000000,
+      "tag": "0008_workflow_event_type_extensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779000000000,
+      "tag": "0009_production_intelligence_phase_a",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778900000000,
+      "tag": "0010_read_station_quality_daily",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779100000000,
+      "tag": "0011_packaging_material_kind_extensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779200000000,
+      "tag": "0012_material_inventory_phase_h",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779300000000,
+      "tag": "0013_route_operation_compat",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1779400000000,
+      "tag": "0014_generic_item_structure",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1779500000000,
+      "tag": "0015_material_usage_learning",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1779600000000,
+      "tag": "0016_raw_item_weight_standards",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1779700000000,
+      "tag": "0017_raw_bag_allocation",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1779800000000,
+      "tag": "0018_roll_counter_segment_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1779900000000,
+      "tag": "0019_bag_release_pickup",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1780000000000,
+      "tag": "0020_packaging_receipt_event_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1780100000000,
+      "tag": "0021_packaging_lot_receipt_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1780200000000,
+      "tag": "0022_employee_code",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1780300000000,
+      "tag": "0023_station_operator_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1780400000000,
+      "tag": "0024_operator_daily_employee_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1780500000000,
+      "tag": "0025_read_material_reconciliation_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1780600000000,
+      "tag": "0026_qc_subsystem_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1780700000000,
+      "tag": "0027_qc_bag_state_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1780800000000,
+      "tag": "0028_product_material_compatibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1780900000000,
+      "tag": "0029_packtrack_recommendations",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1781000000000,
+      "tag": "0030_packtrack_recommendation_send",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781100000000,
+      "tag": "0031_finished_lot_recall_passport",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781200000000,
+      "tag": "0032_nexus_send_persistence",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1781300000000,
+      "tag": "0033_zoho_gateway_sync_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1781400000000,
+      "tag": "0034_receives_po_line",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1781500000000,
+      "tag": "0035_zoho_sync_kind_invoices",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781600000000,
+      "tag": "0036_commercial_trace_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1781700000000,
+      "tag": "0037_zoho_assembly_ops",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1781800000000,
+      "tag": "0038_zoho_assembly_ops_source_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1781900000000,
+      "tag": "0039_variety_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1782000000000,
+      "tag": "0040_qr_card_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1782100000000,
+      "tag": "0041_blister_card_kind",
+      "breakpoints": true
     }
   ]
 }

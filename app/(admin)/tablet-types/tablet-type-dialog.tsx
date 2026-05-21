@@ -1,20 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { X, type LucideIcon } from "lucide-react";
+import { X } from "lucide-react";
 import type { TabletType } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { saveTabletTypeAction } from "./actions";
 
+// triggerIcon: JSX node, not component reference. See product-dialog
+// for the Next.js 15 / digest 3173940408 explanation.
 export function TabletTypeDialog({
   row,
   triggerLabel,
-  triggerIcon: Icon,
+  triggerIcon,
 }: {
   row?: TabletType;
   triggerLabel: string;
-  triggerIcon?: LucideIcon;
+  triggerIcon?: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -29,7 +31,7 @@ export function TabletTypeDialog({
         size={isEdit ? "sm" : "md"}
         onClick={() => setOpen(true)}
       >
-        {Icon && <Icon className="h-4 w-4" aria-hidden />}
+        {triggerIcon}
         {triggerLabel}
       </Button>
 
@@ -62,10 +64,15 @@ export function TabletTypeDialog({
               action={async (form) => {
                 setPending(true);
                 setError(null);
-                const r = await saveTabletTypeAction(form);
-                setPending(false);
-                if (r?.error) setError(r.error);
-                else setOpen(false);
+                try {
+                  const r = await saveTabletTypeAction(form);
+                  setPending(false);
+                  if (r?.error) setError(r.error);
+                  else setOpen(false);
+                } catch {
+                  setPending(false);
+                  setError("Session expired — please reload the page and try again.");
+                }
               }}
               className="p-5 space-y-4"
             >

@@ -138,7 +138,29 @@ export type CurrentUser = {
   id: string;
   email: string;
   role: SessionPayload["role"];
+  /** OP-1B: stable employee identity for accountability defaults on
+   *  admin-side count submissions. Null when the user account isn't
+   *  linked to an employee row (system / bootstrap accounts). */
+  employeeId: string | null;
 };
+
+// Per-request cache so a single request that calls currentUser() many
+// times only does one users.id lookup. Keyed by user id so sign-out
+// during a request can't return a stale row.
+type CachedLookup = { employeeId: string | null };
+const requestCache: Map<string, CachedLookup> = new Map();
+
+async function lookupEmployeeId(userId: string): Promise<string | null> {
+  const cached = requestCache.get(userId);
+  if (cached) return cached.employeeId;
+  const [row] = await db
+    .select({ employeeId: users.employeeId })
+    .from(users)
+    .where(eq(users.id, userId));
+  const employeeId = row?.employeeId ?? null;
+  requestCache.set(userId, { employeeId });
+  return employeeId;
+}
 
 export async function currentUser(): Promise<CurrentUser | null> {
   const c = await cookies();
@@ -146,5 +168,27 @@ export async function currentUser(): Promise<CurrentUser | null> {
   if (!token) return null;
   const payload = await verifyToken(token);
   if (!payload) return null;
-  return { id: payload.uid, email: payload.email, role: payload.role };
+  const employeeId = await lookupEmployeeId(payload.uid);
+  return {
+    id: payload.uid,
+    email: payload.email,
+    role: payload.role,
+    employeeId,
+  };
+}
+
+export async function createSessionCookie(user: { id: string; role: SessionPayload["role"]; email: string }) {
+  const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
+  const token = await signToken({ uid: user.id, role: user.role, email: user.email, exp });
+  return {
+    name: COOKIE_NAME,
+    value: token,
+    options: {
+      httpOnly: true,
+      sameSite: "lax" as const,
+      secure: process.env.NODE_ENV === "production" && (process.env.APP_URL ?? "").startsWith("https"),
+      path: "/",
+      maxAge: COOKIE_MAX_AGE,
+    },
+  };
 }

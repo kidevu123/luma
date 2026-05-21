@@ -12,6 +12,11 @@ import {
 import { writeAudit } from "@/lib/db/audit";
 import { compact } from "@/lib/db/compact";
 import type { CurrentUser } from "@/lib/auth";
+import {
+  buildInternalReceiptNumber,
+  buildRawBagQrPayload,
+} from "@/lib/production/recall-passport";
+import { randomUUID } from "node:crypto";
 
 export async function listReceives() {
   return db
@@ -184,14 +189,36 @@ export async function createReceiveWithBoxes(
         .returning();
       if (!box) throw new Error("smallBox: insert empty");
 
-      const bagRows = Array.from({ length: b.bagCount }, (_, i) => ({
-        smallBoxId: box.id,
-        bagNumber: i + 1,
-        tabletTypeId: b.tabletTypeId,
-        batchId,
-        pillCount: b.pillCountPerBag ?? null,
-        status: "AVAILABLE" as const,
-      }));
+      // LOT-1D — stamp raw-bag identity on every newly-issued bag.
+      // bag_qr_code = BAG-<uuid> is computed from a pre-allocated id
+      // so a single batched INSERT carries every field. internal
+      // receipt number = <receive_name>-B<box>-<bag>.
+      const bagRows = Array.from({ length: b.bagCount }, (_, i) => {
+        const id = randomUUID();
+        const bagNumber = i + 1;
+        const internalReceiptNumber = buildInternalReceiptNumber({
+          receiveName: receive.receiveName,
+          boxNumber: b.boxNumber,
+          bagNumber,
+        });
+        const bagQrCode = buildRawBagQrPayload({
+          inventoryBagId: id,
+          internalReceiptNumber: internalReceiptNumber ?? `RECV-${id}`,
+          bagSequence: bagNumber,
+        });
+        return {
+          id,
+          smallBoxId: box.id,
+          bagNumber,
+          tabletTypeId: b.tabletTypeId,
+          batchId,
+          pillCount: b.pillCountPerBag ?? null,
+          declaredPillCount: b.pillCountPerBag ?? null,
+          bagQrCode,
+          internalReceiptNumber,
+          status: "AVAILABLE" as const,
+        };
+      });
       if (bagRows.length > 0) {
         await tx.insert(inventoryBags).values(bagRows);
         totalBags += bagRows.length;

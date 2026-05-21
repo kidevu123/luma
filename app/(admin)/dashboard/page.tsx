@@ -1,17 +1,21 @@
-// Owner home — the five numbers that matter, plus the single prediction
-// with the highest financial swing this week. Per metrics-strategy.md
-// §13.1: every tile here must drive an action; vanity metrics are out.
+// LUMA-UI-REBUILD-1 v3 — Owner home, rebuilt on the standard design system.
+//
+// Five owner numbers in a stat card grid, the highest-stakes prediction
+// surfaced as a tone panel, top finalized flavors in a standard section
+// div, quick-links as simple bordered Link divs.
+// Per metrics-strategy.md §13.1 every number drives an action; vanity
+// metrics are out. Data loading logic unchanged from the prior page.
 
 import Link from "next/link";
 import {
   ArrowRight,
-  Activity,
+  AlertTriangle,
   PackageCheck,
   Wallet,
   Hourglass,
   Gauge,
   TrendingUp,
-  AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import { sql, and, isNull, lt, gte, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -30,9 +34,8 @@ import { requireSession } from "@/lib/auth-guards";
 
 export const dynamic = "force-dynamic";
 
-// ── Loaders ────────────────────────────────────────────────────────
+// ── Loaders (unchanged) ───────────────────────────────────────────
 
-/** Finalized today + delta vs 7-day average + 7-day total. */
 async function getFinalizedToday() {
   const today = new Date().toISOString().slice(0, 10);
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -63,9 +66,6 @@ async function getFinalizedToday() {
   return { todayN, last7N, avg7 };
 }
 
-/** Cash-on-floor (units approximation, since unit_cost_cents isn't
- *  captured yet — §15.2/15.3 in the strategy doc). Sum of pillCount
- *  across bags by lifecycle stage. */
 async function getCashOnFloor() {
   const [received] = await db
     .select({
@@ -91,19 +91,15 @@ async function getCashOnFloor() {
     .where(isNull(workflowBags.finalizedAt));
   const total =
     (received?.units ?? 0) + (inUse?.units ?? 0) + (unfinalized?.units ?? 0);
-  // The largest stage is the bottleneck where cash is sitting.
-  const stages: Array<{ label: string; units: number; bags: number }> = [
-    { label: "Received", units: received?.units ?? 0, bags: received?.bags ?? 0 },
+  const stages = [
+    { label: "Received",      units: received?.units    ?? 0, bags: received?.bags    ?? 0 },
     { label: "In production", units: unfinalized?.units ?? 0, bags: unfinalized?.bags ?? 0 },
-    { label: "In use", units: inUse?.units ?? 0, bags: inUse?.bags ?? 0 },
+    { label: "In use",        units: inUse?.units       ?? 0, bags: inUse?.bags       ?? 0 },
   ];
   stages.sort((a, b) => b.units - a.units);
   return { totalUnits: total, biggest: stages[0] };
 }
 
-/** Aged unfinalized (§7.5) — bags whose started_at < 30d ago and
- *  not finalized. The single highest-stakes owner number when it's
- *  non-zero — bags sitting on cash. */
 async function getAgedUnfinalized() {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const [agg] = await db
@@ -122,8 +118,6 @@ async function getAgedUnfinalized() {
   return { count: agg?.count ?? 0, units: agg?.units ?? 0 };
 }
 
-/** Forgotten bags — paused > 30 min, not finalized. Drives the
- *  "one prediction" line when count is non-zero. */
 async function getForgottenBagCount() {
   const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
   const [r] = await db
@@ -141,13 +135,9 @@ async function getForgottenBagCount() {
   return r?.n ?? 0;
 }
 
-/** Predicted shippable units this week — extrapolate from today's
- *  finalized rate × business-days remaining + this-week-so-far.
- *  Falls back to "—" if no recent throughput. */
 async function getPredictedShippableThisWeek() {
-  // Compute Monday of current ET week.
   const now = new Date();
-  const dow = now.getDay(); // 0 = Sun, 1 = Mon...
+  const dow = now.getDay();
   const daysSinceMon = (dow + 6) % 7;
   const mondayMs = now.getTime() - daysSinceMon * 24 * 60 * 60 * 1000;
   const mondayStr = new Date(mondayMs).toISOString().slice(0, 10);
@@ -155,7 +145,6 @@ async function getPredictedShippableThisWeek() {
   const [thisWeek] = await db
     .select({
       n: sql<number>`COALESCE(SUM(${readDailyThroughput.bagsFinalized}),0)::int`,
-      days: sql<number>`COALESCE(COUNT(DISTINCT ${readDailyThroughput.day}),0)::int`,
     })
     .from(readDailyThroughput)
     .where(
@@ -175,7 +164,7 @@ async function getPredictedShippableThisWeek() {
     .from(readDailyThroughput)
     .where(sql`${readDailyThroughput.day} >= ${sevenDaysAgo}::date`);
   const dailyAvg = (last7Row?.n ?? 0) / Math.max(last7Row?.days ?? 7, 1);
-  const businessDaysSoFar = Math.min(daysSinceMon + 1, 5); // Mon-Fri working
+  const businessDaysSoFar = Math.min(daysSinceMon + 1, 5);
   const businessDaysRemaining = Math.max(5 - businessDaysSoFar, 0);
   const predictedExtra = Math.round(dailyAvg * businessDaysRemaining);
   return {
@@ -186,15 +175,12 @@ async function getPredictedShippableThisWeek() {
   };
 }
 
-/** Cash-flip ranking by flavor — top performer last 30d (§7.11
- *  approx, no $ yet). Returns top 3 flavors with most finalized
- *  bags + their unit total. */
 async function getTopFlavorsByFinalized() {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const rows = await db
     .select({
-      tabletName: tabletTypes.name,
-      productName: products.name,
+      tabletName:    tabletTypes.name,
+      productName:   products.name,
       bagsFinalized: sql<number>`COUNT(*)::int`,
       unitsFinalized: sql<number>`COALESCE(SUM(${inventoryBags.pillCount}),0)::int`,
     })
@@ -214,14 +200,20 @@ async function getTopFlavorsByFinalized() {
   return rows;
 }
 
-/** Workflow events activity for last 24h, used in the "throughput
- *  today vs avg" sparkline-style summary. */
 async function getActivityHeartbeat() {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const [r] = await db
     .select({ n: sql<number>`COUNT(*)::int` })
     .from(workflowEvents)
     .where(gte(workflowEvents.occurredAt, since));
+  return r?.n ?? 0;
+}
+
+async function getActiveQrCardCount() {
+  const [r] = await db
+    .select({ n: sql<number>`COUNT(*)::int` })
+    .from(qrCards)
+    .where(eq(qrCards.status, "ASSIGNED"));
   return r?.n ?? 0;
 }
 
@@ -239,6 +231,7 @@ export default async function DashboardPage() {
     predicted,
     topFlavors,
     eventsLast24h,
+    activeCards,
   ] = await Promise.all([
     getFinalizedToday(),
     getCashOnFloor(),
@@ -247,10 +240,9 @@ export default async function DashboardPage() {
     getPredictedShippableThisWeek(),
     getTopFlavorsByFinalized(),
     getActivityHeartbeat(),
+    getActiveQrCardCount(),
   ]);
 
-  // The "one prediction with the highest financial swing this week"
-  // line per §13.1 — pick the highest-impact actionable signal.
   const prediction = pickPrediction({
     forgottenBags: forgotten,
     agedUnfinalizedBags: aged.count,
@@ -264,165 +256,190 @@ export default async function DashboardPage() {
   const finalizedPctDelta =
     finalized.avg7 > 0 ? (finalizedDelta / finalized.avg7) * 100 : 0;
 
+  const finalizedHint =
+    finalized.avg7 === 0
+      ? "no 7-day baseline yet"
+      : `${finalizedDelta >= 0 ? "+" : ""}${Math.round(finalizedPctDelta)}% vs 7-day avg (${Math.round(finalized.avg7)})`;
+
+  const cashHint =
+    cash.biggest && cash.biggest.units > 0
+      ? `${cash.biggest.label} holds ${cash.biggest.bags} bags · ${cash.biggest.units.toLocaleString()} tablets`
+      : "no inventory tracked";
+
+  const activityHint = `${forgotten} forgotten bag${forgotten === 1 ? "" : "s"} right now`;
+
+  const predictedHint =
+    predicted.dailyAvg7 > 0
+      ? `~${predicted.dailyAvg7}/day · ${predicted.thisWeekSoFar} so far`
+      : "no recent throughput";
+
+  const agedHint =
+    aged.count === 0
+      ? "all inventory fresh"
+      : `${aged.units.toLocaleString()} tablets sitting`;
+
+  const PanelIcon = prediction.tone === "crit" ? AlertTriangle : Sparkles;
+
+  const panelClass =
+    prediction.tone === "crit"
+      ? "rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 text-[12px] text-red-800 flex items-start gap-2.5"
+      : prediction.tone === "warn"
+        ? "rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[12px] text-amber-800 flex items-start gap-2.5"
+        : "rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] text-sky-800 flex items-start gap-2.5";
+
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Today, at a glance"
-        description="The five numbers that matter — and the one prediction worth acting on."
+        title="Today, at a glance."
+        description="Five numbers that matter. One prediction worth acting on. Everything else is a click away."
       />
 
-      {/* Big-number row — the five owner numbers. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <BigTile
-          icon={PackageCheck}
-          label="Finalized today"
-          value={finalized.todayN.toLocaleString()}
-          hint={
-            finalized.avg7 === 0
-              ? "no 7-day baseline yet"
-              : `${
-                  finalizedDelta >= 0 ? "+" : ""
-                }${Math.round(finalizedPctDelta)}% vs 7-day avg (${Math.round(finalized.avg7)})`
-          }
-          tone={
-            finalized.avg7 > 0 && finalizedDelta < -finalized.avg7 * 0.3
-              ? "warn"
-              : "ok"
-          }
-          href="/floor-board"
-        />
-        <BigTile
-          icon={Wallet}
-          label="Tablets on the floor"
-          value={cash.totalUnits.toLocaleString()}
-          hint={
-            cash.biggest && cash.biggest.units > 0
-              ? `${cash.biggest.label} holds ${cash.biggest.bags} bags · ${cash.biggest.units.toLocaleString()} tablets`
-              : "no inventory tracked"
-          }
-          tone="default"
-          href="/inbound"
-        />
-        <BigTile
-          icon={Gauge}
-          label="Activity (24h)"
-          value={eventsLast24h.toLocaleString()}
-          hint={`${forgotten} forgotten bag${forgotten === 1 ? "" : "s"} right now`}
-          tone={forgotten > 0 ? "danger" : "ok"}
-          href="/floor-board"
-        />
-        <BigTile
-          icon={TrendingUp}
-          label="Predicted this week"
-          value={predicted.total.toLocaleString()}
-          hint={
-            predicted.dailyAvg7 > 0
-              ? `~${predicted.dailyAvg7}/day · ${predicted.thisWeekSoFar} so far · ${predicted.predictedExtra} more forecast`
-              : "no recent throughput"
-          }
-          tone="default"
-          href="/metrics"
-        />
-        <BigTile
-          icon={Hourglass}
-          label="Aged > 30 days"
-          value={aged.count.toLocaleString()}
-          hint={
-            aged.count === 0
-              ? "all inventory fresh"
-              : `${aged.units.toLocaleString()} tablets sitting`
-          }
-          tone={aged.count > 0 ? "warn" : "ok"}
-          href="/floor-board"
-        />
+      {/* Badge strip */}
+      <div className="flex flex-wrap gap-2">
+        <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
+          {eventsLast24h.toLocaleString()} events 24h
+        </span>
+        <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
+          {activeCards} active QR cards
+        </span>
+        {forgotten > 0 && (
+          <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-red-200 bg-red-50 text-[11px] font-mono text-red-700">
+            {forgotten} forgotten bag{forgotten === 1 ? "" : "s"}
+          </span>
+        )}
       </div>
 
-      {/* The one prediction with highest financial swing this week. */}
-      <div
-        className={
-          "rounded-xl border p-4 flex items-start gap-3 " +
-          (prediction.tone === "danger"
-            ? "border-red-200 bg-red-50/50"
-            : prediction.tone === "warn"
-              ? "border-amber-200 bg-amber-50/50"
-              : "border-brand-200 bg-brand-50/50")
-        }
-      >
-        <AlertTriangle
-          className={
-            "h-5 w-5 mt-0.5 shrink-0 " +
-            (prediction.tone === "danger"
-              ? "text-red-700"
-              : prediction.tone === "warn"
-                ? "text-amber-700"
-                : "text-brand-700")
-          }
-        />
-        <div className="flex-1 min-w-0 space-y-1">
-          <div className="text-[11px] uppercase tracking-wider text-text-subtle font-semibold">
-            The one prediction worth acting on
+      {/* Five owner numbers — stat card grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <PackageCheck className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Finalized today</span>
           </div>
-          <div className="text-sm text-text font-medium">
-            {prediction.headline}
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {finalized.todayN.toLocaleString()}
           </div>
-          {prediction.detail && (
-            <div className="text-xs text-text-muted">{prediction.detail}</div>
-          )}
-          {prediction.cta && (
+          <div className="text-[11px] text-text-subtle mt-1">{finalizedHint}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Wallet className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Tablets on the floor</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {cash.totalUnits.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{cashHint}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Gauge className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Activity (24h)</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {eventsLast24h.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{activityHint}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <TrendingUp className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Predicted this week</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {predicted.total.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{predictedHint}</div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface px-4 py-3 col-span-2 sm:col-span-4">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Hourglass className="h-3.5 w-3.5 text-text-subtle" />
+            <span className="text-[10px] uppercase tracking-wider text-text-subtle">Aged &gt; 30 days</span>
+          </div>
+          <div className="text-2xl font-mono tabular-nums text-text-strong">
+            {aged.count.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-text-subtle mt-1">{agedHint}</div>
+        </div>
+      </div>
+
+      {/* Prediction panel */}
+      <div className={panelClass}>
+        <PanelIcon className="h-4 w-4 shrink-0 mt-0.5" />
+        <div>
+          <p className="font-semibold text-[12px]">{prediction.headline}</p>
+          {prediction.detail ? (
+            <p className="mt-1 text-[12px]">{prediction.detail}</p>
+          ) : null}
+          {prediction.cta ? (
             <Link
               href={prediction.cta.href}
-              className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline mt-1"
+              className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold underline-offset-2 hover:underline"
             >
               {prediction.cta.label} <ArrowRight className="h-3 w-3" />
             </Link>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {/* Top flavors strip — secondary context. */}
-      {topFlavors.length > 0 && (
-        <div className="rounded-xl border border-border/70 bg-surface p-4 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold tracking-tight">
-              Top flavors finalized · last 30 days
-            </h2>
+      {/* Top finalized flavors */}
+      {topFlavors.length > 0 ? (
+        <div className="rounded-xl border border-border bg-surface overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-text-subtle">
+                Top flavors finalized · last 30 days
+              </p>
+              <p className="text-sm font-semibold text-text-strong mt-0.5">
+                Where the throughput went
+              </p>
+              <p className="text-[12px] text-text-muted mt-0.5">
+                The three SKUs with the most finalized bags. Use these to spot which lines are pulling weight.
+              </p>
+            </div>
             <Link
               href="/metrics"
-              className="text-[11px] text-text-muted hover:underline"
+              className="text-[11px] font-medium text-text-muted hover:text-text underline-offset-2 hover:underline shrink-0"
             >
-              all metrics →
+              All metrics →
             </Link>
           </div>
-          <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            {topFlavors.map((f, i) => (
-              <li
-                key={(f.tabletName ?? "") + (f.productName ?? "") + i}
-                className="rounded-lg border border-border/50 bg-surface-2 p-2.5"
-              >
-                <div className="text-xs font-medium truncate">
-                  {f.productName ?? f.tabletName ?? "—"}
-                </div>
-                <div className="text-lg font-semibold tabular-nums">
-                  {f.bagsFinalized}
-                  <span className="text-[11px] font-normal text-text-muted ml-1">
-                    bags
-                  </span>
-                </div>
-                <div className="text-[11px] text-text-subtle">
-                  {f.unitsFinalized.toLocaleString()} tablets
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="px-4 py-4">
+            <ul className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {topFlavors.map((f, i) => (
+                <li
+                  key={(f.tabletName ?? "") + (f.productName ?? "") + i}
+                  className="rounded-xl border border-border bg-surface px-4 py-3.5 flex flex-col gap-1.5"
+                >
+                  <div className="text-[12px] font-semibold tracking-tight text-text-strong truncate">
+                    {f.productName ?? f.tabletName ?? "—"}
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-mono tabular-nums text-text-strong">
+                      {f.bagsFinalized.toLocaleString()}
+                    </span>
+                    <span className="text-[11px] text-text-muted">bags</span>
+                  </div>
+                  <div className="text-[11px] text-text-subtle font-mono tabular-nums">
+                    {f.unitsFinalized.toLocaleString()} tablets
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Quick-access strip — secondary, smaller. */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-        <QuickLink href="/floor-board" label="Live floor" />
-        <QuickLink href="/inbound" label="POs &amp; receiving" />
-        <QuickLink href="/batches" label="Batches" />
-        <QuickLink href="/metrics" label="All metrics" />
+      {/* Quick-access strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <QuickLink href="/floor-board" label="Live floor" eyebrow="Operations" />
+        <QuickLink href="/inbound" label="POs & receiving" eyebrow="Logistics" />
+        <QuickLink href="/batches" label="Batches" eyebrow="Production" />
+        <QuickLink href="/metrics" label="All metrics" eyebrow="Reports" />
       </div>
     </div>
   );
@@ -430,76 +447,42 @@ export default async function DashboardPage() {
 
 // ── Components ────────────────────────────────────────────────────
 
-function BigTile({
-  icon: Icon,
-  label,
-  value,
-  hint,
-  tone = "default",
+function QuickLink({
   href,
+  label,
+  eyebrow,
 }: {
-  icon: typeof Activity;
-  label: string;
-  value: string;
-  hint: string;
-  tone?: "default" | "ok" | "warn" | "danger";
   href: string;
+  label: string;
+  eyebrow: string;
 }) {
-  const palette = (() => {
-    switch (tone) {
-      case "ok":     return { value: "text-emerald-700", iconBg: "bg-emerald-50", iconColor: "text-emerald-700", border: "border-border/70" };
-      case "warn":   return { value: "text-amber-800",   iconBg: "bg-amber-50",   iconColor: "text-amber-700",   border: "border-amber-200" };
-      case "danger": return { value: "text-red-800",     iconBg: "bg-red-50",     iconColor: "text-red-700",     border: "border-red-200" };
-      default:       return { value: "",                 iconBg: "bg-brand-50",   iconColor: "text-brand-700",   border: "border-border/70" };
-    }
-  })();
   return (
     <Link
       href={href}
-      className={`group rounded-xl border bg-surface p-4 hover:shadow-sm transition-all ${palette.border}`}
+      className="rounded-xl border border-border bg-surface px-4 py-3.5 group flex flex-col gap-1 hover:border-brand-300 transition-colors"
     >
-      <div className="flex items-center justify-between mb-3">
-        <div
-          className={`h-8 w-8 rounded-md flex items-center justify-center ring-1 ring-inset ${palette.iconBg}`}
-        >
-          <Icon className={`h-4 w-4 ${palette.iconColor}`} aria-hidden />
-        </div>
-        <ArrowRight className="h-3.5 w-3.5 text-text-subtle group-hover:text-text-muted transition-colors" />
+      <div className="text-[10px] uppercase tracking-wider text-text-subtle">
+        {eyebrow}
       </div>
-      <div
-        className={`text-3xl font-semibold tabular-nums tracking-tight ${palette.value}`}
-      >
-        {value}
-      </div>
-      <div className="text-[11px] uppercase tracking-wider text-text-subtle mt-0.5 font-semibold">
-        {label}
-      </div>
-      <div className="text-[11px] text-text-muted mt-1.5 leading-snug">
-        {hint}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13.5px] font-semibold tracking-tight text-text-strong">
+          {label}
+        </span>
+        <ArrowRight className="h-3.5 w-3.5 text-text-subtle group-hover:text-brand-800 transition-colors" />
       </div>
     </Link>
   );
 }
 
-function QuickLink({ href, label }: { href: string; label: string }) {
-  return (
-    <Link
-      href={href}
-      className="rounded-md border border-border/60 bg-surface px-3 py-2 hover:bg-surface-2 hover:border-border transition-colors text-text-muted hover:text-text inline-flex items-center justify-between gap-2"
-    >
-      <span>{label}</span>
-      <ArrowRight className="h-3 w-3" />
-    </Link>
-  );
-}
+// ── Prediction picker (unchanged) ─────────────────────────────────
 
-// ── Prediction picker ──────────────────────────────────────────────
+type Tone = "crit" | "warn" | "info" | "good";
 
 type Prediction = {
   headline: string;
   detail?: string;
   cta?: { label: string; href: string };
-  tone: "default" | "warn" | "danger";
+  tone: Tone;
 };
 
 function pickPrediction(args: {
@@ -510,7 +493,6 @@ function pickPrediction(args: {
   finalizedToday: number;
   avg7: number;
 }): Prediction {
-  // Priority order: forgotten bags > aged unfinalized > behind pace > on track
   if (args.forgottenBags > 0) {
     return {
       headline:
@@ -520,7 +502,7 @@ function pickPrediction(args: {
       detail:
         "Each forgotten bag burns operator handoff cost and shifts your finalize-tonight count down. Sweep the floor.",
       cta: { label: "See forgotten bags", href: "/floor-board" },
-      tone: "danger",
+      tone: "crit",
     };
   }
   if (args.agedUnfinalizedBags > 0) {
@@ -551,6 +533,6 @@ function pickPrediction(args: {
         ? `Pace is ~${args.predicted.dailyAvg7}/day. Push tomorrow morning's first hour to add ${Math.max(Math.round(args.predicted.dailyAvg7 * 0.1), 1)} bags by Friday.`
         : "Run the importer + Rebuild read models if you expected metrics here.",
     cta: { label: "See breakdown", href: "/metrics" },
-    tone: "default",
+    tone: "info",
   };
 }

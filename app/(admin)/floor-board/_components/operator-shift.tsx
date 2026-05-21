@@ -1,6 +1,7 @@
-// Operator-on-shift table — top 8 operators in last 24h by event
-// activity. Falls back to a "synthesizer not yet run" hint when the
-// payload->>'operator_code' field is empty everywhere (legacy bags).
+// Operator-on-shift table — top 8 operators in last 24h. OP-1E:
+// renders employees.fullName when accountability resolved, falls
+// back to the typed operator_code for legacy events. Confidence
+// badge marks legacy code-only rows as LOW.
 
 import * as React from "react";
 import Link from "next/link";
@@ -42,7 +43,7 @@ export function OperatorOnShiftCard({
       <CardContent className="p-0">
         {!hasOperatorPayload ? (
           <p className="px-4 py-4 text-sm text-text-muted">
-            Operator codes not yet captured —{" "}
+            No operator activity in the last 24 hours —{" "}
             <Link
               href="/settings/legacy-import"
               className="underline text-brand-700 hover:text-brand-800"
@@ -50,7 +51,7 @@ export function OperatorOnShiftCard({
               run the synthesizer
             </Link>{" "}
             on legacy data, or operators will populate this once they
-            type their code at scan time.
+            open a shift on a station.
           </p>
         ) : rows.length === 0 ? (
           <p className="px-4 py-4 text-sm text-text-muted">
@@ -61,6 +62,7 @@ export function OperatorOnShiftCard({
             <THead>
               <TR>
                 <TH>Operator</TH>
+                <TH>Code</TH>
                 <TH className="text-right">Events</TH>
                 <TH className="text-right">Stations</TH>
                 <TH>Last seen</TH>
@@ -68,8 +70,18 @@ export function OperatorOnShiftCard({
             </THead>
             <tbody>
               {rows.map((o) => (
-                <TR key={o.operatorCode}>
-                  <TD className="font-mono font-semibold">{o.operatorCode}</TD>
+                <TR key={o.groupKey}>
+                  <TD className="font-semibold">
+                    {o.displayName}
+                    {o.confidence === "LOW" && (
+                      <span className="ml-2 rounded bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 text-[10px]">
+                        legacy code only
+                      </span>
+                    )}
+                  </TD>
+                  <TD className="font-mono text-text-muted text-xs">
+                    {o.operatorCode ?? "—"}
+                  </TD>
                   <TD className="text-right tabular-nums">{o.events}</TD>
                   <TD className="text-right tabular-nums">
                     {o.distinctStations}

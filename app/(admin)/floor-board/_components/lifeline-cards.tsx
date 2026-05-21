@@ -228,7 +228,7 @@ function LifelineCard({ m }: { m: MachineLifeline }) {
               const ok = c.status === "working";
               return (
                 <span
-                  key={i}
+                  key={c.name ?? i}
                   className={`text-[10px] inline-flex items-center gap-0.5 rounded px-1 py-0 leading-tight ${
                     ok
                       ? "text-emerald-700 bg-emerald-50"

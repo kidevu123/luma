@@ -1,0 +1,190 @@
+// Phase E — operator productivity dedicated page. OP-1E: switched to
+// employee_id-keyed rows when accountability resolved at finalize
+// time. Legacy code-only rows still appear, marked LOW confidence so
+// the audit trail stays honest.
+
+import Link from "next/link";
+import { count } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { laborRates } from "@/lib/db/schema";
+import { requireSession } from "@/lib/auth-guards";
+import { PageHeader } from "@/components/ui/page-header";
+import { ConfidenceBadge } from "@/components/production/confidence-badge";
+import { MissingState } from "@/components/production/missing-state";
+import { deriveOperatorRows } from "@/lib/production/metrics";
+import { lastNDays } from "@/lib/production/time";
+
+export const dynamic = "force-dynamic";
+
+export default async function OperatorProductivityPage() {
+  await requireSession();
+  const range = lastNDays(7);
+  const [operators, laborCount] = await Promise.all([
+    deriveOperatorRows(range),
+    db.select({ n: count() }).from(laborRates),
+  ]);
+  const hasLaborRates = (laborCount[0]?.n ?? 0) > 0;
+  const legacyCount = operators.filter((r) => r.confidence === "LOW").length;
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="Operator productivity"
+        description={`Window: last 7 days. Source: lib/production/metrics.ts → deriveOperatorRows. ${operators.length} operator(s) with activity${
+          legacyCount > 0
+            ? ` (${legacyCount} legacy code-only — LOW confidence)`
+            : ""
+        }.`}
+      />
+
+      {!hasLaborRates && (
+        <div className="rounded-xl border border-border bg-surface-2/40 p-3 text-[12px] text-text-muted">
+          <strong className="text-text-strong">Labor cost</strong>: No labor rate configured. Add rates at{" "}
+          <Link href="/standards/labor-rates" className="text-brand-700 hover:text-brand-600">/standards/labor-rates</Link>{" "}
+          to compute cost per operator-hour.
+        </div>
+      )}
+
+      {operators.length === 0 ? (
+        <MissingState
+          metric={{
+            value: null,
+            unit: null,
+            confidence: "MISSING",
+            missingInputs: ["read_operator_daily"],
+            label: "No operator activity in the last 7 days",
+            explanation:
+              "Per-operator rollups update at BAG_FINALIZED time. Once bags finalise with an accountable employee (or legacy operator code), rows appear here.",
+          }}
+        />
+      ) : (
+        <div className="rounded-xl border border-border bg-surface overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-surface-2/50 text-[10px] uppercase tracking-wider text-text-muted">
+              <tr>
+                <th className="text-left px-3 py-2">Operator</th>
+                <th className="text-left px-3 py-2">Code</th>
+                <th className="text-right px-3 py-2">Bags finalized</th>
+                <th className="text-right px-3 py-2">Active min</th>
+                <th className="text-right px-3 py-2">Bags / hr</th>
+                <th className="text-right px-3 py-2" title="Phase-A damages: damaged_packaging + ripped_cards on PACKAGING_COMPLETE">
+                  Pkg dmg
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: count of PACKAGING_DAMAGE_RETURN events">
+                  QC dmg
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: count of REWORK_SENT events accountable to this operator">
+                  Rework sent
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: count of REWORK_RECEIVED events accountable to this operator">
+                  Rework rec
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: SUM(scrap_quantity) across SCRAP_RECORDED events linked to this operator">
+                  Scrap units
+                </th>
+                <th className="text-right px-3 py-2" title="QC-5: count of SUBMISSION_CORRECTED events linked to an event this operator was accountable for">
+                  Corrections
+                </th>
+                <th className="text-right px-3 py-2">Labor cost</th>
+                <th className="text-left px-3 py-2">Confidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {operators.map((r) => {
+                const minutes = Math.round(r.activeSeconds / 60);
+                const unitsPerHour =
+                  r.bagsFinalized > 0 && r.activeSeconds > 0
+                    ? Math.round(
+                        (r.bagsFinalized / r.activeSeconds) * 3600,
+                      )
+                    : 0;
+                const qcActivity =
+                  r.damageEvents +
+                  r.reworkSent +
+                  r.reworkReceived +
+                  r.scrapUnits +
+                  r.corrections;
+                return (
+                  <tr key={r.groupKey} className="border-t border-border">
+                    <td className="px-3 py-2">
+                      <span className="text-text-strong">{r.displayName}</span>
+                      {r.confidence === "LOW" && (
+                        <span className="ml-2 rounded bg-warn-50 text-warn-700 border border-warn-200 px-1.5 py-0.5 text-[10px]">
+                          legacy code only
+                        </span>
+                      )}
+                      {qcActivity > 0 && (
+                        <span
+                          className="ml-2 rounded bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 text-[10px]"
+                          title="One or more QC events attributed to this operator in the window."
+                        >
+                          QC activity
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-text-muted text-[11px]">
+                      {r.operatorCode ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {r.bagsFinalized.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {minutes.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {unitsPerHour.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {r.damages.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {r.damageEvents > 0 ? r.damageEvents.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {r.reworkSent > 0 ? r.reworkSent.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {r.reworkReceived > 0 ? r.reworkReceived.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {r.scrapUnits > 0 ? r.scrapUnits.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-text-strong font-mono">
+                      {r.corrections > 0 ? r.corrections.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {hasLaborRates ? (
+                        <span className="text-text-muted italic text-[11px]">
+                          per-operator role mapping needed
+                        </span>
+                      ) : (
+                        <span className="text-text-muted text-[11px]">No labor rate configured</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <ConfidenceBadge confidence={r.confidence} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="text-[11px] text-text-muted leading-relaxed space-y-1">
+        <p>
+          <strong className="text-text-strong">Honest disclosure:</strong>{" "}
+          rows marked <em>legacy code only</em> were attributed by typed
+          operator code without a stable employee match — typos can
+          inflate the leaderboard. New rows post-OP-1B / OP-1C key on
+          employees.id directly. QC columns (QC dmg / Rework / Scrap /
+          Corrections) populate live from QC-5; "—" means no QC event
+          attributed to this operator in the window. Corrections are
+          tallied against the operator who typed the original entry,
+          not the supervisor who corrected it.
+        </p>
+      </div>
+    </div>
+  );
+}

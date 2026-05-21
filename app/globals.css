@@ -2,22 +2,405 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * LUMA-UI-REBUILD-1 v2 — Operations Atelier
+ *
+ * A luxury-industrial command surface: warm-paper canvas with the
+ * engineering grid actually showing through, three-tier depth (page →
+ * surface → well), brand-teal dominant against a copper-amber accent
+ * earned only on the live moment. Status tones used sparingly.
+ *
+ * Signature moves:
+ *  1. 3px status rail with a 1px inner highlight + an outer bloom in
+ *     the rail's own tone — reads as a sliver of light, not a flat
+ *     line.
+ *  2. Surface cards carry a top-edge gradient (1px highlight) and a
+ *     layered shadow so they feel embossed against the warm canvas.
+ *  3. Hero bands sit on their own backdrop: dual-radial brand + accent
+ *     wash + a faint grid overlay scoped inside the band itself.
+ *  4. A unified inverse ribbon replaces ad-hoc KPI grids — one dark
+ *     band, big tabular display numerals, hairline dividers, accent
+ *     glow.
+ *  5. Display numerals run on Fraunces (modern high-contrast serif,
+ *     self-hosted via next/font/google). The body stays on Geist Sans.
+ *  6. Page-load reveal: sections fade-up in cascade. Live signals
+ *     carry a soft accent pulse.
+ */
+
 @layer base {
   :root {
-    --bg-page: 250 250 250;
-    --bg-surface: 255 255 255;
-    --bg-surface-2: 245 245 245;
-    --text: 15 23 42;
-    --text-muted: 71 85 105;
-    --text-subtle: 148 163 184;
-    --border: 226 232 240;
-    --brand-50: 240 253 250;
-    --brand-100: 204 251 241;
-    --brand-700: 13 148 136;
-    --brand-800: 17 94 89;
+    /* ── Canvas + surfaces ─────────────────────────────────────────── */
+    --bg-canvas:      248 247 245;    /* warm-paper */
+    --bg-page:        248 247 245;
+    --bg-surface:     255 255 255;
+    --bg-surface-2:   244 243 240;
+    --bg-surface-3:   234 232 227;
+    --bg-inverse:     14 18 26;        /* deeper than v1, more contrast */
+    --bg-inverse-2:   20 26 36;
+
+    /* ── Text scale ────────────────────────────────────────────────── */
+    --text:            12 16 24;
+    --text-strong:      7 10 16;
+    --text-muted:      82 92 108;
+    --text-subtle:    132 142 158;
+    --text-on-inverse: 244 243 240;
+
+    /* ── Hairlines + structure ─────────────────────────────────────── */
+    --border:          224 222 216;
+    --border-strong:   198 196 188;
+    --border-inverse:   35  42  54;
+
+    /* ── Brand: deep cyan-teal scale ───────────────────────────────── */
+    --brand-50:  240 250 250;
+    --brand-100: 215 240 240;
+    --brand-200: 180 224 222;
+    --brand-500:  22 138 140;
+    --brand-600:  18 122 124;
+    --brand-700:  13 100 102;
+    --brand-800:  11  78  82;
+    --brand-900:  10  60  64;
+
+    /* The ONE hot accent — copper-amber. Used on live signal, primary
+       CTA, active nav rail, the moment that earns it. Never decoration. */
+    --brand-accent:        217 130 32;
+    --brand-accent-bright: 232 152 50;
+
+    /* ── Status tones — earned only, never decoration ─────────────── */
+    --good-50:  236 253 245;
+    --good-500:  16 175 119;
+    --good-700:  14 124  84;
+    --warn-50:  254 247 224;
+    --warn-500: 217 152  12;
+    --warn-700: 161 100  10;
+    --crit-50:  254 239 236;
+    --crit-500: 211  60  50;
+    --crit-700: 162  38  30;
+    --info-50:  239 247 252;
+    --info-500:  22 132 184;
+    --info-700:  18 100 142;
+    --muted-50: 244 243 240;
+    --muted-500: 122 130 142;
+    --muted-700:  82  90 102;
+
+    /* ── Shadows: layered for embossed depth ──────────────────────── */
+    --shadow-card:
+      0 1px 0 rgb(255 255 255 / 0.65) inset,
+      0 1px 2px rgb(15 22 36 / 0.05),
+      0 0 0 1px rgb(var(--border) / 0.7);
+    --shadow-pop:
+      0 1px 0 rgb(255 255 255 / 0.8) inset,
+      0 14px 36px -10px rgb(15 22 36 / 0.18),
+      0 6px 14px -3px rgb(15 22 36 / 0.08);
+    --shadow-hero:
+      0 1px 0 rgb(255 255 255 / 0.7) inset,
+      0 22px 56px -14px rgb(15 22 36 / 0.16),
+      0 6px 18px -5px rgb(15 22 36 / 0.06);
+    --shadow-ribbon:
+      0 1px 0 rgb(255 255 255 / 0.05) inset,
+      0 24px 56px -14px rgb(0 0 0 / 0.45),
+      0 8px 22px -6px rgb(0 0 0 / 0.20);
+    --shadow-glow-accent:
+      0 0 0 4px rgb(var(--brand-accent) / 0.14),
+      0 0 14px 1px rgb(var(--brand-accent) / 0.40);
+
+    /* ── Motion ─────────────────────────────────────────────────────── */
+    --motion-quick:   120ms cubic-bezier(0.2, 0.6, 0.3, 1);
+    --motion-default: 220ms cubic-bezier(0.2, 0.6, 0.3, 1);
+    --motion-slow:    420ms cubic-bezier(0.2, 0.6, 0.3, 1);
+
+    /* ── Fonts (bound by next/font on <html style>) ───────────────── */
+    --font-sans:    "Geist", "InterVariable", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Fraunces", ui-serif, "Iowan Old Style", Georgia, serif;
+    --font-mono:    "GeistMono", "JetBrains Mono", ui-monospace, monospace;
   }
+
+  html {
+    font-feature-settings:
+      "ss01" on, "ss02" on, "ss03" on,
+      "cv01" on, "cv02" on, "cv11" on,
+      "tnum" on, "calt" on;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Eliminate the 300ms tap delay on Android Chrome and older mobile
+     browsers. Safe: does not disable scroll — only prevents double-tap
+     zoom on interactive elements. */
+  button, a, [role="button"], select, input, textarea, summary {
+    touch-action: manipulation;
+  }
+
   body {
-    background: rgb(var(--bg-page));
+    background: rgb(var(--bg-canvas));
     color: rgb(var(--text));
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11", "tnum", "calt";
+    min-height: 100vh;
+    position: relative;
+  }
+
+  /* Engineering-paper grid — visible across the canvas, top-weighted. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      linear-gradient(rgb(15 22 36 / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(15 22 36 / 0.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    background-position: -1px -1px;
+    mask-image: radial-gradient(ellipse 120% 70% at 50% -20%, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 120% 70% at 50% -20%, black 30%, transparent 75%);
+  }
+
+  /* Ambient brand+accent wash at the top of the canvas — sits behind
+     content but above the grid. Gives the page a warm halo. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(60% 40% at 50% -8%, rgb(var(--brand-500) / 0.055) 0%, transparent 70%),
+      radial-gradient(40% 30% at 92% 4%, rgb(var(--brand-accent) / 0.045) 0%, transparent 60%);
+  }
+
+  /* Ensure content sits above the ambient overlays. */
+  body > * { position: relative; z-index: 1; }
+
+  .tabular,
+  .font-mono,
+  code,
+  kbd,
+  samp {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: rgb(var(--brand-500) / 0.22);
+    color: rgb(var(--text-strong));
+  }
+
+  *:focus-visible {
+    outline: 2px solid rgb(var(--brand-500) / 0.75);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  /* ── The signature 3px rail ─────────────────────────────────────── */
+  .rail { position: relative; }
+  .rail::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: 3px;
+    border-top-left-radius: inherit;
+    border-bottom-left-radius: inherit;
+    background: rgb(var(--border-strong));
+    box-shadow:
+      inset 1px 0 0 rgb(255 255 255 / 0.35),
+      4px 0 16px -6px currentColor;
+  }
+  .rail-good::before  { background: rgb(var(--good-500));     color: rgb(var(--good-500)     / 0.45); }
+  .rail-warn::before  { background: rgb(var(--warn-500));     color: rgb(var(--warn-500)     / 0.45); }
+  .rail-crit::before  { background: rgb(var(--crit-500));     color: rgb(var(--crit-500)     / 0.45); }
+  .rail-info::before  { background: rgb(var(--info-500));     color: rgb(var(--info-500)     / 0.45); }
+  .rail-muted::before { background: rgb(var(--muted-500));    color: transparent; }
+  .rail-brand::before { background: rgb(var(--brand-accent)); color: rgb(var(--brand-accent) / 0.60); }
+
+  /* ── Card with top-edge highlight + layered shadow ─────────────── */
+  .surface-card {
+    background:
+      linear-gradient(180deg, rgb(255 255 255) 0%, rgb(252 251 249) 100%);
+    border: 1px solid rgb(var(--border));
+    border-radius: 12px;
+    box-shadow: var(--shadow-card);
+    position: relative;
+  }
+  .surface-card::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 12px;
+    right: 12px;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(255 255 255 / 0.9) 50%,
+      transparent 100%
+    );
+    pointer-events: none;
+  }
+
+  /* ── Inset well ─────────────────────────────────────────────────── */
+  .surface-well {
+    background: rgb(var(--bg-surface-2));
+    border: 1px solid rgb(var(--border));
+    border-radius: 8px;
+  }
+
+  /* ── Hero band — brand+accent radial backdrop + scoped grid ────── */
+  .surface-hero {
+    position: relative;
+    border-radius: 16px;
+    border: 1px solid rgb(var(--border));
+    background:
+      linear-gradient(180deg, rgb(255 255 255) 0%, rgb(250 249 246) 100%);
+    box-shadow: var(--shadow-hero);
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .surface-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(120% 80% at 0% 0%,   rgb(var(--brand-500)  / 0.085) 0%, transparent 55%),
+      radial-gradient(80% 60% at 100% 100%, rgb(var(--brand-accent) / 0.055) 0%, transparent 60%);
+  }
+  .surface-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      linear-gradient(rgb(15 22 36 / 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(15 22 36 / 0.03) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: linear-gradient(180deg, black 0%, transparent 85%);
+    -webkit-mask-image: linear-gradient(180deg, black 0%, transparent 85%);
+  }
+  .surface-hero > * { position: relative; z-index: 1; }
+
+  /* ── Ribbon — unified inverse band for KPI strips ──────────────── */
+  .surface-ribbon {
+    position: relative;
+    border-radius: 14px;
+    background:
+      linear-gradient(180deg, rgb(var(--bg-inverse)) 0%, rgb(var(--bg-inverse-2)) 100%);
+    border: 1px solid rgb(var(--border-inverse));
+    box-shadow: var(--shadow-ribbon);
+    overflow: hidden;
+    color: rgb(var(--text-on-inverse));
+    isolation: isolate;
+  }
+  .surface-ribbon::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(60% 100% at 0% 50%,   rgb(var(--brand-accent) / 0.10) 0%, transparent 60%),
+      radial-gradient(50% 100% at 100% 50%, rgb(var(--brand-500)    / 0.16) 0%, transparent 65%);
+  }
+  .surface-ribbon::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgb(255 255 255 / 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(255 255 255 / 0.025) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: linear-gradient(180deg, transparent 0%, black 50%, transparent 100%);
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, black 50%, transparent 100%);
+  }
+  .surface-ribbon > * { position: relative; z-index: 1; }
+
+  /* ── Eyebrow — small caps, brand-tinted on bright surfaces ─────── */
+  .eyebrow {
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: rgb(var(--text-subtle));
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  /* ── Display number — Fraunces with display optical sizing ─────── */
+  .display-num {
+    font-family: var(--font-display);
+    font-feature-settings: "tnum", "ss01", "lnum";
+    font-variation-settings: "opsz" 144, "SOFT" 50, "WONK" 0;
+    font-weight: 500;
+    letter-spacing: -0.018em;
+    line-height: 0.92;
+    color: rgb(var(--text-strong));
+  }
+  .display-title {
+    font-family: var(--font-display);
+    font-feature-settings: "ss01";
+    font-variation-settings: "opsz" 96, "SOFT" 50, "WONK" 0;
+    font-weight: 500;
+    letter-spacing: -0.022em;
+    line-height: 1.02;
+    color: rgb(var(--text-strong));
+  }
+
+  /* ── Brand-accent pip (live signal) ─────────────────────────────── */
+  .glow-accent {
+    box-shadow: var(--shadow-glow-accent);
+    background: rgb(var(--brand-accent));
+  }
+}
+
+@layer utilities {
+  .bg-inverse {
+    background: rgb(var(--bg-inverse));
+    color: rgb(var(--text-on-inverse));
+  }
+  .bg-inverse-2 { background: rgb(var(--bg-inverse-2)); }
+  .border-inverse { border-color: rgb(var(--border-inverse)); }
+
+  .divider-h { border-top: 1px solid rgb(var(--border)); }
+  .divider-v { border-left: 1px solid rgb(var(--border)); }
+
+  /* Page-load reveal — staggered cascade. */
+  @keyframes lift-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .reveal   { animation: lift-in var(--motion-slow) both; }
+  .reveal-1 { animation-delay:  40ms; }
+  .reveal-2 { animation-delay:  90ms; }
+  .reveal-3 { animation-delay: 150ms; }
+  .reveal-4 { animation-delay: 220ms; }
+  .reveal-5 { animation-delay: 300ms; }
+  .reveal-6 { animation-delay: 380ms; }
+
+  /* Accent pulse — for the live signal pip on hero bands. */
+  @keyframes pulse-accent {
+    0%, 100% {
+      box-shadow:
+        0 0 0 0   rgb(var(--brand-accent) / 0.50),
+        0 0 0 1px rgb(var(--brand-accent) / 0.75);
+    }
+    50% {
+      box-shadow:
+        0 0 0 10px rgb(var(--brand-accent) / 0),
+        0 0 0 1px  rgb(var(--brand-accent) / 0.55);
+    }
+  }
+  .pulse-accent { animation: pulse-accent 2.4s ease-out infinite; }
+
+  /* Subtle hover lift for clickable cards. */
+  .lift-on-hover {
+    transition: transform var(--motion-default), box-shadow var(--motion-default), border-color var(--motion-default);
+  }
+  .lift-on-hover:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-pop);
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { X, type LucideIcon } from "lucide-react";
+import { X } from "lucide-react";
 import type { PackagingMaterial } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -22,14 +22,16 @@ const KINDS = [
   ["OTHER", "Other"],
 ] as const;
 
+// triggerIcon: JSX node, not component reference. See product-dialog
+// for the Next.js 15 / digest 3173940408 explanation.
 export function PackagingDialog({
   row,
   triggerLabel,
-  triggerIcon: Icon,
+  triggerIcon,
 }: {
   row?: PackagingMaterial;
   triggerLabel: string;
-  triggerIcon?: LucideIcon;
+  triggerIcon?: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -44,7 +46,7 @@ export function PackagingDialog({
         size={isEdit ? "sm" : "md"}
         onClick={() => setOpen(true)}
       >
-        {Icon && <Icon className="h-4 w-4" aria-hidden />}
+        {triggerIcon}
         {triggerLabel}
       </Button>
 

@@ -35,10 +35,31 @@ services:
       OTEL_DEPLOYMENT_ENVIRONMENT: ${OTEL_DEPLOYMENT_ENVIRONMENT:-production}
       OTEL_PROMETHEUS_PORT: "9464"
       OTEL_PROMETHEUS_HOST: "0.0.0.0"
-      ZOHO_INTEGRATION_URL: ${ZOHO_INTEGRATION_URL:-http://192.168.1.190:9503}
+      # ZOHO-GW-1: gateway lives on LXC 9503 (zoho-integration-service)
+      # at 192.168.1.205:8000. The optional shared secret is read by
+      # lib/integrations/zoho/gateway.ts and sent as x-luma-zoho-secret;
+      # also sent as X-Internal-Token to match the gateway's auth.
+      ZOHO_INTEGRATION_URL: ${ZOHO_INTEGRATION_URL:-http://192.168.1.205:8000}
+      ZOHO_INTEGRATION_SECRET: ${ZOHO_INTEGRATION_SECRET:-}
+      # ZOHO-GW-2: multi-brand gateway. Pick which brand's Zoho creds
+      # the gateway should use on this Luma deployment. Sent on every
+      # protected call as X-Brand. Required for ZOHO-2 onward.
+      ZOHO_BRAND: ${ZOHO_BRAND:-}
+      # ZOHO-GW-3: bearer-auth assembly service client (lib/zoho/assembly-service-client.ts).
+      # ZOHO_SERVICE_BEARER_SECRET — the rotated per-deployment token.
+      # ZOHO_DRY_RUN_WRITES_ENABLED — must be exactly "true" to allow write calls.
+      # ZOHO_WAREHOUSE_ID — optional; omit or leave empty to skip warehouse header.
+      ZOHO_SERVICE_BEARER_SECRET: ${ZOHO_SERVICE_BEARER_SECRET:-}
+      ZOHO_DRY_RUN_WRITES_ENABLED: ${ZOHO_DRY_RUN_WRITES_ENABLED:-false}
+      ZOHO_WAREHOUSE_ID: ${ZOHO_WAREHOUSE_ID:-}
       AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER:-}
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+      # PT-3 PackTrack webhook shared-secret (validated against
+      # x-packtrack-secret header in app/api/integrations/packtrack/
+      # receipts/route.ts). Empty default = webhook returns 503 until
+      # the operator sets it in /opt/luma/.env.
+      PACKTRACK_INTEGRATION_SECRET: ${PACKTRACK_INTEGRATION_SECRET:-}
       STORAGE_ROOT: /data
       NODE_ENV: production
     volumes:

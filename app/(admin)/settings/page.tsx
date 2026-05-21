@@ -128,11 +128,18 @@ export default async function SettingsPage() {
               hint={`${machineCount?.n ?? 0} machines · ${stationCount?.n ?? 0} stations`}
             />
             <ConfigLink
-              href="/packaging"
+              href="/settings/materials"
               icon={PackageCheck}
-              label="Packaging materials"
+              label="Packaging & Materials"
               count={packagingCount?.n ?? 0}
-              hint="bottles, caps, labels…"
+              hint="blister cards, display boxes, master cases, labels, foil"
+            />
+            <ConfigLink
+              href="/settings/blister-standards"
+              icon={Activity}
+              label="Blister standards"
+              count={0}
+              hint="PVC + foil consumption rates"
             />
             <ConfigLink
               href="/qr-cards"

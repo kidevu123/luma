@@ -6,6 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Label } from "@/components/ui/input";
 import { StatusPill } from "@/components/ui/page-header";
+import type { LotSourceSummary } from "@/lib/db/queries/products";
 import {
   toggleAllowedTabletAction,
   saveSpecAction,
@@ -40,12 +41,14 @@ export function BomEditor({
   materials,
   allowed,
   specs,
+  lotSummary,
 }: {
   productId: string;
   tablets: Tablet[];
   materials: Material[];
   allowed: AllowedRow[];
   specs: SpecRow[];
+  lotSummary?: Map<string, LotSourceSummary>;
 }) {
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -130,7 +133,7 @@ export function BomEditor({
               {specs.length} item{specs.length === 1 ? "" : "s"}
             </span>
           </div>
-          <SpecsTable productId={productId} specs={specs} materials={materials} />
+          <SpecsTable productId={productId} specs={specs} materials={materials} {...(lotSummary ? { lotSummary } : {})} />
         </section>
 
         {error && (
@@ -143,14 +146,39 @@ export function BomEditor({
   );
 }
 
+function lotSourceBadge(summary: LotSourceSummary | undefined): {
+  label: string;
+  kind: "ok" | "warn" | "danger" | "neutral" | "info";
+} {
+  if (!summary) return { label: "No lots on record", kind: "neutral" };
+  if (summary.totalQty === 0) return { label: "No stock", kind: "danger" };
+  if (summary.packtrack > 0) return { label: "PackTrack-backed", kind: "ok" };
+  return { label: "Manual only", kind: "warn" };
+}
+
+function lotSourceDetail(summary: LotSourceSummary | undefined): string | null {
+  if (!summary) return null;
+  const parts: string[] = [];
+  if (summary.packtrack > 0) {
+    parts.push(`${summary.packtrack} PackTrack lot${summary.packtrack === 1 ? "" : "s"}`);
+  }
+  if (summary.manual > 0) {
+    parts.push(`${summary.manual} manual lot${summary.manual === 1 ? "" : "s"}`);
+  }
+  if (parts.length === 0) return null;
+  return `${parts.join(" · ")} · ${summary.totalQty.toLocaleString()} available`;
+}
+
 function SpecsTable({
   productId,
   specs,
   materials,
+  lotSummary,
 }: {
   productId: string;
   specs: SpecRow[];
   materials: Material[];
+  lotSummary?: Map<string, LotSourceSummary>;
 }) {
   const [adding, setAdding] = React.useState(false);
   const [draft, setDraft] = React.useState({
@@ -207,36 +235,47 @@ function SpecsTable({
     <div className="space-y-2">
       {specs.length > 0 && (
         <ul className="space-y-1">
-          {specs.map((s) => (
-            <li
-              key={`${s.packagingMaterialId}|${s.perScope}`}
-              className="flex items-center justify-between rounded-md border border-border/70 bg-surface px-2.5 py-1.5"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium truncate">{s.materialName}</div>
-                <div className="text-[11px] text-text-subtle font-mono">
-                  {s.materialSku} · {s.materialKind}
+          {specs.map((s) => {
+            const summary = lotSummary?.get(s.packagingMaterialId);
+            const badge = lotSourceBadge(summary);
+            const detail = lotSourceDetail(summary);
+            return (
+              <li
+                key={`${s.packagingMaterialId}|${s.perScope}`}
+                className="rounded-md border border-border/70 bg-surface px-2.5 py-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{s.materialName}</div>
+                    <div className="text-[11px] text-text-subtle font-mono">
+                      {s.materialSku} · {s.materialKind}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="tabular-nums font-medium">
+                      {s.qtyPerUnit} {s.materialUom}
+                    </span>
+                    <StatusPill kind={s.perScope === "UNIT" ? "info" : "neutral"}>
+                      per {s.perScope.toLowerCase()}
+                    </StatusPill>
+                    <StatusPill kind={badge.kind}>{badge.label}</StatusPill>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      type="button"
+                      disabled={pending === `${s.packagingMaterialId}|${s.perScope}`}
+                      onClick={() => remove(s)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="tabular-nums font-medium">
-                  {s.qtyPerUnit} {s.materialUom}
-                </span>
-                <StatusPill kind={s.perScope === "UNIT" ? "info" : "neutral"}>
-                  per {s.perScope.toLowerCase()}
-                </StatusPill>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  type="button"
-                  disabled={pending === `${s.packagingMaterialId}|${s.perScope}`}
-                  onClick={() => remove(s)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </li>
-          ))}
+                {detail && (
+                  <div className="text-[10.5px] text-text-subtle/70 mt-0.5">{detail}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 
