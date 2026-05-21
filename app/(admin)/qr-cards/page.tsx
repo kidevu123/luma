@@ -21,7 +21,9 @@ export const dynamic = "force-dynamic";
 export default async function QrCardsPage() {
   await requireAdmin();
   const rows = await listQrCards();
-  const idleCount = rows.filter((r) => r.card.status === "IDLE").length;
+  const idleRawBagCount = rows.filter(
+    (r) => r.card.status === "IDLE" && r.card.cardType === "RAW_BAG",
+  ).length;
 
   return (
     <div className="space-y-5">
@@ -30,10 +32,10 @@ export default async function QrCardsPage() {
         description="Physical scan badges. Each card carries one workflow bag at a time."
         actions={
           <div className="flex items-center gap-2">
-            {idleCount > 0 && (
+            {idleRawBagCount > 0 && (
               <Button asChild variant="secondary" size="sm">
                 <Link href="/qr-cards/labels" target="_blank" rel="noopener">
-                  <Printer className="h-4 w-4" /> Print {idleCount} idle labels
+                  <Printer className="h-4 w-4" /> Print idle raw bag labels ({idleRawBagCount})
                 </Link>
               </Button>
             )}
