@@ -14,7 +14,7 @@
 //     intake "result" panel and the standalone Lookup receipt / batch
 //     surface.
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   batches,
@@ -24,6 +24,7 @@ import {
   poLines,
   products,
   purchaseOrders,
+  qrCards,
   receives,
   smallBoxes,
   tabletTypes,
@@ -54,6 +55,7 @@ export type CreateRawBagIntakeResult =
       bagCount: number;
       receiptRange: { first: string; last: string } | null;
       qrCount: number;
+      qrAssigned: number; // count of QR cards marked ASSIGNED
       orderedQuantity: number | null;
       receivedQuantity: number;
       variance: number | null;
@@ -363,6 +365,57 @@ export async function createRawBagIntakeAtomic(
       tx,
     );
 
+    // ── Reserve QR cards atomically within the same transaction ────────
+    // For every bag with a non-null bag_qr_code, validate the matching
+    // qrCards row (must be RAW_BAG + IDLE) then mark it ASSIGNED.
+    // Throws if any card is invalid — the whole transaction rolls back.
+    const qrCodesToReserve = bagRows
+      .map((r) => r.bagQrCode)
+      .filter((q): q is string => q != null);
+
+    let qrAssigned = 0;
+    if (qrCodesToReserve.length > 0) {
+      const cards = await tx
+        .select()
+        .from(qrCards)
+        .where(inArray(qrCards.scanToken, qrCodesToReserve));
+
+      // Build lookup: scanToken → card row
+      const cardByToken = new Map(cards.map((c) => [c.scanToken, c]));
+
+      for (const token of qrCodesToReserve) {
+        const card = cardByToken.get(token);
+        if (!card) {
+          throw new Error(
+            `QR code "${token}" is not in the QR card inventory. Use a RAW_BAG QR card.`,
+          );
+        }
+        if (card.cardType !== "RAW_BAG") {
+          throw new Error(
+            card.cardType === "VARIETY_PACK"
+              ? `QR card "${token}" is a variety pack card and cannot be used for a raw bag.`
+              : `QR card "${token}" is not a raw bag card (type: ${card.cardType}).`,
+          );
+        }
+        if (card.status !== "IDLE") {
+          throw new Error(
+            card.status === "ASSIGNED"
+              ? `QR card "${token}" is already assigned to another bag.`
+              : `QR card "${token}" is not available (status: ${card.status}).`,
+          );
+        }
+      }
+
+      // All valid — mark ASSIGNED (assignedWorkflowBagId stays null here;
+      // the floor scanner sets it when production starts).
+      await tx
+        .update(qrCards)
+        .set({ status: "ASSIGNED" as const })
+        .where(inArray(qrCards.scanToken, qrCodesToReserve));
+
+      qrAssigned = qrCodesToReserve.length;
+    }
+
     const receiptValues = bagRows.map((r) => r.internalReceiptNumber);
     return {
       ok: true,
@@ -384,6 +437,7 @@ export async function createRawBagIntakeAtomic(
             }
           : null,
       qrCount: bagRows.filter((r) => r.bagQrCode != null).length,
+      qrAssigned,
       orderedQuantity,
       receivedQuantity: totalDeclared,
       variance: orderedQuantity == null ? null : totalDeclared - orderedQuantity,
