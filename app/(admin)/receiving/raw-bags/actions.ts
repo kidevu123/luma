@@ -3,7 +3,8 @@
 // INTAKE-WORKFLOW-1 — server actions for /receiving/raw-bags.
 
 import { revalidatePath } from "next/cache";
-import { requireLead } from "@/lib/auth-guards";
+import { requireAdmin, requireLead } from "@/lib/auth-guards";
+import { syncPurchaseOrdersFromZoho } from "@/lib/zoho/po-sync";
 import {
   createRawBagIntakeAtomic,
   findRawBagByReceiptOrQr,
@@ -27,4 +28,18 @@ export async function createRawBagIntakeAction(
 export async function lookupRawBagAction(value: string): Promise<RawBagLookupResult> {
   await requireLead();
   return findRawBagByReceiptOrQr(value);
+}
+
+export async function syncPurchaseOrdersFromZohoAction(): Promise<
+  { ok: true; result: import("@/lib/zoho/po-sync").PoSyncResult } |
+  { ok: false; error: string }
+> {
+  await requireAdmin();
+  try {
+    const result = await syncPurchaseOrdersFromZoho();
+    revalidatePath("/receiving/raw-bags");
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }

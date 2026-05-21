@@ -26,6 +26,7 @@ import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { RawBagIntakeForm } from "./raw-bag-intake-form";
 import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 import { PageHeader } from "@/components/ui/page-header";
+import { SyncPoButton } from "./sync-po-button";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +98,7 @@ export default async function ReceiveRawBagsPage() {
         >
           {zohoReady ? "Zoho: ready" : `Zoho: ${readiness}`}
         </span>
+        <SyncPoButton />
       </div>
 
       {!zohoReady ? (
