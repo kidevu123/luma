@@ -3,7 +3,7 @@
 
 import { db } from "../lib/db";
 import { qrCards } from "../lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 interface CardSpec {
   scanToken: string;
@@ -95,8 +95,10 @@ async function main() {
       .update(qrCards)
       .set({ cardType: "RAW_BAG" })
       .where(
-        inArray(qrCards.scanToken, unknownRawBagTokens) &&
+        and(
+          inArray(qrCards.scanToken, unknownRawBagTokens),
           eq(qrCards.cardType, "UNKNOWN"),
+        ),
       );
     typeCorrected += unknownRawBagTokens.length;
   }
@@ -106,8 +108,10 @@ async function main() {
       .update(qrCards)
       .set({ cardType: "VARIETY_PACK" })
       .where(
-        inArray(qrCards.scanToken, unknownVarietyPackTokens) &&
+        and(
+          inArray(qrCards.scanToken, unknownVarietyPackTokens),
           eq(qrCards.cardType, "UNKNOWN"),
+        ),
       );
     typeCorrected += unknownVarietyPackTokens.length;
   }
