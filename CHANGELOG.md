@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.8] — 2026-05-21
+
+### Fixed
+- Zoho readiness banner: three-tier status model. Offline Zoho with local POs shows neutral "Using synced PO data from Luma" info message instead of alarming warning. Warning only appears when Zoho is offline AND no local POs exist.
+- PO dropdown: removed `[OPEN]`/`[RECEIVING]` status tag from main option label — PO number + vendor is sufficient.
+- Helper copy: "Pick a PO to choose the tablet line item being received." (was: "Pick a PO to see its line items as receive cards.")
+- Zero-line empty state: improved copy — now mentions all three resolution options (sync, different PO, manual reference).
+- Stale server action: `handleSave` and `SyncPoButton` now catch thrown errors and show "App updated — please refresh" instead of hanging indefinitely.
+
+### Added
+- Raw bag intake: per-row Remove (x) button. Removing an unsaved row frees its QR code from the pending submission; pool exhaustion warning updates automatically.
+- Start Production: when a raw bag is looked up and has a QR card reserved at intake, that card is auto-selected in the QR picker and labelled "QR card assigned at intake for this bag." If the reserved card is unavailable, a warning is shown.
+- 6 new QR edge-case unit tests: 10-row unique assignment, row removal QR freeing, pool exhaustion threshold, empty-pool null-fill (2072 total).
+
+### Removed
+- Section 3 bag rows title no longer shows duplicate "(N generated, N unsaved)" — now shows just the current count.
+
 ## [0.2.7] — 2026-05-21
 
 ### Added
