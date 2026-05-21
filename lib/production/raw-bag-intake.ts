@@ -20,6 +20,23 @@ export type RawBagRowSeed = {
   notes: string | null;
 };
 
+/** Pure: distribute total count across bagCount bags as evenly as possible.
+ *  Integer-safe: sum of returned values always equals total.
+ *  Remainder distributed to the first bags.
+ *  Returns empty array when bagCount <= 0 or total <= 0.
+ */
+export function distributeDeclaredTotal(
+  total: number,
+  bagCount: number,
+): number[] {
+  if (bagCount <= 0 || total <= 0) return [];
+  const base = Math.floor(total / bagCount);
+  const remainder = total % bagCount;
+  return Array.from({ length: bagCount }, (_, i) =>
+    base + (i < remainder ? 1 : 0),
+  );
+}
+
 /** Pure: generate N bag-row seeds with ascending receipt numbers.
  *
  * Receipt number strategy:
@@ -38,7 +55,8 @@ export function generateBagRowSeed(input: {
   count: number;
   receiptStart: string;
   receiptPrefix?: string | null;
-  declaredCount?: number | null;
+  declaredCount?: number | null;    // broadcast to all rows (backward compat)
+  declaredTotal?: number | null;    // distribute evenly across rows (new)
   weightGrams?: number | null;
 }): RawBagRowSeed[] {
   const count = Math.max(0, Math.floor(input.count));
@@ -50,7 +68,10 @@ export function generateBagRowSeed(input: {
       : parts.prefix;
   const startNum = parts.number;
   const pad = parts.padding;
-  const decl = input.declaredCount ?? null;
+  // If declaredTotal is provided, distribute. Otherwise broadcast declaredCount.
+  const counts: (number | null)[] = input.declaredTotal != null && count > 0
+    ? distributeDeclaredTotal(input.declaredTotal, count)
+    : Array(count).fill(input.declaredCount ?? null);
   const wt = input.weightGrams ?? null;
   return Array.from({ length: count }, (_, i) => {
     const n = startNum + i;
@@ -59,7 +80,7 @@ export function generateBagRowSeed(input: {
       bagSequence: i + 1,
       receiptNumber: `${prefix}${padded}`,
       bagQrCode: null,
-      declaredCount: decl,
+      declaredCount: counts[i] ?? null,
       weightGrams: wt,
       notes: null,
     };

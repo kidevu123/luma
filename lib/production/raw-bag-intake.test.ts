@@ -6,6 +6,7 @@ import {
   computeVariance,
   derivePoVerificationStatus,
   detectDuplicatesInPayload,
+  distributeDeclaredTotal,
   generateBagRowSeed,
   preflightRawBagIntake,
   splitReceiptStart,
@@ -117,6 +118,74 @@ describe("generateBagRowSeed", () => {
   it("bagQrCode is null on every seed (operator fills in)", () => {
     const rows = generateBagRowSeed({ count: 3, receiptStart: "1001" });
     expect(rows.every((r) => r.bagQrCode === null)).toBe(true);
+  });
+
+  it("declaredTotal distributes evenly when divisible", () => {
+    const rows = generateBagRowSeed({
+      count: 10,
+      receiptStart: "1001",
+      declaredTotal: 43100,
+    });
+    expect(rows.every((r) => r.declaredCount === 4310)).toBe(true);
+    expect(rows.reduce((s, r) => s + (r.declaredCount ?? 0), 0)).toBe(43100);
+  });
+
+  it("declaredTotal distributes remainder to first bags", () => {
+    const rows = generateBagRowSeed({
+      count: 3,
+      receiptStart: "1001",
+      declaredTotal: 10,
+    });
+    // 10 / 3 = 3 remainder 1 → [4, 3, 3]
+    expect(rows.map((r) => r.declaredCount)).toEqual([4, 3, 3]);
+    expect(rows.reduce((s, r) => s + (r.declaredCount ?? 0), 0)).toBe(10);
+  });
+
+  it("sum of declaredTotal rows always equals total", () => {
+    // edge case: 43100 across 7 bags
+    const rows = generateBagRowSeed({
+      count: 7,
+      receiptStart: "1",
+      declaredTotal: 43100,
+    });
+    expect(rows.reduce((s, r) => s + (r.declaredCount ?? 0), 0)).toBe(43100);
+  });
+
+  it("declaredCount (per-bag) still broadcasts to all rows", () => {
+    const rows = generateBagRowSeed({
+      count: 5,
+      receiptStart: "1001",
+      declaredCount: 4310,
+    });
+    expect(rows.every((r) => r.declaredCount === 4310)).toBe(true);
+  });
+});
+
+// ─── distributeDeclaredTotal ───────────────────────────────────────────
+
+describe("distributeDeclaredTotal", () => {
+  it("returns empty array for zero bags", () => {
+    expect(distributeDeclaredTotal(100, 0)).toEqual([]);
+  });
+
+  it("returns empty array for zero total", () => {
+    expect(distributeDeclaredTotal(0, 10)).toEqual([]);
+  });
+
+  it("exact division — all bags equal", () => {
+    expect(distributeDeclaredTotal(100, 4)).toEqual([25, 25, 25, 25]);
+  });
+
+  it("remainder distributed to first bags", () => {
+    // 10 / 3 = 3r1 → [4, 3, 3]
+    expect(distributeDeclaredTotal(10, 3)).toEqual([4, 3, 3]);
+  });
+
+  it("sum always equals total", () => {
+    for (const [total, count] of [[43100, 10], [1, 3], [99999, 7], [5, 5]]) {
+      const arr = distributeDeclaredTotal(total!, count!);
+      expect(arr.reduce((a, b) => a + b, 0)).toBe(total);
+    }
   });
 });
 
