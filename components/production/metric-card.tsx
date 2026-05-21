@@ -19,60 +19,68 @@ export function MetricCard({
   className,
   hint,
   size = "md",
+  variant = "dark",
 }: {
   label: string;
   metric: MetricResult;
   className?: string;
   hint?: string;
   size?: "sm" | "md" | "lg";
+  variant?: "dark" | "light";
 }) {
   const isMissing = metric.confidence === "MISSING";
   const valueText = formatValue(metric);
   const unit = metric.unit ?? "";
+
+  const isLight = variant === "light";
+
+  const containerClass = isLight
+    ? "rounded-md border border-border bg-surface px-3 py-2.5"
+    : cn(
+        "rounded-md border bg-slate-900/60 border-slate-700/60 px-3 py-2.5",
+        "shadow-[inset_0_1px_0_0_rgb(148_163_184_/_0.05)]",
+      );
+
+  const labelClass = isLight
+    ? "text-[10px] uppercase tracking-[0.10em] text-text-subtle leading-tight"
+    : "text-[10px] uppercase tracking-[0.10em] text-slate-400 leading-tight";
+
   const valueClass = cn(
     "font-mono tabular-nums tracking-tight",
-    isMissing ? "text-slate-400" : "text-slate-50",
+    isLight
+      ? isMissing ? "text-text-muted" : "text-text-strong"
+      : isMissing ? "text-slate-400" : "text-slate-50",
     size === "sm" && "text-lg",
     size === "md" && "text-2xl",
     size === "lg" && "text-3xl",
   );
+
+  const missingLabelClass = isLight ? "text-sm text-text-muted leading-tight" : "text-sm text-slate-300 leading-tight";
+  const unitClass = isLight ? "text-xs text-text-muted truncate" : "text-xs text-slate-400 truncate";
+  const hintClass = isLight ? "mt-1 text-[10px] text-text-subtle leading-tight line-clamp-2" : "mt-1 text-[10px] text-slate-500 leading-tight line-clamp-2";
+  const missingInputsClass = isLight ? "mt-1 text-[10px] text-text-subtle leading-tight" : "mt-1 text-[10px] text-slate-500 leading-tight";
+
   return (
-    <div
-      className={cn(
-        "rounded-md border bg-slate-900/60 border-slate-700/60 px-3 py-2.5",
-        "shadow-[inset_0_1px_0_0_rgb(148_163_184_/_0.05)]",
-        className,
-      )}
-    >
+    <div className={cn(containerClass, className)}>
       <div className="flex items-start justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-[0.10em] text-slate-400 leading-tight">
-          {label}
-        </div>
+        <div className={labelClass}>{label}</div>
         <ConfidenceBadge confidence={metric.confidence} />
       </div>
       <div className="mt-1.5 flex items-baseline gap-1.5 min-w-0">
         {isMissing ? (
-          <div className="text-sm text-slate-300 leading-tight">
-            {metric.label ?? "—"}
-          </div>
+          <div className={missingLabelClass}>{metric.label ?? "—"}</div>
         ) : (
           <>
             <div className={valueClass}>{valueText}</div>
-            {unit && (
-              <div className="text-xs text-slate-400 truncate">{unit}</div>
-            )}
+            {unit && <div className={unitClass}>{unit}</div>}
           </>
         )}
       </div>
       {(metric.explanation || hint) && !isMissing && (
-        <div className="mt-1 text-[10px] text-slate-500 leading-tight line-clamp-2">
-          {metric.explanation ?? hint}
-        </div>
+        <div className={hintClass}>{metric.explanation ?? hint}</div>
       )}
       {isMissing && metric.missingInputs.length > 0 && (
-        <div className="mt-1 text-[10px] text-slate-500 leading-tight">
-          missing: {metric.missingInputs.join(", ")}
-        </div>
+        <div className={missingInputsClass}>missing: {metric.missingInputs.join(", ")}</div>
       )}
     </div>
   );

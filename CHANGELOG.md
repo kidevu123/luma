@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3] — 2026-05-21
+
+### Improved
+- Packaging output page: MetricCard now supports `variant="light"` for the admin UI. All metric cards on the Packaging output page now use white/light-surface cards with proper contrast instead of dark `bg-slate-900` tiles. Floor-board MetricCards unchanged (still `variant="dark"` by default).
+- Packaging output page: "Unknown" product label replaced with muted "—" dash in queue tables.
+- Packaging output page: Added conditional note in queue section header when product name is blank (bag not yet mapped via PRODUCT_MAPPED event).
+- Packaging output page: Removed spurious italic from empty-state text and null dash spans.
+
 ## [0.2.2] — 2026-05-21
 
 ### Added

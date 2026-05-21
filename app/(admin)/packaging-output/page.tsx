@@ -244,11 +244,16 @@ export default async function PackagingOutputPage() {
             <div className="space-y-5">
               {/* Sub-section 1: Finalized bags awaiting lot */}
               <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle mb-2">
-                  Finalized — awaiting lot
+                <div className="flex items-baseline gap-2 mb-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
+                    Finalized — awaiting lot
+                  </div>
+                  {awaitingLot.some((b) => !b.productName) && (
+                    <span className="text-[10px] text-text-subtle">· product blank = bag not yet mapped via PRODUCT_MAPPED event</span>
+                  )}
                 </div>
                 {awaitingLot.length === 0 ? (
-                  <p className="text-[12px] text-text-muted italic">None — all finalized bags have lots.</p>
+                  <p className="text-[12px] text-text-muted">None — all finalized bags have lots.</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="text-[12.5px] w-full">
@@ -268,10 +273,10 @@ export default async function PackagingOutputPage() {
                         {awaitingLot.map((bag) => (
                           <tr key={bag.id} className="border-b border-border/30 last:border-0">
                             <td className="py-2 pr-4 font-mono text-[11.5px] text-text-strong">
-                              {bag.receiptNumber ?? <span className="text-text-subtle italic">—</span>}
+                              {bag.receiptNumber ?? <span className="text-text-subtle">—</span>}
                             </td>
                             <td className="py-2 pr-4">
-                              <div className="text-text-strong">{bag.productName ?? <span className="text-text-subtle italic">Unknown</span>}</div>
+                              <div className="text-text-strong">{bag.productName ?? <span className="text-text-subtle text-[11px]">—</span>}</div>
                               {bag.productSku ? (
                                 <div className="font-mono text-[10.5px] text-text-muted">{bag.productSku}</div>
                               ) : null}
@@ -312,7 +317,7 @@ export default async function PackagingOutputPage() {
                   Packaged — awaiting floor finalization
                 </div>
                 {awaitingFinalize.length === 0 ? (
-                  <p className="text-[12px] text-text-muted italic">None — no bags currently at PACKAGED stage.</p>
+                  <p className="text-[12px] text-text-muted">None — no bags currently at PACKAGED stage.</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="text-[12.5px] w-full">
@@ -331,10 +336,10 @@ export default async function PackagingOutputPage() {
                         {awaitingFinalize.map((bag) => (
                           <tr key={bag.id} className="border-b border-border/30 last:border-0">
                             <td className="py-2 pr-4 font-mono text-[11.5px] text-text-strong">
-                              {bag.receiptNumber ?? <span className="text-text-subtle italic">—</span>}
+                              {bag.receiptNumber ?? <span className="text-text-subtle">—</span>}
                             </td>
                             <td className="py-2 pr-4">
-                              <div className="text-text-strong">{bag.productName ?? <span className="text-text-subtle italic">Unknown</span>}</div>
+                              <div className="text-text-strong">{bag.productName ?? <span className="text-text-subtle text-[11px]">—</span>}</div>
                               {bag.productSku ? (
                                 <div className="font-mono text-[10.5px] text-text-muted">{bag.productSku}</div>
                               ) : null}
@@ -378,31 +383,17 @@ export default async function PackagingOutputPage() {
         </div>
         <div className="px-4 py-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
-            <MetricCard label="Cases" metric={packaging.masterCases ?? FALLBACK} />
-            <MetricCard
-              label="Displays"
-              metric={packaging.displaysMade ?? FALLBACK}
-            />
-            <MetricCard
-              label="Loose cards"
-              metric={packaging.looseCards ?? FALLBACK}
-            />
-            <MetricCard
-              label="Damaged"
-              metric={packaging.damagedPackaging ?? FALLBACK}
-            />
-            <MetricCard
-              label="Ripped cards"
-              metric={packaging.rippedCards ?? FALLBACK}
-            />
-            <MetricCard
-              label="Bags finalised"
-              metric={packaging.bagsFinalised ?? FALLBACK}
-            />
+            <MetricCard label="Cases" metric={packaging.masterCases ?? FALLBACK} variant="light" />
+            <MetricCard label="Displays" metric={packaging.displaysMade ?? FALLBACK} variant="light" />
+            <MetricCard label="Loose cards" metric={packaging.looseCards ?? FALLBACK} variant="light" />
+            <MetricCard label="Damaged" metric={packaging.damagedPackaging ?? FALLBACK} variant="light" />
+            <MetricCard label="Ripped cards" metric={packaging.rippedCards ?? FALLBACK} variant="light" />
+            <MetricCard label="Bags finalised" metric={packaging.bagsFinalised ?? FALLBACK} variant="light" />
             <MetricCard
               label="Damage rate"
               metric={packaging.damageRatePct ?? FALLBACK}
               hint="(damaged + ripped) / (cases + displays + loose)"
+              variant="light"
             />
           </div>
         </div>
@@ -419,30 +410,12 @@ export default async function PackagingOutputPage() {
         </div>
         <div className="px-4 py-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-            <MetricCard
-              label="Released lots"
-              metric={finished.releasedLots ?? FALLBACK}
-            />
-            <MetricCard
-              label="Released units"
-              metric={finished.releasedUnits ?? FALLBACK}
-            />
-            <MetricCard
-              label="Released cases"
-              metric={finished.releasedCases ?? FALLBACK}
-            />
-            <MetricCard
-              label="Released displays"
-              metric={finished.releasedDisplays ?? FALLBACK}
-            />
-            <MetricCard
-              label="Pending QC"
-              metric={finished.pendingQcLots ?? FALLBACK}
-            />
-            <MetricCard
-              label="On-time"
-              metric={finished.onTimeCompletionPct ?? FALLBACK}
-            />
+            <MetricCard label="Released lots" metric={finished.releasedLots ?? FALLBACK} variant="light" />
+            <MetricCard label="Released units" metric={finished.releasedUnits ?? FALLBACK} variant="light" />
+            <MetricCard label="Released cases" metric={finished.releasedCases ?? FALLBACK} variant="light" />
+            <MetricCard label="Released displays" metric={finished.releasedDisplays ?? FALLBACK} variant="light" />
+            <MetricCard label="Pending QC" metric={finished.pendingQcLots ?? FALLBACK} variant="light" />
+            <MetricCard label="On-time" metric={finished.onTimeCompletionPct ?? FALLBACK} variant="light" />
           </div>
         </div>
       </div>
