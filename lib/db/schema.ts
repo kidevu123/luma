@@ -519,6 +519,7 @@ export const purchaseOrders = pgTable(
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     notes: text("notes"),
+    isTabletPo: boolean("is_tablet_po"),
   },
   (t) => [
     uniqueIndex("po_number_unique").on(t.poNumber),
