@@ -576,9 +576,8 @@ function PoLineCards({
           </div>
           {linesForPo.length === 0 ? (
             <div className="rounded-md border border-dashed border-border/60 bg-surface/40 px-4 py-6 text-center text-sm text-text-muted">
-              This PO has no lines configured. Add lines via{" "}
-              <span className="font-mono">/inbound/[id]</span> or use the
-              manual PO reference tab above.
+              No line items found for this PO. Run &ldquo;Sync POs from Zoho&rdquo; to import
+              lines, or use the manual PO reference tab above.
             </div>
           ) : (
             <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">

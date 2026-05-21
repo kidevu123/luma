@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.4] — 2026-05-21
+
+### Fixed
+- PO sync now fetches line items: `syncPurchaseOrdersFromZoho()` calls the Zoho detail endpoint for every OPEN/RECEIVING PO and upserts `po_lines` rows keyed on `zohoLineItemId`. Lines auto-match to local `tabletTypeId` via `tablet_types.zoho_item_id`; unmatched lines store the Zoho item name + id in `notes`. Sync result now reports `lineUpserted`, `lineSkipped`, and `detailsFetched`.
+- Raw-bag intake: empty-state message now directs users to the Zoho sync button rather than the inbound page.
+
 ## [0.2.3] — 2026-05-21
 
 ### Improved
