@@ -10,7 +10,7 @@
 // wiring unchanged.
 
 import { db } from "@/lib/db";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, or } from "drizzle-orm";
 import {
   productAllowedTablets,
   products,
@@ -30,7 +30,12 @@ export default async function StartProductionPage() {
     db
       .select({ id: qrCards.id, code: qrCards.label })
       .from(qrCards)
-      .where(eq(qrCards.status, "IDLE"))
+      .where(
+        or(
+          eq(qrCards.status, "IDLE"),
+          and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId))
+        )
+      )
       .orderBy(asc(qrCards.label))
       .limit(200),
     db
@@ -72,7 +77,7 @@ export default async function StartProductionPage() {
               : "border-red-200 bg-red-50 text-red-700"
           }`}
         >
-          {idleCardCount} idle QR card{idleCardCount === 1 ? "" : "s"}
+          {idleCardCount} idle or intake-reserved QR card{idleCardCount === 1 ? "" : "s"}
         </span>
         <span
           className={`inline-flex items-center h-6 px-2.5 rounded-md border text-[11px] font-mono ${

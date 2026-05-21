@@ -48,7 +48,11 @@ export async function retireQrCard(id: string, actor: CurrentUser) {
   return db.transaction(async (tx) => {
     const [before] = await tx.select().from(qrCards).where(eq(qrCards.id, id));
     if (!before) throw new Error("retireQrCard: not found");
-    if (before.status === "ASSIGNED") {
+    // Block retirement only when the card is genuinely mid-production
+    // (ASSIGNED with a live workflow bag). Intake-reserved cards
+    // (ASSIGNED+null workflowBagId) have not entered production and
+    // may be retired freely.
+    if (before.status === "ASSIGNED" && before.assignedWorkflowBagId !== null) {
       throw new Error("Cannot retire a card that's mid-bag. Finalize the bag first.");
     }
     const [row] = await tx
@@ -76,6 +80,7 @@ export async function retireQrCard(id: string, actor: CurrentUser) {
 // Availability helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Returns only IDLE cards; intake-reserved (ASSIGNED+null workflowBagId) cards are not included.
 /** Returns all RAW_BAG cards with status IDLE, ordered by label. */
 export async function listAvailableRawBagQrCards(): Promise<QrCardRow[]> {
   return db
@@ -94,6 +99,7 @@ export async function listAvailableVarietyPackQrCards(): Promise<QrCardRow[]> {
     .orderBy(asc(qrCards.label));
 }
 
+// Returns only IDLE cards; intake-reserved (ASSIGNED+null workflowBagId) cards are not included.
 /** Returns the first available RAW_BAG IDLE card (lowest label), or null. */
 export async function getNextAvailableRawBagQrCard(): Promise<QrCardRow | null> {
   const rows = await db

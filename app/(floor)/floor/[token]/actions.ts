@@ -175,9 +175,14 @@ export async function scanCardAction(
                 .where(eq(products.id, pickedProductId))
             )[0] ?? null
           : null;
+        // Intake-reserved cards (ASSIGNED+null workflowBagId) are
+        // semantically equivalent to IDLE for first-op gating.
+        const isFreshStart =
+          card.status === "IDLE" ||
+          (card.status === "ASSIGNED" && !card.assignedWorkflowBagId);
         const firstOp = checkFirstOpProductSelection({
           stationKind: station.kind,
-          cardStatus: "IDLE",
+          cardStatus: isFreshStart ? "IDLE" : card.status,
           pickedProductId,
           product: productLookup,
         });
@@ -299,6 +304,8 @@ export async function scanCardAction(
                   .where(eq(products.id, pickedProductId))
               )[0] ?? null
             : null;
+          // Partial-bag resume is semantically a fresh start —
+          // treat as IDLE for first-op product gating.
           const firstOp = checkFirstOpProductSelection({
             stationKind: station.kind,
             cardStatus: "IDLE",
