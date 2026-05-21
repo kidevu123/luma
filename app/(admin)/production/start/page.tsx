@@ -28,7 +28,7 @@ export default async function StartProductionPage() {
 
   const [idleCards, activeStations, allowedRows] = await Promise.all([
     db
-      .select({ id: qrCards.id, code: qrCards.label })
+      .select({ id: qrCards.id, code: qrCards.label, scanToken: qrCards.scanToken })
       .from(qrCards)
       .where(
         or(
@@ -130,7 +130,7 @@ export default async function StartProductionPage() {
       </div>
 
       <StartProductionForm
-        idleCards={idleCards.map((c) => ({ id: c.id, code: c.code }))}
+        idleCards={idleCards.map((c) => ({ id: c.id, code: c.code, scanToken: c.scanToken }))}
         stations={activeStations}
         allowedProductsByTabletType={groupAllowedProductsByTabletType(allowedRows)}
       />

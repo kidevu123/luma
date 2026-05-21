@@ -10,7 +10,7 @@
 // On success we render a StartedPanel with PO / vendor / product /
 // receipt / QR / IDs and a link back to the live floor.
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import Link from "next/link";
 import {
   ProductionSection,
@@ -24,7 +24,7 @@ import {
 } from "./actions";
 import type { RawBagLookupResult } from "@/lib/db/queries/raw-bag-intake";
 
-type IdleCard = { id: string; code: string };
+type IdleCard = { id: string; code: string | null; scanToken: string };
 type StationOpt = { id: string; label: string; kind: string };
 type AllowedProduct = { id: string; name: string; sku: string; kind: string };
 
@@ -50,6 +50,16 @@ export function StartProductionForm({
   const allowedProducts = resolvedBag
     ? allowedProductsByTabletType[resolvedBag.product.tabletTypeId] ?? []
     : [];
+
+  useEffect(() => {
+    if (!lookup?.found) return;
+    const bagQrCode = lookup.bag.bagQrCode;
+    if (!bagQrCode) return;
+    const match = idleCards.find((c) => c.scanToken === bagQrCode);
+    if (match) {
+      setQrCardId(match.id);
+    }
+  }, [lookup, idleCards]);
 
   function handleLookup() {
     if (!scanValue.trim()) return;
@@ -270,18 +280,33 @@ export function StartProductionForm({
             }
           />
         ) : (
-          <select
-            value={qrCardId}
-            onChange={(e) => setQrCardId(e.target.value)}
-            className="w-full h-10 px-3 rounded-md border border-border bg-surface font-mono text-sm focus:border-brand-500 focus:outline-none"
-          >
-            <option value="">— select an idle workflow QR card —</option>
-            {idleCards.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.code}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              value={qrCardId}
+              onChange={(e) => setQrCardId(e.target.value)}
+              className="w-full h-10 px-3 rounded-md border border-border bg-surface font-mono text-sm focus:border-brand-500 focus:outline-none"
+            >
+              <option value="">— select an idle workflow QR card —</option>
+              {idleCards.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.code}
+                </option>
+              ))}
+            </select>
+            {resolvedBag?.bag.bagQrCode &&
+              idleCards.some((c) => c.scanToken === resolvedBag.bag.bagQrCode) &&
+              qrCardId &&
+              idleCards.find((c) => c.id === qrCardId)?.scanToken === resolvedBag.bag.bagQrCode && (
+                <p className="text-[11px] text-sky-700 mt-1">QR card assigned at intake for this bag.</p>
+              )}
+            {resolvedBag?.bag.bagQrCode &&
+              !idleCards.some((c) => c.scanToken === resolvedBag.bag.bagQrCode) && (
+                <p className="text-[11px] text-amber-700 mt-1">
+                  The QR card reserved for this bag ({resolvedBag.bag.bagQrCode}) is not available.
+                  It may already be in production or retired.
+                </p>
+              )}
+          </>
         )}
       </ProductionSection>
 
