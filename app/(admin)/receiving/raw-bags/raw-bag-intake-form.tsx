@@ -57,7 +57,7 @@ export function RawBagIntakeForm({
   poLines: PoLine[];
   tabletTypes: TabletType[];
   zohoReadiness: ZohoReadiness;
-  availableQrCards: { scanToken: string; label: string | null }[];
+  availableQrCards: { scanToken: string }[];
 }) {
   const [poMode, setPoMode] = React.useState<PoMode>(
     purchaseOrders.length > 0 ? "LOCAL_PO" : "MANUAL_REFERENCE",
@@ -288,7 +288,7 @@ export function RawBagIntakeForm({
       {/* SECTION 2 — SUPPLIER LOT SETUP */}
       <ProductionSection
         title="2. Supplier lot setup"
-        subtitle="Captures the manufacturer-printed lot number + bag count + per-bag declared count."
+        subtitle="Captures the manufacturer-printed lot number + bag count + declared total (distributed evenly across bags)."
         tone="INFO"
       >
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -416,9 +416,10 @@ export function RawBagIntakeForm({
                         value={r.weightGrams != null ? (r.weightGrams / 1000) : ""}
                         onChange={(e) =>
                           patchRow(i, {
-                            weightGrams: e.target.value
-                              ? Math.round(Number(e.target.value) * 1000)
-                              : null,
+                            weightGrams: (() => {
+                              const g = Math.round(Number(e.target.value) * 1000);
+                              return e.target.value && Number.isFinite(g) ? g : null;
+                            })(),
                           })
                         }
                         className="text-right tabular-nums text-xs"

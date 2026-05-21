@@ -133,7 +133,7 @@ export default async function ReceiveRawBagsPage() {
         poLines={lines}
         tabletTypes={tablets}
         zohoReadiness={readiness}
-        availableQrCards={availableQrCards.map((c) => ({ scanToken: c.scanToken, label: c.label }))}
+        availableQrCards={availableQrCards.map((c) => ({ scanToken: c.scanToken }))}
       />
     </div>
   );
