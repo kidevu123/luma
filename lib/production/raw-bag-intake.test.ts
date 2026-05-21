@@ -613,3 +613,79 @@ describe("RECEIVABLE_PO_STATUSES", () => {
     expect(RECEIVABLE_PO_STATUSES).not.toContain("RECEIVED");
   });
 });
+
+// ─── QR assignment edge cases — RECEIVE-2 ─────────────────────────
+describe("QR assignment edge cases — RECEIVE-2", () => {
+  it("10 rows with 10-card pool: all rows get unique non-null QR codes", () => {
+    const pool = Array.from({ length: 10 }, (_, i) => ({
+      scanToken: `bag-card-${i + 1}`,
+    }));
+    const rows = generateBagRowSeed({ count: 10, receiptStart: "1001" });
+    const assigned = assignQrCodesFromPool(rows, pool);
+    const qrCodes = assigned.map((r) => r.bagQrCode).filter((q) => q != null);
+    expect(qrCodes).toHaveLength(10);
+    expect(new Set(qrCodes).size).toBe(10);
+  });
+
+  it("removing a row does not affect remaining rows' QR codes", () => {
+    const pool = Array.from({ length: 5 }, (_, i) => ({
+      scanToken: `bag-card-${i + 1}`,
+    }));
+    const rows = generateBagRowSeed({ count: 5, receiptStart: "1001" });
+    const assigned = assignQrCodesFromPool(rows, pool);
+    // Simulate removing row at index 2 (bag-card-3)
+    const afterRemoval = assigned.filter((_, idx) => idx !== 2);
+    expect(afterRemoval).toHaveLength(4);
+    expect(afterRemoval[0]?.bagQrCode).toBe("bag-card-1");
+    expect(afterRemoval[1]?.bagQrCode).toBe("bag-card-2");
+    expect(afterRemoval[2]?.bagQrCode).toBe("bag-card-4");
+    expect(afterRemoval[3]?.bagQrCode).toBe("bag-card-5");
+  });
+
+  it("removed row's QR code is absent from remaining rows", () => {
+    const pool = [
+      { scanToken: "bag-card-1" },
+      { scanToken: "bag-card-2" },
+      { scanToken: "bag-card-3" },
+    ];
+    const rows = generateBagRowSeed({ count: 3, receiptStart: "1001" });
+    const assigned = assignQrCodesFromPool(rows, pool);
+    const remaining = assigned.filter((_, idx) => idx !== 1);
+    const remainingQrCodes = remaining.map((r) => r.bagQrCode);
+    expect(remainingQrCodes).not.toContain("bag-card-2");
+    expect(remainingQrCodes).toContain("bag-card-1");
+    expect(remainingQrCodes).toContain("bag-card-3");
+  });
+
+  it("pool exhaustion: 5-card pool for 10 rows gives nulls for rows 6–10", () => {
+    const pool = Array.from({ length: 5 }, (_, i) => ({
+      scanToken: `bag-card-${i + 1}`,
+    }));
+    const rows = generateBagRowSeed({ count: 10, receiptStart: "1001" });
+    const assigned = assignQrCodesFromPool(rows, pool);
+    const hasQr = assigned.map((r) => r.bagQrCode != null);
+    expect(hasQr).toEqual([
+      true, true, true, true, true,
+      false, false, false, false, false,
+    ]);
+  });
+
+  it("empty pool: all rows get null QR codes (no silent assignment)", () => {
+    const rows = generateBagRowSeed({ count: 5, receiptStart: "1001" });
+    const assigned = assignQrCodesFromPool(rows, []);
+    expect(assigned.every((r) => r.bagQrCode === null)).toBe(true);
+  });
+
+  it("trimming rows after removal updates exhaustion threshold", () => {
+    // 8 rows, 5-card pool → rows 6–8 have no QR
+    const pool = Array.from({ length: 5 }, (_, i) => ({
+      scanToken: `bag-card-${i + 1}`,
+    }));
+    const rows = generateBagRowSeed({ count: 8, receiptStart: "1001" });
+    const assigned = assignQrCodesFromPool(rows, pool);
+    // Remove rows 6,7,8 (indices 5,6,7)
+    const trimmed = assigned.filter((_, idx) => idx < 5);
+    expect(trimmed).toHaveLength(5);
+    expect(trimmed.every((r) => r.bagQrCode != null)).toBe(true);
+  });
+});
