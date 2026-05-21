@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.2] — 2026-05-21
+
+### Added
+- Zoho Integration inventory read client (`lib/zoho/inventory-service-client.ts`) — four GET functions: list purchase orders, get PO detail, search items, list warehouses. Injectable env/fetchImpl/timeoutMs; 32 tests.
+- PO sync service (`lib/zoho/po-sync.ts`) — `syncPurchaseOrdersFromZoho()` upserts `purchase_orders` from Zoho via SELECT-then-INSERT/UPDATE. Terminal-status guard (RECEIVED/CLOSED/CANCELLED rows never downgraded). Duplicate zohoPoId guard. 17 tests.
+- Receive-eligible status mapping: Zoho `issued`→`OPEN`, `partially_received`→`RECEIVING`, `received`→`RECEIVED`, `draft`→`DRAFT`, `cancelled`→`CANCELLED`.
+- Admin sync action (`syncPurchaseOrdersFromZohoAction`) on the raw-bags receiving page — admin-gated, revalidates PO list on success.
+- "Sync POs from Zoho" button in the raw-bags badge strip — shows fetched/upserted counts and errors inline.
+
+## [0.2.1] — 2026-05-21
+
+### Fixed
+- PO dropdown in raw bag intake now sorts newest-first (`openedAt` desc) so most recent POs appear at the top.
+
+### Improved
+- PO option labels include vendor name and status badge for clarity.
+- Badge strip shows count of open/receiving POs and a hint that draft/closed/cancelled POs are hidden.
+
 ## [0.2.0] — 2026-05-19
 
 ### Fixed
