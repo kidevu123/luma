@@ -30,6 +30,7 @@ import {
   verificationStatusLabel,
 } from "@/lib/production/raw-bag-intake";
 import type { ZohoReadiness } from "@/lib/integrations/zoho/gateway";
+import { cn } from "@/lib/utils";
 import {
   createRawBagIntakeAction,
   lookupRawBagAction,
@@ -441,7 +442,11 @@ export function RawBagIntakeForm({
                       <Input
                         value={r.supplierLotNumber}
                         onChange={(e) => patchRow(i, { supplierLotNumber: e.target.value })}
-                        className={`text-xs font-mono${r.supplierLotNumber !== supplierLot.trim() && r.supplierLotNumber.trim().length > 0 ? " border-amber-400 bg-amber-50/40" : ""}`}
+                        aria-label={`Supplier lot number for bag ${r.bagSequence}`}
+                        className={cn(
+                          "text-xs font-mono",
+                          r.supplierLotNumber !== supplierLot.trim() && r.supplierLotNumber.trim().length > 0 && "border-amber-400 bg-amber-50/40",
+                        )}
                       />
                     </td>
                     <td className="px-2 py-1.5">
