@@ -118,16 +118,22 @@ async function upsertPo(
   const openedAt = parseDateSafe(zohoPo.date);
 
   // Step 2b: SELECT by zohoPoId (zoho_po_id is NOT a unique index)
-  const existing = await (db as unknown as DbLike)
+  const existing = await db
     .select()
     .from(purchaseOrders)
     .where(eq(purchaseOrders.zohoPoId, zohoPo.purchaseorder_id));
+
+  // Step 2b-guard: Duplicate rows mean the unique constraint is missing —
+  // treat as an error so the caller knows the data needs investigation.
+  if (existing.length > 1) {
+    throw new Error(`Duplicate zohoPoId ${zohoPo.purchaseorder_id} — ${existing.length} rows found`);
+  }
 
   const existingPo = existing[0];
 
   if (existingPo === undefined) {
     // Step 2d: INSERT new row
-    await (db as unknown as DbLike)
+    await db
       .insert(purchaseOrders)
       .values({
         poNumber: zohoPo.purchaseorder_number,
@@ -138,26 +144,23 @@ async function upsertPo(
       });
   } else {
     // Step 2c: UPDATE if not in terminal state
-    const localStatus = existingPo["status"] as string;
-    const isTerminal = TERMINAL_STATUSES.has(localStatus);
+    const isTerminal = TERMINAL_STATUSES.has(existingPo.status);
 
     // Build update payload — always refresh vendorName and openedAt;
     // only update status when the PO is not already in a terminal state.
-    const updatePayload: Record<string, unknown> = {
+    const updatePayload: Partial<typeof purchaseOrders.$inferInsert> = {
       vendorName: zohoPo.vendor_name,
       openedAt,
     };
 
     if (!isTerminal) {
-      updatePayload["status"] = mappedStatus;
+      updatePayload.status = mappedStatus;
     }
 
-    const existingId = existingPo["id"] as string;
-
-    await (db as unknown as DbLike)
+    await db
       .update(purchaseOrders)
       .set(updatePayload)
-      .where(eq(purchaseOrders.id, existingId));
+      .where(eq(purchaseOrders.id, existingPo.id));
   }
 }
 
@@ -168,20 +171,3 @@ function parseDateSafe(dateStr: string): Date {
   return isNaN(d.getTime()) ? new Date() : d;
 }
 
-// Minimal structural type for the db client so we can use the mock without
-// casting to `any`. This covers only the operations used in this file.
-type DbLike = {
-  select: () => {
-    from: (table: unknown) => {
-      where: (cond: unknown) => Promise<Array<Record<string, unknown>>>;
-    };
-  };
-  insert: (table: unknown) => {
-    values: (vals: Record<string, unknown>) => Promise<unknown>;
-  };
-  update: (table: unknown) => {
-    set: (vals: Record<string, unknown>) => {
-      where: (cond: unknown) => Promise<unknown>;
-    };
-  };
-};

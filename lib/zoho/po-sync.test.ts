@@ -12,6 +12,7 @@ vi.mock("./inventory-service-client", () => ({
 
 import { syncPurchaseOrdersFromZoho } from "./po-sync";
 import { listInventoryPurchaseOrders } from "./inventory-service-client";
+import type { db } from "@/lib/db";
 
 // ─── Typed mock ref ───────────────────────────────────────────────────────────
 const mockList = vi.mocked(listInventoryPurchaseOrders);
@@ -114,7 +115,7 @@ describe("fetch failure", () => {
     });
 
     const result = await syncPurchaseOrdersFromZoho({
-      dbOverride: mockDbSelect([]) as Parameters<typeof syncPurchaseOrdersFromZoho>[0] extends { dbOverride?: infer D } ? D : never,
+      dbOverride: mockDbSelect([]) as unknown as typeof db,
     });
 
     expect(result.fetched).toBe(0);
@@ -132,7 +133,7 @@ describe("empty list", () => {
     mockList.mockResolvedValueOnce({ ok: true, data: [], meta: META });
 
     const result = await syncPurchaseOrdersFromZoho({
-      dbOverride: mockDbSelect([]) as never,
+      dbOverride: mockDbSelect([]) as unknown as typeof db,
     });
 
     expect(result.fetched).toBe(0);
@@ -155,7 +156,7 @@ describe("new PO insert", () => {
     const mockDb = mockDbFull([]);
 
     const result = await syncPurchaseOrdersFromZoho({
-      dbOverride: mockDb as never,
+      dbOverride: mockDb as unknown as typeof db,
     });
 
     expect(result.fetched).toBe(1);
@@ -192,7 +193,7 @@ describe("existing PO update", () => {
     const mockDb = mockDbFull([existingPo]);
 
     const result = await syncPurchaseOrdersFromZoho({
-      dbOverride: mockDb as never,
+      dbOverride: mockDb as unknown as typeof db,
     });
 
     expect(result.fetched).toBe(1);
@@ -329,10 +330,9 @@ describe("terminal status guard", () => {
 
     await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as never });
 
-    // Either update was not called at all, OR the status field was NOT changed to OPEN
-    if (updateSpy.mock.calls.length > 0) {
-      expect((capturedSet as AnyRow | null)?.["status"]).not.toBe("OPEN");
-    }
+    // update MUST be called (to refresh vendorName/openedAt), and status MUST NOT be in the payload
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(capturedSet).not.toHaveProperty("status");
     // INSERT was definitely not called
     expect(mockDb.insert).not.toHaveBeenCalled();
   });
@@ -376,9 +376,9 @@ describe("terminal status guard", () => {
 
     await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as never });
 
-    if (updateSpy.mock.calls.length > 0) {
-      expect((capturedSet as AnyRow | null)?.["status"]).not.toBe("OPEN");
-    }
+    // update MUST be called (to refresh vendorName/openedAt), and status MUST NOT be in the payload
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(capturedSet).not.toHaveProperty("status");
     expect(mockDb.insert).not.toHaveBeenCalled();
   });
 
@@ -421,9 +421,9 @@ describe("terminal status guard", () => {
 
     await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as never });
 
-    if (updateSpy.mock.calls.length > 0) {
-      expect((capturedSet as AnyRow | null)?.["status"]).not.toBe("OPEN");
-    }
+    // update MUST be called (to refresh vendorName/openedAt), and status MUST NOT be in the payload
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(capturedSet).not.toHaveProperty("status");
     expect(mockDb.insert).not.toHaveBeenCalled();
   });
 });
@@ -461,7 +461,7 @@ describe("error isolation", () => {
       update: vi.fn(),
     };
 
-    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as never });
+    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
 
     expect(result.fetched).toBe(2);
     expect(result.poUpserted).toBe(1);   // goodPo succeeded
@@ -481,9 +481,51 @@ describe("line counts always zero", () => {
 
     const mockDb = mockDbFull([]);
 
-    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as never });
+    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
 
     expect(result.lineUpserted).toBe(0);
     expect(result.lineSkipped).toBe(0);
+  });
+});
+
+// 10. Duplicate zohoPoId guard
+describe("duplicate zohoPoId guard", () => {
+  it("records an error when SELECT returns more than one row for the same zohoPoId", async () => {
+    mockList.mockResolvedValueOnce({
+      ok: true,
+      data: [makeZohoPo()],
+      meta: META,
+    });
+
+    const row = {
+      id: "uuid-1",
+      poNumber: "PO-2026-001",
+      parentPoNumber: null,
+      vendorName: "ACME Pharma",
+      status: "OPEN",
+      zohoPoId: "ZPOID-001",
+      openedAt: new Date("2026-05-20"),
+      closedAt: null,
+      notes: null,
+    };
+
+    const mockDb = {
+      select: () => ({
+        from: () => ({
+          where: () => Promise.resolve([row, { ...row, id: "uuid-2" }]),
+        }),
+      }),
+      insert: vi.fn(),
+      update: vi.fn(),
+    };
+
+    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+
+    expect(result.poUpserted).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain("Duplicate zohoPoId");
+    expect(result.errors[0]).toContain("ZPOID-001");
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
   });
 });
