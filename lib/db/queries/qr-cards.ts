@@ -1,8 +1,10 @@
-import { eq, asc, desc } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { qrCards, workflowBags, products } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
+
+export type QrCardRow = typeof qrCards.$inferSelect;
 
 export async function listQrCards() {
   return db
@@ -68,4 +70,113 @@ export async function retireQrCard(id: string, actor: CurrentUser) {
     );
     return row;
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Availability helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Returns all RAW_BAG cards with status IDLE, ordered by label. */
+export async function listAvailableRawBagQrCards(): Promise<QrCardRow[]> {
+  return db
+    .select()
+    .from(qrCards)
+    .where(and(eq(qrCards.cardType, "RAW_BAG"), eq(qrCards.status, "IDLE")))
+    .orderBy(asc(qrCards.label));
+}
+
+/** Returns all VARIETY_PACK cards with status IDLE, ordered by label. */
+export async function listAvailableVarietyPackQrCards(): Promise<QrCardRow[]> {
+  return db
+    .select()
+    .from(qrCards)
+    .where(and(eq(qrCards.cardType, "VARIETY_PACK"), eq(qrCards.status, "IDLE")))
+    .orderBy(asc(qrCards.label));
+}
+
+/** Returns the first available RAW_BAG IDLE card (lowest label), or null. */
+export async function getNextAvailableRawBagQrCard(): Promise<QrCardRow | null> {
+  const rows = await db
+    .select()
+    .from(qrCards)
+    .where(and(eq(qrCards.cardType, "RAW_BAG"), eq(qrCards.status, "IDLE")))
+    .orderBy(asc(qrCards.label))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Validation helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Validates a QR card by scanToken for raw-bag use.
+ * Type is checked before status.
+ */
+export async function validateQrCardUsableForRawBag(
+  scanToken: string,
+): Promise<{ valid: true; card: QrCardRow } | { valid: false; reason: string }> {
+  const rows = await db
+    .select()
+    .from(qrCards)
+    .where(eq(qrCards.scanToken, scanToken));
+  const card = rows[0];
+  if (!card) return { valid: false, reason: "QR card not found" };
+
+  // Check type first
+  if (card.cardType === "VARIETY_PACK") {
+    return { valid: false, reason: "Card is designated for variety packs, not raw bags" };
+  }
+  if (card.cardType === "WORKFLOW_TRAVELER") {
+    return { valid: false, reason: "Card is a workflow traveler, not a raw bag card" };
+  }
+  if (card.cardType === "UNKNOWN") {
+    return { valid: false, reason: "Card type is not configured — contact admin" };
+  }
+
+  // Then check status
+  if (card.status === "ASSIGNED") {
+    return { valid: false, reason: "Card is already assigned to an active bag" };
+  }
+  if (card.status === "RETIRED") {
+    return { valid: false, reason: "Card has been retired" };
+  }
+
+  return { valid: true, card };
+}
+
+/**
+ * Validates a QR card by scanToken for variety-pack use.
+ * Type is checked before status.
+ */
+export async function validateQrCardUsableForVarietyPack(
+  scanToken: string,
+): Promise<{ valid: true; card: QrCardRow } | { valid: false; reason: string }> {
+  const rows = await db
+    .select()
+    .from(qrCards)
+    .where(eq(qrCards.scanToken, scanToken));
+  const card = rows[0];
+  if (!card) return { valid: false, reason: "QR card not found" };
+
+  // Check type first
+  if (card.cardType === "RAW_BAG") {
+    return { valid: false, reason: "Card is designated for raw bags, not variety packs" };
+  }
+  if (card.cardType === "WORKFLOW_TRAVELER") {
+    return { valid: false, reason: "Card is a workflow traveler, not a variety pack card" };
+  }
+  if (card.cardType === "UNKNOWN") {
+    return { valid: false, reason: "Card type is not configured — contact admin" };
+  }
+
+  // Then check status
+  if (card.status === "ASSIGNED") {
+    return { valid: false, reason: "Card is already assigned to an active bag" };
+  }
+  if (card.status === "RETIRED") {
+    return { valid: false, reason: "Card has been retired" };
+  }
+
+  return { valid: true, card };
 }
