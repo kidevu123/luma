@@ -177,12 +177,22 @@ export function RawBagIntakeForm({
         notes: r.notes,
       })),
     };
-    const r = await createRawBagIntakeAction(payload);
-    setPending(false);
-    if (!r.ok) {
-      setErrorMessage(r.error);
-    } else {
-      setResult(r);
+    try {
+      const r = await createRawBagIntakeAction(payload);
+      setPending(false);
+      if (!r.ok) {
+        setErrorMessage(r.error);
+      } else {
+        setResult(r);
+      }
+    } catch (err) {
+      setPending(false);
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(
+        msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("action_id")
+          ? "The app was updated. Please refresh the page and try again."
+          : `Save failed: ${msg}`,
+      );
     }
   }
 

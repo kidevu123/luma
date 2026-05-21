@@ -13,12 +13,22 @@ export function SyncPoButton() {
   function handleSync() {
     setLastError(null);
     startTransition(async () => {
-      const res = await syncPurchaseOrdersFromZohoAction();
-      if (res.ok) {
-        setLastResult(res.result);
-        setLastError(null);
-      } else {
-        setLastError(res.error);
+      try {
+        const res = await syncPurchaseOrdersFromZohoAction();
+        if (res.ok) {
+          setLastResult(res.result);
+          setLastError(null);
+        } else {
+          setLastError(res.error);
+          setLastResult(null);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setLastError(
+          msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("action_id")
+            ? "App updated — please refresh the page and try again."
+            : `Sync failed: ${msg}`,
+        );
         setLastResult(null);
       }
     });
