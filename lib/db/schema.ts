@@ -172,6 +172,13 @@ export const qrCardStatusEnum = pgEnum("qr_card_status", [
   "RETIRED",
 ]);
 
+export const qrCardTypeEnum = pgEnum("qr_card_type", [
+  "RAW_BAG",
+  "VARIETY_PACK",
+  "WORKFLOW_TRAVELER",
+  "UNKNOWN",
+]);
+
 export const workflowEventTypeEnum = pgEnum("workflow_event_type", [
   // Card / bag lifecycle
   "CARD_ASSIGNED",
@@ -1103,6 +1110,7 @@ export const qrCards = pgTable(
     label: text("label").notNull(),
     scanToken: text("scan_token").notNull(),
     status: qrCardStatusEnum("status").notNull().default("IDLE"),
+    cardType: qrCardTypeEnum("card_type").notNull().default("UNKNOWN"),
     assignedWorkflowBagId: uuid("assigned_workflow_bag_id"), // FK applied below
     retiredAt: timestamp("retired_at", { withTimezone: true }),
     notes: text("notes"),
@@ -1110,6 +1118,7 @@ export const qrCards = pgTable(
   (t) => [
     uniqueIndex("qr_cards_token_unique").on(t.scanToken),
     index("qr_cards_status_idx").on(t.status),
+    index("qr_cards_type_idx").on(t.cardType),
   ],
 );
 
