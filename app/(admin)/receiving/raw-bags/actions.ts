@@ -4,7 +4,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin, requireLead } from "@/lib/auth-guards";
-import { syncPurchaseOrdersFromZoho } from "@/lib/zoho/po-sync";
+import { syncPurchaseOrdersFromZoho, type PoSyncResult } from "@/lib/zoho/po-sync";
 import {
   createRawBagIntakeAtomic,
   findRawBagByReceiptOrQr,
@@ -31,7 +31,7 @@ export async function lookupRawBagAction(value: string): Promise<RawBagLookupRes
 }
 
 export async function syncPurchaseOrdersFromZohoAction(): Promise<
-  { ok: true; result: import("@/lib/zoho/po-sync").PoSyncResult } |
+  { ok: true; result: PoSyncResult } |
   { ok: false; error: string }
 > {
   await requireAdmin();
