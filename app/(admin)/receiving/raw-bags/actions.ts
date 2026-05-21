@@ -21,6 +21,7 @@ export async function createRawBagIntakeAction(
     revalidatePath("/receiving/raw-bags");
     revalidatePath("/inbound");
     revalidatePath("/recall");
+    revalidatePath("/qr-cards");
   }
   return result;
 }

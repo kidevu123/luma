@@ -51,11 +51,13 @@ export function RawBagIntakeForm({
   poLines,
   tabletTypes,
   zohoReadiness,
+  availableQrCards,
 }: {
   purchaseOrders: PO[];
   poLines: PoLine[];
   tabletTypes: TabletType[];
   zohoReadiness: ZohoReadiness;
+  availableQrCards: { scanToken: string; label: string | null }[];
 }) {
   const [poMode, setPoMode] = React.useState<PoMode>(
     purchaseOrders.length > 0 ? "LOCAL_PO" : "MANUAL_REFERENCE",
@@ -71,8 +73,7 @@ export function RawBagIntakeForm({
 
   const [supplierLot, setSupplierLot] = React.useState("");
   const [numberOfBags, setNumberOfBags] = React.useState<string>("10");
-  const [declaredPerBag, setDeclaredPerBag] = React.useState<string>("");
-  const [weightPerBag, setWeightPerBag] = React.useState<string>("");
+  const [declaredTotal, setDeclaredTotal] = React.useState<string>("");
   const [receiptStart, setReceiptStart] = React.useState<string>("");
   const [receiptPrefix, setReceiptPrefix] = React.useState<string>("");
 
@@ -124,16 +125,21 @@ export function RawBagIntakeForm({
 
   function handleGenerateRows() {
     const count = Number.parseInt(numberOfBags, 10);
-    const declared = declaredPerBag ? Number.parseInt(declaredPerBag, 10) : null;
-    const weight = weightPerBag ? Number.parseInt(weightPerBag, 10) : null;
+    const safeCount = Number.isFinite(count) ? count : 0;
+    const declared = declaredTotal ? Number.parseInt(declaredTotal, 10) : null;
     const seed = generateBagRowSeed({
-      count: Number.isFinite(count) ? count : 0,
+      count: safeCount,
       receiptStart: receiptStart.trim(),
       receiptPrefix: receiptPrefix.trim() || null,
-      declaredCount: declared,
-      weightGrams: weight,
+      declaredTotal: declared,
+      // no weightGrams — operator enters per-row in kg
     });
-    setRows(seed);
+    // Auto-assign QR codes from available pool (sequential, first-come-first-served).
+    const assigned = seed.map((row, i) => ({
+      ...row,
+      bagQrCode: availableQrCards[i]?.scanToken ?? null,
+    }));
+    setRows(assigned);
     setErrorMessage(null);
   }
 
@@ -306,25 +312,14 @@ export function RawBagIntakeForm({
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="declaredPerBag">Declared count per bag *</Label>
+            <Label htmlFor="declaredTotal">Declared total *</Label>
             <Input
-              id="declaredPerBag"
+              id="declaredTotal"
               type="number"
               min={1}
-              value={declaredPerBag}
-              onChange={(e) => setDeclaredPerBag(e.target.value)}
-              placeholder="e.g. 20000"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="weightPerBag">Default weight per bag (grams)</Label>
-            <Input
-              id="weightPerBag"
-              type="number"
-              min={0}
-              value={weightPerBag}
-              onChange={(e) => setWeightPerBag(e.target.value)}
-              placeholder="optional"
+              value={declaredTotal}
+              onChange={(e) => setDeclaredTotal(e.target.value)}
+              placeholder="e.g. 200000 (distributed evenly)"
             />
           </div>
           <div className="space-y-1">
@@ -359,6 +354,14 @@ export function RawBagIntakeForm({
           title={`3. Bag rows (${rows.length} generated, ${rows.length} unsaved)`}
           subtitle="Edit any field. Receipt numbers can be overridden. Every row needs a QR before save."
         >
+          {rows.length > availableQrCards.length ? (
+            <div className="mb-3 text-sm text-amber-700 inline-flex items-center gap-1.5">
+              <AlertTriangle className="h-4 w-4" />
+              {availableQrCards.length === 0
+                ? "No idle RAW_BAG QR cards available — enter QR codes manually."
+                : `Only ${availableQrCards.length} idle QR card${availableQrCards.length === 1 ? "" : "s"} available; ${rows.length - availableQrCards.length} bag${rows.length - availableQrCards.length === 1 ? "" : "s"} need manual QR entry.`}
+            </div>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-xs uppercase text-text-muted bg-surface-2">
@@ -367,7 +370,7 @@ export function RawBagIntakeForm({
                   <th className="text-left px-2 py-1.5">QR code</th>
                   <th className="text-left px-2 py-1.5">Receipt #</th>
                   <th className="text-right px-2 py-1.5">Declared</th>
-                  <th className="text-right px-2 py-1.5">Weight (g)</th>
+                  <th className="text-right px-2 py-1.5">Weight (kg)</th>
                   <th className="text-left px-2 py-1.5">Notes</th>
                 </tr>
               </thead>
@@ -409,11 +412,12 @@ export function RawBagIntakeForm({
                       <Input
                         type="number"
                         min={0}
-                        value={r.weightGrams ?? ""}
+                        step="0.001"
+                        value={r.weightGrams != null ? (r.weightGrams / 1000) : ""}
                         onChange={(e) =>
                           patchRow(i, {
                             weightGrams: e.target.value
-                              ? Number.parseInt(e.target.value, 10)
+                              ? Math.round(Number(e.target.value) * 1000)
                               : null,
                           })
                         }
@@ -728,6 +732,9 @@ function SaveResultPanel({
           label="Bags created"
           value={`${result.bagCount} (${result.qrCount} with QR)`}
         />
+        {result.qrAssigned > 0 ? (
+          <Row label="QR cards reserved" value={`${result.qrAssigned}`} />
+        ) : null}
         <Row
           label="Ordered"
           value={
@@ -778,6 +785,5 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-// Unused — keeps the icon imports honest with eslint
+// Unused — keeps the icon import honest with eslint
 void CheckCircle2;
-void AlertTriangle;

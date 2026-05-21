@@ -17,6 +17,7 @@ import {
 } from "@/lib/db/schema";
 import { RECEIVABLE_PO_STATUSES } from "@/lib/production/raw-bag-intake";
 import { requireLead } from "@/lib/auth-guards";
+import { listAvailableRawBagQrCards } from "@/lib/db/queries/qr-cards";
 import {
   checkZohoGatewayHealth,
   deriveZohoReadiness,
@@ -33,8 +34,8 @@ export const dynamic = "force-dynamic";
 export default async function ReceiveRawBagsPage() {
   await requireLead();
 
-  // Load PO picker data + tablet types in parallel.
-  const [pos, lines, tablets] = await Promise.all([
+  // Load PO picker data + tablet types + available QR cards in parallel.
+  const [pos, lines, tablets, availableQrCards] = await Promise.all([
     db
       .select({
         id: purchaseOrders.id,
@@ -63,6 +64,7 @@ export default async function ReceiveRawBagsPage() {
       .from(tabletTypes)
       .where(eq(tabletTypes.isActive, true))
       .orderBy(asc(tabletTypes.name)),
+    listAvailableRawBagQrCards(),
   ]);
 
   // Probe Zoho readiness — read-only; if NEEDS_REAUTH the form shows
@@ -131,6 +133,7 @@ export default async function ReceiveRawBagsPage() {
         poLines={lines}
         tabletTypes={tablets}
         zohoReadiness={readiness}
+        availableQrCards={availableQrCards.map((c) => ({ scanToken: c.scanToken, label: c.label }))}
       />
     </div>
   );
