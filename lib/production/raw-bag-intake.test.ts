@@ -726,6 +726,7 @@ describe("generateBagRowSeed — supplierLotNumber seeding", () => {
       receiptStart: "1001",
       supplierLotNumber: "LOT-ABC-001",
     });
+    expect(rows).toHaveLength(3);
     expect(rows.every((r) => r.supplierLotNumber === "LOT-ABC-001")).toBe(true);
   });
 
@@ -735,11 +736,13 @@ describe("generateBagRowSeed — supplierLotNumber seeding", () => {
       receiptStart: "1001",
       supplierLotNumber: "  LOT-TRIM  ",
     });
+    expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.supplierLotNumber === "LOT-TRIM")).toBe(true);
   });
 
   it("defaults supplierLotNumber to empty string when not provided", () => {
     const rows = generateBagRowSeed({ count: 2, receiptStart: "1001" });
+    expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.supplierLotNumber === "")).toBe(true);
   });
 });
@@ -799,18 +802,14 @@ describe("rawBagIntakeInputSchema — per-row supplierLotNumber", () => {
       ],
     };
     const result = rawBagIntakeInputSchema.safeParse(payload);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.rows[0]?.supplierLotNumber).toBe("LOT-A");
-      expect(result.data.rows[1]?.supplierLotNumber).toBe("LOT-B");
-    }
+    if (!result.success) throw new Error("Expected parse to succeed");
+    expect(result.data.rows[0]?.supplierLotNumber).toBe("LOT-A");
+    expect(result.data.rows[1]?.supplierLotNumber).toBe("LOT-B");
   });
 
   it("preflightRawBagIntake maps row supplierLotNumber", () => {
     const result = preflightRawBagIntake(basePayload);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.input.rows[0]?.supplierLotNumber).toBe("LOT-MAIN-001");
-    }
+    if (!result.ok) throw new Error("Expected ok=true, got: " + result.error);
+    expect(result.input.rows[0]?.supplierLotNumber).toBe("LOT-MAIN-001");
   });
 });
