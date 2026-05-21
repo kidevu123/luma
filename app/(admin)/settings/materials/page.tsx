@@ -55,7 +55,7 @@ export default async function MaterialsAdminPage({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Materials"
+        title="Packaging & Materials"
         description={`${rows.length} item${rows.length === 1 ? "" : "s"} in the master list. Inactive items are hidden from BOM and receiving forms.`}
       />
 

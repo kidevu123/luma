@@ -130,16 +130,9 @@ export default async function SettingsPage() {
             <ConfigLink
               href="/settings/materials"
               icon={PackageCheck}
-              label="Materials"
+              label="Packaging & Materials"
               count={packagingCount?.n ?? 0}
-              hint="bottles, caps, labels, PVC, foil"
-            />
-            <ConfigLink
-              href="/settings/packaging-bom"
-              icon={Boxes}
-              label="Packaging BOM"
-              count={productCount?.n ?? 0}
-              hint="materials required per SKU"
+              hint="blister cards, display boxes, master cases, labels, foil"
             />
             <ConfigLink
               href="/settings/blister-standards"
