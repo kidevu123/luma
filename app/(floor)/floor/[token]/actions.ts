@@ -156,7 +156,7 @@ export async function scanCardAction(
         .where(eq(qrCards.id, cardId));
       if (!card) throw new Error("Card not found.");
 
-      if (card.status === "IDLE") {
+      if (card.status === "IDLE" || (card.status === "ASSIGNED" && !card.assignedWorkflowBagId)) {
         // Fresh scan — first-op stations REQUIRE a product pick so
         // workflow_bags.product_id lands non-null at the very first
         // event. Downstream stations inherit via the projector's

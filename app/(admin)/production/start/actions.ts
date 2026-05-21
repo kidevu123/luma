@@ -89,15 +89,18 @@ export async function startProductionForRawBagAction(
   }
 
   const [card] = await db
-    .select({ id: qrCards.id, status: qrCards.status })
+    .select({ id: qrCards.id, status: qrCards.status, assignedWorkflowBagId: qrCards.assignedWorkflowBagId })
     .from(qrCards)
     .where(eq(qrCards.id, input.qrCardId))
     .limit(1);
   if (!card) return { ok: false, error: "QR card not found." };
-  if (card.status !== "IDLE") {
+  const cardIsAvailableForProduction =
+    card.status === "IDLE" ||
+    (card.status === "ASSIGNED" && !card.assignedWorkflowBagId);
+  if (!cardIsAvailableForProduction) {
     return {
       ok: false,
-      error: `QR card status is ${card.status}; only IDLE cards can be assigned.`,
+      error: `QR card status is ${card.status}; only IDLE cards (or intake-reserved cards) can be assigned.`,
     };
   }
 

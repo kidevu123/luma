@@ -21,7 +21,7 @@ import {
   productPackagingSpecs,
   packagingMaterials,
 } from "@/lib/db/schema";
-import { eq, and, inArray, isNotNull, sql, desc, asc } from "drizzle-orm";
+import { eq, and, or, inArray, isNotNull, isNull, sql, desc, asc } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
 import { STATION_PICKUP_FROM_STAGE } from "@/lib/production/stage-progression";
@@ -80,11 +80,18 @@ export default async function FloorStationPage({
     .where(eq(readStationLive.stationId, station.station.id));
 
   // Idle cards available to scan, sorted by label so the dropdown
-  // is predictable. Eventually replace with a scan-only input.
+  // is predictable. Also include ASSIGNED cards with no workflow bag
+  // (intake-reserved cards) — they behave identically to IDLE for the
+  // floor scanner. Eventually replace with a scan-only input.
   const idleCards = await db
     .select()
     .from(qrCards)
-    .where(eq(qrCards.status, "IDLE"));
+    .where(
+      or(
+        eq(qrCards.status, "IDLE"),
+        and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId)),
+      ),
+    );
 
   // First-op product picker (PRD-1): when this station is BLISTER /
   // COMBINED, the operator must pick a product on a fresh-card scan.
