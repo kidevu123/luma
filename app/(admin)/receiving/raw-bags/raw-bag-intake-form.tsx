@@ -349,7 +349,7 @@ export function RawBagIntakeForm({
       {/* SECTION 3 — BAG ROWS */}
       {rows.length > 0 ? (
         <ProductionSection
-          title={`3. Bag rows (${rows.length} generated, ${rows.length} unsaved)`}
+          title={`3. Bag rows (${rows.length})`}
           subtitle="Edit any field. Receipt numbers can be overridden. Every row needs a QR before save."
         >
           {rows.length > availableQrCards.length ? (
@@ -370,6 +370,7 @@ export function RawBagIntakeForm({
                   <th className="text-right px-2 py-1.5">Declared</th>
                   <th className="text-right px-2 py-1.5">Weight (kg)</th>
                   <th className="text-left px-2 py-1.5">Notes</th>
+                  <th className="text-left px-2 py-1.5 w-8"></th>
                 </tr>
               </thead>
               <tbody>
@@ -429,6 +430,16 @@ export function RawBagIntakeForm({
                         onChange={(e) => patchRow(i, { notes: e.target.value })}
                         className="text-xs"
                       />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setRows((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="text-text-muted hover:text-red-600 text-xs px-1 leading-none"
+                        aria-label={`Remove bag ${r.bagSequence}`}
+                      >
+                        ×
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -545,7 +556,7 @@ function PoLineCards({
             <option value="">— Select PO —</option>
             {purchaseOrders.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.poNumber} · {p.vendorName ?? "no vendor"} [{p.status}]
+                {p.poNumber} · {p.vendorName ?? "no vendor"}
               </option>
             ))}
           </Select>
@@ -579,8 +590,8 @@ function PoLineCards({
           </div>
           {linesForPo.length === 0 ? (
             <div className="rounded-md border border-dashed border-border/60 bg-surface/40 px-4 py-6 text-center text-sm text-text-muted">
-              No line items found for this PO. Run &ldquo;Sync POs from Zoho&rdquo; to import
-              lines, or use the manual PO reference tab above.
+              No line items for this PO. Run &ldquo;Sync POs from Zoho&rdquo; to import lines,
+              select a different PO, or switch to the &ldquo;Manual PO reference&rdquo; tab above.
             </div>
           ) : (
             <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -630,7 +641,7 @@ function PoLineCards({
         </div>
       ) : (
         <p className="text-sm text-text-muted">
-          Pick a PO to see its line items as receive cards.
+          Pick a PO to choose the tablet line item being received.
         </p>
       )}
     </div>
