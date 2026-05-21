@@ -281,6 +281,13 @@
       "when": 1781900000000,
       "tag": "0039_variety_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1782000000000,
+      "tag": "0040_qr_card_type",
+      "breakpoints": true
     }
   ]
 }
