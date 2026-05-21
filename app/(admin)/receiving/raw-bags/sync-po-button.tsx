@@ -37,7 +37,10 @@ export function SyncPoButton() {
 
       {lastResult && (
         <p className="text-[10px] text-text-muted">
-          Synced: {lastResult.fetched} fetched, {lastResult.poUpserted} upserted
+          {lastResult.fetched} POs · {lastResult.detailsFetched} details · {lastResult.lineUpserted} lines synced
+          {lastResult.lineSkipped > 0 && (
+            <span className="ml-1">· {lastResult.lineSkipped} skipped</span>
+          )}
           {lastResult.errors.length > 0 && (
             <span className="text-warn-700 ml-1">· {lastResult.errors.length} error{lastResult.errors.length !== 1 ? "s" : ""}</span>
           )}

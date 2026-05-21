@@ -1143,4 +1143,60 @@ describe("line sync", () => {
     expect(result.detailsFetched).toBe(2);
     expect(result.poUpserted).toBe(3);
   });
+
+  it("upserts lines with to_be_received and partially_received statuses", async () => {
+    mockList.mockResolvedValueOnce({
+      ok: true,
+      data: [makeZohoPo({ purchaseorder_id: "ZPOID-ALLOW", status: "issued" })],
+      meta: META,
+    });
+    mockGetDetail.mockResolvedValueOnce(
+      makePoDetail("ZPOID-ALLOW", [
+        makeZohoLine({ line_item_id: "L-TBR",  status: "to_be_received" }),
+        makeZohoLine({ line_item_id: "L-PART", status: "partially_received" }),
+      ]),
+    );
+
+    const mockDb = makeLineSyncDb({
+      selectSequence: [[], [], [], []],   // tabletTypes, poOrders, poLines×2
+      insertReturns:  [{ id: "po-uuid" }, undefined, undefined],
+    });
+
+    const result = await syncPurchaseOrdersFromZoho({
+      dbOverride: mockDb as unknown as typeof db,
+    });
+
+    expect(result.lineUpserted).toBe(2);
+    expect(result.lineSkipped).toBe(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("skips lines with received, not_receivable, and unknown statuses", async () => {
+    mockList.mockResolvedValueOnce({
+      ok: true,
+      data: [makeZohoPo({ purchaseorder_id: "ZPOID-BLOCK", status: "partially_received" })],
+      meta: META,
+    });
+    mockGetDetail.mockResolvedValueOnce(
+      makePoDetail("ZPOID-BLOCK", [
+        makeZohoLine({ line_item_id: "L-RCV",   status: "received" }),
+        makeZohoLine({ line_item_id: "L-NORECV",status: "not_receivable" }),
+        makeZohoLine({ line_item_id: "L-UNK",   status: "unknown_future_status" }),
+        makeZohoLine({ line_item_id: "L-OK",    status: "to_be_received" }),
+      ]),
+    );
+
+    const mockDb = makeLineSyncDb({
+      selectSequence: [[], [], []],  // tabletTypes, poOrders, poLines for L-OK only
+      insertReturns:  [{ id: "po-uuid" }, undefined],
+    });
+
+    const result = await syncPurchaseOrdersFromZoho({
+      dbOverride: mockDb as unknown as typeof db,
+    });
+
+    expect(result.lineUpserted).toBe(1);   // only L-OK
+    expect(result.lineSkipped).toBe(3);    // received + not_receivable + unknown
+    expect(result.errors).toHaveLength(0);
+  });
 });

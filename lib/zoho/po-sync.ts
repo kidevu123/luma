@@ -41,6 +41,15 @@ const TERMINAL_STATUSES: ReadonlySet<string> = new Set<LocalPoStatus>([
   "CANCELLED",
 ]);
 
+// Only lines with these Zoho statuses are eligible for raw-bag intake.
+// received / not_receivable / unknown are skipped during sync.
+// TODO: when Zoho Integration exposes is_tablet_po on list/detail, add tablet-PO
+// scoping here (only call detail for tablet POs, only show tablet POs in dropdown).
+const RECEIVABLE_LINE_STATUSES: ReadonlySet<string> = new Set([
+  "to_be_received",
+  "partially_received",
+]);
+
 // Return type for upsertPo — provides the local PO ID and effective status
 // so the caller can decide whether to fetch line item details.
 type UpsertPoResult = {
@@ -286,6 +295,10 @@ async function upsertLines(
 
   for (const line of lines) {
     if (!line.line_item_id) {
+      skipped++;
+      continue;
+    }
+    if (!RECEIVABLE_LINE_STATUSES.has(line.status)) {
       skipped++;
       continue;
     }

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.5] — 2026-05-21
+
+### Fixed
+- PO line sync: `upsertLines` now skips lines whose Zoho status is `received`, `not_receivable`, or any unknown value. Only `to_be_received` and `partially_received` lines are inserted/updated in `po_lines`.
+- Sync POs banner now shows full detail: "N POs · N details · N lines synced" so operators can confirm detail fetches and line upserts at a glance.
+
+### Added
+- TODO comment in po-sync.ts marking where `is_tablet_po` scoping will plug in once Zoho Integration exposes the normalized field.
+
 ## [0.2.4] — 2026-05-21
 
 ### Fixed
