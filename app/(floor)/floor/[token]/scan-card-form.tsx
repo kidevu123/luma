@@ -77,12 +77,23 @@ export function ScanCardForm({
   // Used as fallback when the card is not yet in the receivedCards list.
   const [scannedTabletTypeId, setScannedTabletTypeId] = React.useState<string | null>(null);
 
+  // Card ID resolved by typed/camera scan at a first-op station (fresh bag
+  // path). Lets the product picker and submit button work for cards that
+  // aren't in the server-rendered receivedCards dropdown.
+  // Cleared when the user switches to the dropdown.
+  const [resolvedCardId, setResolvedCardId] = React.useState<string | null>(null);
+
   const receivedSet = React.useMemo(
     () => new Set(receivedCards.map((c) => c.id)),
     [receivedCards],
   );
+  // True when selectedCardId was picked from the dropdown (server-rendered list).
   const isReceivedCardSelected =
     selectedCardId !== "" && receivedSet.has(selectedCardId);
+  // True when a card is selected via either the dropdown or typed/camera scan.
+  const hasCardSelected =
+    selectedCardId !== "" &&
+    (receivedSet.has(selectedCardId) || resolvedCardId === selectedCardId);
 
   // Filter products to those compatible with the selected bag's tablet type.
   // Primary: tablet type from the dropdown selection (selectedCard).
@@ -99,7 +110,7 @@ export function ScanCardForm({
 
   const showProductPicker =
     requireProductForFreshBag &&
-    isReceivedCardSelected &&
+    hasCardSelected &&
     filteredProducts.length > 0;
 
   const hasReceived = receivedCards.length > 0 && canStartFreshBag;
@@ -107,8 +118,10 @@ export function ScanCardForm({
   const hasDropdownOptions = hasReceived || hasPickups;
 
   // Submit with an explicit cardId, bypassing the form select.
+  // explicitProductId overrides the productId state for the stale-closure
+  // case (single auto-selected product called before setProductId settles).
   const submitWithCardId = React.useCallback(
-    async (cardId: string) => {
+    async (cardId: string, explicitProductId?: string) => {
       setPending(true);
       setError(null);
       try {
@@ -116,10 +129,13 @@ export function ScanCardForm({
         fd.set("token", token);
         fd.set("stationId", stationId);
         fd.set("cardId", cardId);
-        if (productId) fd.set("productId", productId);
+        const pid = explicitProductId ?? productId;
+        if (pid) fd.set("productId", pid);
         const r = await scanCardAction(fd);
         if (r?.error) setError(r.error);
         else router.refresh();
+      } catch {
+        setError("Start failed — please try again or refresh the page.");
       } finally {
         setPending(false);
       }
@@ -143,8 +159,7 @@ export function ScanCardForm({
         setScanInput("");
         const cardId = result.cardId;
 
-        // First-op station with intake-reserved bag: show product picker.
-        // Auto-select when exactly one product is compatible with this tablet type.
+        // First-op station with intake-reserved bag: resolve product then submit.
         if (requireProductForFreshBag && result.isIntakeReserved) {
           const ttId = result.tabletTypeId ?? null;
           setScannedTabletTypeId(ttId);
@@ -156,7 +171,15 @@ export function ScanCardForm({
                   p.allowedTabletTypeIds.includes(ttId),
               )
             : allowedProducts;
-          setProductId(narrowed.length === 1 && narrowed[0] ? narrowed[0].id : "");
+          if (narrowed.length === 1 && narrowed[0]) {
+            // Exactly one compatible product — auto-submit without extra click.
+            // Pass product ID explicitly to avoid stale-closure on productId state.
+            await submitWithCardId(cardId, narrowed[0].id);
+          } else {
+            // Zero or multiple products — surface the picker/error to the operator.
+            setResolvedCardId(cardId);
+            setProductId("");
+          }
           return;
         }
 
@@ -202,7 +225,7 @@ export function ScanCardForm({
           setError(null);
           if (
             requireProductForFreshBag &&
-            isReceivedCardSelected &&
+            hasCardSelected &&
             (!productId || productId === "")
           ) {
             setError(
@@ -286,6 +309,7 @@ export function ScanCardForm({
                 setScannedTabletTypeId(null);
                 setProductId("");
                 setScanError(null);
+                setResolvedCardId(null);
               }}
               className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
             >
@@ -350,7 +374,7 @@ export function ScanCardForm({
         )}
 
         {requireProductForFreshBag &&
-          isReceivedCardSelected &&
+          hasCardSelected &&
           filteredProducts.length === 0 && (
             <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
               {effectiveTabletTypeId
@@ -370,10 +394,25 @@ export function ScanCardForm({
           type="submit"
           disabled={pending || scanPending}
           onClick={async (e) => {
+            // Typed scan input takes highest priority.
             const raw = scanInput.trim();
             if (raw) {
               e.preventDefault();
               await handleResolvedToken(raw);
+              return;
+            }
+            // Scan-resolved card path: card was found by typed/camera scan, not
+            // by dropdown. Native form submit won't have the right cardId in the
+            // select element, so we must call submitWithCardId directly.
+            if (resolvedCardId) {
+              e.preventDefault();
+              if (requireProductForFreshBag && filteredProducts.length > 0 && !productId) {
+                setError(
+                  "Pick a product before starting. The first production station must record what's being made.",
+                );
+                return;
+              }
+              await submitWithCardId(resolvedCardId);
             }
           }}
           className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-base font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60 transition-colors"

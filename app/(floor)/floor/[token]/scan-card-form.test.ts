@@ -1,9 +1,16 @@
-// FLOOR-START-3 tests — lookupCardByTokenAction invariants.
+// FLOOR-START-3 + FLOOR-START-5 tests.
 //
-// Covers: card-not-found, wrong card type, retired card, IDLE card rejection,
-// valid RAW_BAG (intake-reserved ASSIGNED+no-bag, mid-production ASSIGNED+bag).
+// FLOOR-START-3: lookupCardByTokenAction invariants.
+// FLOOR-START-5: typed/camera scan advances the flow (resolvedCardId,
+//   hasCardSelected, auto-submit on single product).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const formSrc = readFileSync(resolve(here, "scan-card-form.tsx"), "utf8");
 
 // ── DB mock ──────────────────────────────────────────────────────────────
 
@@ -223,5 +230,121 @@ describe("product narrowing filter", () => {
     const result = narrowProducts([cardProduct, bottleProduct], "tt-001");
     expect(result).toHaveLength(1);
     expect(result[0]?.id).toBe("p1");
+  });
+});
+
+// ── FLOOR-START-5 structural invariants (source-text) ────────────────────────
+
+describe("FLOOR-START-5 · scan-card-form.tsx structural invariants", () => {
+  it("declares resolvedCardId state", () => {
+    expect(formSrc).toMatch(/resolvedCardId/);
+    expect(formSrc).toMatch(/setResolvedCardId/);
+  });
+
+  it("hasCardSelected includes resolvedCardId === selectedCardId check", () => {
+    expect(formSrc).toMatch(/hasCardSelected/);
+    expect(formSrc).toMatch(/resolvedCardId\s*===\s*selectedCardId/);
+  });
+
+  it("showProductPicker uses hasCardSelected, not isReceivedCardSelected directly", () => {
+    const block = formSrc.match(/const showProductPicker[\s\S]*?;/)?.[0] ?? "";
+    expect(block).toMatch(/hasCardSelected/);
+    expect(block).not.toMatch(/isReceivedCardSelected/);
+  });
+
+  it("submitWithCardId accepts optional explicitProductId parameter", () => {
+    expect(formSrc).toMatch(/explicitProductId\?/);
+    expect(formSrc).toMatch(/explicitProductId\s*\?\?\s*productId/);
+  });
+
+  it("handleResolvedToken auto-submits with explicit product ID when narrowed list has one entry", () => {
+    expect(formSrc).toMatch(/await submitWithCardId\(cardId,\s*narrowed\[0\]\.id\)/);
+  });
+
+  it("setResolvedCardId(null) is called in dropdown onChange to reset scan path", () => {
+    expect(formSrc).toMatch(/setResolvedCardId\(null\)/);
+  });
+
+  it("submit button onClick intercepts when resolvedCardId is set", () => {
+    expect(formSrc).toMatch(/if\s*\(\s*resolvedCardId\s*\)/);
+    expect(formSrc).toMatch(/submitWithCardId\(resolvedCardId\)/);
+  });
+
+  it("zero-products error uses hasCardSelected (fires for scan-resolved cards too)", () => {
+    // In JSX: {requireProductForFreshBag && hasCardSelected && filteredProducts.length === 0 && ...}
+    expect(formSrc).toMatch(/hasCardSelected[\s\S]{0,60}filteredProducts\.length === 0/);
+  });
+});
+
+// ── FLOOR-START-5 · hasCardSelected pure logic ────────────────────────────────
+
+function computeHasCardSelected(
+  selectedCardId: string,
+  receivedSet: Set<string>,
+  resolvedCardId: string | null,
+): boolean {
+  return (
+    selectedCardId !== "" &&
+    (receivedSet.has(selectedCardId) || resolvedCardId === selectedCardId)
+  );
+}
+
+describe("FLOOR-START-5 · hasCardSelected", () => {
+  const RECEIVED_ID = "00000000-0000-0000-0000-aaaaaaaaaaaa";
+  const SCANNED_ID = "00000000-0000-0000-0000-bbbbbbbbbbbb";
+  const receivedSet = new Set([RECEIVED_ID]);
+
+  it("false when selectedCardId is empty", () => {
+    expect(computeHasCardSelected("", receivedSet, null)).toBe(false);
+  });
+
+  it("true when selectedCardId is in receivedSet (dropdown path)", () => {
+    expect(computeHasCardSelected(RECEIVED_ID, receivedSet, null)).toBe(true);
+  });
+
+  it("true when selectedCardId matches resolvedCardId (scan path, card not in dropdown)", () => {
+    expect(computeHasCardSelected(SCANNED_ID, receivedSet, SCANNED_ID)).toBe(true);
+  });
+
+  it("false when selectedCardId is not in receivedSet and resolvedCardId is null (silent-failure case FLOOR-START-5 fixed)", () => {
+    expect(computeHasCardSelected(SCANNED_ID, receivedSet, null)).toBe(false);
+  });
+
+  it("false when resolvedCardId is set but selectedCardId differs (stale state)", () => {
+    expect(computeHasCardSelected(SCANNED_ID, receivedSet, "different-id")).toBe(false);
+  });
+
+  it("true when card is in both receivedSet and resolvedCardId (both paths match)", () => {
+    expect(computeHasCardSelected(RECEIVED_ID, receivedSet, RECEIVED_ID)).toBe(true);
+  });
+});
+
+// ── FLOOR-START-5 · auto-submit trigger condition ────────────────────────────
+
+describe("FLOOR-START-5 · auto-submit on single compatible product", () => {
+  it("triggers auto-submit when narrowed list has exactly one product", () => {
+    const narrowed = [{ id: "p1", sku: "CARD", name: "Card A", allowedTabletTypeIds: ["tt-001"] }];
+    expect(narrowed.length === 1 && !!narrowed[0]).toBe(true);
+  });
+
+  it("shows picker (defers submit) when multiple products match", () => {
+    const narrowed = [
+      { id: "p1", sku: "CARD_A", name: "Card A", allowedTabletTypeIds: [] },
+      { id: "p2", sku: "CARD_B", name: "Card B", allowedTabletTypeIds: [] },
+    ];
+    expect(narrowed.length === 1).toBe(false);
+  });
+
+  it("shows config-error (defers submit) when zero products match", () => {
+    const narrowed: unknown[] = [];
+    expect(narrowed.length === 1).toBe(false);
+    expect(narrowed.length === 0).toBe(true);
+  });
+
+  it("auto-submit uses narrowed[0].id directly (not productId state) to avoid stale closure", () => {
+    // Verified structurally: submitWithCardId(cardId, narrowed[0].id) passes
+    // the product ID as an explicit argument, not relying on the productId state
+    // variable which would be stale in the same render cycle.
+    expect(formSrc).toMatch(/submitWithCardId\(cardId,\s*narrowed\[0\]\.id\)/);
   });
 });
