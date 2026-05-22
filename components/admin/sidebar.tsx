@@ -38,8 +38,8 @@ const SECTIONS: Section[] = [
   {
     heading: "Operations",
     items: [
-      { href: "/production/start",   label: "Start production",     icon: QrCode },
       { href: "/partial-bags",       label: "Available Partial Bags", icon: Archive },
+      { href: "/production/start",   label: "Start production",     icon: QrCode },
       { href: "/inbound",            label: "Receiving",             icon: Inbox },
       { href: "/packaging-output",   label: "Production output",     icon: Package },
       { href: "/qc-review",          label: "QC review",             icon: ShieldAlert },
