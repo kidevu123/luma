@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.36] — 2026-05-22
+
+### Fixed
+- **New Receive PO dropdown regression:** The "New receive" wizard was showing all purchase orders instead of only open/receiving tablet POs. The `is_tablet_po = true` filter was dropped in a prior commit that restructured status filtering. Now uses `and(inArray(status, RECEIVABLE_PO_STATUSES), eq(isTabletPo, true))` matching the raw-bag intake page.
+- Added empty-state note below the PO selector when no open tablet POs are available.
+
+### Tests
+- Added 9 regression tests in `app/(admin)/inbound/new/page.test.ts` guarding the PO filter: verifies `eq(isTabletPo, true)` present, `notInArray` not used, `RECEIVABLE_PO_STATUSES` referenced, and constant contains only OPEN/RECEIVING.
+
 ## [0.2.35] — 2026-05-22
 
 ### Fixed

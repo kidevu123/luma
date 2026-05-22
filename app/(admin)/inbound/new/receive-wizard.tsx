@@ -122,6 +122,11 @@ export function ReceiveWizard({
                       </option>
                     ))}
                   </Select>
+                  {purchaseOrders.length === 0 && (
+                    <p className="text-xs text-text-muted mt-1">
+                      No open tablet POs. Sync from Zoho or ask a supervisor to open one.
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="receiveName">Receive name</Label>
