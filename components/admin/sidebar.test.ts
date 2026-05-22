@@ -71,8 +71,8 @@ describe("NAV-REDESIGN-1 · Operations entries", () => {
   it("Receiving is in Operations", () => {
     expect(inOps('"/inbound"')).toBe(true);
   });
-  it("Pack-out is in Operations", () => {
-    expect(inOps('"Pack-out"')).toBe(true);
+  it("Production output is in Operations", () => {
+    expect(inOps('"Production output"')).toBe(true);
   });
   it("QC review is in Operations", () => {
     expect(inOps('"QC review"')).toBe(true);

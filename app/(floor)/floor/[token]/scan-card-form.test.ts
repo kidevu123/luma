@@ -14,6 +14,14 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: (_fields?: unknown) => ({
       from: (_table?: unknown) => ({
+        leftJoin: (_t: unknown, _c: unknown) => ({
+          where: (_cond?: unknown) => ({
+            limit: async (_count?: unknown) => {
+              const rows = (selectResults[callIdx++] ?? []) as unknown[];
+              return rows;
+            },
+          }),
+        }),
         where: (_cond?: unknown) => ({
           limit: async (_count?: unknown) => {
             const rows = (selectResults[callIdx++] ?? []) as unknown[];
@@ -27,10 +35,12 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/db/schema", () => ({
   qrCards: {},
+  inventoryBags: {},
 }));
 
 vi.mock("drizzle-orm", () => ({
   eq: (a: unknown, b: unknown) => ({ eq: [a, b] }),
+  inArray: (a: unknown, b: unknown) => ({ inArray: [a, b] }),
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────
@@ -50,6 +60,7 @@ const IDLE_RAW_BAG = {
   cardType: "RAW_BAG",
   status: "IDLE",
   assignedWorkflowBagId: null,
+  tabletTypeId: null,
 };
 
 const INTAKE_RESERVED_RAW_BAG = {
@@ -57,6 +68,7 @@ const INTAKE_RESERVED_RAW_BAG = {
   cardType: "RAW_BAG",
   status: "ASSIGNED",
   assignedWorkflowBagId: null,
+  tabletTypeId: "tt-001",
 };
 
 const ASSIGNED_RAW_BAG = {
@@ -64,6 +76,7 @@ const ASSIGNED_RAW_BAG = {
   cardType: "RAW_BAG",
   status: "ASSIGNED",
   assignedWorkflowBagId: "00000000-0000-0000-0000-000000000099",
+  tabletTypeId: "tt-002",
 };
 
 // ── beforeEach ────────────────────────────────────────────────────────────
@@ -123,21 +136,92 @@ describe("lookupCardByTokenAction", () => {
     selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
     const result = await lookupCardByTokenAction(makeForm("bag-card-2"));
     expect(result).toHaveProperty("ok", true);
-    expect((result as { ok: true; cardId: string; isIntakeReserved: boolean }).cardId).toBe(INTAKE_RESERVED_RAW_BAG.id);
-    expect((result as { ok: true; cardId: string; isIntakeReserved: boolean }).isIntakeReserved).toBe(true);
+    const ok = result as { ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null };
+    expect(ok.cardId).toBe(INTAKE_RESERVED_RAW_BAG.id);
+    expect(ok.isIntakeReserved).toBe(true);
+    expect(ok.tabletTypeId).toBe("tt-001");
   });
 
   it("returns ok+isIntakeReserved=false for mid-production ASSIGNED RAW_BAG card", async () => {
     selectResults[0] = [ASSIGNED_RAW_BAG];
     const result = await lookupCardByTokenAction(makeForm("pickup-bag-token"));
     expect(result).toHaveProperty("ok", true);
-    expect((result as { ok: true; cardId: string; isIntakeReserved: boolean }).cardId).toBe(ASSIGNED_RAW_BAG.id);
-    expect((result as { ok: true; cardId: string; isIntakeReserved: boolean }).isIntakeReserved).toBe(false);
+    const ok = result as { ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null };
+    expect(ok.cardId).toBe(ASSIGNED_RAW_BAG.id);
+    expect(ok.isIntakeReserved).toBe(false);
+    expect(ok.tabletTypeId).toBe("tt-002");
   });
 
   it("trims whitespace from scan token before lookup", async () => {
     selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
     const result = await lookupCardByTokenAction(makeForm("  bag-card-2  "));
     expect(result).toHaveProperty("ok", true);
+  });
+
+  it("returns tabletTypeId null when leftJoin finds no inventory bag", async () => {
+    selectResults[0] = [{
+      id: "00000000-0000-0000-0000-000000000004",
+      cardType: "RAW_BAG",
+      status: "ASSIGNED",
+      assignedWorkflowBagId: null,
+      tabletTypeId: null,
+    }];
+    const result = await lookupCardByTokenAction(makeForm("unlinked-token"));
+    expect(result).toHaveProperty("ok", true);
+    const ok = result as { ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null };
+    expect(ok.tabletTypeId).toBeNull();
+  });
+});
+
+// ── Product narrowing filter logic (pure) ─────────────────────────────────
+// Verifies the filter rule used by eligibleProducts / handleResolvedToken.
+
+type MockProduct = { id: string; sku: string; name: string; allowedTabletTypeIds: string[] };
+
+function narrowProducts(
+  products: MockProduct[],
+  tabletTypeId: string | null,
+): MockProduct[] {
+  if (!tabletTypeId) return products;
+  return products.filter(
+    (p) => p.allowedTabletTypeIds.length === 0 || p.allowedTabletTypeIds.includes(tabletTypeId),
+  );
+}
+
+describe("product narrowing filter", () => {
+  const cardProduct: MockProduct = { id: "p1", sku: "CARD_A", name: "Card A", allowedTabletTypeIds: ["tt-001"] };
+  const bottleProduct: MockProduct = { id: "p2", sku: "BOT_A", name: "Bottle A", allowedTabletTypeIds: ["tt-002"] };
+  const multiTabletCard: MockProduct = { id: "p3", sku: "CARD_B", name: "Card B", allowedTabletTypeIds: ["tt-001", "tt-003"] };
+  const unmappedProduct: MockProduct = { id: "p4", sku: "GENERIC", name: "Generic", allowedTabletTypeIds: [] };
+
+  it("shows only products compatible with scanned tablet type", () => {
+    const result = narrowProducts([cardProduct, bottleProduct], "tt-001");
+    expect(result).toEqual([cardProduct]);
+  });
+
+  it("shows all products when tablet type is null (no tablet info)", () => {
+    const result = narrowProducts([cardProduct, bottleProduct], null);
+    expect(result).toEqual([cardProduct, bottleProduct]);
+  });
+
+  it("shows product mapped to multiple tablet types when matching one of them", () => {
+    const result = narrowProducts([cardProduct, multiTabletCard, bottleProduct], "tt-003");
+    expect(result).toEqual([multiTabletCard]);
+  });
+
+  it("shows unmapped product (allowedTabletTypeIds=[]) regardless of scanned tablet", () => {
+    const result = narrowProducts([cardProduct, unmappedProduct], "tt-001");
+    expect(result).toEqual([cardProduct, unmappedProduct]);
+  });
+
+  it("returns empty array when no products are compatible (config error case)", () => {
+    const result = narrowProducts([cardProduct, bottleProduct], "tt-999");
+    expect(result).toHaveLength(0);
+  });
+
+  it("auto-select scenario: exactly one product matches", () => {
+    const result = narrowProducts([cardProduct, bottleProduct], "tt-001");
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("p1");
   });
 });

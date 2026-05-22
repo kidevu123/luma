@@ -226,3 +226,38 @@ describe("first-op product selection — BOTTLE_HANDPACK station", () => {
     if (r.ok) expect(r.productId).toBeNull();
   });
 });
+
+describe("STATION_KIND_TO_PRODUCT_KINDS — product kind mapping per station", () => {
+  it("BLISTER allows CARD and VARIETY only", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["BLISTER"]).toEqual(
+      expect.arrayContaining(["CARD", "VARIETY"]),
+    );
+    expect(STATION_KIND_TO_PRODUCT_KINDS["BLISTER"]).not.toContain("BOTTLE");
+  });
+
+  it("HANDPACK_BLISTER allows CARD and VARIETY only", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["HANDPACK_BLISTER"]).toEqual(
+      expect.arrayContaining(["CARD", "VARIETY"]),
+    );
+    expect(STATION_KIND_TO_PRODUCT_KINDS["HANDPACK_BLISTER"]).not.toContain("BOTTLE");
+  });
+
+  it("COMBINED allows CARD and VARIETY only", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["COMBINED"]).toEqual(
+      expect.arrayContaining(["CARD", "VARIETY"]),
+    );
+    expect(STATION_KIND_TO_PRODUCT_KINDS["COMBINED"]).not.toContain("BOTTLE");
+  });
+
+  it("BOTTLE_HANDPACK allows BOTTLE and VARIETY only", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["BOTTLE_HANDPACK"]).toEqual(
+      expect.arrayContaining(["BOTTLE", "VARIETY"]),
+    );
+    expect(STATION_KIND_TO_PRODUCT_KINDS["BOTTLE_HANDPACK"]).not.toContain("CARD");
+  });
+
+  it("downstream stations (SEALING, PACKAGING) have no entry — empty array fallback", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["SEALING"] ?? []).toHaveLength(0);
+    expect(STATION_KIND_TO_PRODUCT_KINDS["PACKAGING"] ?? []).toHaveLength(0);
+  });
+});
