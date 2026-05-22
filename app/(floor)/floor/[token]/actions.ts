@@ -37,6 +37,10 @@ const FIRST_OP_COUNT_EVENTS: ReadonlySet<string> = new Set([
   "BOTTLE_HANDPACK_COMPLETE",
 ]);
 
+// Canonical source: lib/production/first-op-product.ts FIRST_OP_STATION_KINDS.
+// Intentionally duplicated here for floor-action isolation — do NOT
+// deduplicate or import the shared constant into this file. If
+// FIRST_OP_STATION_KINDS changes, update both sets in tandem.
 const FRESH_BAG_STATION_KINDS: ReadonlySet<string> = new Set([
   "BLISTER",
   "HANDPACK_BLISTER",

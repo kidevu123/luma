@@ -46,6 +46,7 @@ const stationSchema = z.object({
   label: z.string().min(1).max(60),
   kind: z.enum([
     "BLISTER",
+    "HANDPACK_BLISTER",
     "SEALING",
     "PACKAGING",
     "BOTTLE_HANDPACK",
