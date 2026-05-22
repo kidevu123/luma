@@ -35,7 +35,7 @@ type SpecRow = {
 type Material = { id: string; sku: string; name: string; kind: string; uom: string };
 
 const PACKAGING_KINDS = new Set([
-  "BLISTER_CARD", "DISPLAY", "CASE", "LABEL", "BOTTLE", "CAP", "INSERT",
+  "BLISTER_CARD", "DISPLAY", "CASE", "LABEL", "INSERT",
 ]);
 type Tablet = { id: string; name: string };
 
