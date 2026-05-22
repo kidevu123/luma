@@ -317,7 +317,7 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
                         {intakeBag.receiveName ? ` · ${intakeBag.receiveName}` : ""}
                         {intakeBag.bagNumber != null ? ` · Bag ${intakeBag.bagNumber}` : ""}
                         {intakeBag.internalReceiptNumber
-                          ? ` · Receipt ${intakeBag.internalReceiptNumber}`
+                          ? ` · Receipt # ${intakeBag.internalReceiptNumber}`
                           : ""}
                         {intakeBag.tabletTypeName ? ` · ${intakeBag.tabletTypeName}` : ""}
                       </span>
