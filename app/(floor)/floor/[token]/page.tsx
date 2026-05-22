@@ -312,15 +312,7 @@ export default async function FloorStationPage({
               token={token}
               stationId={station.station.id}
               canStartFreshBag={canStartFreshBag}
-              receivedCards={receivedCards.map((c) => ({
-                id: c.id,
-                label: c.label,
-                scanToken: c.scanToken,
-                receiptNumber: c.receiptNumber ?? null,
-                tabletTypeName: c.tabletTypeName ?? null,
-                bagNumber: c.bagNumber ?? null,
-                poNumber: c.poNumber ?? null,
-              }))}
+              receivedCards={receivedCards}
               eligiblePickups={eligiblePickups
                 .filter(
                   (
