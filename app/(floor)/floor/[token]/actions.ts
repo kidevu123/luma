@@ -36,6 +36,13 @@ const FIRST_OP_COUNT_EVENTS: ReadonlySet<string> = new Set([
   "BOTTLE_HANDPACK_COMPLETE",
 ]);
 
+const FRESH_BAG_STATION_KINDS: ReadonlySet<string> = new Set([
+  "BLISTER",
+  "HANDPACK_BLISTER",
+  "BOTTLE_HANDPACK",
+  "COMBINED",
+]);
+
 // Floor PWA actions are anonymous (no admin login). Authorization is
 // the station's scan_token, which lives in the URL. Every action MUST
 // take the token, look up the station, and then refuse if the
@@ -187,6 +194,11 @@ export async function scanCardAction(
         const isFreshStart =
           card.status === "IDLE" ||
           (card.status === "ASSIGNED" && !card.assignedWorkflowBagId);
+        if (isFreshStart && !FRESH_BAG_STATION_KINDS.has(station.kind)) {
+          throw new Error(
+            "This station does not start fresh bags. Scan a bag that has already been released to this station.",
+          );
+        }
         const firstOp = checkFirstOpProductSelection({
           stationKind: station.kind,
           cardStatus: isFreshStart ? "IDLE" : card.status,
@@ -313,6 +325,11 @@ export async function scanCardAction(
             : null;
           // Partial-bag resume is semantically a fresh start —
           // treat as IDLE for first-op product gating.
+          if (!FRESH_BAG_STATION_KINDS.has(station.kind)) {
+            throw new Error(
+              "This station does not start fresh bags. Scan a bag that has already been released to this station.",
+            );
+          }
           const firstOp = checkFirstOpProductSelection({
             stationKind: station.kind,
             cardStatus: "IDLE",
