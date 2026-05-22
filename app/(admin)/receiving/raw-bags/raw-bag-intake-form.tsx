@@ -13,7 +13,6 @@ import {
   ClipboardList,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -88,7 +87,6 @@ export function RawBagIntakeForm({
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   type Result = Awaited<ReturnType<typeof createRawBagIntakeAction>>;
   const [result, setResult] = React.useState<Result | null>(null);
-  const router = useRouter();
 
   const selectedPo = React.useMemo(
     () => purchaseOrders.find((p) => p.id === poId) ?? null,
@@ -204,24 +202,6 @@ export function RawBagIntakeForm({
     }
   }
 
-  function handleAnother() {
-    setResult(null);
-    setPoId("");
-    setPoLineId("");
-    setPoNumberManual("");
-    setVendorNameManual("");
-    setOrderedQuantityManual("");
-    setTabletTypeId(tabletTypes[0]?.id ?? "");
-    setSupplierLot("");
-    setNumberOfBags("10");
-    setDeclaredTotal("");
-    setReceiptStart("");
-    setReceiptPrefix("");
-    setRows([]);
-    setErrorMessage(null);
-    router.refresh();
-  }
-
   const receivedTotal = computeReceivedTotal(rows);
 
   const poolSet = React.useMemo(
@@ -238,7 +218,7 @@ export function RawBagIntakeForm({
   );
 
   if (result?.ok) {
-    return <SaveResultPanel result={result} onAnother={handleAnother} />;
+    return <SaveResultPanel result={result} />;
   }
 
   return (
@@ -809,10 +789,8 @@ function LookupCard() {
 
 function SaveResultPanel({
   result,
-  onAnother,
 }: {
   result: Extract<Awaited<ReturnType<typeof createRawBagIntakeAction>>, { ok: true }>;
-  onAnother: () => void;
 }) {
   return (
     <ProductionSection
@@ -876,8 +854,10 @@ function SaveResultPanel({
             <ArrowRight className="h-3.5 w-3.5" /> Start production
           </Link>
         </Button>
-        <Button size="sm" onClick={onAnother}>
-          <Inbox className="h-3.5 w-3.5" /> Receive another batch
+        <Button asChild size="sm">
+          <Link href="/receiving/raw-bags">
+            <Inbox className="h-3.5 w-3.5" /> Receive another batch
+          </Link>
         </Button>
       </div>
     </ProductionSection>

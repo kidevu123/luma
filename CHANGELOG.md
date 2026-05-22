@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.39] — 2026-05-22
+
+### Improved
+- Receiving tabs: "Purchase orders" tab renamed to "Receives" — the `/inbound` page shows receive history, not a PO list.
+- Recall page: "Pack-out — N" section heading renamed to "Production output — N" for consistency with sidebar and page title.
+- "Receive another batch" button now navigates to `/receiving/raw-bags` (full page load, clean form) instead of resetting React state in-place, making the intent of the action clear.
+
 ## [0.2.38] — 2026-05-22
 
 ### Fixed
