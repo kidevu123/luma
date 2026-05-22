@@ -5,6 +5,8 @@ import {
   qrCards,
   workflowBags,
   batches,
+  smallBoxes,
+  receives,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
@@ -89,6 +91,10 @@ export function validateQrCardForRawBag(
   return { ok: true };
 }
 
+export function shouldReleaseQrAtBagEdit(card: QrCardForValidation): boolean {
+  return card.status === "ASSIGNED" && card.assignedWorkflowBagId === null;
+}
+
 export async function getBagForEdit(bagId: string) {
   const [row] = await db
     .select({
@@ -147,11 +153,7 @@ export async function editInventoryBag(
             .select()
             .from(qrCards)
             .where(eq(qrCards.scanToken, bag.bagQrCode));
-          if (
-            oldCard &&
-            oldCard.status === "ASSIGNED" &&
-            oldCard.assignedWorkflowBagId === null
-          ) {
+          if (oldCard && shouldReleaseQrAtBagEdit(oldCard)) {
             await tx
               .update(qrCards)
               .set({ status: "IDLE" as const })
@@ -187,8 +189,14 @@ export async function editInventoryBag(
           // The DB has a partial unique index as a safety net, but we throw early with
           // a clear message rather than letting the constraint violation surface.
           const [existingBag] = await tx
-            .select({ id: inventoryBags.id })
+            .select({
+              id: inventoryBags.id,
+              bagNumber: inventoryBags.bagNumber,
+              receiveName: receives.receiveName,
+            })
             .from(inventoryBags)
+            .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+            .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
             .where(
               and(
                 eq(inventoryBags.bagQrCode, newToken),
@@ -196,8 +204,14 @@ export async function editInventoryBag(
               ),
             )
             .limit(1);
-          if (existingBag)
-            throw new Error("This QR card is already assigned to another raw bag.");
+          if (existingBag) {
+            const ctx = existingBag.receiveName
+              ? `bag ${existingBag.bagNumber} in receive ${existingBag.receiveName}`
+              : `bag ${existingBag.bagNumber}`;
+            throw new Error(
+              `This QR is already assigned to ${ctx}. Choose another QR or resolve the existing assignment first.`,
+            );
+          }
 
           await tx
             .update(qrCards)
@@ -270,6 +284,27 @@ export async function editInventoryBag(
         } else {
           newBatchId = null;
         }
+      }
+
+      // ── Receipt number uniqueness guard ───────────────────────────────────
+      if (input.internalReceiptNumber?.trim()) {
+        const [rcptConflict] = await tx
+          .select({ id: inventoryBags.id })
+          .from(inventoryBags)
+          .where(
+            and(
+              eq(
+                inventoryBags.internalReceiptNumber,
+                input.internalReceiptNumber.trim(),
+              ),
+              ne(inventoryBags.id, bagId),
+            ),
+          )
+          .limit(1);
+        if (rcptConflict)
+          throw new Error(
+            `Receipt number "${input.internalReceiptNumber.trim()}" is already used by another bag.`,
+          );
       }
 
       // ── Apply patch ───────────────────────────────────────────────────────
