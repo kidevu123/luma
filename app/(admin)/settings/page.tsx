@@ -15,6 +15,8 @@ import {
   Cpu,
   UserCog,
   Webhook,
+  Receipt,
+  Scale,
 } from "lucide-react";
 import {
   products as productsTable,
@@ -113,6 +115,12 @@ export default async function SettingsPage() {
           hint="blister cards, display boxes, master cases, labels, foil"
         />
         <ConfigLink
+          href="/product-packaging-requirements"
+          icon={PackageCheck}
+          label="Product requirements"
+          hint="packaging spec per product — which materials and quantities each SKU needs"
+        />
+        <ConfigLink
           href="/settings/blister-standards"
           icon={Activity}
           label="Blister standards"
@@ -158,10 +166,32 @@ export default async function SettingsPage() {
           hint="packaging receipt sync from the station scanner"
         />
         <ConfigLink
+          href="/zoho-operations"
+          icon={Webhook}
+          label="Zoho Operations"
+          hint="assembly operations sync — push production runs to Zoho Manufacturing"
+        />
+        <ConfigLink
           href="/settings/legacy-import"
           icon={Plug}
           label="Legacy import"
           hint="pull the legacy DB dump from PythonAnywhere — owner only"
+        />
+      </Section>
+
+      {/* ANALYTICS */}
+      <Section heading="Analytics">
+        <ConfigLink
+          href="/invoice-allocations"
+          icon={Receipt}
+          label="Invoice allocations"
+          hint="match supplier invoices to received lots for cost accounting"
+        />
+        <ConfigLink
+          href="/material-reconciliation"
+          icon={Scale}
+          label="Material reconciliation"
+          hint="compare expected vs actual material consumption per batch"
         />
       </Section>
 

@@ -34,6 +34,8 @@ import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
 import { shouldRenderQcPanel } from "@/lib/production/qc-panel-helpers";
 import { QcPanel, type PendingReworkRow } from "./qc-panel";
+import { loadAutoLots, STATION_AUTO_MATERIAL_KINDS, type AutoLoadedLot } from "@/lib/production/auto-load-lots";
+import { SealHandpackForm } from "./seal-handpack-form";
 
 export const dynamic = "force-dynamic";
 
@@ -150,6 +152,27 @@ export default async function FloorStationPage({
             ),
           );
 
+  // Auto-load available lots for deterministic-material stations
+  const autoLots = STATION_AUTO_MATERIAL_KINDS[station.station.kind]
+    ? await loadAutoLots(station.station.kind)
+    : [];
+
+  // Detect if the active bag at a SEALING station came from HANDPACK_BLISTER
+  let bagIsHandpacked = false;
+  if (station.station.kind === "SEALING" && currentAtStation?.bag.id) {
+    const [priorHandpackEvent] = await db
+      .select({ eventType: workflowEvents.eventType })
+      .from(workflowEvents)
+      .where(
+        and(
+          eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
+          sql`event_type = 'HANDPACK_BLISTER_COMPLETE'`,
+        )
+      )
+      .limit(1);
+    bagIsHandpacked = priorHandpackEvent !== undefined;
+  }
+
   // Load the product's packaging BOM so the packaging close-out form
   // can preview expected material consumption as the operator types.
   const currentProductId = currentAtStation?.bag.productId ?? null;
@@ -208,6 +231,8 @@ export default async function FloorStationPage({
         activeSession={activeSession}
         employeeOptions={employeeOptions}
       />
+
+      <AutoLoadedLotsPanel lots={autoLots} stationKind={station.station.kind} />
 
       <section className="rounded-2xl bg-surface border border-border p-5 space-y-4">
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-subtle">
@@ -316,7 +341,15 @@ export default async function FloorStationPage({
               unitsPerDisplay={currentAtStation.product?.unitsPerDisplay ?? null}
               displaysPerCase={currentAtStation.product?.displaysPerCase ?? null}
               packagingSpecs={packagingSpecsForForm}
+              bagIsHandpacked={bagIsHandpacked}
             />
+            {bagIsHandpacked && station.station.kind === "SEALING" && (
+              <SealHandpackForm
+                token={token}
+                stationId={station.station.id}
+                workflowBagId={currentAtStation.bag.id}
+              />
+            )}
             {/* Help operator pick the next action when the bag has
              *  already advanced past this station's stage. The
              *  StageActionButtons hides its primary button in that
@@ -359,6 +392,7 @@ export default async function FloorStationPage({
 // from "use server" actions.
 const STATION_PREREQ_STAGE: Record<string, string> = {
   BLISTER: "STARTED",
+  HANDPACK_BLISTER: "STARTED",
   SEALING: "BLISTERED",
   PACKAGING: "SEALED",
   COMBINED: "STARTED", // first action is BLISTER_COMPLETE
@@ -495,3 +529,39 @@ function BagAdvancedBanner({
     </div>
   );
 }
+
+function AutoLoadedLotsPanel({
+  lots,
+  stationKind,
+}: {
+  lots: AutoLoadedLot[];
+  stationKind: string;
+}) {
+  if (!STATION_AUTO_MATERIAL_KINDS[stationKind]) return null;
+  return (
+    <div className="rounded-xl border border-border bg-surface p-4 space-y-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+        Loaded materials
+      </p>
+      {lots.length === 0 ? (
+        <p className="text-sm text-amber-700 font-medium">
+          No available lots found — receive stock before starting.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {lots.map((lot) => (
+            <li key={lot.lotId} className="flex items-center justify-between gap-3 text-sm">
+              <span className="font-medium">{lot.materialName}</span>
+              <span className="tabular-nums text-text-muted font-mono text-xs">
+                {lot.qtyOnHand.toLocaleString()} on hand
+                {lot.boxNumber ? ` · box ${lot.boxNumber}` : ""}
+                {lot.supplierLotNumber ? ` · lot ${lot.supplierLotNumber}` : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+

@@ -71,6 +71,7 @@ export const stationKindEnum = pgEnum("station_kind", [
   "BOTTLE_CAP_SEAL",
   "BOTTLE_STICKER",
   "COMBINED",
+  "HANDPACK_BLISTER",
 ]);
 
 export const productKindEnum = pgEnum("product_kind", [
@@ -197,6 +198,7 @@ export const workflowEventTypeEnum = pgEnum("workflow_event_type", [
   "BAG_VERIFIED",
   // Production stages
   "BLISTER_COMPLETE",
+  "HANDPACK_BLISTER_COMPLETE",
   "SEALING_COMPLETE",
   "PACKAGING_SNAPSHOT",
   "PACKAGING_COMPLETE",

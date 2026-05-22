@@ -16,6 +16,7 @@
  *  Filling will join this set in PRD-3. */
 export const FIRST_OP_STATION_KINDS: ReadonlySet<string> = new Set([
   "BLISTER",
+  "HANDPACK_BLISTER",
   "COMBINED", // does the whole pipeline; first event is BLISTER_COMPLETE
 ]);
 
@@ -24,6 +25,7 @@ export const FIRST_OP_STATION_KINDS: ReadonlySet<string> = new Set([
  *  COMBINED accepts the same. Bottle stations come later. */
 export const STATION_KIND_TO_PRODUCT_KINDS: Readonly<Record<string, ReadonlyArray<string>>> = {
   BLISTER: ["CARD", "VARIETY"],
+  HANDPACK_BLISTER: ["CARD", "VARIETY"],
   COMBINED: ["CARD", "VARIETY"],
   BOTTLE_HANDPACK: ["BOTTLE", "VARIETY"],
 };
