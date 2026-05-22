@@ -8,12 +8,13 @@
 // stage events still come from station scans.
 
 import { db } from "@/lib/db";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import {
   productAllowedTablets,
   products,
   stations,
 } from "@/lib/db/schema";
+import { FIRST_OP_STATION_KINDS } from "@/lib/production/first-op-product";
 import { requireLead } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { StartProductionForm } from "./start-production-form";
@@ -27,7 +28,12 @@ export default async function StartProductionPage() {
     db
       .select({ id: stations.id, label: stations.label, kind: stations.kind })
       .from(stations)
-      .where(eq(stations.isActive, true))
+      .where(
+        and(
+          eq(stations.isActive, true),
+          inArray(stations.kind, [...FIRST_OP_STATION_KINDS] as ("BLISTER" | "HANDPACK_BLISTER" | "BOTTLE_HANDPACK" | "COMBINED")[]),
+        ),
+      )
       .orderBy(asc(stations.label)),
     db
       .select({
@@ -49,7 +55,7 @@ export default async function StartProductionPage() {
     <div className="space-y-5">
       <PageHeader
         title="Start production"
-        description="Scan a received raw bag, pick the station, confirm the product (auto-selected by station type), and start production. The raw bag's QR card — reserved at receiving — activates automatically."
+        description="Supervisor fallback path. For day-to-day production, operators scan bag QRs at the floor station. Use this page if a bag could not start from the floor — e.g., scanner issue or misconfigured station. Scans the raw bag, selects a first-operation station, confirms the product, and fires CARD_ASSIGNED."
       />
 
       {/* Readiness badges */}
