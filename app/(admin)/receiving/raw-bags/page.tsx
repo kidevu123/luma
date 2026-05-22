@@ -18,6 +18,7 @@ import {
 import { RECEIVABLE_PO_STATUSES } from "@/lib/production/raw-bag-intake";
 import { requireLead } from "@/lib/auth-guards";
 import { listAvailableRawBagQrCards } from "@/lib/db/queries/qr-cards";
+import { listPoLineReceiveTotals } from "@/lib/db/queries/receives";
 import { ShieldAlert, ShieldCheck, Info } from "lucide-react";
 import { RawBagIntakeForm } from "./raw-bag-intake-form";
 import { ReceivingTabs } from "@/components/ui/receiving-tabs";
@@ -66,6 +67,11 @@ export default async function ReceiveRawBagsPage() {
       .orderBy(asc(tabletTypes.name)),
     listAvailableRawBagQrCards(),
   ]);
+
+  // Load PO line receive totals for all tablet POs (typically <10 POs)
+  const lineReceiveTotals = (
+    await Promise.all(pos.map((p) => listPoLineReceiveTotals(p.id)))
+  ).flat();
 
   // Zoho readiness is based solely on whether the Integration Service bearer
   // credentials are configured. We never probe the old OAuth gateway token
@@ -141,6 +147,7 @@ export default async function ReceiveRawBagsPage() {
         poLines={lines}
         tabletTypes={tablets}
         availableQrCards={availableQrCards.map((c) => ({ scanToken: c.scanToken }))}
+        lineReceiveTotals={lineReceiveTotals}
       />
     </div>
   );

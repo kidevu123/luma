@@ -45,6 +45,7 @@ type PoLine = {
   zohoLineItemId: string | null;
 };
 type TabletType = { id: string; sku: string | null; name: string };
+type PoLineReceiveTotal = { poLineId: string; bagCount: number; receiveCount: number };
 
 type PoMode = "LOCAL_PO" | "MANUAL_REFERENCE";
 
@@ -53,11 +54,13 @@ export function RawBagIntakeForm({
   poLines,
   tabletTypes,
   availableQrCards,
+  lineReceiveTotals = [],
 }: {
   purchaseOrders: PO[];
   poLines: PoLine[];
   tabletTypes: TabletType[];
   availableQrCards: { scanToken: string }[];
+  lineReceiveTotals?: PoLineReceiveTotal[];
 }) {
   const [poMode, setPoMode] = React.useState<PoMode>(
     purchaseOrders.length > 0 ? "LOCAL_PO" : "MANUAL_REFERENCE",
@@ -262,6 +265,7 @@ export function RawBagIntakeForm({
             setPoId={setPoId}
             poLineId={poLineId}
             setPoLineId={setPoLineId}
+            lineReceiveTotals={lineReceiveTotals}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -568,6 +572,7 @@ function PoLineCards({
   setPoId,
   poLineId,
   setPoLineId,
+  lineReceiveTotals,
 }: {
   purchaseOrders: PO[];
   poLines: PoLine[];
@@ -576,6 +581,7 @@ function PoLineCards({
   setPoId: (s: string) => void;
   poLineId: string;
   setPoLineId: (s: string) => void;
+  lineReceiveTotals: PoLineReceiveTotal[];
 }) {
   const [filter, setFilter] = React.useState("");
   const selectedPo = purchaseOrders.find((p) => p.id === poId) ?? null;
@@ -645,6 +651,7 @@ function PoLineCards({
               {filteredLines.map((l) => {
                 const tt = tabletTypes.find((t) => t.id === l.tabletTypeId);
                 const active = poLineId === l.id;
+                const total = lineReceiveTotals.find((t) => t.poLineId === l.id);
                 return (
                   <li key={l.id}>
                     <button
@@ -668,9 +675,18 @@ function PoLineCards({
                           </div>
                         </div>
                         <div>
-                          <div className="text-text-muted uppercase tracking-wider">Status</div>
+                          <div className="text-text-muted uppercase tracking-wider">Luma receives</div>
                           <div className="font-mono">
-                            {active ? "Receiving" : "Ready"}
+                            {active ? (
+                              <span className="text-brand-700 font-semibold">Receiving</span>
+                            ) : total ? (
+                              <span className="text-emerald-700">
+                                {total.bagCount} bag{total.bagCount === 1 ? "" : "s"}
+                                {total.receiveCount > 1 ? ` · ${total.receiveCount} rcvs` : ""}
+                              </span>
+                            ) : (
+                              <span className="text-text-subtle">None yet</span>
+                            )}
                           </div>
                         </div>
                       </div>

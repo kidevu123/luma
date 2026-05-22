@@ -68,6 +68,43 @@ export async function getReceive(id: string) {
   return { ...row, boxes, bags: bagsByBox };
 }
 
+export type PoLineReceiveTotal = {
+  poLineId: string;
+  bagCount: number;
+  receiveCount: number;
+};
+
+/**
+ * For a given PO, return the total number of Luma bags and receives per PO line.
+ * Used by the intake form to show operators whether a line already has receives.
+ */
+export async function listPoLineReceiveTotals(
+  poId: string,
+): Promise<PoLineReceiveTotal[]> {
+  const rows = await db.execute<{
+    po_line_id: string;
+    bag_count: number;
+    receive_count: number;
+  }>(sql`
+    SELECT
+      r.po_line_id,
+      COUNT(ib.id)::int          AS bag_count,
+      COUNT(DISTINCT r.id)::int  AS receive_count
+    FROM receives r
+    JOIN small_boxes sb ON sb.receive_id = r.id
+    LEFT JOIN inventory_bags ib ON ib.small_box_id = sb.id
+    WHERE r.po_id = ${poId}
+      AND r.po_line_id IS NOT NULL
+    GROUP BY r.po_line_id
+  `);
+
+  return Array.from(rows).map((r) => ({
+    poLineId: r.po_line_id,
+    bagCount: r.bag_count,
+    receiveCount: r.receive_count,
+  }));
+}
+
 /** Single-shot intake. Wraps the entire receive flow in one txn:
  *   - Optionally create PO if no existing one (skipped here; pick from list).
  *   - Create or pick shipment.
