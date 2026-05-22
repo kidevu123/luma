@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.34] — 2026-05-22
+
+### Fixed
+- QR conflict error at bag edit now includes receive and bag context: "This QR is already assigned to bag 2 in receive PO-001-R1. Choose another QR or resolve the existing assignment first." Previously showed a generic "assigned to another raw bag" message with no context.
+- Receipt number uniqueness is now pre-checked with a friendly error before hitting the database unique constraint. Previously a duplicate receipt number would surface a raw Postgres error.
+- Receipt number is now trimmed consistently (both in the uniqueness check and when writing to the database).
+
+### Improved
+- Extracted `shouldReleaseQrAtBagEdit` as a testable pure helper (returns true only for intake-reserved cards; never for IDLE, mid-production, or RETIRED cards).
+
+### Tests
+- Added 4 unit tests for `shouldReleaseQrAtBagEdit`.
+- Added 11 unit tests for `editBagAction` covering weight kg→grams conversion, negative/NaN weight rejection, no-op unchanged fields, notes trim/blank→null, and error propagation.
+- Added 8 DB-mocked integration tests for `editInventoryBag` covering: no-op same QR, QR conflict message format (with and without receive name), receipt# conflict, old-QR safe-release (intake-reserved only), and audit write.
+
 ## [0.2.33] — 2026-05-22
 
 ### Fixed
