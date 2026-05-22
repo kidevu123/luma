@@ -37,6 +37,8 @@ type Tablet = { id: string; name: string };
 
 export function BomEditor({
   productId,
+  productName,
+  globallyAssignedIds,
   tablets,
   materials,
   allowed,
@@ -44,6 +46,8 @@ export function BomEditor({
   lotSummary,
 }: {
   productId: string;
+  productName: string;
+  globallyAssignedIds: string[];
   tablets: Tablet[];
   materials: Material[];
   allowed: AllowedRow[];
@@ -141,6 +145,8 @@ export function BomEditor({
           </div>
           <SpecsTable
             productId={productId}
+            productName={productName}
+            globallyAssignedIds={globallyAssignedIds}
             specs={packagingSpecs}
             materials={packagingMats}
             allSpecs={specs}
@@ -159,6 +165,8 @@ export function BomEditor({
           </div>
           <SpecsTable
             productId={productId}
+            productName={productName}
+            globallyAssignedIds={[]}
             specs={rawSpecs}
             materials={rawMats}
             allSpecs={specs}
@@ -202,6 +210,8 @@ function lotSourceDetail(summary: LotSourceSummary | undefined): string | null {
 
 function SpecsTable({
   productId,
+  productName,
+  globallyAssignedIds,
   specs,
   materials,
   allSpecs,
@@ -209,6 +219,8 @@ function SpecsTable({
   lotSummary,
 }: {
   productId: string;
+  productName: string;
+  globallyAssignedIds: string[];
   specs: SpecRow[];
   materials: Material[];
   allSpecs: SpecRow[];
@@ -225,9 +237,25 @@ function SpecsTable({
   const [pending, setPending] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
 
-  // Hide materials already assigned anywhere in the BOM (any scope)
-  const usedMaterialIds = new Set(allSpecs.map((s) => s.packagingMaterialId));
-  const availableMaterials = materials.filter((m) => !usedMaterialIds.has(m.id));
+  // Exclude materials globally assigned to any product (PACKAGING section)
+  // plus anything already on this product's BOM.
+  const blockedIds = new Set([
+    ...globallyAssignedIds,
+    ...allSpecs.map((s) => s.packagingMaterialId),
+  ]);
+  const unblocked = materials.filter((m) => !blockedIds.has(m.id));
+
+  // Sort: items whose name contains the product name (or vice-versa) first,
+  // then everything else alphabetically — so "FIX Beyond - Citrus Drift - ..."
+  // floats to the top when you're on that product's BOM page.
+  const nameLower = productName.toLowerCase();
+  const availableMaterials = [...unblocked].sort((a, b) => {
+    const aMatch = a.name.toLowerCase().includes(nameLower) || nameLower.includes(a.name.toLowerCase());
+    const bMatch = b.name.toLowerCase().includes(nameLower) || nameLower.includes(b.name.toLowerCase());
+    if (aMatch && !bMatch) return -1;
+    if (!aMatch && bMatch) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   async function add() {
     if (!draft.packagingMaterialId) return;

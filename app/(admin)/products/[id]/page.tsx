@@ -9,6 +9,8 @@ import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { BomEditor } from "./bom-editor";
 import { ZohoMappingForm } from "./zoho-mapping-form";
+import { db } from "@/lib/db";
+import { productPackagingSpecs } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +21,17 @@ export default async function ProductBomPage({
 }) {
   await requireAdmin();
   const { id } = await params;
-  const [product, tablets, materials] = await Promise.all([
+  const [product, tablets, materials, assignedRows] = await Promise.all([
     getProductWithBom(id),
     listTabletTypes(),
     listPackagingMaterials(),
+    db.selectDistinct({ id: productPackagingSpecs.packagingMaterialId })
+      .from(productPackagingSpecs),
   ]);
   if (!product) notFound();
+  // Material IDs assigned to ANY product — used by BomEditor to hide
+  // already-claimed PACKAGING items from the picker dropdown globally.
+  const globallyAssignedIds = assignedRows.map((r) => r.id);
   return (
     <div className="space-y-5">
       <div>
@@ -64,6 +71,8 @@ export default async function ProductBomPage({
 
         <BomEditor
           productId={product.id}
+          productName={product.name}
+          globallyAssignedIds={globallyAssignedIds}
           tablets={tablets.map((t) => ({ id: t.id, name: t.name }))}
           materials={materials.map((m) => ({
             id: m.id,
