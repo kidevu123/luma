@@ -1,13 +1,10 @@
-// WORKFLOW-CLEANUP-2 → LUMA-UI-REBUILD-1
+// START-2 — Start Production workflow.
 //
-// Start Production workflow. Guided 4-step flow: scan the raw bag →
-// pick the product → pick an IDLE workflow QR card → pick a station →
-// click Start. The CARD_ASSIGNED event fires through projectEvent
-// inside the action, just like the floor PWA does. This is the admin
-// on-ramp; downstream stage events still come from station scans.
-//
-// Chrome rebuilt on the standard design system. Data loading + form
-// wiring unchanged.
+// Guided 4-step flow: scan the raw bag → pick the station → pick product
+// (auto-resolved by station type) → confirm QR card → click Start.
+// The CARD_ASSIGNED event fires through projectEvent inside the action,
+// just like the floor PWA does. This is the admin on-ramp; downstream
+// stage events still come from station scans.
 
 import { db } from "@/lib/db";
 import { and, asc, eq, isNull, ne, or } from "drizzle-orm";
@@ -68,7 +65,7 @@ export default async function StartProductionPage() {
     <div className="space-y-5">
       <PageHeader
         title="Start production"
-        description="Scan a received raw bag, pick the product to produce, confirm the QR card, and pick a station. QR card administration (mint / retire / print) lives under Advanced → QR card management."
+        description="Scan a received raw bag, pick the station, confirm the product (auto-selected by station type), and confirm the QR card. QR card administration (mint / retire / print) lives under Advanced → QR card management."
       />
 
       {/* Readiness badges */}
@@ -107,10 +104,9 @@ export default async function StartProductionPage() {
         <ol className="px-4 py-4 flex flex-col gap-2">
           {[
             "Scan raw bag",
-            "Pick product",
-            "Confirm QR card",
             "Pick station",
-            "Start run",
+            "Pick product",
+            "Confirm QR card · Start run",
           ].map((stepLabel, i) => (
             <li key={stepLabel} className="flex items-center gap-3">
               <span

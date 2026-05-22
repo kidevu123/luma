@@ -11,6 +11,8 @@ Items captured for future work. Not scheduled.
 ## Production UI
 
 - **Consider renaming Packaging output to Production output** — "Packaging output" could be confused with packaging materials workflow. "Production output" or "Tablet production output" is more accurate for the blister/sealing/packaging station flow.
+- **Start Production: station/product validation on server** — `resolveStartProductionProduct` runs client-side for UX. The server action currently accepts any `productId` without re-checking station kind compatibility. Consider adding a server-side guard once station validation requirements are clearer (may never be needed since the action already checks product existence and bag availability).
+- **Start Production: COMBINED station product grouping** — COMBINED stations currently show all candidate products without filtering. If operators commonly run COMBINED stations with mixed tablet types, add a secondary grouping or hint in the product picker.
 
 ## QR cards
 

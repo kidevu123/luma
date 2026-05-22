@@ -1,16 +1,16 @@
 "use client";
 
-// WORKFLOW-CLEANUP-2 — Start Production guided 4-step workflow.
+// START-2 — Start Production guided flow.
 //
 // Step 1: scan / paste a raw bag receipt # or BAG-uuid QR.
-// Step 2: pick the product (filtered by the bag's tablet type).
-// Step 3: pick an IDLE workflow QR card to assign to the bag.
-// Step 4: pick a station, click Start production.
+// Step 2: pick the station (determines product kind filter).
+// Step 3: product auto-resolved from station type, or operator picks from narrowed list.
+// Step 4: confirm QR card + click Start production.
 //
 // On success we render a StartedPanel with PO / vendor / product /
 // receipt / QR / IDs and a link back to the live floor.
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useMemo } from "react";
 import Link from "next/link";
 import {
   ProductionSection,
@@ -23,10 +23,13 @@ import {
   type StartProductionResult,
 } from "./actions";
 import type { RawBagLookupResult } from "@/lib/db/queries/raw-bag-intake";
+import {
+  resolveStartProductionProduct,
+  type CandidateProduct,
+} from "@/lib/production/start-production";
 
 type IdleCard = { id: string; code: string | null; scanToken: string };
 type StationOpt = { id: string; label: string; kind: string };
-type AllowedProduct = { id: string; name: string; sku: string; kind: string };
 
 export function StartProductionForm({
   idleCards,
@@ -35,22 +38,51 @@ export function StartProductionForm({
 }: {
   idleCards: IdleCard[];
   stations: StationOpt[];
-  allowedProductsByTabletType: Record<string, AllowedProduct[]>;
+  allowedProductsByTabletType: Record<string, CandidateProduct[]>;
 }) {
   const [scanValue, setScanValue] = useState("");
   const [lookup, setLookup] = useState<RawBagLookupResult | null>(null);
+  const [stationId, setStationId] = useState("");
   const [productId, setProductId] = useState("");
   const [qrCardId, setQrCardId] = useState("");
-  const [stationId, setStationId] = useState("");
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<StartProductionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const resolvedBag = lookup && lookup.found ? lookup : null;
-  const allowedProducts = resolvedBag
-    ? allowedProductsByTabletType[resolvedBag.product.tabletTypeId] ?? []
-    : [];
 
+  const allowedProducts = useMemo(
+    () =>
+      resolvedBag
+        ? (allowedProductsByTabletType[resolvedBag.product.tabletTypeId] ?? [])
+        : [],
+    [resolvedBag, allowedProductsByTabletType],
+  );
+
+  const selectedStation = useMemo(
+    () => stations.find((s) => s.id === stationId) ?? null,
+    [stations, stationId],
+  );
+
+  const resolution = useMemo(() => {
+    if (!resolvedBag || !stationId) return null;
+    return resolveStartProductionProduct({
+      stationKind: selectedStation?.kind ?? null,
+      candidateProducts: allowedProducts,
+    });
+  }, [resolvedBag, stationId, selectedStation, allowedProducts]);
+
+  // Auto-select product when resolution is unambiguous; reset when station changes.
+  useEffect(() => {
+    if (resolution === null) return;
+    if (resolution.kind === "auto") {
+      setProductId(resolution.product.id);
+    } else {
+      setProductId("");
+    }
+  }, [resolution]);
+
+  // Auto-select the QR card reserved at intake for this bag.
   useEffect(() => {
     if (!lookup?.found) return;
     const bagQrCode = lookup.bag.bagQrCode;
@@ -65,9 +97,9 @@ export function StartProductionForm({
     if (!scanValue.trim()) return;
     setError(null);
     setLookup(null);
+    setStationId("");
     setProductId("");
     setQrCardId("");
-    setStationId("");
     setResult(null);
     startTransition(async () => {
       try {
@@ -106,9 +138,9 @@ export function StartProductionForm({
   function handleReset() {
     setScanValue("");
     setLookup(null);
+    setStationId("");
     setProductId("");
     setQrCardId("");
-    setStationId("");
     setResult(null);
     setError(null);
   }
@@ -117,12 +149,21 @@ export function StartProductionForm({
     return <StartedPanel result={result} onAnother={handleReset} />;
   }
 
+  // Candidates to show when operator must choose.
+  const chooseCandidates =
+    resolution?.kind === "choose"
+      ? resolution.candidates
+      : resolution?.kind === "config_error"
+        ? resolution.fallback
+        : [];
+
   return (
     <div className="space-y-4">
       {error ? (
         <ProductionAlertCard tone="CRITICAL" title="Cannot start production" body={error} />
       ) : null}
 
+      {/* Step 1 — Scan bag */}
       <ProductionSection
         title="Step 1 · Scan the raw bag"
         subtitle="Type or scan the internal receipt number (e.g. RB-20260514-001) or the BAG-uuid QR sticker. This identifies the physical bag of tablets."
@@ -157,10 +198,7 @@ export function StartProductionForm({
           <div className="mt-3">
             <ProductionIdentityBlock
               rows={[
-                {
-                  label: "PO number",
-                  value: resolvedBag.po.poNumber ?? "—",
-                },
+                { label: "PO number", value: resolvedBag.po.poNumber ?? "—" },
                 { label: "Vendor", value: resolvedBag.po.vendorName ?? "—" },
                 {
                   label: "Tablet product",
@@ -168,10 +206,7 @@ export function StartProductionForm({
                     resolvedBag.product.productSku ?? "—"
                   })`,
                 },
-                {
-                  label: "Tablet type",
-                  value: resolvedBag.product.tabletTypeName,
-                },
+                { label: "Tablet type", value: resolvedBag.product.tabletTypeName },
                 {
                   label: "Supplier lot",
                   value: resolvedBag.supplierLot.batchNumber,
@@ -212,13 +247,61 @@ export function StartProductionForm({
         ) : null}
       </ProductionSection>
 
+      {/* Step 2 — Pick station */}
       <ProductionSection
-        title="Step 2 · Pick the product to produce"
-        subtitle="Tablet bags can map to multiple finished SKUs (count variants, variety packs). Pick the SKU that this run will produce."
-        tone={resolvedBag && productId ? "GOOD" : resolvedBag ? "INFO" : "MUTED"}
+        title="Step 2 · Pick the station"
+        subtitle="Select the station this bag will start at. The station type narrows the product list in the next step."
+        tone={resolvedBag && stationId ? "GOOD" : resolvedBag ? "INFO" : "MUTED"}
       >
         {!resolvedBag ? (
           <p className="text-sm text-text-muted">Scan a raw bag first.</p>
+        ) : stations.length === 0 ? (
+          <ProductionAlertCard
+            tone="WARN"
+            title="No active stations"
+            body={
+              <>
+                No active stations found. Configure stations at{" "}
+                <Link className="underline" href="/settings/machines">
+                  /settings/machines
+                </Link>
+                .
+              </>
+            }
+          />
+        ) : (
+          <select
+            value={stationId}
+            onChange={(e) => {
+              setStationId(e.target.value);
+              setProductId(""); // resolution will auto-set if unambiguous
+            }}
+            className="w-full h-10 px-3 rounded-md border border-border bg-surface text-sm focus:border-brand-500 focus:outline-none"
+          >
+            <option value="">— select an active station —</option>
+            {stations.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label} ({s.kind})
+              </option>
+            ))}
+          </select>
+        )}
+      </ProductionSection>
+
+      {/* Step 3 — Product */}
+      <ProductionSection
+        title="Step 3 · Product"
+        subtitle="The station type is used to narrow the list. When only one product matches, it is selected automatically."
+        tone={
+          resolvedBag && stationId && productId
+            ? "GOOD"
+            : resolvedBag && stationId
+              ? "INFO"
+              : "MUTED"
+        }
+      >
+        {!resolvedBag || !stationId ? (
+          <p className="text-sm text-text-muted">Pick a station first.</p>
         ) : allowedProducts.length === 0 ? (
           <ProductionAlertCard
             tone="WARN"
@@ -226,48 +309,80 @@ export function StartProductionForm({
             body={
               <>
                 The tablet type on this bag has no products mapped to it. Configure
-                allowed products at <Link className="underline" href="/settings/products">/settings/products</Link>.
+                allowed products at{" "}
+                <Link className="underline" href="/settings/products">
+                  /settings/products
+                </Link>
+                .
               </>
             }
           />
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {allowedProducts.map((p) => {
-              const active = productId === p.id;
-              return (
-                <button
-                  type="button"
-                  key={p.id}
-                  onClick={() => setProductId(active ? "" : p.id)}
-                  className={`text-left rounded-md border p-3 ${
-                    active
-                      ? "border-brand-500 bg-brand-50/40"
-                      : "border-border hover:border-border-strong bg-surface"
-                  }`}
-                >
-                  <div className="text-sm font-medium">{p.name}</div>
-                  <div className="text-[11px] text-text-muted font-mono">
-                    {p.sku} · {p.kind}
-                  </div>
-                  {active ? (
-                    <div className="mt-2 text-[10px] uppercase tracking-wider text-brand-700">
-                      Selected
-                    </div>
-                  ) : null}
-                </button>
-              );
-            })}
+        ) : resolution?.kind === "auto" ? (
+          <div className="rounded-md border border-brand-300 bg-brand-50/40 px-3 py-2.5">
+            <p className="text-[10px] uppercase tracking-wider text-brand-700 mb-0.5">
+              Product selected automatically
+            </p>
+            <p className="text-sm font-medium text-text-strong">{resolution.product.name}</p>
+            <p className="text-[11px] text-text-muted font-mono">
+              {resolution.product.sku} · {resolution.product.kind}
+            </p>
           </div>
+        ) : (
+          <>
+            {resolution?.kind === "config_error" ? (
+              <ProductionAlertCard
+                tone="WARN"
+                title="Product configuration mismatch"
+                body={resolution.message}
+              />
+            ) : null}
+            {chooseCandidates.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-2">
+                {chooseCandidates.map((p) => {
+                  const active = productId === p.id;
+                  return (
+                    <button
+                      type="button"
+                      key={p.id}
+                      onClick={() => setProductId(active ? "" : p.id)}
+                      className={`text-left rounded-md border p-3 ${
+                        active
+                          ? "border-brand-500 bg-brand-50/40"
+                          : "border-border hover:border-border-strong bg-surface"
+                      }`}
+                    >
+                      <div className="text-sm font-medium">{p.name}</div>
+                      <div className="text-[11px] text-text-muted font-mono">
+                        {p.sku} · {p.kind}
+                      </div>
+                      {active ? (
+                        <div className="mt-2 text-[10px] uppercase tracking-wider text-brand-700">
+                          Selected
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </>
         )}
       </ProductionSection>
 
+      {/* Step 4 — QR card + Start */}
       <ProductionSection
-        title="Step 3 · QR card"
+        title="Step 4 · QR card"
         subtitle="The raw bag QR card was reserved at receiving and tracks this bag through all stations. If one was pre-reserved for this bag, it is selected automatically below."
-        tone={resolvedBag && productId && qrCardId ? "GOOD" : productId ? "INFO" : "MUTED"}
+        tone={
+          resolvedBag && stationId && productId && qrCardId
+            ? "GOOD"
+            : resolvedBag && stationId && productId
+              ? "INFO"
+              : "MUTED"
+        }
       >
-        {!resolvedBag || !productId ? (
-          <p className="text-sm text-text-muted">Pick a product first.</p>
+        {!resolvedBag || !stationId || !productId ? (
+          <p className="text-sm text-text-muted">Complete the previous steps first.</p>
         ) : idleCards.length === 0 ? (
           <ProductionAlertCard
             tone="WARN"
@@ -275,67 +390,50 @@ export function StartProductionForm({
             body={
               <>
                 All cards are currently ASSIGNED. Mint or retire cards at{" "}
-                <Link className="underline" href="/qr-cards">/qr-cards</Link>.
+                <Link className="underline" href="/qr-cards">
+                  /qr-cards
+                </Link>
+                .
               </>
             }
           />
         ) : (
-          <>
-            <select
-              value={qrCardId}
-              onChange={(e) => setQrCardId(e.target.value)}
-              className="w-full h-10 px-3 rounded-md border border-border bg-surface font-mono text-sm focus:border-brand-500 focus:outline-none"
-            >
-              <option value="">— select a QR card —</option>
-              {idleCards.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code}
-                </option>
-              ))}
-            </select>
-            {resolvedBag?.bag.bagQrCode &&
+          <div className="space-y-3">
+            <div>
+              <select
+                value={qrCardId}
+                onChange={(e) => setQrCardId(e.target.value)}
+                className="w-full h-10 px-3 rounded-md border border-border bg-surface font-mono text-sm focus:border-brand-500 focus:outline-none"
+              >
+                <option value="">— select a QR card —</option>
+                {idleCards.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code}
+                  </option>
+                ))}
+              </select>
+              {resolvedBag?.bag.bagQrCode &&
               idleCards.some((c) => c.scanToken === resolvedBag.bag.bagQrCode) &&
               qrCardId &&
-              idleCards.find((c) => c.id === qrCardId)?.scanToken === resolvedBag.bag.bagQrCode && (
-                <p className="text-[11px] text-sky-700 mt-1">QR card assigned at intake for this bag.</p>
-              )}
-            {resolvedBag?.bag.bagQrCode &&
-              !idleCards.some((c) => c.scanToken === resolvedBag.bag.bagQrCode) && (
-                <p className="text-[11px] text-amber-700 mt-1">
-                  The QR card reserved for this bag ({resolvedBag.bag.bagQrCode}) is not available.
-                  It may already be in production or retired.
+              idleCards.find((c) => c.id === qrCardId)?.scanToken ===
+                resolvedBag.bag.bagQrCode ? (
+                <p className="text-[11px] text-sky-700 mt-1">
+                  QR card assigned at intake for this bag.
                 </p>
-              )}
-          </>
-        )}
-      </ProductionSection>
-
-      <ProductionSection
-        title="Step 4 · Pick the first station and start"
-        subtitle="Usually a blistering or weighing station. The CARD_ASSIGNED event fires here, same as the floor PWA flow. Downstream events still come from station scans."
-        tone={resolvedBag && productId && qrCardId && stationId ? "GOOD" : qrCardId ? "INFO" : "MUTED"}
-      >
-        {!resolvedBag || !productId || !qrCardId ? (
-          <p className="text-sm text-text-muted">Complete the previous steps first.</p>
-        ) : (
-          <div className="space-y-3">
-            <select
-              value={stationId}
-              onChange={(e) => setStationId(e.target.value)}
-              className="w-full h-10 px-3 rounded-md border border-border bg-surface text-sm focus:border-brand-500 focus:outline-none"
-            >
-              <option value="">— select an active station —</option>
-              {stations.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label} ({s.kind})
-                </option>
-              ))}
-            </select>
+              ) : null}
+              {resolvedBag?.bag.bagQrCode &&
+              !idleCards.some((c) => c.scanToken === resolvedBag.bag.bagQrCode) ? (
+                <p className="text-[11px] text-amber-700 mt-1">
+                  The QR card reserved for this bag ({resolvedBag.bag.bagQrCode}) is not
+                  available. It may already be in production or retired.
+                </p>
+              ) : null}
+            </div>
             <div className="flex justify-end">
               <button
                 type="button"
                 onClick={handleStart}
-                disabled={pending || !stationId}
+                disabled={pending || !qrCardId}
                 className="h-10 px-5 rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium"
               >
                 {pending ? "Starting…" : "Start production"}
