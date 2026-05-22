@@ -18,6 +18,7 @@ import { FIRST_OP_STATION_KINDS } from "@/lib/production/first-op-product";
 import { requireLead } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { StartProductionForm } from "./start-production-form";
+import { Info } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -55,8 +56,16 @@ export default async function StartProductionPage() {
     <div className="space-y-5">
       <PageHeader
         title="Start production"
-        description="Supervisor fallback path. For day-to-day production, operators scan bag QRs at the floor station. Use this page if a bag could not start from the floor — e.g., scanner issue or misconfigured station. Scans the raw bag, selects a first-operation station, confirms the product, and fires CARD_ASSIGNED."
+        description="Supervisor fallback — use the floor station URL for normal production starts."
       />
+
+      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <span>
+          Preferred workflow: open the floor station URL on the tablet and scan the bag QR there.
+          Use this page only as a supervisor fallback when a station scanner or tablet is not working.
+        </span>
+      </div>
 
       {/* Readiness badges */}
       <div className="flex flex-wrap gap-2">
