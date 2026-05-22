@@ -17,8 +17,10 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────
 
+type AllocationStatus = "OPEN" | "CLOSED" | "RETURNED_TO_STOCK" | "DEPLETED" | "VOIDED";
+
 export interface PartialBagSession {
-  allocationStatus: string;
+  allocationStatus: AllocationStatus;
   endingBalanceQty: number | null;
   closedAt: Date | null;
 }
@@ -37,7 +39,7 @@ export interface AvailablePartialBagRow {
   lastConsumedQty: number | null;
   lastUsedProductName: string | null;
   lastUsedAt: Date | null;
-  lastSessionStatus: string | null;
+  lastSessionStatus: AllocationStatus | null;
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────
@@ -53,7 +55,7 @@ export function isAvailablePartialBag(sessions: readonly PartialBagSession[]): b
 
 /** True if any session is currently OPEN (belt-and-suspenders guard). */
 export function hasOpenAllocationSession(
-  sessions: readonly { allocationStatus: string }[],
+  sessions: readonly { allocationStatus: AllocationStatus }[],
 ): boolean {
   return sessions.some((s) => s.allocationStatus === "OPEN");
 }
@@ -118,10 +120,15 @@ export async function loadAvailablePartialBags(): Promise<AvailablePartialBagRow
     .orderBy(asc(rawBagAllocationSessions.openedAt));
 
   // Step 3: Group sessions by bag, filter to partial bags, build output
-  const sessionsByBag = new Map<string, typeof sessionRows>();
-  for (const s of sessionRows) {
+  // Cast allocationStatus from string to AllocationStatus — the DB column is a
+  // constrained text field; Drizzle infers string because there's no pgEnum.
+  type SessionRow = Omit<(typeof sessionRows)[number], "allocationStatus"> & {
+    allocationStatus: AllocationStatus;
+  };
+  const typedSessionRows = sessionRows as SessionRow[];
+  const sessionsByBag = new Map<string, SessionRow[]>();
+  for (const s of typedSessionRows) {
     const bagId = s.inventoryBagId;
-    if (!bagId) continue;
     const list = sessionsByBag.get(bagId) ?? [];
     list.push(s);
     sessionsByBag.set(bagId, list);
@@ -133,13 +140,12 @@ export async function loadAvailablePartialBags(): Promise<AvailablePartialBagRow
     const sessions = sessionsByBag.get(bag.id) ?? [];
     if (!isAvailablePartialBag(sessions)) continue; // fresh bag, not partial
 
-    // Last closed/returned session (sessions are oldest-first, so last = most recent)
     const lastClosed = [...sessions]
-      .reverse()
-      .find(
+      .filter(
         (s) =>
           s.allocationStatus === "CLOSED" || s.allocationStatus === "RETURNED_TO_STOCK",
-      );
+      )
+      .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0))[0];
 
     const remainingEstimate = deriveRemainingEstimate(sessions);
 
