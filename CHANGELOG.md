@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.45] — 2026-05-22
+
+### Fixed
+- **Floor scan: `narrowProducts` test function corrected (FLOOR-SCAN-1):** The `narrowProducts` helper in `scan-card-form.test.ts` was testing a more permissive filter rule (treating `allowedTabletTypeIds=[]` as "accepts all tablet types") than the actual production code (`filteredProducts` excludes products with an empty `allowedTabletTypeIds` array — intentionally marked as incomplete configuration). The test function and the "shows unmapped product regardless of scanned tablet" assertion are corrected to match actual behavior, with an explanatory comment.
+
+### Improved
+- **Floor scan form wording (FLOOR-SCAN-1 Task 6):** Typed scan input placeholder changed from "Scan or type bag QR…" to "Scan bag QR…". Dropdown backup optgroup labels updated to "Received bags available for this station" and "Received bags available for this station — start new run".
+
+### Tests added
+- **FLOOR-SCAN-1 · downstream station fresh-bag guard** (4 tests): structural checks that `actions.ts` defines `FRESH_BAG_STATION_KINDS`, blocks non-first-op stations from starting fresh bags, rejects IDLE cards with "Receive Pills" message, and blocks RETIRED cards.
+- **FLOOR-SCAN-1 · camera scanner HTTPS requirement** (5 tests): verifies `camera-scanner.tsx` checks `window.isSecureContext`, shows "Camera access requires HTTPS. This page is served over HTTP" on insecure context, shows browser-unsupported fallback, links to typed input, and routes camera decode result through the same `onResult` handler as typed scan.
+- **FLOOR-SCAN-1 · typed scan flow structural guards** (5 tests): confirms `handleResolvedToken` narrows products by tablet type ID before auto-submit decision, verifies the scan-resolved card path (`resolvedCardId`, `scannedTabletTypeId`) works for cards not in the server-rendered dropdown, and confirms zero-product config error is shown (no silent no-op).
+
 ## [0.2.44] — 2026-05-22
 
 ### Improved

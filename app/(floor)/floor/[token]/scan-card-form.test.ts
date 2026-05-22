@@ -181,7 +181,15 @@ describe("lookupCardByTokenAction", () => {
 });
 
 // ── Product narrowing filter logic (pure) ─────────────────────────────────
-// Verifies the filter rule used by eligibleProducts / handleResolvedToken.
+// Mirrors the filteredProducts computation in scan-card-form.tsx exactly.
+//
+// Contract (enforced by code comment in form):
+//   "Products with no configured tablet types are incomplete, not 'accepts all'."
+// When effectiveTabletTypeId is non-null, a product must explicitly list that
+// tablet type in allowedTabletTypeIds to be shown. Products with an empty
+// allowedTabletTypeIds are hidden — the supervisor must set up the mapping.
+// When effectiveTabletTypeId is null (no tablet info), all products are shown
+// as a fallback so the operator is not silently blocked.
 
 type MockProduct = { id: string; sku: string; name: string; allowedTabletTypeIds: string[] };
 
@@ -190,9 +198,7 @@ function narrowProducts(
   tabletTypeId: string | null,
 ): MockProduct[] {
   if (!tabletTypeId) return products;
-  return products.filter(
-    (p) => p.allowedTabletTypeIds.length === 0 || p.allowedTabletTypeIds.includes(tabletTypeId),
-  );
+  return products.filter((p) => p.allowedTabletTypeIds.includes(tabletTypeId));
 }
 
 describe("product narrowing filter", () => {
@@ -216,9 +222,14 @@ describe("product narrowing filter", () => {
     expect(result).toEqual([multiTabletCard]);
   });
 
-  it("shows unmapped product (allowedTabletTypeIds=[]) regardless of scanned tablet", () => {
+  it("hides unmapped product (allowedTabletTypeIds=[]) when tablet type is known — incomplete configuration", () => {
+    // Products with no tablet type mapping are treated as incomplete, not
+    // "accepts all". They are hidden to prevent silently running the wrong
+    // product on a bag whose tablet type the product hasn't been configured for.
+    // Supervisor must add the mapping via product_allowed_tablets.
     const result = narrowProducts([cardProduct, unmappedProduct], "tt-001");
-    expect(result).toEqual([cardProduct, unmappedProduct]);
+    expect(result).toEqual([cardProduct]);
+    expect(result).not.toContain(unmappedProduct);
   });
 
   it("returns empty array when no products are compatible (config error case)", () => {
@@ -346,5 +357,109 @@ describe("FLOOR-START-5 · auto-submit on single compatible product", () => {
     // the product ID as an explicit argument, not relying on the productId state
     // variable which would be stale in the same render cycle.
     expect(formSrc).toMatch(/submitWithCardId\(cardId,\s*narrowed\[0\]\.id\)/);
+  });
+});
+
+// ── FLOOR-SCAN-1 · downstream station fresh-bag guard ────────────────────
+// Verifies that actions.ts prevents non-first-op stations from starting fresh bags.
+
+const actionsSrc = readFileSync(resolve(here, "actions.ts"), "utf8");
+
+describe("FLOOR-SCAN-1 · downstream station fresh-bag guard", () => {
+  it("actions.ts defines FRESH_BAG_STATION_KINDS with all first-op kinds", () => {
+    expect(actionsSrc).toMatch(/FRESH_BAG_STATION_KINDS/);
+    expect(actionsSrc).toMatch(/"BLISTER"/);
+    expect(actionsSrc).toMatch(/"HANDPACK_BLISTER"/);
+    expect(actionsSrc).toMatch(/"BOTTLE_HANDPACK"/);
+    expect(actionsSrc).toMatch(/"COMBINED"/);
+  });
+
+  it("scanCardAction throws when non-first-op station scans intake-reserved card", () => {
+    // Guard is: if (!FRESH_BAG_STATION_KINDS.has(station.kind)) throw ...
+    // Verified structurally that the guard is present in actions.ts.
+    expect(actionsSrc).toMatch(/This station does not start fresh bags/);
+    expect(actionsSrc).toMatch(/FRESH_BAG_STATION_KINDS\.has/);
+  });
+
+  it("IDLE card scan is blocked with receive-first message", () => {
+    expect(actionsSrc).toMatch(/not been linked to a received bag/);
+    expect(actionsSrc).toMatch(/Receive Pills page/);
+  });
+
+  it("RETIRED card scan is blocked", () => {
+    // classifyFloorScanCard handles RETIRED, but scanCardAction also has its
+    // own fallback: card.status not ASSIGNED throws "not scannable".
+    expect(actionsSrc).toMatch(/not scannable/);
+  });
+});
+
+// ── FLOOR-SCAN-1 · camera scanner secure context ──────────────────────────
+// Verifies that camera-scanner.tsx degrades gracefully on HTTP deployments.
+
+const cameraSrc = readFileSync(resolve(here, "camera-scanner.tsx"), "utf8");
+
+describe("FLOOR-SCAN-1 · camera scanner HTTPS requirement", () => {
+  it("camera-scanner.tsx checks window.isSecureContext", () => {
+    expect(cameraSrc).toMatch(/isSecureContext/);
+  });
+
+  it("shows HTTPS-specific error when page is served over HTTP", () => {
+    expect(cameraSrc).toMatch(/Camera access requires HTTPS/);
+    expect(cameraSrc).toMatch(/This page is served over HTTP/);
+  });
+
+  it("shows browser-unsupported message when MediaDevices API is absent for non-insecure reasons", () => {
+    expect(cameraSrc).toMatch(/not available in this browser/);
+  });
+
+  it("falls back to 'Use typed input' link when camera is unavailable", () => {
+    expect(cameraSrc).toMatch(/Use typed input/);
+  });
+
+  it("camera decode result calls onResult — same handler as typed scan", () => {
+    // Structural: both BarcodeDetector and jsQR paths call onResult(value)
+    expect(cameraSrc).toMatch(/onResult\(/);
+  });
+});
+
+// ── FLOOR-SCAN-1 · typed scan + product narrowing full path ──────────────
+// Pure logic tests verifying the end-to-end narrowing path described in
+// handleResolvedToken: lookupCardByToken → narrowed → auto-submit or picker.
+
+describe("FLOOR-SCAN-1 · typed scan flow structural guards", () => {
+  it("handleResolvedToken is declared in scan-card-form.tsx", () => {
+    expect(formSrc).toMatch(/handleResolvedToken/);
+  });
+
+  it("handleResolvedToken narrows products by tabletTypeId before deciding auto-submit", () => {
+    // The narrowed computation inside handleResolvedToken uses allowedProducts
+    // (server-rendered prop) not the filteredProducts state variable, so the
+    // auto-submit trigger fires in the same async frame without waiting for
+    // a React re-render.
+    expect(formSrc).toMatch(/allowedProducts\.filter/);
+    expect(formSrc).toMatch(/allowedTabletTypeIds\.includes\(ttId\)/);
+  });
+
+  it("card not in server-rendered dropdown can still reach product picker (resolvedCardId path)", () => {
+    // If card is not in receivedCards, selectedCard is undefined →
+    // effectiveTabletTypeId falls back to scannedTabletTypeId (set by scan).
+    // resolvedCardId === selectedCardId makes hasCardSelected true.
+    expect(formSrc).toMatch(/scannedTabletTypeId/);
+    expect(formSrc).toMatch(/selectedCard\?\.tabletTypeId\s*\?\?\s*scannedTabletTypeId/);
+    expect(formSrc).toMatch(/resolvedCardId\s*===\s*selectedCardId/);
+  });
+
+  it("zero compatible products shows config error not silent no-op", () => {
+    // The JSX condition: requireProductForFreshBag && hasCardSelected && filteredProducts.length === 0
+    expect(formSrc).toMatch(/No active products are configured for this tablet type/);
+    expect(formSrc).toMatch(/No active products configured for this station kind/);
+  });
+
+  it("product narrowing: unmapped products (empty allowedTabletTypeIds) are excluded when tablet type is known", () => {
+    // The filter uses .includes() only — no length === 0 bypass.
+    // This matches the intentional policy: empty = incomplete, not "accepts all".
+    const filterBlock = formSrc.match(/allowedProducts\.filter[\s\S]{0,200}allowedTabletTypeIds\.includes/)?.[0] ?? "";
+    expect(filterBlock).toBeTruthy();
+    expect(filterBlock).not.toMatch(/allowedTabletTypeIds\.length\s*===\s*0/);
   });
 });

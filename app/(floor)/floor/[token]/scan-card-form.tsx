@@ -258,7 +258,7 @@ export function ScanCardForm({
                 setScanError(null);
               }}
               onKeyDown={handleScanKeyDown}
-              placeholder="Scan or type bag QR…"
+              placeholder="Scan bag QR…"
               disabled={pending || scanPending}
               className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             />
@@ -326,7 +326,7 @@ export function ScanCardForm({
                 </optgroup>
               )}
               {hasReceived && (
-                <optgroup label={hasPickups ? "Received bags — start new" : "Received bags"}>
+                <optgroup label={hasPickups ? "Received bags available for this station — start new run" : "Received bags available for this station"}>
                   {receivedCards.map((c) => (
                     <option key={c.id} value={c.id}>
                       {formatEligibleCardLabel(c)}
