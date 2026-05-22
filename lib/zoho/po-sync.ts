@@ -14,6 +14,7 @@ import { purchaseOrders, poLines, tabletTypes } from "@/lib/db/schema";
 import {
   listInventoryPurchaseOrders,
   getInventoryPurchaseOrder,
+  extractIsTabletPo,
 } from "./inventory-service-client";
 import type {
   ZohoPurchaseOrderSummary,
@@ -28,6 +29,7 @@ export type PoSyncResult = {
   lineUpserted: number;    // inserts + updates across all receivable POs
   lineSkipped: number;     // lines skipped (no line_item_id)
   detailsFetched: number;  // count of getInventoryPurchaseOrder calls made
+  nonTabletFlagged: number;
   errors: string[];
 };
 
@@ -56,6 +58,7 @@ type UpsertPoResult = {
   localPoId: string;
   zohoPoId: string;
   effectiveStatus: LocalPoStatus;
+  isTabletPo: boolean;
 };
 
 // ─── Status mapping ───────────────────────────────────────────────────────────
@@ -91,7 +94,7 @@ export async function syncPurchaseOrdersFromZoho(opts?: {
   if (opts?.env !== undefined) listOpts.env = opts.env;
   if (opts?.fetchImpl !== undefined) listOpts.fetchImpl = opts.fetchImpl;
 
-  const listResult = await listInventoryPurchaseOrders(listOpts);
+  const listResult = await listInventoryPurchaseOrders({ ...listOpts, tabletOnly: true });
 
   if (!listResult.ok) {
     return {
@@ -100,6 +103,7 @@ export async function syncPurchaseOrdersFromZoho(opts?: {
       lineUpserted: 0,
       lineSkipped: 0,
       detailsFetched: 0,
+      nonTabletFlagged: 0,
       errors: [`Zoho fetch failed: ${listResult.message}`],
     };
   }
@@ -107,6 +111,7 @@ export async function syncPurchaseOrdersFromZoho(opts?: {
   const zohoPos = listResult.data;
   const fetched = zohoPos.length;
   let poUpserted = 0;
+  let nonTabletFlagged = 0;
 
   // Step 2: Pre-fetch tablet type lookup map
   const tabletTypeMap = await buildTabletTypeMap(db);
@@ -115,12 +120,19 @@ export async function syncPurchaseOrdersFromZoho(opts?: {
   const receivablePos: { localPoId: string; zohoPoId: string }[] = [];
 
   for (const zohoPo of zohoPos) {
+    const isTabletPo = extractIsTabletPo(zohoPo);
+    if (!isTabletPo) {
+      nonTabletFlagged++;
+      errors.push(
+        `Contract anomaly: PO ${zohoPo.purchaseorder_id} returned by tablet-filtered endpoint but is_tablet_po is not true`,
+      );
+    }
     try {
-      const result = await upsertPo(db, zohoPo, errors);
+      const result = await upsertPo(db, zohoPo, isTabletPo, errors);
       poUpserted++;
       if (
-        result.effectiveStatus === "OPEN" ||
-        result.effectiveStatus === "RECEIVING"
+        isTabletPo &&
+        (result.effectiveStatus === "OPEN" || result.effectiveStatus === "RECEIVING")
       ) {
         receivablePos.push({
           localPoId: result.localPoId,
@@ -174,6 +186,7 @@ export async function syncPurchaseOrdersFromZoho(opts?: {
     lineUpserted,
     lineSkipped,
     detailsFetched,
+    nonTabletFlagged,
     errors,
   };
 }
@@ -183,6 +196,7 @@ export async function syncPurchaseOrdersFromZoho(opts?: {
 async function upsertPo(
   db: typeof realDb,
   zohoPo: ZohoPurchaseOrderSummary,
+  isTabletPo: boolean,
   errors: string[],
 ): Promise<UpsertPoResult> {
   void errors; // reserved for future per-field validation warnings
@@ -218,6 +232,7 @@ async function upsertPo(
         status: mappedStatus,
         zohoPoId: zohoPo.purchaseorder_id,
         openedAt,
+        isTabletPo,
       })
       .returning({ id: purchaseOrders.id });
 
@@ -232,6 +247,7 @@ async function upsertPo(
       localPoId: insertedId,
       zohoPoId: zohoPo.purchaseorder_id,
       effectiveStatus: mappedStatus,
+      isTabletPo,
     };
   } else {
     // UPDATE if not in terminal state
@@ -242,6 +258,7 @@ async function upsertPo(
     const updatePayload: Partial<typeof purchaseOrders.$inferInsert> = {
       vendorName: zohoPo.vendor_name,
       openedAt,
+      isTabletPo,
     };
 
     if (!isTerminal) {
@@ -261,6 +278,7 @@ async function upsertPo(
       localPoId: existingPo.id,
       zohoPoId: zohoPo.purchaseorder_id,
       effectiveStatus,
+      isTabletPo,
     };
   }
 }

@@ -10,6 +10,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("./inventory-service-client", () => ({
   listInventoryPurchaseOrders: vi.fn(),
   getInventoryPurchaseOrder: vi.fn(),
+  extractIsTabletPo: (po: { app_flags?: { luma?: { is_tablet_po?: boolean } } }) =>
+    po.app_flags?.luma?.is_tablet_po === true,
 }));
 
 import { syncPurchaseOrdersFromZoho } from "./po-sync";
@@ -41,6 +43,7 @@ function makeZohoPo(overrides: Partial<{
   total: number;
   received_status: string;
   quantity_yet_to_receive: number;
+  app_flags: { luma?: { is_tablet_po?: boolean } };
 }> = {}) {
   return {
     purchaseorder_id: "ZPOID-001",
@@ -51,6 +54,7 @@ function makeZohoPo(overrides: Partial<{
     total: 50000,
     received_status: "to_be_received",
     quantity_yet_to_receive: 1000,
+    app_flags: { luma: { is_tablet_po: true } } as { luma?: { is_tablet_po?: boolean } },
     ...overrides,
   };
 }
@@ -1198,5 +1202,103 @@ describe("line sync", () => {
     expect(result.lineUpserted).toBe(1);   // only L-OK
     expect(result.lineSkipped).toBe(3);    // received + not_receivable + unknown
     expect(result.errors).toHaveLength(0);
+  });
+});
+
+// ─── RECEIVE-4: tablet-filtered sync tests ────────────────────────────────────
+
+describe("tablet-filtered sync — tabletOnly: true", () => {
+  it("calls listInventoryPurchaseOrders with tabletOnly: true", async () => {
+    mockList.mockResolvedValueOnce({ ok: true, data: [], meta: META });
+
+    await syncPurchaseOrdersFromZoho({ dbOverride: mockDbSelect([]) as unknown as typeof db });
+
+    expect(mockList).toHaveBeenCalledWith(
+      expect.objectContaining({ tabletOnly: true }),
+    );
+  });
+
+  it("stores isTabletPo: true for POs with is_tablet_po flag", async () => {
+    const po = {
+      ...makeZohoPo(),
+      app_flags: { luma: { is_tablet_po: true } },
+    };
+    mockList.mockResolvedValueOnce({ ok: true, data: [po], meta: META });
+    mockGetDetail.mockResolvedValueOnce(makePoDetail("ZPOID-001", []));
+
+    let capturedInsertValues: Record<string, unknown> | null = null;
+    const insertSpy = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((vals: Record<string, unknown>) => {
+        capturedInsertValues = vals;
+        return { returning: vi.fn().mockResolvedValue([{ id: "new-uuid" }]) };
+      }),
+    });
+
+    const mockDb = {
+      select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+      insert: insertSpy,
+      update: vi.fn(),
+    };
+
+    await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+
+    expect(capturedInsertValues).not.toBeNull();
+    expect(capturedInsertValues!["isTabletPo"]).toBe(true);
+  });
+
+  it("excludes PO with missing luma block from detail fetch and logs anomaly", async () => {
+    // app_flags present but luma block absent → extractIsTabletPo returns false
+    const po = { ...makeZohoPo(), app_flags: {} };
+    mockList.mockResolvedValueOnce({ ok: true, data: [po], meta: META });
+
+    const mockDb = mockDbFull([]);
+
+    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+
+    expect(mockGetDetail).not.toHaveBeenCalled();
+    expect(result.nonTabletFlagged).toBe(1);
+    expect(result.errors.some((e) => e.includes("is_tablet_po"))).toBe(true);
+  });
+
+  it("excludes PO with is_tablet_po: false from detail fetch", async () => {
+    const po = { ...makeZohoPo(), app_flags: { luma: { is_tablet_po: false } } };
+    mockList.mockResolvedValueOnce({ ok: true, data: [po], meta: META });
+
+    const mockDb = mockDbFull([]);
+
+    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+
+    expect(mockGetDetail).not.toHaveBeenCalled();
+    expect(result.nonTabletFlagged).toBe(1);
+  });
+
+  it("nonTabletFlagged is 0 when all POs have is_tablet_po: true", async () => {
+    const po = { ...makeZohoPo(), app_flags: { luma: { is_tablet_po: true } } };
+    mockList.mockResolvedValueOnce({ ok: true, data: [po], meta: META });
+    mockGetDetail.mockResolvedValueOnce(makePoDetail("ZPOID-001", []));
+
+    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDbFull([]) as unknown as typeof db });
+
+    expect(result.nonTabletFlagged).toBe(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("still fetches detail and upserts lines for tablet POs", async () => {
+    const po = { ...makeZohoPo(), app_flags: { luma: { is_tablet_po: true } } };
+    mockList.mockResolvedValueOnce({ ok: true, data: [po], meta: META });
+    mockGetDetail.mockResolvedValueOnce(
+      makePoDetail("ZPOID-001", [makeZohoLine()]),
+    );
+
+    const mockDb = makeLineSyncDb({
+      selectSequence: [[], [], []],
+      insertReturns: [{ id: "po-uuid" }, undefined],
+    });
+
+    const result = await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+
+    expect(mockGetDetail).toHaveBeenCalledTimes(1);
+    expect(result.lineUpserted).toBe(1);
+    expect(result.detailsFetched).toBe(1);
   });
 });
