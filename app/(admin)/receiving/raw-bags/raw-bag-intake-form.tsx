@@ -27,6 +27,8 @@ import {
   computeVariance,
   derivePoVerificationStatus,
   generateBagRowSeed,
+  validateQrTokens,
+  type QrTokenState,
   type RawBagRowSeed,
   type VarianceVerdict,
   verificationStatusLabel,
@@ -222,6 +224,19 @@ export function RawBagIntakeForm({
 
   const receivedTotal = computeReceivedTotal(rows);
 
+  const poolSet = React.useMemo(
+    () => new Set(availableQrCards.map((c) => c.scanToken)),
+    [availableQrCards],
+  );
+  const qrStates = React.useMemo(
+    () => validateQrTokens(rows, poolSet),
+    [rows, poolSet],
+  );
+  const hasQrErrors = React.useMemo(
+    () => Array.from(qrStates.values()).some((s) => s === "duplicate_in_form"),
+    [qrStates],
+  );
+
   if (result?.ok) {
     return <SaveResultPanel result={result} onAnother={handleAnother} />;
   }
@@ -413,16 +428,30 @@ export function RawBagIntakeForm({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
+                {rows.map((r, i) => {
+                  const qrState: QrTokenState = qrStates.get(r.bagSequence) ?? "empty";
+                  return (
                   <tr key={r.bagSequence} className="border-t border-border/40">
                     <td className="px-2 py-1.5 font-mono text-xs">{r.bagSequence}</td>
                     <td className="px-2 py-1.5">
-                      <Input
-                        value={r.bagQrCode ?? ""}
-                        onChange={(e) => patchRow(i, { bagQrCode: e.target.value })}
-                        placeholder="Scan or type QR"
-                        className="font-mono text-xs"
-                      />
+                      <div className="space-y-0.5">
+                        <Input
+                          value={r.bagQrCode ?? ""}
+                          onChange={(e) => patchRow(i, { bagQrCode: e.target.value })}
+                          placeholder="Scan or type QR"
+                          className={cn(
+                            "font-mono text-xs",
+                            qrState === "duplicate_in_form" && "border-red-400 bg-red-50/40",
+                            qrState === "not_in_pool" && "border-amber-400 bg-amber-50/40",
+                          )}
+                        />
+                        {qrState === "duplicate_in_form" && (
+                          <p className="text-[10px] text-red-600 leading-tight">Duplicate in this receive</p>
+                        )}
+                        {qrState === "not_in_pool" && (
+                          <p className="text-[10px] text-amber-700 leading-tight">Not in idle RAW_BAG pool</p>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2 py-1.5">
                       <Input
@@ -494,7 +523,8 @@ export function RawBagIntakeForm({
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -551,7 +581,7 @@ export function RawBagIntakeForm({
             <Button
               type="button"
               size="sm"
-              disabled={pending || rows.length === 0 || !supplierLot.trim()}
+              disabled={pending || rows.length === 0 || !supplierLot.trim() || hasQrErrors}
               onClick={handleSave}
             >
               {pending ? "Saving…" : `Save ${rows.length} bags`}

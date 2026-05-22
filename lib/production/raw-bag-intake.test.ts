@@ -13,6 +13,7 @@ import {
   rawBagIntakeInputSchema,
   splitReceiptStart,
   validateBagRowSeeds,
+  validateQrTokens,
   verificationStatusLabel,
 } from "@/lib/production/raw-bag-intake";
 
@@ -811,5 +812,100 @@ describe("rawBagIntakeInputSchema — per-row supplierLotNumber", () => {
     const result = preflightRawBagIntake(basePayload);
     if (!result.ok) throw new Error("Expected ok=true, got: " + result.error);
     expect(result.input.rows[0]?.supplierLotNumber).toBe("LOT-MAIN-001");
+  });
+});
+
+// ─── validateQrTokens ──────────────────────────────────────────────────
+
+describe("validateQrTokens", () => {
+  const pool = new Set(["card-001", "card-002", "card-003"]);
+
+  it("empty token → 'empty'", () => {
+    const rows = [{ bagSequence: 1, bagQrCode: "" }];
+    expect(validateQrTokens(rows, pool).get(1)).toBe("empty");
+  });
+
+  it("null token → 'empty'", () => {
+    const rows = [{ bagSequence: 1, bagQrCode: null }];
+    expect(validateQrTokens(rows, pool).get(1)).toBe("empty");
+  });
+
+  it("valid token in pool → 'ok'", () => {
+    const rows = [{ bagSequence: 1, bagQrCode: "card-001" }];
+    expect(validateQrTokens(rows, pool).get(1)).toBe("ok");
+  });
+
+  it("token not in pool → 'not_in_pool'", () => {
+    const rows = [{ bagSequence: 1, bagQrCode: "card-999" }];
+    expect(validateQrTokens(rows, pool).get(1)).toBe("not_in_pool");
+  });
+
+  it("assigned/retired/variety-pack tokens not in pool → 'not_in_pool'", () => {
+    // These would be non-IDLE or wrong-type cards absent from the IDLE RAW_BAG pool
+    const rows = [
+      { bagSequence: 1, bagQrCode: "variety-pack-card" },
+      { bagSequence: 2, bagQrCode: "retired-card" },
+    ];
+    const states = validateQrTokens(rows, pool);
+    expect(states.get(1)).toBe("not_in_pool");
+    expect(states.get(2)).toBe("not_in_pool");
+  });
+
+  it("duplicate token within form → both rows 'duplicate_in_form'", () => {
+    const rows = [
+      { bagSequence: 1, bagQrCode: "card-001" },
+      { bagSequence: 2, bagQrCode: "card-001" },
+    ];
+    const states = validateQrTokens(rows, pool);
+    expect(states.get(1)).toBe("duplicate_in_form");
+    expect(states.get(2)).toBe("duplicate_in_form");
+  });
+
+  it("duplicate flagged even if token is not in pool", () => {
+    const rows = [
+      { bagSequence: 1, bagQrCode: "card-999" },
+      { bagSequence: 2, bagQrCode: "card-999" },
+    ];
+    const states = validateQrTokens(rows, pool);
+    expect(states.get(1)).toBe("duplicate_in_form");
+    expect(states.get(2)).toBe("duplicate_in_form");
+  });
+
+  it("three-way duplicate → all three flagged", () => {
+    const rows = [
+      { bagSequence: 1, bagQrCode: "card-001" },
+      { bagSequence: 2, bagQrCode: "card-001" },
+      { bagSequence: 3, bagQrCode: "card-001" },
+    ];
+    const states = validateQrTokens(rows, pool);
+    expect(states.get(1)).toBe("duplicate_in_form");
+    expect(states.get(2)).toBe("duplicate_in_form");
+    expect(states.get(3)).toBe("duplicate_in_form");
+  });
+
+  it("mixed rows: ok, not_in_pool, empty, duplicate", () => {
+    const rows = [
+      { bagSequence: 1, bagQrCode: "card-001" },  // ok
+      { bagSequence: 2, bagQrCode: "card-999" },  // not_in_pool
+      { bagSequence: 3, bagQrCode: null },          // empty
+      { bagSequence: 4, bagQrCode: "card-001" },  // duplicate_in_form
+      { bagSequence: 5, bagQrCode: "card-002" },  // ok
+    ];
+    const states = validateQrTokens(rows, pool);
+    expect(states.get(1)).toBe("duplicate_in_form");
+    expect(states.get(2)).toBe("not_in_pool");
+    expect(states.get(3)).toBe("empty");
+    expect(states.get(4)).toBe("duplicate_in_form");
+    expect(states.get(5)).toBe("ok");
+  });
+
+  it("whitespace-only token treated as empty", () => {
+    const rows = [{ bagSequence: 1, bagQrCode: "   " }];
+    expect(validateQrTokens(rows, pool).get(1)).toBe("empty");
+  });
+
+  it("token with leading/trailing whitespace matches pool after trim", () => {
+    const rows = [{ bagSequence: 1, bagQrCode: "  card-001  " }];
+    expect(validateQrTokens(rows, pool).get(1)).toBe("ok");
   });
 });

@@ -410,6 +410,48 @@ export function assignQrCodesFromPool(
   }));
 }
 
+// ─── QR token pre-save validation ──────────────────────────────────────
+
+export type QrTokenState =
+  | "ok"               // token is in the idle RAW_BAG pool and not duplicated
+  | "empty"            // token is blank (field left unfilled)
+  | "duplicate_in_form"  // same token appears in another row in this receive
+  | "not_in_pool";     // token is non-empty but absent from the idle RAW_BAG pool
+                       // (covers: not found, wrong type, retired, already assigned)
+
+/**
+ * Pure: classify the QR token on every bag row against the available-pool set
+ * and within-form duplicates. No network calls — runs on every render.
+ *
+ * Duplicate detection takes precedence over pool membership: a duplicated
+ * token that happens to be in the pool is still flagged as duplicate_in_form.
+ */
+export function validateQrTokens(
+  rows: readonly { bagSequence: number; bagQrCode?: string | null }[],
+  poolSet: ReadonlySet<string>,
+): Map<number, QrTokenState> {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const token = (r.bagQrCode ?? "").trim();
+    if (token) counts.set(token, (counts.get(token) ?? 0) + 1);
+  }
+
+  const result = new Map<number, QrTokenState>();
+  for (const r of rows) {
+    const token = (r.bagQrCode ?? "").trim();
+    if (!token) {
+      result.set(r.bagSequence, "empty");
+    } else if ((counts.get(token) ?? 0) > 1) {
+      result.set(r.bagSequence, "duplicate_in_form");
+    } else if (!poolSet.has(token)) {
+      result.set(r.bagSequence, "not_in_pool");
+    } else {
+      result.set(r.bagSequence, "ok");
+    }
+  }
+  return result;
+}
+
 // Statuses that can still accept new raw bag receipts.
 // DRAFT/RECEIVED/CLOSED/CANCELLED are excluded.
 export const RECEIVABLE_PO_STATUSES = ["OPEN", "RECEIVING"] as const;

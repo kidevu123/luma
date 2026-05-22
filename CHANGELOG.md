@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.16] — 2026-05-22
+
+### Added
+- Receive Pills bag rows table now shows inline QR validation state without requiring a save attempt:
+  - Red border + "Duplicate in this receive" label when the same QR token appears in two or more rows.
+  - Amber border + "Not in idle RAW_BAG pool" label when a manually-entered token is absent from the IDLE RAW_BAG pool (covers: non-existent tokens, wrong card type, retired cards, and already-assigned cards).
+  - Save button is disabled when any row has a duplicate QR conflict (hard error). Not-in-pool rows show a warning but do not block save — the server transactional validation remains authoritative.
+- `validateQrTokens` pure helper added to `lib/production/raw-bag-intake.ts`. 11 unit tests covering all states and edge cases.
+- `docs/backlog.md` updated with: README.md needed, architecture diagram needed (with full scope), QR Card Management table redesign note.
+
 ## [0.2.15] — 2026-05-22
 
 ### Fixed

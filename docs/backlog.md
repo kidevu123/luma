@@ -15,3 +15,9 @@ Items captured for future work. Not scheduled.
 ## QR cards
 
 - **QR Card Management further UX cleanup** — Search, filter, and stats tiles are functional but the page needs visual polish when the card count grows large. Consider pagination or virtual scroll. The "Assigned to" context added in v0.2.13 is a first step.
+- **QR Card Management table redesign** — Current layout is a scrolling card list sorted by label. Needs: numeric/lexicographic sort (card-1, card-2 ... card-10 before card-9 aesthetically), compact row table instead of large cards, clearer "assigned to" inline context (partially addressed in v0.2.13), and a separate section or filter for UNKNOWN/legacy cards that have not been typed. QR type distribution summary (N RAW_BAG, N VARIETY_PACK, N WORKFLOW_TRAVELER, N UNKNOWN) useful for ops.
+
+## Documentation / onboarding
+
+- **README.md needed** — Repo has no README. A minimal README should cover: what the system is, how to run locally (docker compose up, db migrate, seed), how to deploy (systemd timer on LXC 122), required environment variables, and links to key docs.
+- **Architecture diagram needed** — Should cover all of the following so new engineers can orient without asking: deploy flow (git push → systemd pull → docker compose), branch strategy (work on main, deploy tag = HEAD), DB/migrations (Drizzle + drizzle-kit, migration files in lib/db/migrations), QR card lifecycle (IDLE → ASSIGNED/intake-reserved → ASSIGNED/active → IDLE on return), receive → production → finished lot → Zoho sync flow, Zoho Integration Service boundary (LXC 9503, never direct OAuth from Luma app), Authentik/session model (OIDC primary, Argon2id local fallback, role-gated office UI), and main app modules/pages (Inbound, Production, Batches, QR Cards, Settings, Floor PWA).
