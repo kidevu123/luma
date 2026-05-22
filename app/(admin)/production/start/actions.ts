@@ -20,12 +20,13 @@
 // still come from the floor PWA. This action is the on-ramp only.
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   inventoryBags,
   products,
   qrCards,
+  rawBagAllocationSessions,
   stations,
   workflowBags,
 } from "@/lib/db/schema";
@@ -86,6 +87,26 @@ export async function startProductionForRawBagAction(
     return {
       ok: false,
       error: `Raw bag status is ${bag.status}; only AVAILABLE bags can start production.`,
+    };
+  }
+
+  // Belt-and-suspenders: AVAILABLE bags should never have OPEN sessions, but guard explicitly
+  // so the error message is clear if this edge case occurs.
+  const [openSession] = await db
+    .select({ id: rawBagAllocationSessions.id })
+    .from(rawBagAllocationSessions)
+    .where(
+      and(
+        eq(rawBagAllocationSessions.inventoryBagId, bag.id),
+        eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+      ),
+    )
+    .limit(1);
+  if (openSession) {
+    return {
+      ok: false,
+      error:
+        "This bag has an open allocation session in progress. Close the floor session before starting a new production run.",
     };
   }
 
