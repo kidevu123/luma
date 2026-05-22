@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { eq, desc, sql } from "drizzle-orm";
-import { packagingMaterials } from "@/lib/db/schema";
+import { packagingMaterials, packagingLots, productPackagingSpecs } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
 import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
@@ -12,6 +12,7 @@ import {
   toggleMaterialItemActiveAction,
   setMaterialCategoryAction,
   deleteMaterialAction,
+  forceDeleteMaterialAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -38,13 +39,16 @@ const KIND_LABELS: Record<string, string> = {
 export default async function MaterialsAdminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string; q?: string; err?: string }>;
+  searchParams: Promise<{ kind?: string; q?: string; err?: string; failedId?: string; deleted?: string }>;
 }) {
   await requireAdmin();
   const sp = await searchParams;
   const kindFilter = sp.kind && sp.kind !== "ALL" ? sp.kind : null;
   const q = sp.q?.trim().toLowerCase() ?? "";
   const actionError = sp.err ? decodeURIComponent(sp.err) : null;
+  const failedId = sp.failedId ?? null;
+  const deletedMsg = sp.deleted ?? null;
+
   const rows = await db
     .select()
     .from(packagingMaterials)
@@ -54,6 +58,18 @@ export default async function MaterialsAdminPage({
     ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.sku.toLowerCase().includes(q))
     : rows;
 
+  // Load linked record counts for the failed row so we can show what force-delete will remove
+  let failedLotCount = 0;
+  let failedBomCount = 0;
+  if (failedId) {
+    const [lots, bom] = await Promise.all([
+      db.select({ id: packagingLots.id }).from(packagingLots).where(eq(packagingLots.packagingMaterialId, failedId)),
+      db.select({ productId: productPackagingSpecs.productId }).from(productPackagingSpecs).where(eq(productPackagingSpecs.packagingMaterialId, failedId)),
+    ]);
+    failedLotCount = lots.length;
+    failedBomCount = bom.length;
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -61,7 +77,13 @@ export default async function MaterialsAdminPage({
         description={`${rows.length} item${rows.length === 1 ? "" : "s"} in the master list. Inactive items are hidden from BOM and receiving forms.`}
       />
 
-      {actionError && (
+      {deletedMsg && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          Deleted — {deletedMsg.replace("lots", " inventory lot(s),").replace("specs", " BOM spec(s)")}
+        </div>
+      )}
+
+      {actionError && !failedId && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {actionError}
         </div>
@@ -168,67 +190,97 @@ export default async function MaterialsAdminPage({
             </TR>
           </THead>
           <tbody>
-            {filtered.map((r) => (
-              <TR key={r.id}>
-                <TD className="font-mono text-xs">{r.sku}</TD>
-                <TD className="font-medium">{r.name}</TD>
-                <TD>{KIND_LABELS[r.kind] ?? r.kind}</TD>
-                <TD>
-                  <StatusPill kind={r.category === "PACKAGING" ? "info" : "neutral"}>
-                    {r.category === "PACKAGING" ? "Packaging" : "Material"}
-                  </StatusPill>
-                </TD>
-                <TD className="font-mono text-xs">{r.uom}</TD>
-                <TD className="text-right tabular-nums">{r.parLevel ?? "—"}</TD>
-                <TD>
-                  <StatusPill kind={r.isActive ? "ok" : "neutral"}>
-                    {r.isActive ? "Active" : "Inactive"}
-                  </StatusPill>
-                </TD>
-                <TD className="text-right">
-                  <div className="flex items-center justify-end gap-3">
-                    <form
-                      action={async () => {
-                        "use server";
-                        await setMaterialCategoryAction(
-                          r.id,
-                          r.category === "PACKAGING" ? "MATERIAL" : "PACKAGING",
-                        );
-                      }}
-                    >
-                      <button
-                        type="submit"
-                        className="text-xs text-text-subtle hover:text-brand-700 transition-colors"
-                      >
-                        {r.category === "PACKAGING" ? "→ Material" : "→ Packaging"}
-                      </button>
-                    </form>
-                    <form
-                      action={async () => {
-                        "use server";
-                        await toggleMaterialItemActiveAction(r.id, !r.isActive);
-                      }}
-                    >
-                      <button
-                        type="submit"
-                        className="text-xs text-text-subtle hover:text-text transition-colors"
-                      >
-                        {r.isActive ? "Deactivate" : "Activate"}
-                      </button>
-                    </form>
-                    <form action={deleteMaterialAction}>
-                      <input type="hidden" name="id" value={r.id} />
-                      <button
-                        type="submit"
-                        className="text-xs text-text-subtle hover:text-red-600 transition-colors"
-                      >
-                        Delete
-                      </button>
-                    </form>
-                  </div>
-                </TD>
-              </TR>
-            ))}
+            {filtered.map((r) => {
+              const isBlocked = failedId === r.id;
+              return (
+                <TR key={r.id} className={isBlocked ? "bg-red-50 ring-1 ring-inset ring-red-300" : ""}>
+                  <TD className="font-mono text-xs">{r.sku}</TD>
+                  <TD className="font-medium">{r.name}</TD>
+                  <TD>{KIND_LABELS[r.kind] ?? r.kind}</TD>
+                  <TD>
+                    <StatusPill kind={r.category === "PACKAGING" ? "info" : "neutral"}>
+                      {r.category === "PACKAGING" ? "Packaging" : "Material"}
+                    </StatusPill>
+                  </TD>
+                  <TD className="font-mono text-xs">{r.uom}</TD>
+                  <TD className="text-right tabular-nums">{r.parLevel ?? "—"}</TD>
+                  <TD>
+                    <StatusPill kind={r.isActive ? "ok" : "neutral"}>
+                      {r.isActive ? "Active" : "Inactive"}
+                    </StatusPill>
+                  </TD>
+                  <TD className="text-right">
+                    <div className="flex items-center justify-end gap-3 flex-wrap">
+                      {isBlocked ? (
+                        <>
+                          <span className="text-xs text-red-600 font-medium">
+                            {[
+                              failedLotCount > 0 ? `${failedLotCount} lot${failedLotCount !== 1 ? "s" : ""}` : "",
+                              failedBomCount > 0 ? `${failedBomCount} BOM spec${failedBomCount !== 1 ? "s" : ""}` : "",
+                            ].filter(Boolean).join(", ")} linked
+                          </span>
+                          <form action={forceDeleteMaterialAction}>
+                            <input type="hidden" name="id" value={r.id} />
+                            <button
+                              type="submit"
+                              className="text-xs font-semibold text-red-600 hover:text-red-800 underline transition-colors"
+                              onClick={(e) => {
+                                if (!confirm(`Force delete "${r.name}"? This will also delete ${failedLotCount} lot(s) and ${failedBomCount} BOM spec(s). This cannot be undone.`)) {
+                                  e.preventDefault();
+                                }
+                              }}
+                            >
+                              Force delete
+                            </button>
+                          </form>
+                        </>
+                      ) : (
+                        <>
+                          <form
+                            action={async () => {
+                              "use server";
+                              await setMaterialCategoryAction(
+                                r.id,
+                                r.category === "PACKAGING" ? "MATERIAL" : "PACKAGING",
+                              );
+                            }}
+                          >
+                            <button
+                              type="submit"
+                              className="text-xs text-text-subtle hover:text-brand-700 transition-colors"
+                            >
+                              {r.category === "PACKAGING" ? "→ Material" : "→ Packaging"}
+                            </button>
+                          </form>
+                          <form
+                            action={async () => {
+                              "use server";
+                              await toggleMaterialItemActiveAction(r.id, !r.isActive);
+                            }}
+                          >
+                            <button
+                              type="submit"
+                              className="text-xs text-text-subtle hover:text-text transition-colors"
+                            >
+                              {r.isActive ? "Deactivate" : "Activate"}
+                            </button>
+                          </form>
+                          <form action={deleteMaterialAction}>
+                            <input type="hidden" name="id" value={r.id} />
+                            <button
+                              type="submit"
+                              className="text-xs text-text-subtle hover:text-red-600 transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </form>
+                        </>
+                      )}
+                    </div>
+                  </TD>
+                </TR>
+              );
+            })}
           </tbody>
         </DataTable>
       )}

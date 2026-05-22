@@ -7,13 +7,11 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { compact } from "@/lib/db/compact";
 import { requireAdmin } from "@/lib/auth-guards";
-import { packagingMaterials } from "@/lib/db/schema";
-
-// Allowed material kinds (the canonical lexicon for Phase H). The
-// underlying enum on packaging_material_kind has more values for
-// historical reasons (BLISTER_FOIL, HEAT_SEAL_FILM, DESICCANT,
-// COTTON, OTHER); we expose the Phase-H subset to the admin form
-// + map DISPLAY/CASE → DISPLAY_BOX/MASTER_CASE labels in the UI.
+import {
+  packagingMaterials,
+  packagingLots,
+  productPackagingSpecs,
+} from "@/lib/db/schema";
 
 const MATERIAL_KINDS = [
   "BLISTER_CARD",
@@ -59,8 +57,6 @@ export async function saveMaterialItemAction(
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const { id, ...rest } = parsed.data;
-  // Duplicate-SKU check on create. The schema enforces unique sku
-  // index, but we surface a friendlier error before hitting it.
   if (!id) {
     const dupe = await db
       .select({ id: packagingMaterials.id })
@@ -123,21 +119,40 @@ export async function setMaterialCategoryAction(
   return { ok: true };
 }
 
-export async function deleteMaterialAction(
-  formData: FormData,
-): Promise<void> {
+export async function deleteMaterialAction(formData: FormData): Promise<void> {
   await requireAdmin();
   const id = z.string().uuid().safeParse(formData.get("id"));
   if (!id.success) redirect("/settings/materials?err=Invalid+material+id");
   try {
-    await db.delete(packagingMaterials).where(and(eq(packagingMaterials.id, id.data)));
+    await db.delete(packagingMaterials).where(eq(packagingMaterials.id, id.data));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Delete failed.";
     if (msg.includes("foreign key") || msg.includes("violates") || msg.includes("constraint")) {
-      redirect("/settings/materials?err=This+material+has+receiving+or+BOM+records+%E2%80%94+deactivate+it+instead+of+deleting");
+      redirect(`/settings/materials?err=Has+linked+records&failedId=${id.data}`);
     }
-    redirect(`/settings/materials?err=${encodeURIComponent(msg)}`);
+    redirect(`/settings/materials?err=${encodeURIComponent(msg)}&failedId=${id.data}`);
   }
   revalidatePath("/settings/materials");
   revalidatePath("/inbound/packaging-materials");
+}
+
+export async function forceDeleteMaterialAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = z.string().uuid().safeParse(formData.get("id"));
+  if (!id.success) redirect("/settings/materials?err=Invalid+material+id");
+
+  // Show what we're about to delete
+  const [lots, bomRows] = await Promise.all([
+    db.select({ id: packagingLots.id }).from(packagingLots).where(eq(packagingLots.packagingMaterialId, id.data)),
+    db.select({ productId: productPackagingSpecs.productId }).from(productPackagingSpecs).where(eq(productPackagingSpecs.packagingMaterialId, id.data)),
+  ]);
+
+  // Cascade: delete lots, BOM specs, then the material
+  await db.delete(packagingLots).where(eq(packagingLots.packagingMaterialId, id.data));
+  await db.delete(productPackagingSpecs).where(eq(productPackagingSpecs.packagingMaterialId, id.data));
+  await db.delete(packagingMaterials).where(eq(packagingMaterials.id, id.data));
+
+  revalidatePath("/settings/materials");
+  revalidatePath("/inbound/packaging-materials");
+  redirect(`/settings/materials?deleted=${lots.length}lots+${bomRows.length}specs`);
 }
