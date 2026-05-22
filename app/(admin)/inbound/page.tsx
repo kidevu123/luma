@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus, Truck, Package } from "lucide-react";
+import { Truck, Package, Inbox, Boxes } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
 import { listReceives } from "@/lib/db/queries/receives";
 import { PageHeader, EmptyState } from "@/components/ui/page-header";
@@ -19,11 +19,18 @@ export default async function InboundPage() {
         title="Receives"
         description="History of all tablet and packaging receives. Each receive links to a PO and contains boxes and bags."
         actions={
-          <Button asChild>
-            <Link href="/inbound/new">
-              <Plus className="h-4 w-4" /> New receive
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild>
+              <Link href="/receiving/raw-bags">
+                <Inbox className="h-4 w-4" /> Receive pills
+              </Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href="/inbound/packaging-materials">
+                <Boxes className="h-4 w-4" /> Receive packaging
+              </Link>
+            </Button>
+          </div>
         }
       />
 
@@ -31,13 +38,20 @@ export default async function InboundPage() {
         <EmptyState
           icon={Truck}
           title="No receives yet"
-          description="Log your first inbound shipment. The wizard creates the boxes, bags, and batches in one go."
+          description="Start by receiving pills or packaging materials."
           action={
-            <Button asChild>
-              <Link href="/inbound/new">
-                <Plus className="h-4 w-4" /> Start a receive
-              </Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button asChild>
+                <Link href="/receiving/raw-bags">
+                  <Inbox className="h-4 w-4" /> Receive pills
+                </Link>
+              </Button>
+              <Button asChild variant="secondary">
+                <Link href="/inbound/packaging-materials">
+                  <Boxes className="h-4 w-4" /> Receive packaging
+                </Link>
+              </Button>
+            </div>
           }
         />
       ) : (
@@ -78,8 +92,7 @@ export default async function InboundPage() {
       )}
 
       <div className="text-[11px] text-text-subtle inline-flex items-center gap-1.5">
-        <Package className="h-3 w-3" /> Tip: every box you log becomes an
-        auditable batch row. Releasing a batch is a separate gated step.
+        <Package className="h-3 w-3" /> Every bag you receive becomes an auditable batch row. Releasing a batch is a separate gated step.
       </div>
     </div>
   );
