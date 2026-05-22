@@ -26,7 +26,10 @@ export default async function ReceiveDetailPage({
   // Pull batches referenced by this receive's boxes so we can show
   // batch number + status next to each box without an N+1.
   const batchIds = Array.from(
-    new Set(r.boxes.map((b) => b.box.defaultBatchId).filter((x): x is string => !!x)),
+    new Set([
+      ...r.boxes.map((b) => b.box.defaultBatchId),
+      ...r.bags.map((b) => b.batchId),
+    ].filter((x): x is string => !!x)),
   );
   const batchRows = batchIds.length
     ? await db
@@ -124,6 +127,72 @@ export default async function ReceiveDetailPage({
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle>Bags ({r.bags.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {r.bags.length === 0 ? (
+                <p className="text-sm text-text-muted">No bags on this receive.</p>
+              ) : (
+                <DataTable>
+                  <THead>
+                    <TR>
+                      <TH>Receipt #</TH>
+                      <TH>QR token</TH>
+                      <TH>Supplier lot</TH>
+                      <TH className="text-right">Declared</TH>
+                      <TH className="text-right">Weight (kg)</TH>
+                      <TH>Notes</TH>
+                      <TH>Status</TH>
+                      <TH>{""}</TH>
+                    </TR>
+                  </THead>
+                  <tbody>
+                    {r.bags.map((bag) => {
+                      const batch = bag.batchId ? byBatch.get(bag.batchId) : null;
+                      return (
+                        <TR key={bag.id}>
+                          <TD className="font-mono text-xs">
+                            {bag.internalReceiptNumber ?? "—"}
+                          </TD>
+                          <TD className="font-mono text-xs text-text-subtle">
+                            {bag.bagQrCode ?? "—"}
+                          </TD>
+                          <TD className="font-mono text-xs">
+                            {batch?.batchNumber ?? "—"}
+                          </TD>
+                          <TD className="text-right tabular-nums text-xs">
+                            {bag.declaredPillCount?.toLocaleString() ?? "—"}
+                          </TD>
+                          <TD className="text-right tabular-nums text-xs">
+                            {bag.weightGrams != null
+                              ? (bag.weightGrams / 1000).toFixed(3)
+                              : "—"}
+                          </TD>
+                          <TD className="text-xs text-text-muted max-w-[120px] truncate">
+                            {bag.notes ?? "—"}
+                          </TD>
+                          <TD>
+                            <BagStatus status={bag.status} />
+                          </TD>
+                          <TD>
+                            <Link
+                              href={`/inbound/${r.receive.id}/bag/${bag.id}/edit`}
+                              className="text-xs text-brand-700 hover:underline"
+                            >
+                              Edit
+                            </Link>
+                          </TD>
+                        </TR>
+                      );
+                    })}
+                  </tbody>
+                </DataTable>
+              )}
+            </CardContent>
+          </Card>
+
           {r.receive.notes && (
             <Card>
               <CardHeader>
@@ -205,6 +274,16 @@ function BatchStatus({ status }: { status: string }) {
     RECALLED: "danger",
     EXPIRED: "danger",
     DEPLETED: "neutral",
+  };
+  return <StatusPill kind={map[status] ?? "neutral"}>{status}</StatusPill>;
+}
+
+function BagStatus({ status }: { status: string }) {
+  const map: Record<string, "ok" | "warn" | "danger" | "neutral" | "info"> = {
+    AVAILABLE: "ok",
+    IN_USE: "info",
+    CONSUMED: "neutral",
+    CLOSED: "neutral",
   };
   return <StatusPill kind={map[status] ?? "neutral"}>{status}</StatusPill>;
 }
