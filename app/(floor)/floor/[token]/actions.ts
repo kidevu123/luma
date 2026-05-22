@@ -1037,7 +1037,10 @@ export async function packagingCompleteAction(
 
 export async function lookupCardByTokenAction(
   formData: FormData,
-): Promise<{ ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null } | { error: string }> {
+): Promise<
+  | { ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null }
+  | { error: string }
+> {
   const scanToken = formData.get("scanToken");
   if (typeof scanToken !== "string" || !scanToken.trim()) {
     return { error: "No scan token provided." };
@@ -1049,8 +1052,10 @@ export async function lookupCardByTokenAction(
       cardType: qrCards.cardType,
       status: qrCards.status,
       assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
+      tabletTypeId: inventoryBags.tabletTypeId,
     })
     .from(qrCards)
+    .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
     .where(eq(qrCards.scanToken, scanToken.trim()))
     .limit(1);
 
@@ -1061,7 +1066,12 @@ export async function lookupCardByTokenAction(
     return { error: classification.reason };
   }
 
-  return { ok: true, cardId: card.id, isIntakeReserved: classification.isIntakeReserved, tabletTypeId: null };
+  return {
+    ok: true,
+    cardId: card.id,
+    isIntakeReserved: classification.isIntakeReserved,
+    tabletTypeId: card.tabletTypeId ?? null,
+  };
 }
 
 // ── seal handpack bag ──────────────────────────────────────────────────────
