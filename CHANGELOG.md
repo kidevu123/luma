@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.28] — 2026-05-22
+
+### Added
+- FLOOR-START-2: camera QR scanning via jsQR — "Open camera" button next to the scan input opens a modal that uses `getUserMedia` (rear-camera preferred), decodes frames via `jsQR` in a `requestAnimationFrame` loop, and fires the same `lookupCardByTokenAction` + `submitWithCardId` path as the typed-input scanner. Degrades gracefully if the Camera API is unavailable or permission is denied.
+- Idle card dropdown now shows secondary info: internal receipt number and tablet type name (via LEFT JOIN to `inventory_bags` + `tablet_types`).
+- Eligible-pickup dropdown now shows product SKU alongside bag stage (via LEFT JOIN to `workflow_bags` + `products`).
+
+### Changed
+- Dropdown placeholder updated from "Select an available bag QR…" to "Select an eligible bag QR…".
+- Dropdown groups: idle cards group is "Start a new bag" when pickups are also present; pickup group is "Pick up released bag (same QR continues)".
+- Helper text added above dropdown: "Scanning the physical bag QR above is preferred. Use the dropdown only as a backup."
+- Submit button now reads "Start production" when the product picker is visible; "Start bag" otherwise.
+- Installed `jsqr@1.4.0` as a runtime dependency.
+
 ## [0.2.27] — 2026-05-22
 
 ### Added

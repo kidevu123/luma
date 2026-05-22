@@ -20,6 +20,8 @@ import {
   products,
   productPackagingSpecs,
   packagingMaterials,
+  inventoryBags,
+  tabletTypes,
 } from "@/lib/db/schema";
 import { eq, and, or, inArray, isNotNull, isNull, sql, desc, asc } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
@@ -88,10 +90,22 @@ export default async function FloorStationPage({
   const canStartFreshBag = (
     new Set(["BLISTER", "HANDPACK_BLISTER", "BOTTLE_HANDPACK", "COMBINED"])
   ).has(station.station.kind);
+  // Eligible RAW_BAG cards: IDLE + intake-reserved (ASSIGNED+no-workflowBag).
+  // Left-joined to inventory_bags and tablet_types for secondary dropdown info
+  // (receipt number, tablet type name). Only queried at stations that can
+  // start fresh bags — pickup-only stations skip this entirely.
   const idleCardsRaw = canStartFreshBag
     ? await db
-        .select()
+        .select({
+          id: qrCards.id,
+          label: qrCards.label,
+          scanToken: qrCards.scanToken,
+          receiptNumber: inventoryBags.internalReceiptNumber,
+          tabletTypeName: tabletTypes.name,
+        })
         .from(qrCards)
+        .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
+        .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
         .where(
           and(
             eq(qrCards.cardType, "RAW_BAG"),
@@ -147,12 +161,15 @@ export default async function FloorStationPage({
             scanToken: qrCards.scanToken,
             bagId: qrCards.assignedWorkflowBagId,
             bagStage: readBagState.stage,
+            productSku: products.sku,
           })
           .from(qrCards)
           .innerJoin(
             readBagState,
             eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
           )
+          .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
+          .leftJoin(products, eq(products.id, workflowBags.productId))
           .where(
             and(
               eq(qrCards.status, "ASSIGNED"),
@@ -262,6 +279,8 @@ export default async function FloorStationPage({
                 id: c.id,
                 label: c.label,
                 scanToken: c.scanToken,
+                receiptNumber: c.receiptNumber ?? null,
+                tabletTypeName: c.tabletTypeName ?? null,
               }))}
               eligiblePickups={eligiblePickups
                 .filter(
@@ -273,6 +292,7 @@ export default async function FloorStationPage({
                     scanToken: string;
                     bagId: string;
                     bagStage: string;
+                    productSku: string | null;
                   } => c.bagId != null,
                 )
                 .map((c) => ({
@@ -280,7 +300,8 @@ export default async function FloorStationPage({
                   label: c.label,
                   scanToken: c.scanToken,
                   bagId: c.bagId,
-                  bagStage: c.bagStage,
+                  bagStage: c.bagStage ?? "",
+                  productSku: c.productSku ?? null,
                 }))}
               allowedProducts={allowedProducts.map((p) => ({
                 id: p.id,
