@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.15] — 2026-05-22
+
+### Fixed
+- Bag edit QR reassignment: WORKFLOW_TRAVELER and UNKNOWN card types are now rejected with "Only RAW_BAG cards can be assigned to raw bags." Previously only VARIETY_PACK was explicitly checked.
+- Bag edit QR reassignment: a card that is intake-reserved (ASSIGNED + null workflow bag) but already linked to a *different* inventory bag is now rejected with "This QR card is already assigned to another raw bag." Previously the DB unique index would catch the collision with a cryptic error message.
+
+### Changed
+- Receive detail page summary sidebar now shows aggregate "Weight (kg)" total across all bags that have a recorded weight.
+- `validateQrCardForRawBag` extracted as an exported pure helper in `lib/db/queries/bag-edits.ts`. 7 unit tests added.
+
 ## [0.2.14] — 2026-05-22
 
 ### Added

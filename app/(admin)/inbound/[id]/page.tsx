@@ -47,6 +47,7 @@ export default async function ReceiveDetailPage({
 
   const totalBags = r.bags.length;
   const totalPills = r.bags.reduce((s, b) => s + (b.pillCount ?? 0), 0);
+  const totalWeightKg = r.bags.reduce((s, b) => s + (b.weightGrams ?? 0), 0) / 1000;
   const availableBags = r.bags.filter((b) => b.status === "AVAILABLE").length;
 
   return (
@@ -219,6 +220,10 @@ export default async function ReceiveDetailPage({
               <Row label="Bags" value={totalBags.toLocaleString()} />
               <Row label="Available" value={availableBags.toLocaleString()} />
               <Row label="Pills (est.)" value={totalPills.toLocaleString()} />
+              <Row
+                label="Weight (kg)"
+                value={totalWeightKg > 0 ? totalWeightKg.toFixed(3) : "—"}
+              />
               <Row
                 label="Received"
                 value={new Date(r.receive.receivedAt as unknown as string).toLocaleString()}

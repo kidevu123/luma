@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { validateBagEditFields, type BagSnapshot, type BagEditInput } from "./bag-edits";
+import {
+  validateBagEditFields,
+  validateQrCardForRawBag,
+  type BagSnapshot,
+  type BagEditInput,
+  type QrCardForValidation,
+} from "./bag-edits";
 
 const baseBag: BagSnapshot = {
   id: "bag-1",
@@ -121,5 +127,80 @@ describe("validateBagEditFields", () => {
 
   it("allows empty input (no-op)", () => {
     expect(validateBagEditFields(baseBag, {}, false)).toEqual({ ok: true });
+  });
+});
+
+describe("validateQrCardForRawBag", () => {
+  const idleRawBag: QrCardForValidation = {
+    cardType: "RAW_BAG",
+    status: "IDLE",
+    assignedWorkflowBagId: null,
+  };
+
+  it("allows idle RAW_BAG card", () => {
+    expect(validateQrCardForRawBag(idleRawBag)).toEqual({ ok: true });
+  });
+
+  it("allows intake-reserved RAW_BAG card (ASSIGNED + null workflowBagId)", () => {
+    // Same-bag no-op is caught by the caller before reaching this helper.
+    // A different-bag intake-reserved card passes pure validation — the
+    // uniqueness DB check in editInventoryBag catches the cross-bag case.
+    expect(
+      validateQrCardForRawBag({
+        cardType: "RAW_BAG",
+        status: "ASSIGNED",
+        assignedWorkflowBagId: null,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("rejects VARIETY_PACK card with specific message", () => {
+    const r = validateQrCardForRawBag({
+      cardType: "VARIETY_PACK",
+      status: "IDLE",
+      assignedWorkflowBagId: null,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/variety pack/i);
+  });
+
+  it("rejects WORKFLOW_TRAVELER card", () => {
+    const r = validateQrCardForRawBag({
+      cardType: "WORKFLOW_TRAVELER",
+      status: "IDLE",
+      assignedWorkflowBagId: null,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/RAW_BAG/);
+  });
+
+  it("rejects UNKNOWN card type", () => {
+    const r = validateQrCardForRawBag({
+      cardType: "UNKNOWN",
+      status: "IDLE",
+      assignedWorkflowBagId: null,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/RAW_BAG/);
+  });
+
+  it("rejects RETIRED RAW_BAG card", () => {
+    const r = validateQrCardForRawBag({
+      cardType: "RAW_BAG",
+      status: "RETIRED",
+      assignedWorkflowBagId: null,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/retired/i);
+  });
+
+  it("rejects RAW_BAG card active in production (ASSIGNED + non-null workflowBagId)", () => {
+    const r = validateQrCardForRawBag({
+      cardType: "RAW_BAG",
+      status: "ASSIGNED",
+      assignedWorkflowBagId: "wfb-uuid-123",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/production/i);
   });
 });

@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   inventoryBags,
@@ -66,6 +66,26 @@ export function validateBagEditFields(
     };
   }
 
+  return { ok: true };
+}
+
+export type QrCardForValidation = {
+  cardType: string;
+  status: string;
+  assignedWorkflowBagId: string | null;
+};
+
+export function validateQrCardForRawBag(
+  card: QrCardForValidation,
+): { ok: true } | { ok: false; error: string } {
+  if (card.cardType === "VARIETY_PACK")
+    return { ok: false, error: "Variety pack cards cannot be used for raw bags." };
+  if (card.cardType !== "RAW_BAG")
+    return { ok: false, error: "Only RAW_BAG cards can be assigned to raw bags." };
+  if (card.status === "RETIRED")
+    return { ok: false, error: "Retired QR cards cannot be assigned." };
+  if (card.status === "ASSIGNED" && card.assignedWorkflowBagId !== null)
+    return { ok: false, error: "This QR card is already active in production." };
   return { ok: true };
 }
 
@@ -159,12 +179,25 @@ export async function editInventoryBag(
             .where(eq(qrCards.scanToken, newToken));
           if (!newCard)
             throw new Error(`QR card "${newToken}" not found.`);
-          if (newCard.cardType === "VARIETY_PACK")
-            throw new Error("Variety pack cards cannot be used for raw bags.");
-          if (newCard.status === "RETIRED")
-            throw new Error("Retired QR cards cannot be assigned.");
-          if (newCard.status === "ASSIGNED" && newCard.assignedWorkflowBagId !== null)
-            throw new Error("This QR card is already active in production.");
+
+          const cardValidation = validateQrCardForRawBag(newCard);
+          if (!cardValidation.ok) throw new Error(cardValidation.error);
+
+          // Uniqueness guard: reject if this scan token is already on a different bag.
+          // The DB has a partial unique index as a safety net, but we throw early with
+          // a clear message rather than letting the constraint violation surface.
+          const [existingBag] = await tx
+            .select({ id: inventoryBags.id })
+            .from(inventoryBags)
+            .where(
+              and(
+                eq(inventoryBags.bagQrCode, newToken),
+                ne(inventoryBags.id, bagId),
+              ),
+            )
+            .limit(1);
+          if (existingBag)
+            throw new Error("This QR card is already assigned to another raw bag.");
 
           await tx
             .update(qrCards)
