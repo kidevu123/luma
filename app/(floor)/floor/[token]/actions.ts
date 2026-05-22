@@ -18,6 +18,7 @@ import {
   workflowEvents,
 } from "@/lib/db/schema";
 import { isPartialBagResume } from "@/lib/production/bag-allocation";
+import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
 import {
@@ -170,8 +171,14 @@ export async function scanCardAction(
         throw new Error("Only bag QR cards (RAW_BAG type) can be used to start production.");
       }
 
-      if (card.status === "IDLE" || (card.status === "ASSIGNED" && !card.assignedWorkflowBagId)) {
-        // Fresh scan — first-op stations REQUIRE a product pick so
+      if (card.status === "IDLE") {
+        throw new Error(
+          "This bag QR has not been linked to a received bag. Use the Receive Pills page to receive the bag before starting production.",
+        );
+      }
+
+      if (card.status === "ASSIGNED" && !card.assignedWorkflowBagId) {
+        // Intake-reserved fresh scan — first-op stations REQUIRE a product pick so
         // workflow_bags.product_id lands non-null at the very first
         // event. Downstream stations inherit via the projector's
         // COALESCE pattern.
@@ -191,9 +198,7 @@ export async function scanCardAction(
           : null;
         // Intake-reserved cards (ASSIGNED+null workflowBagId) are
         // semantically equivalent to IDLE for first-op gating.
-        const isFreshStart =
-          card.status === "IDLE" ||
-          (card.status === "ASSIGNED" && !card.assignedWorkflowBagId);
+        const isFreshStart = true;
         if (isFreshStart && !FRESH_BAG_STATION_KINDS.has(station.kind)) {
           throw new Error(
             "This station does not start fresh bags. Scan a bag that has already been released to this station.",
@@ -1027,30 +1032,32 @@ export async function packagingCompleteAction(
 
 // ── lookup card by scan token (floor scanner text input) ───────────────────
 
-/** Resolve a QR scan token to a card ID for the floor scanner text input.
- *  Validates: card exists, is RAW_BAG type, not RETIRED.
- *  Returns the internal card ID on success so the caller can submit via
- *  scanCardAction. Full eligibility (stage, station kind) is checked there. */
 export async function lookupCardByTokenAction(
   formData: FormData,
-): Promise<{ ok: true; cardId: string } | { error: string }> {
-  const scanToken = ((formData.get("scanToken") as string | null) ?? "").trim();
-  if (!scanToken) return { error: "Scan token required." };
+): Promise<{ ok: true; cardId: string; isIntakeReserved: boolean } | { error: string }> {
+  const scanToken = formData.get("scanToken");
+  if (typeof scanToken !== "string" || !scanToken.trim()) {
+    return { error: "No scan token provided." };
+  }
 
   const [card] = await db
-    .select({ id: qrCards.id, cardType: qrCards.cardType, status: qrCards.status })
+    .select({
+      id: qrCards.id,
+      cardType: qrCards.cardType,
+      status: qrCards.status,
+      assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
+    })
     .from(qrCards)
-    .where(eq(qrCards.scanToken, scanToken))
-    .limit(1);
+    .where(eq(qrCards.scanToken, scanToken.trim()));
 
   if (!card) return { error: "Bag QR not found." };
-  if (card.cardType !== "RAW_BAG") {
-    return { error: "This is not a bag QR. Scan a bag label (not a variety pack or traveler card)." };
+
+  const classification = classifyFloorScanCard(card);
+  if (!classification.eligible) {
+    return { error: classification.reason };
   }
-  if (card.status === "RETIRED") {
-    return { error: "This bag QR has been retired and can no longer be used." };
-  }
-  return { ok: true, cardId: card.id };
+
+  return { ok: true, cardId: card.id, isIntakeReserved: classification.isIntakeReserved };
 }
 
 // ── seal handpack bag ──────────────────────────────────────────────────────
