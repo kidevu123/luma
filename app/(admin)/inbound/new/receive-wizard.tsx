@@ -99,8 +99,8 @@ export function ReceiveWizard({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="New receive"
-        description="One screen, one save. Boxes auto-create their batches. Bags auto-generate from box × bag count."
+        title="Legacy receive wizard"
+        description="Supervisor fallback only. For normal tablet intake use Receive pills; for packaging use Receive packaging."
       />
       <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
         <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />

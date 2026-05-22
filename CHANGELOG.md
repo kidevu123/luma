@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.44] — 2026-05-22
+
+### Improved
+- **Legacy receive wizard title corrected (UI-POLISH-4):** The `/inbound/new` legacy wizard page title was "New receive", implying it is the normal receive entry point. Renamed to "Legacy receive wizard" with an updated description ("Supervisor fallback only. For normal tablet intake use Receive pills; for packaging use Receive packaging."). The amber warning banner and links to the correct pages were already in place from a prior fix; this aligns the page heading with that message.
+
+### Audit findings (no further changes needed)
+- "Pack-out" wording: only in code/JSX comments in `packaging-output/page.tsx`; all user-visible labels already say "Production output" or "Output queue".
+- "Purchase orders" tab: already renamed "Receives".
+- "Receive another batch" button: already navigates to `/receiving/raw-bags` via full page load.
+- `/inbound/new` promotion: not linked from any sidebar, nav button, or CTA. `inbound/page.test.ts` asserts this.
+- "cards" for PO line items: not found.
+
+### Tests
+- Added `UI-POLISH-4 · legacy wizard labeling` suite (4 tests) in `app/(admin)/inbound/new/page.test.ts`: pins wizard title as "Legacy receive wizard", confirms amber banner text, and verifies both fallback links.
+
 ## [0.2.42] — 2026-05-22
 
 ### Improved
