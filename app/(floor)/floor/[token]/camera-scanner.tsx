@@ -15,6 +15,15 @@ import * as React from "react";
 import { X, CameraOff, Loader2 } from "lucide-react";
 import jsQR from "jsqr";
 
+type BarcodeDetectorInstance = {
+  detect(image: HTMLVideoElement): Promise<Array<{ rawValue: string }>>;
+};
+type BarcodeDetectorConstructor = new (options?: {
+  formats?: string[];
+}) => BarcodeDetectorInstance;
+
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 export function CameraScanner({
   onResult,
   onClose,
@@ -115,51 +124,100 @@ export function CameraScanner({
     };
   }, []);
 
-  // Start the rAF decode loop once the camera is scanning.
+  // Start the decode loop once the camera is scanning.
   React.useEffect(() => {
     if (phase !== "scanning") return;
 
-    function tick() {
-      if (resolvedRef.current) return;
+    const video = videoRef.current;
+    if (!video) return;
+    const videoEl: HTMLVideoElement = video;
 
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      if (
-        !video ||
-        !canvas ||
-        video.readyState < video.HAVE_ENOUGH_DATA
-      ) {
-        rafRef.current = requestAnimationFrame(tick);
-        return;
+    function stopStream() {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      cancelAnimationFrame(rafRef.current);
+    }
+
+    if (
+      typeof window !== "undefined" &&
+      "BarcodeDetector" in window
+    ) {
+      // Native BarcodeDetector path (Chrome/Android — faster, no canvas)
+      const DetectorClass = (window as Record<string, unknown>)[
+        "BarcodeDetector"
+      ] as BarcodeDetectorConstructor;
+      const detector = new DetectorClass({ formats: ["qr_code"] });
+      let cancelled = false;
+
+      async function nativeLoop() {
+        while (!cancelled && !resolvedRef.current) {
+          if (videoEl.readyState < videoEl.HAVE_ENOUGH_DATA) {
+            await delay(50);
+            continue;
+          }
+          try {
+            const barcodes = await detector.detect(videoEl);
+            if (cancelled || resolvedRef.current) return;
+            if (barcodes[0]?.rawValue) {
+              resolvedRef.current = true;
+              stopStream();
+              onResult(barcodes[0].rawValue);
+              return;
+            }
+          } catch {
+            // detection error on a frame is non-fatal; continue loop
+          }
+          await delay(100); // ~10fps
+        }
       }
+      void nativeLoop();
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) {
+      return () => {
+        cancelled = true;
+        stopStream();
+      };
+    } else {
+      // jsQR fallback path (existing code below — DO NOT MODIFY)
+      function tick() {
+        if (resolvedRef.current) return;
+
+        const canvas = canvasRef.current;
+        if (
+          !video ||
+          !canvas ||
+          video.readyState < video.HAVE_ENOUGH_DATA
+        ) {
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+          rafRef.current = requestAnimationFrame(tick);
+          return;
+        }
+
+        ctx.drawImage(video, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert",
+        });
+
+        if (code?.data) {
+          resolvedRef.current = true;
+          streamRef.current?.getTracks().forEach((t) => t.stop());
+          cancelAnimationFrame(rafRef.current);
+          onResult(code.data.trim());
+          return;
+        }
+
         rafRef.current = requestAnimationFrame(tick);
-        return;
-      }
-
-      ctx.drawImage(video, 0, 0);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: "dontInvert",
-      });
-
-      if (code?.data) {
-        resolvedRef.current = true;
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        cancelAnimationFrame(rafRef.current);
-        onResult(code.data.trim());
-        return;
       }
 
       rafRef.current = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(rafRef.current);
     }
-
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
   }, [phase, onResult]);
 
   return (
