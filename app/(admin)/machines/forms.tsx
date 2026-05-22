@@ -12,10 +12,11 @@ import {
 } from "./actions";
 
 const STATION_KINDS = [
-  ["BLISTER", "Blister"],
+  ["BLISTER", "Blister (machine)"],
+  ["HANDPACK_BLISTER", "Hand-pack blister (no machine)"],
   ["SEALING", "Sealing"],
   ["PACKAGING", "Packaging"],
-  ["BOTTLE_HANDPACK", "Bottle handpack"],
+  ["BOTTLE_HANDPACK", "Bottle hand-pack"],
   ["BOTTLE_CAP_SEAL", "Bottle cap-seal"],
   ["BOTTLE_STICKER", "Bottle sticker"],
   ["COMBINED", "Combined"],

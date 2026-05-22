@@ -6,7 +6,7 @@ import { Truck, Inbox, Boxes, ClipboardList, GitCompare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-  { href: "/inbound",                     label: "Purchase orders",    icon: Truck },
+  { href: "/inbound",                     label: "Receives",           icon: Truck },
   { href: "/receiving/raw-bags",          label: "Receive pills",      icon: Inbox },
   { href: "/inbound/packaging-materials", label: "Receive packaging",  icon: Boxes },
   { href: "/packaging-receipts",          label: "Packaging receipts", icon: ClipboardList },

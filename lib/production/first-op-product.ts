@@ -1,10 +1,21 @@
 // PRD-1: First-operation product selection helper.
 //
-// At the first production station for a given route (Blister for the
-// card route, Bottle Filling for the bottle route, etc.), the
-// operator must select the finished product/SKU being made when
-// they scan a fresh IDLE card. That product is then locked on the
-// workflow_bag and inherited by every downstream station.
+// Station vs machine model (authoritative definition):
+//   Station  — a floor work area where operators scan bag QRs and record
+//              events. Each station has a scan_token URL used to auth the
+//              floor PWA. Stations may optionally reference a machine.
+//   Machine  — a physical piece of equipment (blister press, sealing
+//              machine, etc.). Machines are optional; hand-pack stations
+//              have no machine.
+//
+// Starting-point stations (FIRST_OP_STATION_KINDS below) create fresh
+// workflow_bags and must record the finished product. Downstream stations
+// (SEALING, PACKAGING, BOTTLE_CAP_SEAL, BOTTLE_STICKER) receive bags
+// already in-flight and only record throughput/completion events.
+//
+// Normal start flow: operator opens station URL → scans bag QR → system
+// picks product automatically if only one match → fires CARD_ASSIGNED.
+// Admin "Start Production" page is a supervisor fallback only.
 //
 // Pure helper — no DB calls — so the rule can be unit-tested without
 // integration setup. The action loads rows, this helper decides

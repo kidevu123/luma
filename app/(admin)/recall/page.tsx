@@ -628,7 +628,7 @@ function OutputsSection({ passport }: { passport: RecallPassport }) {
     <div className="rounded-xl border border-border bg-surface overflow-hidden">
       <div className="px-4 py-3 border-b border-border/60">
         <p className="text-[10px] uppercase tracking-wider text-text-subtle">Finished output</p>
-        <h2 className="text-sm font-semibold text-text-strong">Pack-out — {passport.outputs.length}</h2>
+        <h2 className="text-sm font-semibold text-text-strong">Production output — {passport.outputs.length}</h2>
       </div>
       <div className="px-4 py-4">
         {passport.outputs.length === 0 ? (

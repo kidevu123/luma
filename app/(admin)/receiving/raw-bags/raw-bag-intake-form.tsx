@@ -205,21 +205,8 @@ export function RawBagIntakeForm({
   }
 
   function handleAnother() {
-    setResult(null);
-    setPoId("");
-    setPoLineId("");
-    setPoNumberManual("");
-    setVendorNameManual("");
-    setOrderedQuantityManual("");
-    setTabletTypeId(tabletTypes[0]?.id ?? "");
-    setSupplierLot("");
-    setNumberOfBags("10");
-    setDeclaredTotal("");
-    setReceiptStart("");
-    setReceiptPrefix("");
-    setRows([]);
-    setErrorMessage(null);
-    router.refresh();
+    // Full page load guarantees a clean form and refreshed QR pool.
+    window.location.href = "/receiving/raw-bags";
   }
 
   const receivedTotal = computeReceivedTotal(rows);

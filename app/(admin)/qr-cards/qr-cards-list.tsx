@@ -113,19 +113,24 @@ function AssignmentCell({
     );
   }
 
-  if (card.cardType === "RAW_BAG" && intakeBag) {
+  if (card.cardType === "RAW_BAG" && intakeBag?.id) {
     const parts: string[] = [];
     if (intakeBag.receiveName) parts.push(intakeBag.receiveName);
     if (intakeBag.bagNumber != null) parts.push(`Bag ${intakeBag.bagNumber}`);
     if (intakeBag.internalReceiptNumber)
       parts.push(`Receipt\u202f#\u202f${intakeBag.internalReceiptNumber}`);
     if (intakeBag.tabletTypeName) parts.push(intakeBag.tabletTypeName);
-    return (
-      <span className="text-[11px] leading-snug">
-        <span className="text-sky-700 font-medium">Reserved at receive</span>
-        {parts.length > 0 && (
+    if (parts.length > 0) {
+      return (
+        <span className="text-[11px] leading-snug">
+          <span className="text-sky-700 font-medium">Reserved at receive</span>
           <span className="text-text-muted"> · {parts.join(" · ")}</span>
-        )}
+        </span>
+      );
+    }
+    return (
+      <span className="text-[11px] leading-snug text-amber-700 font-medium">
+        Reserved at receive · missing details
       </span>
     );
   }
@@ -133,7 +138,7 @@ function AssignmentCell({
   return (
     <span className="text-[11px] text-text-muted italic">
       {card.cardType === "RAW_BAG"
-        ? "Assigned — no bag context"
+        ? "Assigned — missing bag context"
         : "Assigned — no active workflow"}
     </span>
   );

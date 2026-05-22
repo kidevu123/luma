@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Trash2, Save, AlertCircle } from "lucide-react";
+import { Plus, Trash2, Save, AlertCircle, Info } from "lucide-react";
 import type { TabletType, PurchaseOrder } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -102,6 +102,21 @@ export function ReceiveWizard({
         title="New receive"
         description="One screen, one save. Boxes auto-create their batches. Bags auto-generate from box × bag count."
       />
+      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <span>
+          This is a legacy wizard — use it only as a supervisor fallback.
+          For normal tablet intake, go to{" "}
+          <a href="/receiving/raw-bags" className="underline font-medium">
+            Receive pills
+          </a>
+          . For packaging, go to{" "}
+          <a href="/inbound/packaging-materials" className="underline font-medium">
+            Receive packaging
+          </a>
+          .
+        </span>
+      </div>
 
       <div className="grid lg:grid-cols-[1fr_280px] gap-5">
         <div className="space-y-5">
