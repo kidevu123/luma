@@ -141,3 +141,56 @@ describe("lookupCardByTokenAction", () => {
     expect(result).toHaveProperty("ok", true);
   });
 });
+
+// ── Product narrowing filter logic (pure) ─────────────────────────────────
+// Verifies the filter rule used by eligibleProducts / handleResolvedToken.
+
+type MockProduct = { id: string; sku: string; name: string; allowedTabletTypeIds: string[] };
+
+function narrowProducts(
+  products: MockProduct[],
+  tabletTypeId: string | null,
+): MockProduct[] {
+  if (!tabletTypeId) return products;
+  return products.filter(
+    (p) => p.allowedTabletTypeIds.length === 0 || p.allowedTabletTypeIds.includes(tabletTypeId),
+  );
+}
+
+describe("product narrowing filter", () => {
+  const cardProduct: MockProduct = { id: "p1", sku: "CARD_A", name: "Card A", allowedTabletTypeIds: ["tt-001"] };
+  const bottleProduct: MockProduct = { id: "p2", sku: "BOT_A", name: "Bottle A", allowedTabletTypeIds: ["tt-002"] };
+  const multiTabletCard: MockProduct = { id: "p3", sku: "CARD_B", name: "Card B", allowedTabletTypeIds: ["tt-001", "tt-003"] };
+  const unmappedProduct: MockProduct = { id: "p4", sku: "GENERIC", name: "Generic", allowedTabletTypeIds: [] };
+
+  it("shows only products compatible with scanned tablet type", () => {
+    const result = narrowProducts([cardProduct, bottleProduct], "tt-001");
+    expect(result).toEqual([cardProduct]);
+  });
+
+  it("shows all products when tablet type is null (no tablet info)", () => {
+    const result = narrowProducts([cardProduct, bottleProduct], null);
+    expect(result).toEqual([cardProduct, bottleProduct]);
+  });
+
+  it("shows product mapped to multiple tablet types when matching one of them", () => {
+    const result = narrowProducts([cardProduct, multiTabletCard, bottleProduct], "tt-003");
+    expect(result).toEqual([multiTabletCard]);
+  });
+
+  it("shows unmapped product (allowedTabletTypeIds=[]) regardless of scanned tablet", () => {
+    const result = narrowProducts([cardProduct, unmappedProduct], "tt-001");
+    expect(result).toEqual([cardProduct, unmappedProduct]);
+  });
+
+  it("returns empty array when no products are compatible (config error case)", () => {
+    const result = narrowProducts([cardProduct, bottleProduct], "tt-999");
+    expect(result).toHaveLength(0);
+  });
+
+  it("auto-select scenario: exactly one product matches", () => {
+    const result = narrowProducts([cardProduct, bottleProduct], "tt-001");
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("p1");
+  });
+});

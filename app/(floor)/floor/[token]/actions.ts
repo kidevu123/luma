@@ -1033,7 +1033,7 @@ export async function packagingCompleteAction(
 
 export async function lookupCardByTokenAction(
   formData: FormData,
-): Promise<{ ok: true; cardId: string; isIntakeReserved: boolean } | { error: string }> {
+): Promise<{ ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null } | { error: string }> {
   const scanToken = formData.get("scanToken");
   if (typeof scanToken !== "string" || !scanToken.trim()) {
     return { error: "No scan token provided." };
@@ -1057,7 +1057,7 @@ export async function lookupCardByTokenAction(
     return { error: classification.reason };
   }
 
-  return { ok: true, cardId: card.id, isIntakeReserved: classification.isIntakeReserved };
+  return { ok: true, cardId: card.id, isIntakeReserved: classification.isIntakeReserved, tabletTypeId: null };
 }
 
 // ── seal handpack bag ──────────────────────────────────────────────────────
