@@ -94,6 +94,7 @@ export default async function ProductBomPage({
             kind={product.kind}
             unitsPerDisplay={product.unitsPerDisplay ?? null}
             displaysPerCase={product.displaysPerCase ?? null}
+            zohoItemIdFallback={product.zohoItemId ?? null}
             zohoItemIdUnit={product.zohoItemIdUnit ?? null}
             zohoItemIdDisplay={product.zohoItemIdDisplay ?? null}
             zohoItemIdCase={product.zohoItemIdCase ?? null}

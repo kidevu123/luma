@@ -157,4 +157,72 @@ describe("first-op product selection — registry sanity", () => {
     expect(STATION_KIND_TO_PRODUCT_KINDS.BLISTER).toContain("VARIETY");
     expect(STATION_KIND_TO_PRODUCT_KINDS.BOTTLE_HANDPACK).toContain("VARIETY");
   });
+
+  it("BOTTLE_HANDPACK is a first-op station kind", () => {
+    expect(FIRST_OP_STATION_KINDS.has("BOTTLE_HANDPACK")).toBe(true);
+  });
+
+  it("downstream-only kinds are NOT first-op", () => {
+    expect(FIRST_OP_STATION_KINDS.has("SEALING")).toBe(false);
+    expect(FIRST_OP_STATION_KINDS.has("BOTTLE_CAP_SEAL")).toBe(false);
+    expect(FIRST_OP_STATION_KINDS.has("BOTTLE_STICKER")).toBe(false);
+    expect(FIRST_OP_STATION_KINDS.has("PACKAGING")).toBe(false);
+  });
+});
+
+describe("first-op product selection — BOTTLE_HANDPACK station", () => {
+  it("requires productId for IDLE card at BOTTLE_HANDPACK", () => {
+    const r = checkFirstOpProductSelection({
+      stationKind: "BOTTLE_HANDPACK",
+      cardStatus: "IDLE",
+      pickedProductId: null,
+      product: null,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/Pick a product/);
+  });
+
+  it("accepts BOTTLE product at BOTTLE_HANDPACK", () => {
+    const r = checkFirstOpProductSelection({
+      stationKind: "BOTTLE_HANDPACK",
+      cardStatus: "IDLE",
+      pickedProductId: ACTIVE_BOTTLE.id,
+      product: ACTIVE_BOTTLE,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.productId).toBe(ACTIVE_BOTTLE.id);
+  });
+
+  it("accepts VARIETY product at BOTTLE_HANDPACK", () => {
+    const r = checkFirstOpProductSelection({
+      stationKind: "BOTTLE_HANDPACK",
+      cardStatus: "IDLE",
+      pickedProductId: ACTIVE_VARIETY.id,
+      product: ACTIVE_VARIETY,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.productId).toBe(ACTIVE_VARIETY.id);
+  });
+
+  it("rejects CARD product at BOTTLE_HANDPACK (wrong kind)", () => {
+    const r = checkFirstOpProductSelection({
+      stationKind: "BOTTLE_HANDPACK",
+      cardStatus: "IDLE",
+      pickedProductId: ACTIVE_CARD.id,
+      product: ACTIVE_CARD,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/cannot start at a BOTTLE_HANDPACK station/);
+  });
+
+  it("does not require product for ASSIGNED card at BOTTLE_HANDPACK (pickup path)", () => {
+    const r = checkFirstOpProductSelection({
+      stationKind: "BOTTLE_HANDPACK",
+      cardStatus: "ASSIGNED",
+      pickedProductId: null,
+      product: null,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.productId).toBeNull();
+  });
 });

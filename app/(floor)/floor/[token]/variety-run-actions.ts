@@ -134,6 +134,7 @@ export async function startOrResumeVarietyRunAction(
         .insert(varietyRuns)
         .values({
           parentScanToken: trimmedToken,
+          varietyQrCardId: qrCard.id,
           ...(d.productId && d.productId !== ""
             ? { productId: d.productId }
             : {}),
@@ -247,11 +248,17 @@ export async function closeVarietyRunAction(
         .where(eq(varietyRuns.id, d.varietyRunId));
 
       // Release VARIETY_PACK QR card.
-      const [parentCard] = await tx
-        .select({ id: qrCards.id, status: qrCards.status })
-        .from(qrCards)
-        .where(eq(qrCards.scanToken, run.parentScanToken))
-        .limit(1);
+      const [parentCard] = run.varietyQrCardId
+        ? await tx
+            .select({ id: qrCards.id, status: qrCards.status })
+            .from(qrCards)
+            .where(eq(qrCards.id, run.varietyQrCardId))
+            .limit(1)
+        : await tx
+            .select({ id: qrCards.id, status: qrCards.status })
+            .from(qrCards)
+            .where(eq(qrCards.scanToken, run.parentScanToken))
+            .limit(1);
 
       if (parentCard && parentCard.status === "ASSIGNED") {
         await tx.update(qrCards).set({ status: "IDLE" }).where(eq(qrCards.id, parentCard.id));

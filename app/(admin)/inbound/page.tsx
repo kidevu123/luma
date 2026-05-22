@@ -47,13 +47,14 @@ export default async function InboundPage() {
               <TH>Receive</TH>
               <TH>PO</TH>
               <TH>Vendor</TH>
+              <TH>Tablet / Flavor</TH>
               <TH>Received</TH>
               <TH className="text-right">Bags</TH>
               <TH>Status</TH>
             </TR>
           </THead>
           <tbody>
-            {rows.map(({ receive, poNumber, vendor, bagCount }) => (
+            {rows.map(({ receive, poNumber, vendor, bagCount, tabletTypes }) => (
               <TR key={receive.id}>
                 <TD className="font-medium">
                   <Link href={`/inbound/${receive.id}`} className="hover:underline">
@@ -62,6 +63,7 @@ export default async function InboundPage() {
                 </TD>
                 <TD className="font-mono text-xs">{poNumber ?? "—"}</TD>
                 <TD className="text-text-muted">{vendor ?? "—"}</TD>
+                <TD className="text-xs text-text-muted">{formatFlavorSummary(tabletTypes)}</TD>
                 <TD className="text-text-muted text-xs">
                   {new Date(receive.receivedAt as unknown as string).toLocaleString()}
                 </TD>
@@ -81,4 +83,11 @@ export default async function InboundPage() {
       </div>
     </div>
   );
+}
+
+function formatFlavorSummary(tabletTypes: string | null): string {
+  if (!tabletTypes) return "—";
+  const parts = tabletTypes.split(", ");
+  if (parts.length === 1) return parts[0]!;
+  return `${parts[0]!} + ${parts.length - 1} more`;
 }

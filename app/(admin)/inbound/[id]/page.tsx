@@ -139,6 +139,7 @@ export default async function ReceiveDetailPage({
                 <DataTable>
                   <THead>
                     <TR>
+                      <TH>Bag #</TH>
                       <TH>Receipt #</TH>
                       <TH>QR token</TH>
                       <TH>Supplier lot</TH>
@@ -154,6 +155,7 @@ export default async function ReceiveDetailPage({
                       const batch = bag.batchId ? byBatch.get(bag.batchId) : null;
                       return (
                         <TR key={bag.id}>
+                          <TD className="tabular-nums font-semibold text-xs">{bag.bagNumber}</TD>
                           <TD className="font-mono text-xs">
                             {bag.internalReceiptNumber ?? "—"}
                           </TD>

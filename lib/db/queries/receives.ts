@@ -29,6 +29,12 @@ export async function listReceives() {
         JOIN small_boxes sb ON sb.id = ib.small_box_id
         WHERE sb.receive_id = ${receives.id}
       )`,
+      tabletTypes: sql<string | null>`(
+        SELECT STRING_AGG(DISTINCT tt.name, ', ' ORDER BY tt.name)
+        FROM small_boxes sb
+        JOIN tablet_types tt ON tt.id = sb.default_tablet_type_id
+        WHERE sb.receive_id = ${receives.id}
+      )`,
     })
     .from(receives)
     .leftJoin(purchaseOrders, eq(receives.poId, purchaseOrders.id))

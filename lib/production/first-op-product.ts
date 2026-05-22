@@ -17,6 +17,7 @@
 export const FIRST_OP_STATION_KINDS: ReadonlySet<string> = new Set([
   "BLISTER",
   "HANDPACK_BLISTER",
+  "BOTTLE_HANDPACK",
   "COMBINED", // does the whole pipeline; first event is BLISTER_COMPLETE
 ]);
 

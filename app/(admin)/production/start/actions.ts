@@ -38,6 +38,7 @@ import {
   type RawBagLookupResult,
 } from "@/lib/db/queries/raw-bag-intake";
 import { validateRawBagQrForStart } from "@/lib/production/start-production";
+import { FIRST_OP_STATION_KINDS } from "@/lib/production/first-op-product";
 
 export type StartProductionResult =
   | {
@@ -138,6 +139,12 @@ export async function startProductionForRawBagAction(
   if (!station) return { ok: false, error: "Station not found." };
   if (!station.isActive) {
     return { ok: false, error: `Station ${station.label} is inactive.` };
+  }
+  if (!FIRST_OP_STATION_KINDS.has(station.kind)) {
+    return {
+      ok: false,
+      error: `Station "${station.label}" (${station.kind}) cannot start fresh bags. Select a first-operation station (blister, bottle handpack, or combined).`,
+    };
   }
 
   const [product] = await db

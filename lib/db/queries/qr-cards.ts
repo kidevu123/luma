@@ -1,6 +1,6 @@
 import { eq, and, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { qrCards, workflowBags, products, inventoryBags, batches } from "@/lib/db/schema";
+import { qrCards, workflowBags, products, inventoryBags, batches, smallBoxes, receives, tabletTypes } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
 
@@ -16,6 +16,9 @@ export async function listQrCards() {
         id: inventoryBags.id,
         internalReceiptNumber: inventoryBags.internalReceiptNumber,
         batchId: inventoryBags.batchId,
+        bagNumber: inventoryBags.bagNumber,
+        receiveName: receives.receiveName,
+        tabletTypeName: tabletTypes.name,
       },
       intakeBatchNumber: batches.batchNumber,
     })
@@ -24,6 +27,9 @@ export async function listQrCards() {
     .leftJoin(products, eq(workflowBags.productId, products.id))
     .leftJoin(inventoryBags, eq(qrCards.scanToken, inventoryBags.bagQrCode))
     .leftJoin(batches, eq(inventoryBags.batchId, batches.id))
+    .leftJoin(smallBoxes, eq(inventoryBags.smallBoxId, smallBoxes.id))
+    .leftJoin(receives, eq(smallBoxes.receiveId, receives.id))
+    .leftJoin(tabletTypes, eq(inventoryBags.tabletTypeId, tabletTypes.id))
     .orderBy(asc(qrCards.label));
 }
 
