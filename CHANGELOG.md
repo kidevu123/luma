@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.11] — 2026-05-21
+
+### Fixed
+- Sidebar tests: updated 20 stale expectations from `1ce88c1` Settings hub restructure. Section names updated to "Operations" / "Oversight" / "Configure"; labels updated ("Pack-out", "Workflows", "Find lot / batch"); removed routes no longer in sidebar (/qr-cards, /standards, /workflow-validation, /settings/users); invoice allocations and Workflows placement assertions corrected. All 2093 tests pass.
+
 ## [0.2.10] — 2026-05-21
 
 ### Changed
