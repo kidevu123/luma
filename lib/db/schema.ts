@@ -2118,9 +2118,14 @@ export const varietyRuns = pgTable(
   "variety_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** Scan token from the reusable physical variety card. Not a FK to
-     *  qr_cards — availability determined by status = 'OPEN'. */
+    /** Scan token from the reusable physical variety card. Kept for display
+     *  and legacy fallback. Formal FK is varietyQrCardId (added in 0044). */
     parentScanToken: text("parent_scan_token").notNull(),
+    /** FK to qr_cards — the VARIETY_PACK card assigned to this run.
+     *  Nullable for legacy rows created before VARIETY-2b. */
+    varietyQrCardId: uuid("variety_qr_card_id").references(() => qrCards.id, {
+      onDelete: "set null",
+    }),
     productId: uuid("product_id").references(() => products.id, {
       onDelete: "set null",
     }),
@@ -2146,6 +2151,9 @@ export const varietyRuns = pgTable(
     uniqueIndex("variety_runs_one_open_per_token_idx")
       .on(t.parentScanToken)
       .where(sql`status = 'OPEN'`),
+    index("variety_runs_qr_card_idx")
+      .on(t.varietyQrCardId)
+      .where(sql`variety_qr_card_id IS NOT NULL`),
   ],
 );
 
