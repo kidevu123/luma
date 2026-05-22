@@ -282,8 +282,9 @@ function BagStatus({ status }: { status: string }) {
   const map: Record<string, "ok" | "warn" | "danger" | "neutral" | "info"> = {
     AVAILABLE: "ok",
     IN_USE: "info",
-    CONSUMED: "neutral",
-    CLOSED: "neutral",
+    EMPTIED: "neutral",
+    QUARANTINED: "warn",
+    VOID: "danger",
   };
   return <StatusPill kind={map[status] ?? "neutral"}>{status}</StatusPill>;
 }
