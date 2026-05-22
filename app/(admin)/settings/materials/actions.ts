@@ -34,6 +34,7 @@ const schema = z.object({
   sku: z.string().min(1).max(60),
   name: z.string().min(1).max(120),
   kind: z.enum(MATERIAL_KINDS),
+  category: z.enum(["PACKAGING", "MATERIAL"]).default("PACKAGING"),
   uom: z.string().min(1).max(40),
   parLevel: z.coerce.number().int().min(0).optional().nullable(),
   isActive: z.coerce.boolean().optional(),
@@ -48,6 +49,7 @@ export async function saveMaterialItemAction(
     sku: formData.get("sku"),
     name: formData.get("name"),
     kind: formData.get("kind"),
+    category: formData.get("category") || "PACKAGING",
     uom: formData.get("uom"),
     parLevel: formData.get("parLevel") || null,
     isActive: formData.get("isActive") === "on",
@@ -94,6 +96,24 @@ export async function toggleMaterialItemActiveAction(
     await db
       .update(packagingMaterials)
       .set({ isActive: active })
+      .where(eq(packagingMaterials.id, id));
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Update failed." };
+  }
+  revalidatePath("/settings/materials");
+  return { ok: true };
+}
+
+export async function setMaterialCategoryAction(
+  id: string,
+  category: "PACKAGING" | "MATERIAL",
+): Promise<{ error?: string; ok?: true } | void> {
+  await requireAdmin();
+  if (!z.string().uuid().safeParse(id).success) return { error: "Invalid id." };
+  try {
+    await db
+      .update(packagingMaterials)
+      .set({ category })
       .where(eq(packagingMaterials.id, id));
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Update failed." };

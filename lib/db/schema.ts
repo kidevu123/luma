@@ -79,6 +79,11 @@ export const productKindEnum = pgEnum("product_kind", [
   "VARIETY",     // pack of multiple cards/bottles, mixed source batches
 ]);
 
+export const packagingItemCategoryEnum = pgEnum("packaging_item_category", [
+  "MATERIAL",
+  "PACKAGING",
+]);
+
 export const packagingMaterialKindEnum = pgEnum("packaging_material_kind", [
   "BLISTER_CARD",  // printed product-specific blister card (e.g. "4ct Choco Drift Blister Card")
   "BLISTER_FOIL",  // legacy — raw blister foil rolls; use PVC_ROLL or FOIL_ROLL for new entries
@@ -677,6 +682,7 @@ export const packagingMaterials = pgTable(
     sku: text("sku").notNull(),
     name: text("name").notNull(),
     kind: packagingMaterialKindEnum("kind").notNull(),
+    category: packagingItemCategoryEnum("category").notNull().default("PACKAGING"),
     /** Stock-keeping unit of measure ("each", "roll", "kg"). */
     uom: text("uom").notNull().default("each"),
     /** Reorder threshold; below this we alert. */

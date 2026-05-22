@@ -10,6 +10,7 @@ import { Boxes } from "lucide-react";
 import {
   saveMaterialItemAction,
   toggleMaterialItemActiveAction,
+  setMaterialCategoryAction,
   deleteMaterialAction,
 } from "./actions";
 
@@ -105,6 +106,13 @@ export default async function MaterialsAdminPage({
             </Select>
           </div>
           <div className="space-y-1">
+            <Label htmlFor="new-category">Category</Label>
+            <Select id="new-category" name="category" defaultValue="PACKAGING">
+              <option value="PACKAGING">Packaging</option>
+              <option value="MATERIAL">Material</option>
+            </Select>
+          </div>
+          <div className="space-y-1">
             <Label htmlFor="new-uom">Unit of measure</Label>
             <Input id="new-uom" name="uom" required defaultValue="each" placeholder="each / kg / roll" />
           </div>
@@ -145,6 +153,7 @@ export default async function MaterialsAdminPage({
               <TH>SKU</TH>
               <TH>Name</TH>
               <TH>Kind</TH>
+              <TH>Category</TH>
               <TH>UoM</TH>
               <TH className="text-right">Par</TH>
               <TH>Status</TH>
@@ -157,6 +166,11 @@ export default async function MaterialsAdminPage({
                 <TD className="font-mono text-xs">{r.sku}</TD>
                 <TD className="font-medium">{r.name}</TD>
                 <TD>{KIND_LABELS[r.kind] ?? r.kind}</TD>
+                <TD>
+                  <StatusPill kind={r.category === "PACKAGING" ? "info" : "neutral"}>
+                    {r.category === "PACKAGING" ? "Packaging" : "Material"}
+                  </StatusPill>
+                </TD>
                 <TD className="font-mono text-xs">{r.uom}</TD>
                 <TD className="text-right tabular-nums">{r.parLevel ?? "—"}</TD>
                 <TD>
@@ -166,6 +180,22 @@ export default async function MaterialsAdminPage({
                 </TD>
                 <TD className="text-right">
                   <div className="flex items-center justify-end gap-3">
+                    <form
+                      action={async () => {
+                        "use server";
+                        await setMaterialCategoryAction(
+                          r.id,
+                          r.category === "PACKAGING" ? "MATERIAL" : "PACKAGING",
+                        );
+                      }}
+                    >
+                      <button
+                        type="submit"
+                        className="text-xs text-text-subtle hover:text-brand-700 transition-colors"
+                      >
+                        {r.category === "PACKAGING" ? "→ Material" : "→ Packaging"}
+                      </button>
+                    </form>
                     <form
                       action={async () => {
                         "use server";

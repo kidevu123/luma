@@ -71,6 +71,7 @@ export default async function ProductBomPage({
             name: m.name,
             kind: m.kind,
             uom: m.uom,
+            category: m.category,
           }))}
           allowed={product.allowed}
           specs={product.specs}

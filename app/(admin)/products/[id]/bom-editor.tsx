@@ -32,11 +32,7 @@ type SpecRow = {
   materialKind: string;
   materialUom: string;
 };
-type Material = { id: string; sku: string; name: string; kind: string; uom: string };
-
-const PACKAGING_KINDS = new Set([
-  "BLISTER_CARD", "DISPLAY", "CASE", "LABEL", "INSERT",
-]);
+type Material = { id: string; sku: string; name: string; kind: string; uom: string; category: string };
 type Tablet = { id: string; name: string };
 
 export function BomEditor({
@@ -58,10 +54,11 @@ export function BomEditor({
   const [error, setError] = React.useState<string | null>(null);
   const allowedById = new Map(allowed.map((a) => [a.tabletTypeId, a]));
 
-  const packagingMats = materials.filter((m) => PACKAGING_KINDS.has(m.kind));
-  const rawMats = materials.filter((m) => !PACKAGING_KINDS.has(m.kind));
-  const packagingSpecs = specs.filter((s) => PACKAGING_KINDS.has(s.materialKind));
-  const rawSpecs = specs.filter((s) => !PACKAGING_KINDS.has(s.materialKind));
+  const packagingMats = materials.filter((m) => m.category === "PACKAGING");
+  const rawMats = materials.filter((m) => m.category === "MATERIAL");
+  const packagingMatIds = new Set(packagingMats.map((m) => m.id));
+  const packagingSpecs = specs.filter((s) => packagingMatIds.has(s.packagingMaterialId));
+  const rawSpecs = specs.filter((s) => !packagingMatIds.has(s.packagingMaterialId));
 
   async function toggleTablet(tabletTypeId: string, enabled: boolean, isPrimary = false) {
     setPending(true);
