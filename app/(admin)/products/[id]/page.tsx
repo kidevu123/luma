@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
 import { getProductWithBom } from "@/lib/db/queries/products";
 import { listTabletTypes } from "@/lib/db/queries/tablet-types";
@@ -11,6 +11,7 @@ import { BomEditor } from "./bom-editor";
 import { ZohoMappingForm } from "./zoho-mapping-form";
 import { db } from "@/lib/db";
 import { productPackagingSpecs } from "@/lib/db/schema";
+import { floorReadinessLevel, floorReadinessLabel } from "@/lib/production/product-floor-readiness";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,12 @@ export default async function ProductBomPage({
         />
       </div>
 
+      <FloorReadinessCard
+        isActive={product.isActive}
+        tabletMappingCount={product.allowed.length}
+        tabletNames={product.allowed.map((a) => a.tabletName)}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle>Zoho assembly mapping</CardTitle>
@@ -131,6 +138,60 @@ function SpecRow({
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+// ── Floor readiness ──────────────────────────────────────────────────────────
+
+function FloorReadinessCard({
+  isActive,
+  tabletMappingCount,
+  tabletNames,
+}: {
+  isActive: boolean;
+  tabletMappingCount: number;
+  tabletNames: string[];
+}) {
+  const level = floorReadinessLevel({ isActive, tabletMappingCount });
+
+  const styles = {
+    ready: {
+      container: "border-emerald-200 bg-emerald-50/60",
+      icon: <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />,
+      title: "text-emerald-900",
+      body: "text-emerald-800/80",
+    },
+    "no-tablet-mapping": {
+      container: "border-amber-200 bg-amber-50/60",
+      icon: <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />,
+      title: "text-amber-900",
+      body: "text-amber-800/80",
+    },
+    inactive: {
+      container: "border-border bg-surface-2/40",
+      icon: <XCircle className="h-4 w-4 text-text-muted flex-shrink-0 mt-0.5" />,
+      title: "text-text-muted",
+      body: "text-text-subtle",
+    },
+  }[level];
+
+  const detail =
+    level === "ready"
+      ? `Tablet types: ${tabletNames.join(", ")}`
+      : level === "no-tablet-mapping"
+        ? "Open the Bill of Materials section below and check the tablet types this product should use."
+        : "Activate this product to allow it to appear in floor station pickers.";
+
+  return (
+    <div className={`rounded-xl border px-4 py-3 flex gap-3 ${styles.container}`}>
+      {styles.icon}
+      <div className="space-y-0.5">
+        <p className={`text-sm font-semibold ${styles.title}`}>
+          {floorReadinessLabel(level)}
+        </p>
+        <p className={`text-xs ${styles.body}`}>{detail}</p>
+      </div>
     </div>
   );
 }

@@ -59,7 +59,7 @@ export function ZohoMappingForm({
       <input type="hidden" name="id" value={productId} />
 
       <div className="space-y-1.5">
-        <Label htmlFor="zohoItemIdUnit">Zoho item ID — single unit / card</Label>
+        <Label htmlFor="zohoItemIdUnit">Zoho item ID — single unit</Label>
         <Input
           id="zohoItemIdUnit"
           name="zohoItemIdUnit"
@@ -79,7 +79,7 @@ export function ZohoMappingForm({
 
       {showDisplay ? (
         <div className="space-y-1.5">
-          <Label htmlFor="zohoItemIdDisplay">Display Zoho item ID</Label>
+          <Label htmlFor="zohoItemIdDisplay">Zoho item ID — display</Label>
           <Input
             id="zohoItemIdDisplay"
             name="zohoItemIdDisplay"
@@ -94,7 +94,7 @@ export function ZohoMappingForm({
       ) : (
         <div className="space-y-1.5">
           <Label htmlFor="zohoItemIdDisplay" className="text-text-subtle">
-            Display Zoho item ID
+            Zoho item ID — display
             <span className="ml-1.5 text-[10px] font-normal normal-case">(set units/display first)</span>
           </Label>
           <Input
@@ -109,7 +109,7 @@ export function ZohoMappingForm({
 
       {showCase ? (
         <div className="space-y-1.5">
-          <Label htmlFor="zohoItemIdCase">Case Zoho item ID</Label>
+          <Label htmlFor="zohoItemIdCase">Zoho item ID — case</Label>
           <Input
             id="zohoItemIdCase"
             name="zohoItemIdCase"
@@ -124,7 +124,7 @@ export function ZohoMappingForm({
       ) : (
         <div className="space-y-1.5">
           <Label htmlFor="zohoItemIdCase" className="text-text-subtle">
-            Case Zoho item ID
+            Zoho item ID — case
             <span className="ml-1.5 text-[10px] font-normal normal-case">(set displays/case first)</span>
           </Label>
           <Input

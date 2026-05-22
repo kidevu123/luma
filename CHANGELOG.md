@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.46] — 2026-05-22
+
+### Fixed
+- **Zoho item ID no longer requires double-entry (PRODUCT-MAP-2):** The product creation dialog was writing the "Zoho item ID (single unit)" value to `products.zoho_item_id` (legacy column) instead of `products.zoho_item_id_unit`. After creation, the mapping page pre-filled from the fallback with a "Save to confirm" hint, forcing supervisors to click Save a second time. Fixed by changing the dialog field `name` to `zohoItemIdUnit` and adding the same `zohoItemId` back-sync already present in `zoho-mapping-actions.ts`.
+
+### Improved
+- **Canonical Zoho item ID labels (PRODUCT-MAP-2):** The product creation dialog and Zoho mapping form now use consistent labels: "Zoho item ID — single unit", "Zoho item ID — display", "Zoho item ID — case". Removed the "display & case IDs coming soon" placeholder (both fields have been supported since ZOHO-ASSY-1).
+- **Floor readiness card on product detail (PRODUCT-MAP-2):** A compact status banner now appears on every product detail page showing one of: "Ready for floor selection" (active + has at least one tablet mapping), "Missing tablet mapping — floor selection unavailable" (active + no mappings), or "Inactive — cannot be assigned to new production runs". Links supervisors to the BOM section when configuration is needed.
+
+### Tests added (PRODUCT-MAP-2)
+- Dialog field correctness (4 tests): `zohoItemIdUnit` field name, no stray `zohoItemId` input, fallback defaultValue for old products, correct label.
+- `saveProductAction` back-sync (4 tests): derives legacy `zohoItemId` from `zohoItemIdUnit` — short value, >60 chars, null, and not-submitted.
+- Mapping form canonical labels (4 tests): unit/display/case labels match spec.
+- Floor readiness classification (3 tests): ready / missing-tablet / inactive states.
+- Floor compatibility contract (6 tests): product with no tablet mapping excluded when type known, all products shown when type null, zero-match config error, single-match auto-select, multiple-match narrowed picker.
+
 ## [0.2.45] — 2026-05-22
 
 ### Fixed

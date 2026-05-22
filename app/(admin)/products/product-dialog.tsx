@@ -165,12 +165,12 @@ export function ProductDialog({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="zohoItemId">Zoho item ID (single unit)</Label>
+                  <Label htmlFor="zohoItemIdUnit">Zoho item ID — single unit</Label>
                   <Input
-                    id="zohoItemId"
-                    name="zohoItemId"
-                    defaultValue={row?.zohoItemId ?? ""}
-                    placeholder="optional — display &amp; case IDs coming soon"
+                    id="zohoItemIdUnit"
+                    name="zohoItemIdUnit"
+                    defaultValue={row?.zohoItemIdUnit ?? row?.zohoItemId ?? ""}
+                    placeholder="optional — e.g. 460000012345"
                   />
                 </div>
               </div>

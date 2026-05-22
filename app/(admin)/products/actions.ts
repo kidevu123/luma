@@ -57,7 +57,18 @@ export async function saveProductAction(
   }
   const { id, sku, ...rest } = parsed.data;
   const resolvedSku = sku?.trim() || generateSku(rest.name);
-  const input = { sku: resolvedSku, ...rest };
+
+  // Back-sync: if zohoItemIdUnit is explicitly submitted (not undefined), derive
+  // the legacy zohoItemId from it so both columns stay consistent. Matches the
+  // same rule in zoho-mapping-actions.ts (60-char limit on legacy column).
+  const backSyncedZohoItemId: string | null | undefined =
+    rest.zohoItemIdUnit !== undefined
+      ? rest.zohoItemIdUnit === null || rest.zohoItemIdUnit.length > 60
+        ? null
+        : rest.zohoItemIdUnit
+      : rest.zohoItemId; // fall through to whatever was passed (may be undefined)
+
+  const input = { sku: resolvedSku, ...rest, zohoItemId: backSyncedZohoItemId };
   try {
     if (id) {
       await updateProduct(id, input, actor);
