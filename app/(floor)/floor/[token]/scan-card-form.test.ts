@@ -14,10 +14,12 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: (_fields?: unknown) => ({
       from: (_table?: unknown) => ({
-        where: async (_cond?: unknown) => {
-          const rows = (selectResults[callIdx++] ?? []) as unknown[];
-          return rows;
-        },
+        where: (_cond?: unknown) => ({
+          limit: async (_count?: unknown) => {
+            const rows = (selectResults[callIdx++] ?? []) as unknown[];
+            return rows;
+          },
+        }),
       }),
     }),
   },

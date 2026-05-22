@@ -198,15 +198,14 @@ export async function scanCardAction(
           : null;
         // Intake-reserved cards (ASSIGNED+null workflowBagId) are
         // semantically equivalent to IDLE for first-op gating.
-        const isFreshStart = true;
-        if (isFreshStart && !FRESH_BAG_STATION_KINDS.has(station.kind)) {
+        if (!FRESH_BAG_STATION_KINDS.has(station.kind)) {
           throw new Error(
             "This station does not start fresh bags. Scan a bag that has already been released to this station.",
           );
         }
         const firstOp = checkFirstOpProductSelection({
           stationKind: station.kind,
-          cardStatus: isFreshStart ? "IDLE" : card.status,
+          cardStatus: "IDLE",
           pickedProductId,
           product: productLookup,
         });
@@ -1048,7 +1047,8 @@ export async function lookupCardByTokenAction(
       assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
     })
     .from(qrCards)
-    .where(eq(qrCards.scanToken, scanToken.trim()));
+    .where(eq(qrCards.scanToken, scanToken.trim()))
+    .limit(1);
 
   if (!card) return { error: "Bag QR not found." };
 
