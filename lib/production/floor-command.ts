@@ -103,6 +103,7 @@ export async function getStationsWithLiveState(): Promise<StationWithLive[]> {
   return rows.map((r) => ({
     ...r,
     kind: r.kind as StationWithLive["kind"],
+    lastEventAt: r.lastEventAt ? r.lastEventAt.toISOString() : null,
   }));
 }
 
@@ -373,7 +374,7 @@ export type RecentEventRow = {
   workflowBagId: string;
   stationId: string | null;
   employeeId: string | null;
-  occurredAt: Date;
+  occurredAt: string;
 };
 
 export async function getRecentEvents(limit = 30): Promise<RecentEventRow[]> {
@@ -393,6 +394,7 @@ export async function getRecentEvents(limit = 30): Promise<RecentEventRow[]> {
   return rows.map((r) => ({
     ...r,
     eventType: r.eventType as string,
+    occurredAt: r.occurredAt.toISOString(),
   }));
 }
 

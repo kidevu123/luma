@@ -112,7 +112,7 @@ type CardStatus = "running" | "paused" | "idle" | "empty";
 function getCardStatus(station: StationWithLive): CardStatus {
   if (!station.lastEventAt) return "empty";
   const now = Date.now();
-  const age = now - station.lastEventAt.getTime();
+  const age = now - new Date(station.lastEventAt).getTime();
   if (station.currentWorkflowBagId) {
     return age < 30 * 60 * 1000 ? "running" : "paused";
   }

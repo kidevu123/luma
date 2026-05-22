@@ -61,7 +61,7 @@ export type StationWithLive = {
   currentProductName: string | null;
   currentEmployeeName: string | null;
   lastEventType: string | null;
-  lastEventAt: Date | null;
+  lastEventAt: string | null;
   busyForSeconds: number | null;
 };
 
