@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.23] — 2026-05-22
+
+### Added
+- Available Partial Bags page (`/partial-bags`): shows AVAILABLE raw bags that have been through ≥1 production run, with remaining estimate, last used product/date, and a Start run link. No new DB status — derived from `rawBagAllocationSessions` ledger.
+- `loadAvailablePartialBags()` DB query + `isAvailablePartialBag`, `hasOpenAllocationSession`, `deriveRemainingEstimate` pure helpers in `lib/production/partial-bags.ts`. 20 unit tests covering all spec cases.
+- "Available Partial Bags" link added to Operations section of sidebar (after "Start production").
+
+### Changed
+- Start Production now blocks a bag if it has an OPEN allocation session (belt-and-suspenders guard — AVAILABLE status already blocks IN_USE bags, but this provides an explicit error message for any edge case).
+
 ## [0.2.22] — 2026-05-22
 
 ### Added
