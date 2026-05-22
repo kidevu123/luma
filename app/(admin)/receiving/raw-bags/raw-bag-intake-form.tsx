@@ -12,6 +12,7 @@ import {
   Search,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -81,6 +82,7 @@ export function RawBagIntakeForm({
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   type Result = Awaited<ReturnType<typeof createRawBagIntakeAction>>;
   const [result, setResult] = React.useState<Result | null>(null);
+  const router = useRouter();
 
   const selectedPo = React.useMemo(
     () => purchaseOrders.find((p) => p.id === poId) ?? null,
@@ -196,10 +198,28 @@ export function RawBagIntakeForm({
     }
   }
 
+  function handleAnother() {
+    setResult(null);
+    setPoId("");
+    setPoLineId("");
+    setPoNumberManual("");
+    setVendorNameManual("");
+    setOrderedQuantityManual("");
+    setTabletTypeId(tabletTypes[0]?.id ?? "");
+    setSupplierLot("");
+    setNumberOfBags("10");
+    setDeclaredTotal("");
+    setReceiptStart("");
+    setReceiptPrefix("");
+    setRows([]);
+    setErrorMessage(null);
+    router.refresh();
+  }
+
   const receivedTotal = computeReceivedTotal(rows);
 
   if (result?.ok) {
-    return <SaveResultPanel result={result} />;
+    return <SaveResultPanel result={result} onAnother={handleAnother} />;
   }
 
   return (
@@ -271,6 +291,7 @@ export function RawBagIntakeForm({
                 min={0}
                 value={orderedQuantityManual}
                 onChange={(e) => setOrderedQuantityManual(e.target.value)}
+                onWheel={(e) => (e.target as HTMLInputElement).blur()}
                 placeholder="e.g. 200000"
               />
             </div>
@@ -317,6 +338,7 @@ export function RawBagIntakeForm({
               min={1}
               value={numberOfBags}
               onChange={(e) => setNumberOfBags(e.target.value)}
+              onWheel={(e) => (e.target as HTMLInputElement).blur()}
             />
           </div>
           <div className="space-y-1">
@@ -327,6 +349,7 @@ export function RawBagIntakeForm({
               min={1}
               value={declaredTotal}
               onChange={(e) => setDeclaredTotal(e.target.value)}
+              onWheel={(e) => (e.target as HTMLInputElement).blur()}
               placeholder="e.g. 200000 (distributed evenly)"
             />
           </div>
@@ -415,6 +438,7 @@ export function RawBagIntakeForm({
                               : null,
                           })
                         }
+                        onWheel={(e) => (e.target as HTMLInputElement).blur()}
                         className="text-right tabular-nums text-xs"
                       />
                     </td>
@@ -432,6 +456,7 @@ export function RawBagIntakeForm({
                             })(),
                           })
                         }
+                        onWheel={(e) => (e.target as HTMLInputElement).blur()}
                         className="text-right tabular-nums text-xs"
                       />
                     </td>
@@ -738,8 +763,10 @@ function LookupCard() {
 
 function SaveResultPanel({
   result,
+  onAnother,
 }: {
   result: Extract<Awaited<ReturnType<typeof createRawBagIntakeAction>>, { ok: true }>;
+  onAnother: () => void;
 }) {
   return (
     <ProductionSection
@@ -794,14 +821,12 @@ function SaveResultPanel({
           </Link>
         </Button>
         <Button asChild size="sm" variant="secondary">
-          <Link href="/qr-cards">
+          <Link href="/production/start">
             <ArrowRight className="h-3.5 w-3.5" /> Start production
           </Link>
         </Button>
-        <Button asChild size="sm">
-          <Link href="/receiving/raw-bags">
-            <Inbox className="h-3.5 w-3.5" /> Receive another batch
-          </Link>
+        <Button size="sm" onClick={onAnother}>
+          <Inbox className="h-3.5 w-3.5" /> Receive another batch
         </Button>
       </div>
     </ProductionSection>

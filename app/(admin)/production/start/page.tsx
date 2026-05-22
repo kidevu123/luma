@@ -10,7 +10,7 @@
 // wiring unchanged.
 
 import { db } from "@/lib/db";
-import { and, asc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, or } from "drizzle-orm";
 import {
   productAllowedTablets,
   products,
@@ -31,9 +31,12 @@ export default async function StartProductionPage() {
       .select({ id: qrCards.id, code: qrCards.label, scanToken: qrCards.scanToken })
       .from(qrCards)
       .where(
-        or(
-          eq(qrCards.status, "IDLE"),
-          and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId))
+        and(
+          ne(qrCards.cardType, "VARIETY_PACK"),
+          or(
+            eq(qrCards.status, "IDLE"),
+            and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId))
+          )
         )
       )
       .orderBy(asc(qrCards.label))
@@ -65,7 +68,7 @@ export default async function StartProductionPage() {
     <div className="space-y-5">
       <PageHeader
         title="Start production"
-        description="Scan a raw bag, assign a workflow QR card, pick a station, and start. QR card administration (add / retire / print labels) lives under Advanced → QR card management."
+        description="Scan a received raw bag, pick the product to produce, confirm the QR card, and pick a station. QR card administration (mint / retire / print) lives under Advanced → QR card management."
       />
 
       {/* Readiness badges */}
@@ -95,7 +98,7 @@ export default async function StartProductionPage() {
         <div className="px-4 py-3 border-b border-border">
           <p className="text-[10px] uppercase tracking-wider text-text-subtle">Run sequence</p>
           <p className="text-sm font-semibold text-text-strong mt-0.5">
-            Five steps to a live workflow card
+            Steps to start production
           </p>
           <p className="text-[12px] text-text-muted mt-0.5">
             Each step gates the next. The CARD_ASSIGNED event fires only after you click Start.
@@ -105,7 +108,7 @@ export default async function StartProductionPage() {
           {[
             "Scan raw bag",
             "Pick product",
-            "Assign QR card",
+            "Confirm QR card",
             "Pick station",
             "Start run",
           ].map((stepLabel, i) => (

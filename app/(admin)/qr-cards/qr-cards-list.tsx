@@ -20,6 +20,12 @@ type QrCardRow = {
   };
   bag: { id: string } | null;
   productName: string | null;
+  intakeBag: {
+    id: string;
+    internalReceiptNumber: string | null;
+    batchId: string | null;
+  } | null;
+  intakeBatchNumber: string | null;
 };
 
 type TabFilter =
@@ -269,7 +275,7 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
         </p>
       ) : (
         <ul className="space-y-2">
-          {filtered.map(({ card, bag, productName }) => (
+          {filtered.map(({ card, bag, productName, intakeBag, intakeBatchNumber }) => (
             <li
               key={card.id}
               className="rounded-lg border border-border/70 bg-surface p-3"
@@ -294,6 +300,12 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
                   <StatusPill kind={STATUS_KIND[card.status] ?? "neutral"}>
                     {card.status}
                   </StatusPill>
+                  {card.status === "ASSIGNED" && !bag && intakeBag && (
+                    <span className="text-[11px] text-text-muted">
+                      Assigned at intake: {intakeBag.internalReceiptNumber ?? intakeBag.id.slice(0, 8)}
+                      {intakeBatchNumber ? ` · lot ${intakeBatchNumber}` : ""}
+                    </span>
+                  )}
                   {card.status === "ASSIGNED" && bag && (
                     <span className="text-[11px] text-text-muted">
                       bag {bag.id.slice(0, 8)}

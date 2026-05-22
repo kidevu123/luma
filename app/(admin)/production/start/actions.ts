@@ -89,7 +89,7 @@ export async function startProductionForRawBagAction(
   }
 
   const [card] = await db
-    .select({ id: qrCards.id, status: qrCards.status, assignedWorkflowBagId: qrCards.assignedWorkflowBagId })
+    .select({ id: qrCards.id, status: qrCards.status, assignedWorkflowBagId: qrCards.assignedWorkflowBagId, cardType: qrCards.cardType })
     .from(qrCards)
     .where(eq(qrCards.id, input.qrCardId))
     .limit(1);
@@ -102,6 +102,9 @@ export async function startProductionForRawBagAction(
       ok: false,
       error: `QR card status is ${card.status}; only IDLE cards (or intake-reserved cards) can be assigned.`,
     };
+  }
+  if (card.cardType === "VARIETY_PACK") {
+    return { ok: false, error: "Variety pack cards cannot be used for raw bags." };
   }
 
   const [station] = await db

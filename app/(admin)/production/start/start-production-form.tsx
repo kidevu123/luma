@@ -262,8 +262,8 @@ export function StartProductionForm({
       </ProductionSection>
 
       <ProductionSection
-        title="Step 3 · Assign a workflow QR card"
-        subtitle="Reusable floor badges that track this bag from station to station until packaging. Only IDLE cards are eligible. After production completes, the card returns to IDLE for the next bag."
+        title="Step 3 · QR card"
+        subtitle="The raw bag QR card was reserved at receiving and tracks this bag through all stations. If one was pre-reserved for this bag, it is selected automatically below."
         tone={resolvedBag && productId && qrCardId ? "GOOD" : productId ? "INFO" : "MUTED"}
       >
         {!resolvedBag || !productId ? (
@@ -286,7 +286,7 @@ export function StartProductionForm({
               onChange={(e) => setQrCardId(e.target.value)}
               className="w-full h-10 px-3 rounded-md border border-border bg-surface font-mono text-sm focus:border-brand-500 focus:outline-none"
             >
-              <option value="">— select an idle workflow QR card —</option>
+              <option value="">— select a QR card —</option>
               {idleCards.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.code}
@@ -360,7 +360,7 @@ function StartedPanel({
       <ProductionAlertCard
         tone="GOOD"
         title="Production started"
-        body="The workflow QR card is now ASSIGNED to this raw bag. CARD_ASSIGNED + PRODUCT_MAPPED events have been recorded; the bag will appear on the live floor board."
+        body="The QR card is now active on this bag. CARD_ASSIGNED + PRODUCT_MAPPED events recorded; the bag will appear on the live floor board."
       />
       <ProductionSection title="Started bag" tone="GOOD">
         <ProductionIdentityBlock
