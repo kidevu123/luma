@@ -12,11 +12,12 @@ export const dynamic = "force-dynamic";
 export default async function PackagingInventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string; status?: string; showScrapped?: string }>;
+  searchParams: Promise<{ kind?: string; status?: string; showScrapped?: string; err?: string }>;
 }) {
   await requireAdmin();
   const sp = await searchParams;
   const showScrapped = sp.showScrapped === "1";
+  const actionError = sp.err ? decodeURIComponent(sp.err) : null;
   const panel = await loadPackagingInventoryPanel(undefined, sp);
   const visibleLots = showScrapped
     ? panel.lots
@@ -28,6 +29,12 @@ export default async function PackagingInventoryPage({
         title="Packaging inventory"
         description="Read-only view of received material lots. Source system, receipt truth, weights, status, and confidence are surfaced honestly."
       />
+
+      {actionError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </div>
+      )}
 
       <Card>
         <CardHeader>
