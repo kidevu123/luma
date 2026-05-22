@@ -107,7 +107,7 @@ beforeEach(() => {
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-const ACTOR = { id: "user-001", role: "LEAD" as const };
+const ACTOR = { id: "user-001", role: "LEAD" as const, email: "lead@luma.local", employeeId: "emp-001" };
 const BAG_ID = "bag-001";
 
 function bagRow(
