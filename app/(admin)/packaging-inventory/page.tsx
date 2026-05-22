@@ -3,6 +3,7 @@
 import { requireAdmin } from "@/lib/auth-guards";
 import { loadPackagingInventoryPanel } from "@/lib/production/material-panels";
 import { PageHeader } from "@/components/ui/page-header";
+import { MaterialsTabs } from "@/components/ui/materials-tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { scrapLotAction, deleteLotAction } from "./actions";
@@ -25,6 +26,7 @@ export default async function PackagingInventoryPage({
 
   return (
     <div className="space-y-5">
+      <MaterialsTabs />
       <PageHeader
         title="Packaging inventory"
         description="Read-only view of received material lots. Source system, receipt truth, weights, status, and confidence are surfaced honestly."
