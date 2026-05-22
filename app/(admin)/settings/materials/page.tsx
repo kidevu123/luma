@@ -38,12 +38,13 @@ const KIND_LABELS: Record<string, string> = {
 export default async function MaterialsAdminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string; q?: string }>;
+  searchParams: Promise<{ kind?: string; q?: string; err?: string }>;
 }) {
   await requireAdmin();
   const sp = await searchParams;
   const kindFilter = sp.kind && sp.kind !== "ALL" ? sp.kind : null;
   const q = sp.q?.trim().toLowerCase() ?? "";
+  const actionError = sp.err ? decodeURIComponent(sp.err) : null;
   const rows = await db
     .select()
     .from(packagingMaterials)
@@ -59,6 +60,12 @@ export default async function MaterialsAdminPage({
         title="Packaging & Materials"
         description={`${rows.length} item${rows.length === 1 ? "" : "s"} in the master list. Inactive items are hidden from BOM and receiving forms.`}
       />
+
+      {actionError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </div>
+      )}
 
       {/* Filter bar */}
       <form method="get" className="flex flex-wrap items-end gap-2 rounded-xl border border-border bg-surface px-4 py-3">
@@ -209,12 +216,7 @@ export default async function MaterialsAdminPage({
                         {r.isActive ? "Deactivate" : "Activate"}
                       </button>
                     </form>
-                    <form
-                      action={async (fd) => {
-                        "use server";
-                        await deleteMaterialAction(fd);
-                      }}
-                    >
+                    <form action={deleteMaterialAction}>
                       <input type="hidden" name="id" value={r.id} />
                       <button
                         type="submit"

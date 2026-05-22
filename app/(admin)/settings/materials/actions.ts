@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { compact } from "@/lib/db/compact";
@@ -124,20 +125,19 @@ export async function setMaterialCategoryAction(
 
 export async function deleteMaterialAction(
   formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
+): Promise<void> {
   await requireAdmin();
   const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) return { error: "Invalid id." };
+  if (!id.success) redirect("/settings/materials?err=Invalid+material+id");
   try {
     await db.delete(packagingMaterials).where(and(eq(packagingMaterials.id, id.data)));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Delete failed.";
     if (msg.includes("foreign key") || msg.includes("violates") || msg.includes("constraint")) {
-      return { error: "This material has receiving or BOM records — deactivate it instead of deleting." };
+      redirect("/settings/materials?err=This+material+has+receiving+or+BOM+records+%E2%80%94+deactivate+it+instead+of+deleting");
     }
-    return { error: msg };
+    redirect(`/settings/materials?err=${encodeURIComponent(msg)}`);
   }
   revalidatePath("/settings/materials");
   revalidatePath("/inbound/packaging-materials");
-  return { ok: true };
 }
