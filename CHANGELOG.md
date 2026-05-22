@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.36] — 2026-05-22
+
+### Improved
+- Number inputs no longer change value on mouse-wheel scroll: the shared `Input` component blurs on wheel when `type="number"`, composing with any caller-supplied `onWheel`.
+- Removed redundant per-site `onWheel` handler from the `orderedQuantityManual` field in raw-bag intake (now handled by the shared component).
+- Sidebar nav label for `/packaging-output` renamed from "Pack-out" to "Production output".
+- "Pack-out queue" section label on the Production output page renamed to "Output queue".
+- Empty-state message updated from "No bags pending pack-out" to "No bags pending output".
+- Sidebar test updated to assert `"Production output"` label.
+
 ## [0.2.35] — 2026-05-22
 
 ### Fixed
