@@ -33,7 +33,7 @@ export default async function MachinesPage() {
             <span className="font-semibold text-text">Machines</span> are physical equipment (blister press, sealing machine, etc.) that can optionally be linked to a station. Leave the machine field blank for stations that do not use a machine.
           </p>
           <p>
-            Hand-pack work areas should be created as <span className="font-semibold text-text">Stations</span>, not Machines. Use kind &ldquo;Hand-pack blister&rdquo; for blister hand-packing or &ldquo;Bottle hand-pack&rdquo; for bottle hand-packing.
+            Hand-pack work areas should be created as <span className="font-semibold text-text">Stations</span>, not Machines. Use kind &ldquo;Hand-pack blister (no machine)&rdquo; for blister hand-packing or &ldquo;Bottle hand-pack&rdquo; for bottle hand-packing.
           </p>
         </div>
       </div>
