@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { ScanLine } from "lucide-react";
-import { scanCardAction } from "./actions";
+import { scanCardAction, lookupCardByTokenAction } from "./actions";
 
 export type EligibleCard = { id: string; label: string; scanToken: string };
 
@@ -28,28 +28,28 @@ export function ScanCardForm({
   eligiblePickups = [],
   allowedProducts = [],
   requireProductForFreshBag = false,
+  canStartFreshBag = true,
 }: {
   token: string;
   stationId: string;
   idleCards: EligibleCard[];
-  /** ASSIGNED cards whose bag is at a stage this station can pick up
-   *  (e.g. SEALING station accepts BLISTERED bags). Surfaced so the
-   *  operator can claim a released bag with the same QR. */
   eligiblePickups?: EligiblePickup[];
-  /** Products the operator can pick when starting a fresh bag at this
-   *  station. Empty list when this station kind doesn't require a
-   *  first-op product (sealing, packaging, etc.). */
   allowedProducts?: AllowedProduct[];
-  /** True when the station's kind is in FIRST_OP_STATION_KINDS
-   *  (BLISTER / COMBINED today). Triggers the product-picker reveal
-   *  whenever the operator selects an IDLE card. */
   requireProductForFreshBag?: boolean;
+  /** True for stations that can start a fresh bag (BLISTER, HANDPACK_BLISTER,
+   *  BOTTLE_HANDPACK, COMBINED). False hides the idle cards optgroup. */
+  canStartFreshBag?: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [selectedCardId, setSelectedCardId] = React.useState("");
   const [productId, setProductId] = React.useState("");
+
+  // Text scanner state
+  const [scanInput, setScanInput] = React.useState("");
+  const [scanError, setScanError] = React.useState<string | null>(null);
+  const [scanPending, setScanPending] = React.useState(false);
 
   const idleSet = React.useMemo(
     () => new Set(idleCards.map((c) => c.id)),
@@ -62,15 +62,74 @@ export function ScanCardForm({
     isIdleCardSelected &&
     allowedProducts.length > 0;
 
-  const hasIdle = idleCards.length > 0;
+  const hasIdle = idleCards.length > 0 && canStartFreshBag;
   const hasPickups = eligiblePickups.length > 0;
+
+  // Submit with an explicit cardId (used by the text scanner path to
+  // bypass the controlled select and fire immediately).
+  const submitWithCardId = React.useCallback(
+    async (cardId: string) => {
+      setPending(true);
+      setError(null);
+      try {
+        const fd = new FormData();
+        fd.set("token", token);
+        fd.set("stationId", stationId);
+        fd.set("cardId", cardId);
+        if (productId) fd.set("productId", productId);
+        const r = await scanCardAction(fd);
+        if (r?.error) setError(r.error);
+        else router.refresh();
+      } finally {
+        setPending(false);
+      }
+    },
+    [token, stationId, productId, router],
+  );
+
+  const handleScanKeyDown = async (
+    e: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const raw = scanInput.trim();
+    if (!raw || scanPending) return;
+
+    setScanError(null);
+    setScanPending(true);
+    try {
+      const fd = new FormData();
+      fd.set("scanToken", raw);
+      const result = await lookupCardByTokenAction(fd);
+      if (!("ok" in result)) {
+        setScanError(result.error);
+        return;
+      }
+      setScanInput("");
+      const cardId = result.cardId;
+
+      // If this is an idle card at a first-op station that requires a
+      // product pick, populate the select and let the operator choose.
+      if (requireProductForFreshBag && idleSet.has(cardId)) {
+        setSelectedCardId(cardId);
+        setProductId("");
+        return;
+      }
+
+      // For all other cases (pickup, or idle at non-product-required
+      // station), submit immediately.
+      setSelectedCardId(cardId);
+      await submitWithCardId(cardId);
+    } finally {
+      setScanPending(false);
+    }
+  };
 
   return (
     <form
       action={async (form) => {
         setPending(true);
         setError(null);
-        // Client-side preflight: require product when needed.
         if (
           requireProductForFreshBag &&
           isIdleCardSelected &&
@@ -94,38 +153,62 @@ export function ScanCardForm({
     >
       <input type="hidden" name="token" value={token} />
       <input type="hidden" name="stationId" value={stationId} />
-      <select
-        name="cardId"
-        required
-        value={selectedCardId}
-        onChange={(e) => {
-          setSelectedCardId(e.target.value);
-          setProductId(""); // reset product when card changes
-        }}
-        className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
-      >
-        <option value="" disabled>
-          {hasPickups ? "Pick a card to scan…" : "Pick an idle card…"}
-        </option>
-        {hasPickups && (
-          <optgroup label="Pick up released bag (same QR continues)">
-            {eligiblePickups.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label} — bag {c.bagId.slice(0, 8)} · {c.bagStage}
-              </option>
-            ))}
-          </optgroup>
+
+      {/* Wedge scanner / keyboard text input */}
+      <div className="space-y-1">
+        <input
+          type="text"
+          value={scanInput}
+          onChange={(e) => {
+            setScanInput(e.target.value);
+            setScanError(null);
+          }}
+          onKeyDown={handleScanKeyDown}
+          placeholder="Scan or type bag QR…"
+          disabled={pending || scanPending}
+          className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        />
+        {scanError && (
+          <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            {scanError}
+          </p>
         )}
-        {hasIdle && (
-          <optgroup label={hasPickups ? "Start a new bag" : "Idle cards"}>
-            {idleCards.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </optgroup>
-        )}
-      </select>
+      </div>
+
+      {(hasIdle || hasPickups) && (
+        <select
+          name="cardId"
+          required
+          value={selectedCardId}
+          onChange={(e) => {
+            setSelectedCardId(e.target.value);
+            setProductId("");
+          }}
+          className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
+        >
+          <option value="" disabled>
+            Select an available bag QR…
+          </option>
+          {hasPickups && (
+            <optgroup label="Pick up released bag (same QR continues)">
+              {eligiblePickups.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label} — bag {c.bagId.slice(0, 8)} · {c.bagStage}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {hasIdle && (
+            <optgroup label={hasPickups ? "Start a new bag" : "Available bag QRs"}>
+              {idleCards.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+      )}
 
       {showProductPicker && (
         <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
@@ -175,7 +258,7 @@ export function ScanCardForm({
       )}
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || scanPending}
         className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-base font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60 transition-colors"
       >
         <ScanLine className="h-5 w-5" />
@@ -183,7 +266,7 @@ export function ScanCardForm({
           ? "Scanning…"
           : showProductPicker
             ? "Start production"
-            : "Scan card"}
+            : "Scan bag QR"}
       </button>
     </form>
   );

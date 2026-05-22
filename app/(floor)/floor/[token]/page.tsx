@@ -81,19 +81,30 @@ export default async function FloorStationPage({
     .leftJoin(products, eq(products.id, workflowBags.productId))
     .where(eq(readStationLive.stationId, station.station.id));
 
-  // Idle cards available to scan, sorted by label so the dropdown
-  // is predictable. Also include ASSIGNED cards with no workflow bag
-  // (intake-reserved cards) — they behave identically to IDLE for the
-  // floor scanner. Eventually replace with a scan-only input.
-  const idleCards = await db
-    .select()
-    .from(qrCards)
-    .where(
-      or(
-        eq(qrCards.status, "IDLE"),
-        and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId)),
-      ),
-    );
+  // RAW_BAG cards available to scan: IDLE or ASSIGNED with no workflow bag
+  // (intake-reserved). Filtered to RAW_BAG type only — VARIETY_PACK and
+  // WORKFLOW_TRAVELER cards must never appear here. Only shown at stations
+  // that can start fresh bags; pickup-only stations see only eligiblePickups.
+  const canStartFreshBag = (
+    new Set(["BLISTER", "HANDPACK_BLISTER", "BOTTLE_HANDPACK", "COMBINED"])
+  ).has(station.station.kind);
+  const idleCardsRaw = canStartFreshBag
+    ? await db
+        .select()
+        .from(qrCards)
+        .where(
+          and(
+            eq(qrCards.cardType, "RAW_BAG"),
+            or(
+              eq(qrCards.status, "IDLE"),
+              and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId)),
+            ),
+          ),
+        )
+    : [];
+  const idleCards = idleCardsRaw.sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }),
+  );
 
   // First-op product picker (PRD-1): when this station is BLISTER /
   // COMBINED, the operator must pick a product on a fresh-card scan.
@@ -241,11 +252,12 @@ export default async function FloorStationPage({
         {!currentAtStation ? (
           <div className="py-3">
             <p className="text-sm text-text-muted mb-3">
-              No bag at this station. Scan a card to begin.
+              No bag at this station. Scan a bag QR or select one below.
             </p>
             <ScanCardForm
               token={token}
               stationId={station.station.id}
+              canStartFreshBag={canStartFreshBag}
               idleCards={idleCards.map((c) => ({
                 id: c.id,
                 label: c.label,

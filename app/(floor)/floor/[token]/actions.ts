@@ -159,6 +159,9 @@ export async function scanCardAction(
         .from(qrCards)
         .where(eq(qrCards.id, cardId));
       if (!card) throw new Error("Card not found.");
+      if (card.cardType !== "RAW_BAG") {
+        throw new Error("Only bag QR cards (RAW_BAG type) can be used to start production.");
+      }
 
       if (card.status === "IDLE" || (card.status === "ASSIGNED" && !card.assignedWorkflowBagId)) {
         // Fresh scan — first-op stations REQUIRE a product pick so
@@ -1003,6 +1006,34 @@ export async function packagingCompleteAction(
   revalidatePath(`/floor/${parsed.data.token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
+}
+
+// ── lookup card by scan token (floor scanner text input) ───────────────────
+
+/** Resolve a QR scan token to a card ID for the floor scanner text input.
+ *  Validates: card exists, is RAW_BAG type, not RETIRED.
+ *  Returns the internal card ID on success so the caller can submit via
+ *  scanCardAction. Full eligibility (stage, station kind) is checked there. */
+export async function lookupCardByTokenAction(
+  formData: FormData,
+): Promise<{ ok: true; cardId: string } | { error: string }> {
+  const scanToken = ((formData.get("scanToken") as string | null) ?? "").trim();
+  if (!scanToken) return { error: "Scan token required." };
+
+  const [card] = await db
+    .select({ id: qrCards.id, cardType: qrCards.cardType, status: qrCards.status })
+    .from(qrCards)
+    .where(eq(qrCards.scanToken, scanToken))
+    .limit(1);
+
+  if (!card) return { error: "Bag QR not found." };
+  if (card.cardType !== "RAW_BAG") {
+    return { error: "This is not a bag QR. Scan a bag label (not a variety pack or traveler card)." };
+  }
+  if (card.status === "RETIRED") {
+    return { error: "This bag QR has been retired and can no longer be used." };
+  }
+  return { ok: true, cardId: card.id };
 }
 
 // ── seal handpack bag ──────────────────────────────────────────────────────
