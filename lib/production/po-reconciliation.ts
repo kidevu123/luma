@@ -156,6 +156,8 @@ export async function listPoSummaries(): Promise<PoSummaryRow[]> {
       po.opened_at::text         AS opened_at,
       COUNT(ib.id)::int          AS bag_count
     FROM purchase_orders po
+    -- only POs that have at least one tablet line item
+    INNER JOIN po_lines pl        ON pl.po_id = po.id AND pl.tablet_type_id IS NOT NULL
     LEFT JOIN receives r          ON r.po_id = po.id
     LEFT JOIN small_boxes sb      ON sb.receive_id = r.id
     LEFT JOIN inventory_bags ib   ON ib.small_box_id = sb.id
