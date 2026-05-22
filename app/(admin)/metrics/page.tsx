@@ -36,6 +36,7 @@ import {
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
+import { MetricsTabs } from "@/components/ui/metrics-tabs";
 import {
   Card,
   CardHeader,
@@ -456,6 +457,7 @@ export default async function MetricsPage({
 
   return (
     <div className="space-y-5">
+      <MetricsTabs />
       <PageHeader
         title="Metrics"
         description={`Last ${days} days · ${totalBags} finalized bags · ${totalUnits.toLocaleString()} units yielded`}
