@@ -456,3 +456,49 @@ export function validateQrTokens(
 // DRAFT/RECEIVED/CLOSED/CANCELLED are excluded.
 export const RECEIVABLE_PO_STATUSES = ["OPEN", "RECEIVING"] as const;
 export type ReceivablePoStatus = (typeof RECEIVABLE_PO_STATUSES)[number];
+
+// ─── PO line local-receive status ────────────────────────────────────────────
+//
+// "Local receive status" is distinct from Zoho's line-level receivable status.
+// Zoho line status is NOT stored per-line in this schema (only PO-level status
+// on purchase_orders). These helpers derive status purely from Luma-local data.
+
+export type PoLineLocalStatus =
+  /** No Luma receive exists for this PO line. Operator can receive freely. */
+  | "available"
+  /** One or more Luma receives already exist for this line. Multiple receives
+   *  per line are intentionally supported; this is informational, not blocking. */
+  | "received";
+
+export type PoLineReceiveSummary = {
+  poLineId: string;
+  bagCount: number;
+  receiveCount: number;
+};
+
+/**
+ * Classifies a PO line by its local Luma receive history.
+ * Pass `undefined` or a zero-count total → "available".
+ */
+export function classifyPoLineLocalStatus(
+  total: PoLineReceiveSummary | undefined,
+): PoLineLocalStatus {
+  if (!total || total.receiveCount === 0) return "available";
+  return "received";
+}
+
+/**
+ * Human-readable label for a PO line's local receive status.
+ * Used in the Receive Pills line-item cards.
+ */
+export function poLineLocalStatusLabel(
+  status: PoLineLocalStatus,
+  total?: PoLineReceiveSummary,
+): string {
+  if (status === "available") return "Available";
+  const bags = total?.bagCount ?? 0;
+  const rcvs = total?.receiveCount ?? 0;
+  const bagPart = `${bags} bag${bags === 1 ? "" : "s"}`;
+  const rcvPart = rcvs > 1 ? ` · ${rcvs} receives` : "";
+  return `Received in Luma · ${bagPart}${rcvPart}`;
+}

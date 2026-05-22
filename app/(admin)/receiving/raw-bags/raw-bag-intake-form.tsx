@@ -26,7 +26,9 @@ import {
   computeReceivedTotal,
   computeVariance,
   derivePoVerificationStatus,
+  classifyPoLineLocalStatus,
   generateBagRowSeed,
+  poLineLocalStatusLabel,
   validateQrTokens,
   type QrTokenState,
   type RawBagRowSeed,
@@ -669,6 +671,7 @@ function PoLineCards({
                 const tt = tabletTypes.find((t) => t.id === l.tabletTypeId);
                 const active = poLineId === l.id;
                 const total = lineReceiveTotals.find((t) => t.poLineId === l.id);
+                const lineStatus = classifyPoLineLocalStatus(total);
                 return (
                   <li key={l.id}>
                     <button
@@ -676,15 +679,30 @@ function PoLineCards({
                       onClick={() => setPoLineId(active ? "" : l.id)}
                       className={`w-full text-left rounded-md border px-3 py-2.5 transition-colors ${active ? "border-brand-500 bg-brand-50/60 ring-1 ring-brand-300" : "border-border bg-surface hover:bg-surface-2"}`}
                     >
-                      <div className="text-[12px] font-semibold text-text leading-tight">
-                        {tt?.name ?? "(unknown product)"}
+                      <div className="flex items-start justify-between gap-1 mb-1">
+                        <div className="text-[12px] font-semibold text-text leading-tight">
+                          {tt?.name ?? "(unknown product)"}
+                        </div>
+                        {active ? (
+                          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-100 text-brand-700">
+                            Receiving now
+                          </span>
+                        ) : lineStatus === "received" ? (
+                          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">
+                            Received in Luma
+                          </span>
+                        ) : (
+                          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
+                            Available
+                          </span>
+                        )}
                       </div>
                       {tt?.sku ? (
-                        <div className="text-[10px] font-mono text-text-muted mt-0.5">
+                        <div className="text-[10px] font-mono text-text-muted mb-1.5">
                           {tt.sku}
                         </div>
                       ) : null}
-                      <div className="mt-1.5 grid grid-cols-2 gap-1 text-[10px]">
+                      <div className="grid grid-cols-2 gap-1 text-[10px]">
                         <div>
                           <div className="text-text-muted uppercase tracking-wider">Ordered</div>
                           <div className="font-mono tabular-nums">
@@ -696,8 +714,8 @@ function PoLineCards({
                           <div className="font-mono">
                             {active ? (
                               <span className="text-brand-700 font-semibold">Receiving</span>
-                            ) : total ? (
-                              <span className="text-emerald-700">
+                            ) : lineStatus === "received" && total ? (
+                              <span className="text-sky-700">
                                 {total.bagCount} bag{total.bagCount === 1 ? "" : "s"}
                                 {total.receiveCount > 1 ? ` · ${total.receiveCount} rcvs` : ""}
                               </span>
@@ -707,6 +725,11 @@ function PoLineCards({
                           </div>
                         </div>
                       </div>
+                      {active && lineStatus === "received" && total ? (
+                        <div className="mt-2 text-[10px] text-sky-700 bg-sky-50 rounded px-2 py-1 leading-snug">
+                          This line already has {total.receiveCount} receive{total.receiveCount === 1 ? "" : "s"} in Luma ({total.bagCount} bag{total.bagCount === 1 ? "" : "s"}). A new receive will be added.
+                        </div>
+                      ) : null}
                     </button>
                   </li>
                 );

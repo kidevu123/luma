@@ -3,12 +3,14 @@
 import { describe, expect, it } from "vitest";
 import {
   assignQrCodesFromPool,
+  classifyPoLineLocalStatus,
   computeReceivedTotal,
   computeVariance,
   derivePoVerificationStatus,
   detectDuplicatesInPayload,
   distributeDeclaredTotal,
   generateBagRowSeed,
+  poLineLocalStatusLabel,
   preflightRawBagIntake,
   rawBagIntakeInputSchema,
   splitReceiptStart,
@@ -907,5 +909,65 @@ describe("validateQrTokens", () => {
   it("token with leading/trailing whitespace matches pool after trim", () => {
     const rows = [{ bagSequence: 1, bagQrCode: "  card-001  " }];
     expect(validateQrTokens(rows, pool).get(1)).toBe("ok");
+  });
+});
+
+// ─── classifyPoLineLocalStatus + poLineLocalStatusLabel ─────────────────────
+
+describe("classifyPoLineLocalStatus", () => {
+  it("returns 'available' when total is undefined (no receive record for line)", () => {
+    expect(classifyPoLineLocalStatus(undefined)).toBe("available");
+  });
+
+  it("returns 'available' when receiveCount is 0", () => {
+    expect(
+      classifyPoLineLocalStatus({ poLineId: "l1", bagCount: 0, receiveCount: 0 }),
+    ).toBe("available");
+  });
+
+  it("returns 'received' when receiveCount is 1", () => {
+    expect(
+      classifyPoLineLocalStatus({ poLineId: "l1", bagCount: 20, receiveCount: 1 }),
+    ).toBe("received");
+  });
+
+  it("returns 'received' when receiveCount is >1 (multiple receives per line)", () => {
+    expect(
+      classifyPoLineLocalStatus({ poLineId: "l1", bagCount: 40, receiveCount: 2 }),
+    ).toBe("received");
+  });
+});
+
+describe("poLineLocalStatusLabel", () => {
+  it("returns 'Available' for available status", () => {
+    expect(poLineLocalStatusLabel("available")).toBe("Available");
+  });
+
+  it("returns 'Available' for available status ignoring total arg", () => {
+    expect(
+      poLineLocalStatusLabel("available", { poLineId: "l1", bagCount: 5, receiveCount: 1 }),
+    ).toBe("Available");
+  });
+
+  it("labels single receive with bag count (singular bag)", () => {
+    expect(
+      poLineLocalStatusLabel("received", { poLineId: "l1", bagCount: 1, receiveCount: 1 }),
+    ).toBe("Received in Luma · 1 bag");
+  });
+
+  it("labels single receive with bag count (plural bags)", () => {
+    expect(
+      poLineLocalStatusLabel("received", { poLineId: "l1", bagCount: 20, receiveCount: 1 }),
+    ).toBe("Received in Luma · 20 bags");
+  });
+
+  it("includes receive count when >1", () => {
+    expect(
+      poLineLocalStatusLabel("received", { poLineId: "l1", bagCount: 40, receiveCount: 2 }),
+    ).toBe("Received in Luma · 40 bags · 2 receives");
+  });
+
+  it("handles received with no total gracefully", () => {
+    expect(poLineLocalStatusLabel("received", undefined)).toBe("Received in Luma · 0 bags");
   });
 });
