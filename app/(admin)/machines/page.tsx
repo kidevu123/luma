@@ -1,4 +1,4 @@
-import { Sliders } from "lucide-react";
+import { Info, Sliders } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
 import { listMachines, listStations } from "@/lib/db/queries/machines";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
@@ -22,6 +22,21 @@ export default async function MachinesPage() {
         title="Machines & stations"
         description="A station is a QR scan target on the floor. Stations can be linked to a machine so completion events sync into output. Tokens are rotated from this page."
       />
+
+      <div className="rounded-lg border border-border bg-surface-subtle px-4 py-3 flex gap-3 text-sm text-text-muted">
+        <Info className="h-4 w-4 mt-0.5 shrink-0 text-text-subtle" aria-hidden />
+        <div className="space-y-1 leading-relaxed">
+          <p>
+            <span className="font-semibold text-text">Stations</span> are the floor scan URLs that operators open on a tablet. Each station has a unique URL — scanning a bag QR at that URL records events for that station.
+          </p>
+          <p>
+            <span className="font-semibold text-text">Machines</span> are physical equipment (blister press, sealing machine, etc.) that can optionally be linked to a station. Leave the machine field blank for stations that do not use a machine.
+          </p>
+          <p>
+            Hand-pack work areas should be created as <span className="font-semibold text-text">Stations</span>, not Machines. Use kind &ldquo;Hand-pack blister&rdquo; for blister hand-packing or &ldquo;Bottle hand-pack&rdquo; for bottle hand-packing.
+          </p>
+        </div>
+      </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>

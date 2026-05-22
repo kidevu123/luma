@@ -57,6 +57,9 @@ export function CreateMachineForm() {
       <p className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
         Add a machine
       </p>
+      <p className="text-[11px] text-text-subtle">
+        Physical equipment only. Hand-pack areas are stations, not machines.
+      </p>
       <div className="grid grid-cols-3 gap-2">
         <div>
           <Label htmlFor="m_name">Name</Label>
@@ -113,6 +116,9 @@ export function CreateStationForm({ machines }: { machines: Machine[] }) {
     >
       <p className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
         Add a station
+      </p>
+      <p className="text-[11px] text-text-subtle">
+        Each station gets a unique floor URL. Select a machine only if this station uses one.
       </p>
       <div className="grid grid-cols-3 gap-2">
         <div>
