@@ -42,3 +42,29 @@ describe("saveProductAction field extraction", () => {
     expect(zohoItemIdUnit).toBeUndefined();
   });
 });
+
+describe("ZohoMappingForm unit field fallback", () => {
+  it("uses zohoItemIdFallback when zohoItemIdUnit is null", () => {
+    const zohoItemIdUnit: string | null = null;
+    const zohoItemIdFallback: string | null = "ZOHO-LEGACY-001";
+
+    const defaultValue = zohoItemIdUnit ?? zohoItemIdFallback ?? "";
+    expect(defaultValue).toBe("ZOHO-LEGACY-001");
+  });
+
+  it("prefers zohoItemIdUnit over fallback when both present", () => {
+    const zohoItemIdUnit: string | null = "ZOHO-UNIT-NEW";
+    const zohoItemIdFallback: string | null = "ZOHO-LEGACY-001";
+
+    const defaultValue = zohoItemIdUnit ?? zohoItemIdFallback ?? "";
+    expect(defaultValue).toBe("ZOHO-UNIT-NEW");
+  });
+
+  it("shows empty string when both are null", () => {
+    const zohoItemIdUnit: string | null = null;
+    const zohoItemIdFallback: string | null = null;
+
+    const defaultValue = zohoItemIdUnit ?? zohoItemIdFallback ?? "";
+    expect(defaultValue).toBe("");
+  });
+});

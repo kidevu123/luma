@@ -15,6 +15,7 @@ type Props = {
   kind: "CARD" | "BOTTLE" | "VARIETY";
   unitsPerDisplay: number | null;
   displaysPerCase: number | null;
+  zohoItemIdFallback: string | null;
   zohoItemIdUnit:    string | null;
   zohoItemIdDisplay: string | null;
   zohoItemIdCase:    string | null;
@@ -25,6 +26,7 @@ export function ZohoMappingForm({
   kind,
   unitsPerDisplay,
   displaysPerCase,
+  zohoItemIdFallback,
   zohoItemIdUnit,
   zohoItemIdDisplay,
   zohoItemIdCase,
@@ -57,16 +59,19 @@ export function ZohoMappingForm({
       <input type="hidden" name="id" value={productId} />
 
       <div className="space-y-1.5">
-        <Label htmlFor="zohoItemIdUnit">
-          {kind === "BOTTLE" ? "Bottle (unit)" : "Card (unit)"} Zoho item ID
-        </Label>
+        <Label htmlFor="zohoItemIdUnit">Zoho item ID — single unit / card</Label>
         <Input
           id="zohoItemIdUnit"
           name="zohoItemIdUnit"
-          defaultValue={zohoItemIdUnit ?? ""}
+          defaultValue={zohoItemIdUnit ?? zohoItemIdFallback ?? ""}
           placeholder="e.g. 460000012345"
           className="font-mono text-sm"
         />
+        {!zohoItemIdUnit && zohoItemIdFallback && (
+          <p className="text-[11px] text-text-muted mt-1">
+            Pre-filled from product Zoho item ID. Save to confirm.
+          </p>
+        )}
         <p className="text-[11px] text-text-subtle">
           The Zoho composite item representing one finished {kind === "BOTTLE" ? "bottle" : "card"}.
         </p>
