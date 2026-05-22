@@ -133,6 +133,7 @@ export default async function FloorStationPage({
             scanToken: qrCards.scanToken,
             receiptNumber: inventoryBags.internalReceiptNumber,
             tabletTypeName: tabletTypes.name,
+            tabletTypeId: tabletTypes.id,
             bagNumber: inventoryBags.bagNumber,
             poNumber: purchaseOrders.poNumber,
           })
@@ -161,7 +162,7 @@ export default async function FloorStationPage({
   // First-op product picker (PRD-1): when this station is BLISTER /
   // COMBINED, the operator must pick a product on a fresh-card scan.
   // List active products whose kind is allowed for this station kind.
-  const allowedProducts = canStartFreshBag && allowedProductKinds.length > 0
+  const allowedProductsRaw = canStartFreshBag && allowedProductKinds.length > 0
     ? await db
         .select({
           id: products.id,
@@ -179,6 +180,32 @@ export default async function FloorStationPage({
           ),
         )
     : [];
+
+  // Build allowedTabletTypeIds per product so the client can filter
+  // the picker to only show products compatible with the scanned bag's
+  // tablet type (e.g. Chocolate Brown only shows its 2 products).
+  const allowedProductIds = allowedProductsRaw.map((p) => p.id);
+  const tabletRows = allowedProductIds.length > 0
+    ? await db
+        .select({
+          productId: productAllowedTablets.productId,
+          tabletTypeId: productAllowedTablets.tabletTypeId,
+        })
+        .from(productAllowedTablets)
+        .where(inArray(productAllowedTablets.productId, allowedProductIds))
+    : [];
+
+  const tabletsByProduct = new Map<string, string[]>();
+  for (const r of tabletRows) {
+    const list = tabletsByProduct.get(r.productId) ?? [];
+    list.push(r.tabletTypeId);
+    tabletsByProduct.set(r.productId, list);
+  }
+
+  const allowedProducts = allowedProductsRaw.map((p) => ({
+    ...p,
+    allowedTabletTypeIds: tabletsByProduct.get(p.id) ?? [],
+  }));
 
   // ASSIGNED cards whose bag is at a stage THIS station can pick up
   // (multi-station travel — VALIDATION-2D model). Sealing accepts
@@ -338,6 +365,7 @@ export default async function FloorStationPage({
                 id: p.id,
                 sku: p.sku,
                 name: p.name,
+                allowedTabletTypeIds: p.allowedTabletTypeIds,
               }))}
               requireProductForFreshBag={canStartFreshBag}
             />

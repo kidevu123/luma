@@ -1,14 +1,24 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { packagingMaterials } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { compact } from "@/lib/db/compact";
 import type { CurrentUser } from "@/lib/auth";
 
+// Returns all MATERIAL-category items (shared across products) plus
+// PACKAGING-category items that are not yet assigned to any product.
+// Once a packaging item is assigned it disappears globally — each
+// packaging SKU belongs to exactly one product's BOM.
 export async function listPackagingMaterials() {
   return db
     .select()
     .from(packagingMaterials)
+    .where(
+      sql`${packagingMaterials.category} = 'MATERIAL'
+        OR ${packagingMaterials.id} NOT IN (
+          SELECT packaging_material_id FROM product_packaging_specs
+        )`,
+    )
     .orderBy(asc(packagingMaterials.name));
 }
 

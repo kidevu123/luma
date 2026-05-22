@@ -12,6 +12,7 @@ export type EligibleCard = {
   scanToken: string;
   receiptNumber: string | null;
   tabletTypeName: string | null;
+  tabletTypeId: string | null;
   bagNumber: number | null;
   poNumber: string | null;
 };
@@ -38,6 +39,7 @@ export type AllowedProduct = {
   id: string;
   sku: string;
   name: string;
+  allowedTabletTypeIds: string[];
 };
 
 export function ScanCardForm({
@@ -77,10 +79,21 @@ export function ScanCardForm({
   );
   const isReceivedCardSelected =
     selectedCardId !== "" && receivedSet.has(selectedCardId);
+
+  // Filter products to those compatible with the selected bag's tablet type.
+  const selectedCard = receivedCards.find((c) => c.id === selectedCardId);
+  const filteredProducts = React.useMemo(() => {
+    if (!selectedCard?.tabletTypeId) return allowedProducts;
+    const tid = selectedCard.tabletTypeId;
+    return allowedProducts.filter(
+      (p) => p.allowedTabletTypeIds.length === 0 || p.allowedTabletTypeIds.includes(tid),
+    );
+  }, [selectedCard, allowedProducts]);
+
   const showProductPicker =
     requireProductForFreshBag &&
     isReceivedCardSelected &&
-    allowedProducts.length > 0;
+    filteredProducts.length > 0;
 
   const hasReceived = receivedCards.length > 0 && canStartFreshBag;
   const hasPickups = eligiblePickups.length > 0;
@@ -308,7 +321,7 @@ export function ScanCardForm({
               <option value="" disabled>
                 — Select product —
               </option>
-              {allowedProducts.map((p) => (
+              {filteredProducts.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.sku} — {p.name}
                 </option>
@@ -319,7 +332,7 @@ export function ScanCardForm({
 
         {requireProductForFreshBag &&
           isReceivedCardSelected &&
-          allowedProducts.length === 0 && (
+          filteredProducts.length === 0 && (
             <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
               No active products configured for this station kind. Supervisor
               must add a product to the route.
