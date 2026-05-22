@@ -64,6 +64,18 @@ export default async function FloorBoardPage() {
       .limit(1),
   ]);
 
+  // Debug: log types of Date-sensitive fields before serialization
+  console.log(
+    "[floor-board] station[0].lastEventAt:",
+    stations[0]?.lastEventAt,
+    typeof stations[0]?.lastEventAt,
+  );
+  console.log(
+    "[floor-board] recentEvents[0].occurredAt:",
+    recentEvents[0]?.occurredAt,
+    typeof recentEvents[0]?.occurredAt,
+  );
+
   const yieldPct = kpiData.firstPassYieldPct;
   const shiftStatus = buildShiftStatusData(targetStatus, queues, yieldPct, attentionItems);
 
