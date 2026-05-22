@@ -48,6 +48,7 @@ function newClientEventId(): string {
 
 const STAGE_BY_KIND: Record<string, { label: string; eventType: string }[]> = {
   BLISTER: [{ label: "Blister complete", eventType: "BLISTER_COMPLETE" }],
+  HANDPACK_BLISTER: [{ label: "Hand-pack complete", eventType: "HANDPACK_BLISTER_COMPLETE" }],
   SEALING: [{ label: "Sealing complete", eventType: "SEALING_COMPLETE" }],
   PACKAGING: [], // PACKAGING uses the rich complete form below
   BOTTLE_HANDPACK: [{ label: "Hand-pack complete", eventType: "BOTTLE_HANDPACK_COMPLETE" }],
@@ -79,6 +80,7 @@ export function StageActionButtons({
   unitsPerDisplay = null,
   displaysPerCase = null,
   packagingSpecs = [],
+  bagIsHandpacked = false,
 }: {
   token: string;
   stationId: string;
@@ -92,6 +94,9 @@ export function StageActionButtons({
   unitsPerDisplay?: number | null;
   displaysPerCase?: number | null;
   packagingSpecs?: PackagingSpecLine[];
+  /** When true and stationKind is SEALING, the sealing close-out
+   *  button is suppressed — the caller renders SealHandpackForm instead. */
+  bagIsHandpacked?: boolean;
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -123,7 +128,12 @@ export function StageActionButtons({
   }
 
   if (!workflowBagId) return null;
-  const allStages = STAGE_BY_KIND[stationKind] ?? [];
+  const allStagesRaw = STAGE_BY_KIND[stationKind] ?? [];
+  // When this is a SEALING station and the bag came from HANDPACK_BLISTER,
+  // suppress the standard sealing button — the caller renders SealHandpackForm.
+  const allStages = bagIsHandpacked && stationKind === "SEALING"
+    ? allStagesRaw.filter(s => s.eventType !== "SEALING_COMPLETE")
+    : allStagesRaw;
   // These events use their own rich close-out forms instead of the
   // shared single-count input + immediate-fire button.
   const RICH_FORM_EVENTS = new Set(["SEALING_COMPLETE", "BLISTER_COMPLETE"]);

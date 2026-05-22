@@ -1,0 +1,11 @@
+-- Add HANDPACK_BLISTER station kind
+DO $$ BEGIN
+  ALTER TYPE station_kind ADD VALUE IF NOT EXISTS 'HANDPACK_BLISTER';
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+-- Add HANDPACK_BLISTER_COMPLETE event type
+DO $$ BEGIN
+  ALTER TYPE workflow_event_type ADD VALUE IF NOT EXISTS 'HANDPACK_BLISTER_COMPLETE';
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;

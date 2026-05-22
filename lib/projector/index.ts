@@ -86,6 +86,7 @@ type EventInput = {
 const STAGE_FOR_EVENT: Record<string, string> = {
   CARD_ASSIGNED: "STARTED",
   BLISTER_COMPLETE: "BLISTERED",
+  HANDPACK_BLISTER_COMPLETE: "BLISTERED",
   SEALING_COMPLETE: "SEALED",
   PACKAGING_SNAPSHOT: "PACKAGED",
   PACKAGING_COMPLETE: "PACKAGED", // rich-payload variant of SNAPSHOT
@@ -100,6 +101,7 @@ const STAGE_FOR_EVENT: Record<string, string> = {
  *  toward bags_packaged exactly like SNAPSHOT does. */
 const THROUGHPUT_COLUMN: Record<string, string> = {
   BLISTER_COMPLETE: "bags_blistered",
+  HANDPACK_BLISTER_COMPLETE: "bags_blistered",
   BOTTLE_HANDPACK_COMPLETE: "bags_blistered",
   SEALING_COMPLETE: "bags_sealed",
   BOTTLE_CAP_SEAL_COMPLETE: "bags_sealed",

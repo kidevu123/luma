@@ -11,6 +11,7 @@
 
 export const EVENT_STAGE_PREREQ: Readonly<Record<string, ReadonlyArray<string>>> = {
   BLISTER_COMPLETE: ["STARTED"],
+  HANDPACK_BLISTER_COMPLETE: ["STARTED"],
   SEALING_COMPLETE: ["BLISTERED"],
   PACKAGING_SNAPSHOT: ["SEALED"],
   PACKAGING_COMPLETE: ["SEALED"],
@@ -25,6 +26,7 @@ export const EVENT_STAGE_PREREQ: Readonly<Record<string, ReadonlyArray<string>>>
 // is NOT touched by release; it stays ASSIGNED to travel with the bag.
 export const STATION_RELEASE_FROM_STAGE: Readonly<Record<string, string>> = {
   BLISTER: "BLISTERED",
+  HANDPACK_BLISTER: "BLISTERED",
   SEALING: "SEALED",
   BOTTLE_HANDPACK: "BLISTERED",
   BOTTLE_CAP_SEAL: "SEALED",
