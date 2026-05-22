@@ -1,0 +1,165 @@
+<h2>What are we building — and who sees it?</h2>
+<p class="subtitle">You have all the data. The question is: what surface should it live on? These three directions use the same real-time feed but are designed for very different contexts.</p>
+
+<div class="cards">
+
+  <!-- Option A: Andon Board -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 0; background: #0f172a; min-height: 220px; display: flex; flex-direction: column; justify-content: space-between; font-family: monospace;">
+      <!-- TV header -->
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #1e3a5f;">
+        <span style="color: #38bdf8; font-weight: 700; font-size: 11px; letter-spacing: 0.2em;">LUMA · LIVE FLOOR</span>
+        <span style="color: #22d3ee; font-size: 10px;">13:41:22</span>
+      </div>
+      <!-- Big KPI row -->
+      <div style="display: flex; gap: 0; flex: 1;">
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1px solid #1e3a5f; padding: 12px 8px; gap: 4px;">
+          <span style="color: #22d3ee; font-size: 28px; font-weight: 700; line-height: 1;">24</span>
+          <span style="color: #475569; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;">bags today</span>
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1px solid #1e3a5f; padding: 12px 8px; gap: 4px;">
+          <span style="color: #4ade80; font-size: 28px; font-weight: 700; line-height: 1;">94%</span>
+          <span style="color: #475569; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;">yield</span>
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1px solid #1e3a5f; padding: 12px 8px; gap: 4px;">
+          <span style="color: #facc15; font-size: 28px; font-weight: 700; line-height: 1;">3</span>
+          <span style="color: #475569; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;">in queue</span>
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 8px; gap: 4px;">
+          <span style="color: #f87171; font-size: 28px; font-weight: 700; line-height: 1;">1</span>
+          <span style="color: #475569; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;">paused</span>
+        </div>
+      </div>
+      <!-- Machine row -->
+      <div style="display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid #1e3a5f;">
+        <div style="flex: 1; background: #14532d; border: 1px solid #166534; border-radius: 4px; padding: 5px 6px; text-align: center;">
+          <div style="color: #4ade80; font-size: 9px; font-weight: 700;">M1 · RUNNING</div>
+          <div style="color: #94a3b8; font-size: 8px;">VitaFlex 60ct</div>
+        </div>
+        <div style="flex: 1; background: #14532d; border: 1px solid #166534; border-radius: 4px; padding: 5px 6px; text-align: center;">
+          <div style="color: #4ade80; font-size: 9px; font-weight: 700;">M2 · RUNNING</div>
+          <div style="color: #94a3b8; font-size: 8px;">OmegaPlus 90ct</div>
+        </div>
+        <div style="flex: 1; background: #7c2d12; border: 1px solid #9a3412; border-radius: 4px; padding: 5px 6px; text-align: center;">
+          <div style="color: #fb923c; font-size: 9px; font-weight: 700;">M3 · PAUSED</div>
+          <div style="color: #94a3b8; font-size: 8px;">PVC swap</div>
+        </div>
+        <div style="flex: 1; background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 5px 6px; text-align: center;">
+          <div style="color: #475569; font-size: 9px; font-weight: 700;">M4 · IDLE</div>
+          <div style="color: #334155; font-size: 8px;">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Shop floor Andon board</h3>
+      <p>Full-screen TV display mounted on the factory wall. Big numbers everyone can read from 10 feet away. Green/yellow/red machine tiles. Updates live. Designed to be glanced at, not studied.</p>
+      <p style="margin-top: 6px; color: var(--text-muted); font-size: 12px;">Best for: operators and shift leads who need situational awareness without touching anything</p>
+    </div>
+  </div>
+
+  <!-- Option B: Command center -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 0; background: #f8fafc; min-height: 220px; display: flex; flex-direction: column; font-size: 11px;">
+      <!-- Header -->
+      <div style="background: #1e293b; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;">
+        <span style="color: #38bdf8; font-weight: 700; font-size: 10px; letter-spacing: 0.1em;">LUMA · COMMAND CENTER</span>
+        <div style="display: flex; gap: 12px;">
+          <span style="color: #4ade80; font-size: 9px;">● LIVE</span>
+          <span style="color: #94a3b8; font-size: 9px;">OEE 81%</span>
+        </div>
+      </div>
+      <!-- Content grid -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: auto auto; gap: 4px; padding: 6px; flex: 1;">
+        <!-- OEE gauge placeholder -->
+        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px; display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 8px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em;">OEE Score</div>
+          <div style="font-size: 22px; font-weight: 700; color: #16a34a;">81%</div>
+          <div style="display: flex; gap: 2px; margin-top: 2px;">
+            <div style="flex: 1; height: 3px; background: #4ade80; border-radius: 2px;"></div>
+            <div style="flex: 1; height: 3px; background: #4ade80; border-radius: 2px;"></div>
+            <div style="flex: 0.8; height: 3px; background: #e2e8f0; border-radius: 2px;"></div>
+          </div>
+          <div style="font-size: 7px; color: #94a3b8;">Avail 94% · Perf 91% · Qual 94%</div>
+        </div>
+        <!-- Throughput -->
+        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px;">
+          <div style="font-size: 8px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em;">Throughput / hr</div>
+          <div style="font-size: 22px; font-weight: 700; color: #0f172a;">2.4</div>
+          <div style="font-size: 7px; color: #94a3b8;">bags · target 3.0</div>
+          <div style="margin-top: 4px; height: 3px; background: #e2e8f0; border-radius: 2px; overflow: hidden;">
+            <div style="width: 80%; height: 100%; background: #f59e0b; border-radius: 2px;"></div>
+          </div>
+        </div>
+        <!-- Bottleneck -->
+        <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 4px; padding: 6px;">
+          <div style="font-size: 8px; color: #9a3412; text-transform: uppercase; letter-spacing: 0.08em;">Bottleneck</div>
+          <div style="font-size: 12px; font-weight: 700; color: #c2410c; margin-top: 2px;">Sealing Queue</div>
+          <div style="font-size: 7px; color: #9a3412; margin-top: 1px;">3 bags · oldest 47m</div>
+        </div>
+        <!-- Flow map mini -->
+        <div style="grid-column: span 2; background: white; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px;">
+          <div style="font-size: 8px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">Flow</div>
+          <div style="display: flex; align-items: center; gap: 3px;">
+            <div style="background: #dcfce7; border: 1px solid #86efac; border-radius: 3px; padding: 2px 5px; font-size: 7px; color: #166534;">Blister<br><b>2 WIP</b></div>
+            <div style="color: #94a3b8; font-size: 10px;">→</div>
+            <div style="background: #fef9c3; border: 1px solid #fde047; border-radius: 3px; padding: 2px 5px; font-size: 7px; color: #854d0e;">Staging<br><b>1 WIP</b></div>
+            <div style="color: #94a3b8; font-size: 10px;">→</div>
+            <div style="background: #fff7ed; border: 1px solid #fdba74; border-radius: 3px; padding: 2px 5px; font-size: 7px; color: #9a3412;">Sealing<br><b>3 WIP</b></div>
+            <div style="color: #94a3b8; font-size: 10px;">→</div>
+            <div style="background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 3px; padding: 2px 5px; font-size: 7px; color: #475569;">Pack<br><b>0 WIP</b></div>
+          </div>
+        </div>
+        <!-- Operator strip -->
+        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px;">
+          <div style="font-size: 8px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px;">Operators</div>
+          <div style="font-size: 7px; color: #0f172a; margin-bottom: 1px;">● Maria — M1, 9 bags</div>
+          <div style="font-size: 7px; color: #0f172a; margin-bottom: 1px;">● Carlos — M2, 7 bags</div>
+          <div style="font-size: 7px; color: #f59e0b;">⏸ Jose — M3 paused</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Supervisor command center</h3>
+      <p>A rich, data-dense dashboard for the manager or supervisor. OEE score, live flow map, bottleneck callout, throughput vs target, operator leaderboard. Watched at a desk or a dedicated monitor.</p>
+      <p style="margin-top: 6px; color: var(--text-muted); font-size: 12px;">Best for: shift supervisors making real-time decisions about staffing, pacing, and problems</p>
+    </div>
+  </div>
+
+  <!-- Option C: Both -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 10px 12px; background: #f8fafc; min-height: 220px; display: flex; flex-direction: column; gap: 10px; font-size: 11px;">
+      <div style="display: flex; gap: 8px; align-items: flex-start;">
+        <div style="flex-shrink: 0; width: 32px; height: 32px; background: #dbeafe; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px;">📺</div>
+        <div>
+          <div style="font-weight: 600; color: #0f172a; font-size: 12px;">TV Andon Board</div>
+          <div style="color: #64748b; font-size: 11px; margin-top: 1px;">New route: <code style="background: #f1f5f9; padding: 1px 4px; border-radius: 3px;">/floor-board/andon</code> — full-screen, no chrome, designed for a wall-mounted screen. Add <code style="background: #f1f5f9; padding: 1px 4px; border-radius: 3px;">?machine=M1</code> to focus one machine.</div>
+        </div>
+      </div>
+      <div style="height: 1px; background: #e2e8f0;"></div>
+      <div style="display: flex; gap: 8px; align-items: flex-start;">
+        <div style="flex-shrink: 0; width: 32px; height: 32px; background: #dcfce7; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px;">📊</div>
+        <div>
+          <div style="font-weight: 600; color: #0f172a; font-size: 12px;">Enhanced Floor Board</div>
+          <div style="color: #64748b; font-size: 11px; margin-top: 1px;">Upgrade the existing <code style="background: #f1f5f9; padding: 1px 4px; border-radius: 3px;">/floor-board</code> with OEE score, flow visualization, bottleneck callout, and today's shift target tracker.</div>
+        </div>
+      </div>
+      <div style="height: 1px; background: #e2e8f0;"></div>
+      <div style="display: flex; gap: 8px; align-items: flex-start;">
+        <div style="flex-shrink: 0; width: 32px; height: 32px; background: #fef9c3; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px;">🔔</div>
+        <div>
+          <div style="font-weight: 600; color: #0f172a; font-size: 12px;">Smart alerts</div>
+          <div style="color: #64748b; font-size: 11px; margin-top: 1px;">Anomaly detection layer: notify when a queue ages past threshold, when downtime rate spikes, or when throughput drops below target. Visible on the board + optionally via push/SMS.</div>
+        </div>
+      </div>
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 8px 10px; font-size: 11px; color: #166534;">
+        Recommending this: the data already supports all three. Start with the enhanced floor board (biggest impact for supervisors), then add the Andon route for the factory wall.
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Both: enhanced board + Andon route (Recommended)</h3>
+      <p>Upgrade the existing <code>/floor-board</code> with Pulsar-style intelligence, then add a <code>/floor-board/andon</code> route for the wall-mounted TV. Same data feed, two surfaces.</p>
+      <p style="margin-top: 6px; color: var(--text-muted); font-size: 12px;">One data layer, purpose-built views for the supervisor at a desk and the operator on the floor</p>
+    </div>
+  </div>
+
+</div>

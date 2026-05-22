@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luma — Production Command</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #060d1a;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    font-size: 12px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ─────────────────────────────────────────── */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: 44px;
+    background: #0a1628;
+    border-bottom: 1px solid #1a2e4a;
+    padding: 0 16px;
+    flex-shrink: 0;
+  }
+  .brand {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: #38bdf8;
+    text-transform: uppercase;
+    margin-right: 10px;
+  }
+  .brand-sub {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    color: #334d6e;
+    text-transform: uppercase;
+    border-left: 1px solid #1a2e4a;
+    padding-left: 10px;
+    margin-right: 20px;
+  }
+  .live-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #22d3ee;
+    margin-right: 6px;
+    box-shadow: 0 0 6px #22d3ee;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .header-clock {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #f1f5f9;
+    letter-spacing: 0.04em;
+    margin-right: 20px;
+  }
+  .header-meta {
+    display: flex;
+    gap: 16px;
+    color: #475569;
+    font-size: 10px;
+    flex: 1;
+  }
+  .header-meta span { display: flex; flex-direction: column; gap: 1px; }
+  .header-meta strong { color: #94a3b8; font-weight: 600; font-size: 11px; }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .badge {
+    background: #0f2a47;
+    border: 1px solid #1e4d7a;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #7dd3fc;
+    letter-spacing: 0.08em;
+  }
+  .badge.warn { background: #2d1a00; border-color: #78350f; color: #fb923c; }
+  .ops-count {
+    display: flex; flex-direction: column; align-items: flex-end;
+    font-size: 9px; color: #475569; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .ops-count strong { font-size: 15px; color: #f1f5f9; font-weight: 700; letter-spacing: 0; }
+
+  /* ── Body layout ─────────────────────────────────────── */
+  .body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Main flow area ──────────────────────────────────── */
+  .flow-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 10px 10px 0 10px;
+    gap: 8px;
+  }
+
+  .flow-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #334d6e;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #0f1f35;
+  }
+  .flow-label span {
+    color: #1e4d7a;
+    margin-left: 6px;
+    font-weight: 400;
+  }
+
+  /* A single horizontal lane */
+  .lane {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Queue arrow between stages */
+  .queue-connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    flex-shrink: 0;
+    gap: 2px;
+  }
+  .queue-count {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .queue-count.ok { color: #4ade80; }
+  .queue-count.warn { color: #facc15; }
+  .queue-count.hot { color: #f87171; }
+  .queue-age {
+    font-size: 8px;
+    color: #334d6e;
+    letter-spacing: 0.05em;
+  }
+  .arrow {
+    color: #1a2e4a;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  /* Stage column */
+  .stage-col {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+
+  /* Machine card */
+  .mcard {
+    border: 1px solid #1a2e4a;
+    border-radius: 6px;
+    background: #0a1628;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 168px;
+    position: relative;
+    overflow: hidden;
+  }
+  .mcard::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 100%;
+    border-radius: 6px 0 0 6px;
+  }
+  .mcard.running { border-color: #14532d; }
+  .mcard.running::before { background: #22c55e; }
+  .mcard.paused { border-color: #78350f; }
+  .mcard.paused::before { background: #f97316; }
+  .mcard.idle { border-color: #1a2e4a; }
+  .mcard.idle::before { background: #1e3a5f; }
+
+  .mcard-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .mcard-name {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #94a3b8;
+  }
+  .mcard-status {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .mcard-status.running { background: #14532d; color: #4ade80; }
+  .mcard-status.paused { background: #431407; color: #fb923c; }
+  .mcard-status.idle { background: #0f1f35; color: #334d6e; }
+
+  .mcard-product {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mcard-product.idle-txt { color: #1e3a5f; }
+  .mcard-lot {
+    font-size: 9px;
+    color: #334d6e;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mcard-meta {
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  .mcard-stat {
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .mcard-stat-val {
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #f1f5f9;
+    line-height: 1;
+  }
+  .mcard-stat-lbl {
+    font-size: 8px;
+    color: #334d6e;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .mcard-operator {
+    font-size: 9px;
+    color: #475569;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Ghost card — new machine will appear here */
+  .mcard.ghost {
+    border: 1px dashed #1a2e4a;
+    background: transparent;
+    opacity: 0.4;
+    align-items: center;
+    justify-content: center;
+    min-height: 80px;
+  }
+  .ghost-label {
+    font-size: 9px;
+    color: #334d6e;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  /* Packaging — wider convergence card */
+  .mcard.packaging {
+    width: 140px;
+    flex: 1;
+    min-height: 0;
+    justify-content: center;
+  }
+
+  /* Route divider */
+  .route-divider {
+    height: 1px;
+    background: linear-gradient(to right, transparent, #1a2e4a 20%, #1a2e4a 80%, transparent);
+    margin: 2px 0;
+  }
+
+  /* ── KPI strip (bottom) ──────────────────────────────── */
+  .kpi-strip {
+    display: flex;
+    gap: 0;
+    height: 82px;
+    flex-shrink: 0;
+    border-top: 1px solid #0f1f35;
+    background: #060d1a;
+  }
+  .kpi-cell {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 14px;
+    border-right: 1px solid #0f1f35;
+    gap: 2px;
+  }
+  .kpi-cell:last-child { border-right: none; }
+  .kpi-label {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #334d6e;
+  }
+  .kpi-val {
+    font-size: 22px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: #f1f5f9;
+  }
+  .kpi-val.good { color: #4ade80; }
+  .kpi-val.warn { color: #facc15; }
+  .kpi-val.bad { color: #f87171; }
+  .kpi-sub {
+    font-size: 9px;
+    color: #334d6e;
+    margin-top: 1px;
+  }
+  .kpi-sub strong { color: #475569; }
+
+  /* ── Right panel ─────────────────────────────────────── */
+  .right-panel {
+    width: 240px;
+    flex-shrink: 0;
+    border-left: 1px solid #0f1f35;
+    background: #080f1e;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-section {
+    border-bottom: 1px solid #0f1f35;
+    padding: 10px 12px;
+    flex-shrink: 0;
+  }
+  .panel-title {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #334d6e;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-title span {
+    background: #1a2e4a;
+    color: #7dd3fc;
+    border-radius: 8px;
+    padding: 1px 6px;
+    font-size: 8px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Material risk rows */
+  .risk-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid #0a1628;
+    gap: 6px;
+  }
+  .risk-row:last-child { border-bottom: none; }
+  .risk-name { font-size: 10px; color: #94a3b8; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .risk-time { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: #f87171; flex-shrink: 0; }
+  .risk-time.ok { color: #4ade80; }
+  .risk-time.warn { color: #facc15; }
+  .risk-badge {
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 1px 4px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .risk-badge.low { background: #14532d; color: #4ade80; }
+  .risk-badge.med { background: #422006; color: #fb923c; }
+  .risk-badge.high { background: #450a0a; color: #f87171; }
+
+  /* Quality rows */
+  .qual-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .qual-item { display: flex; flex-direction: column; gap: 1px; }
+  .qual-lbl { font-size: 8px; color: #334d6e; text-transform: uppercase; letter-spacing: 0.08em; }
+  .qual-val { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; color: #f1f5f9; line-height: 1.1; }
+  .qual-val.warn { color: #facc15; }
+  .qual-val.bad { color: #f87171; }
+  .qual-sub { font-size: 8px; color: #475569; }
+
+  /* Events */
+  .events-list { display: flex; flex-direction: column; gap: 0; flex: 1; overflow-y: auto; }
+  .event-row {
+    display: flex;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid #0a1628;
+    align-items: flex-start;
+  }
+  .event-time { font-size: 8px; color: #334d6e; flex-shrink: 0; padding-top: 1px; font-variant-numeric: tabular-nums; }
+  .event-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 3px; flex-shrink: 0; }
+  .event-dot.high { background: #f87171; }
+  .event-dot.med { background: #fb923c; }
+  .event-dot.ok { background: #4ade80; }
+  .event-dot.info { background: #7dd3fc; }
+  .event-text { font-size: 10px; color: #94a3b8; line-height: 1.3; }
+
+  /* Convergence merge visual */
+  .merge-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    gap: 0;
+    flex-shrink: 0;
+  }
+  .merge-line {
+    width: 1px;
+    flex: 1;
+    background: #1a2e4a;
+  }
+  .merge-arrow {
+    color: #1a2e4a;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────── -->
+<div class="header">
+  <div class="brand">LUMA</div>
+  <div class="brand-sub">Production Command</div>
+  <div class="header-clock">14:32:18</div>
+  <div class="header-meta">
+    <span><strong>SHIFT B</strong>06:00 — 14:00</span>
+    <span><strong>FRESHNESS</strong><span class="live-dot"></span>live</span>
+    <span><strong>ROUTE</strong>Card + Bottle</span>
+  </div>
+  <div class="header-right">
+    <div class="badge">CARD ROUTE ACTIVE</div>
+    <div class="badge">BOTTLE ROUTE ACTIVE</div>
+    <div class="ops-count">
+      <span>OPERATORS</span>
+      <strong>6</strong>
+    </div>
+  </div>
+</div>
+
+<!-- ── Body ──────────────────────────────────────────────── -->
+<div class="body">
+
+  <!-- Flow area -->
+  <div class="flow-area">
+
+    <!-- CARD ROUTE LANE -->
+    <div class="flow-label">Card route <span>Blister → Heat Seal → Packaging</span></div>
+    <div class="lane">
+
+      <!-- Blister -->
+      <div class="stage-col">
+        <div class="mcard running">
+          <div class="mcard-header">
+            <div class="mcard-name">Blister</div>
+            <div class="mcard-status running">Running</div>
+          </div>
+          <div class="mcard-product">VitaFlex 60ct</div>
+          <div class="mcard-lot">BIS-24-0516-041</div>
+          <div class="mcard-meta">
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">01:14:22</div>
+              <div class="mcard-stat-lbl">Active</div>
+            </div>
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">12,450</div>
+              <div class="mcard-stat-lbl">Today</div>
+            </div>
+          </div>
+          <div class="mcard-operator">Maria R.</div>
+        </div>
+        <!-- Handpack alongside blister -->
+        <div class="mcard idle" style="opacity:0.6;">
+          <div class="mcard-header">
+            <div class="mcard-name">Handpack</div>
+            <div class="mcard-status idle">Idle</div>
+          </div>
+          <div class="mcard-product idle-txt">No bag assigned</div>
+        </div>
+      </div>
+
+      <!-- Queue: Blister → Seal -->
+      <div class="queue-connector">
+        <div class="queue-count warn">8</div>
+        <div class="queue-age">AVG 22m</div>
+        <div class="arrow">›</div>
+      </div>
+
+      <!-- Heat Sealers (3) -->
+      <div class="stage-col">
+        <div class="mcard running">
+          <div class="mcard-header">
+            <div class="mcard-name">Heat Sealer 1</div>
+            <div class="mcard-status running">Running</div>
+          </div>
+          <div class="mcard-product">VitaFlex 60ct</div>
+          <div class="mcard-lot">HSL-24-0516-017</div>
+          <div class="mcard-meta">
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">00:43:11</div>
+              <div class="mcard-stat-lbl">Active</div>
+            </div>
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">8,750</div>
+              <div class="mcard-stat-lbl">Today</div>
+            </div>
+          </div>
+          <div class="mcard-operator">Carlos M.</div>
+        </div>
+        <div class="mcard paused">
+          <div class="mcard-header">
+            <div class="mcard-name">Heat Sealer 2</div>
+            <div class="mcard-status paused">Paused</div>
+          </div>
+          <div class="mcard-product">VitaFlex 60ct</div>
+          <div class="mcard-lot">HSL-24-0516-018</div>
+          <div class="mcard-meta">
+            <div class="mcard-stat">
+              <div class="mcard-stat-val" style="color:#fb923c;">00:12:04</div>
+              <div class="mcard-stat-lbl">Paused</div>
+            </div>
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">5,200</div>
+              <div class="mcard-stat-lbl">Today</div>
+            </div>
+          </div>
+          <div class="mcard-operator" style="color:#fb923c;">PVC swap — Jose T.</div>
+        </div>
+        <div class="mcard running">
+          <div class="mcard-header">
+            <div class="mcard-name">Heat Sealer 3</div>
+            <div class="mcard-status running">Running</div>
+          </div>
+          <div class="mcard-product">OmegaPlus 90ct</div>
+          <div class="mcard-lot">HSL-24-0516-019</div>
+          <div class="mcard-meta">
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">00:28:55</div>
+              <div class="mcard-stat-lbl">Active</div>
+            </div>
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">4,100</div>
+              <div class="mcard-stat-lbl">Today</div>
+            </div>
+          </div>
+          <div class="mcard-operator">Aisha K.</div>
+        </div>
+      </div>
+
+      <!-- Queue: Seal → Packaging -->
+      <div class="queue-connector">
+        <div class="queue-count ok">2</div>
+        <div class="queue-age">AVG 8m</div>
+        <div class="arrow">›</div>
+      </div>
+
+      <!-- Merge into packaging (shared, shown at right) -->
+      <div style="display:flex;align-items:center;color:#1a2e4a;font-size:18px;padding:0 2px;">⌐</div>
+
+    </div>
+
+    <!-- ROUTE DIVIDER -->
+    <div class="route-divider"></div>
+
+    <!-- BOTTLE ROUTE LANE -->
+    <div class="flow-label">Bottle route <span>Stickering → Induction Seal → Packaging</span></div>
+    <div class="lane">
+
+      <!-- Stickering -->
+      <div class="stage-col">
+        <div class="mcard running" style="height:100%;max-height:120px;">
+          <div class="mcard-header">
+            <div class="mcard-name">Stickering</div>
+            <div class="mcard-status running">Running</div>
+          </div>
+          <div class="mcard-product">OmegaPlus 90ct</div>
+          <div class="mcard-lot">STK-24-0516-004</div>
+          <div class="mcard-meta">
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">00:51:30</div>
+              <div class="mcard-stat-lbl">Active</div>
+            </div>
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">3,600</div>
+              <div class="mcard-stat-lbl">Today</div>
+            </div>
+          </div>
+          <div class="mcard-operator">Lin W.</div>
+        </div>
+      </div>
+
+      <!-- Queue: Stickering → Induction -->
+      <div class="queue-connector">
+        <div class="queue-count ok">3</div>
+        <div class="queue-age">AVG 11m</div>
+        <div class="arrow">›</div>
+      </div>
+
+      <!-- Induction Sealers (2) -->
+      <div class="stage-col">
+        <div class="mcard running">
+          <div class="mcard-header">
+            <div class="mcard-name">Induction 1</div>
+            <div class="mcard-status running">Running</div>
+          </div>
+          <div class="mcard-product">OmegaPlus 90ct</div>
+          <div class="mcard-lot">IND-24-0516-011</div>
+          <div class="mcard-meta">
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">00:19:42</div>
+              <div class="mcard-stat-lbl">Active</div>
+            </div>
+            <div class="mcard-stat">
+              <div class="mcard-stat-val">2,880</div>
+              <div class="mcard-stat-lbl">Today</div>
+            </div>
+          </div>
+          <div class="mcard-operator">Sam D.</div>
+        </div>
+        <div class="mcard idle">
+          <div class="mcard-header">
+            <div class="mcard-name">Induction 2</div>
+            <div class="mcard-status idle">Idle</div>
+          </div>
+          <div class="mcard-product idle-txt">No bag assigned</div>
+          <div class="mcard-operator" style="color:#1e3a5f;">Ready</div>
+        </div>
+      </div>
+
+      <!-- Queue: Induction → Packaging -->
+      <div class="queue-connector">
+        <div class="queue-count ok">1</div>
+        <div class="queue-age">AVG 5m</div>
+        <div class="arrow">›</div>
+      </div>
+
+      <div style="display:flex;align-items:center;color:#1a2e4a;font-size:18px;padding:0 2px;">L</div>
+
+    </div>
+
+    <!-- Spacer -->
+    <div style="flex:1;"></div>
+
+  </div>
+
+  <!-- Packaging convergence column -->
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 6px;gap:6px;flex-shrink:0;">
+    <div style="font-size:8px;font-weight:700;letter-spacing:0.2em;color:#334d6e;text-transform:uppercase;writing-mode:vertical-rl;transform:rotate(180deg);margin-bottom:8px;">Packaging</div>
+    <div class="mcard packaging running" style="width:136px;">
+      <div class="mcard-header">
+        <div class="mcard-name">Pack Station</div>
+        <div class="mcard-status running">Running</div>
+      </div>
+      <div class="mcard-product">Mixed</div>
+      <div class="mcard-meta" style="margin-top:6px;">
+        <div class="mcard-stat">
+          <div class="mcard-stat-val">14</div>
+          <div class="mcard-stat-lbl">Bags today</div>
+        </div>
+        <div class="mcard-stat">
+          <div class="mcard-stat-val">31,980</div>
+          <div class="mcard-stat-lbl">Units out</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="right-panel">
+
+    <!-- Material Risk -->
+    <div class="panel-section">
+      <div class="panel-title">Material Risk</div>
+      <div class="risk-row">
+        <div class="risk-name">PVC Foil #4622</div>
+        <div class="risk-time">2h 42m</div>
+        <div class="risk-badge low">LOW</div>
+      </div>
+      <div class="risk-row">
+        <div class="risk-name">Foil Seal #3130</div>
+        <div class="risk-time warn">5h 18m</div>
+        <div class="risk-badge med">MED</div>
+      </div>
+      <div class="risk-row">
+        <div class="risk-name">Induction Seals</div>
+        <div class="risk-time ok">&gt; 24h</div>
+        <div class="risk-badge low">LOW</div>
+      </div>
+    </div>
+
+    <!-- Quality Watch -->
+    <div class="panel-section">
+      <div class="panel-title">Quality Watch <span>Last 4h</span></div>
+      <div class="qual-grid">
+        <div class="qual-item">
+          <div class="qual-lbl">Yield</div>
+          <div class="qual-val good">94.2%</div>
+          <div class="qual-sub">+1.1% vs yesterday</div>
+        </div>
+        <div class="qual-item">
+          <div class="qual-lbl">Paused bags</div>
+          <div class="qual-val warn">1</div>
+          <div class="qual-sub">12m avg pause</div>
+        </div>
+        <div class="qual-item">
+          <div class="qual-lbl">Rework</div>
+          <div class="qual-val">0</div>
+          <div class="qual-sub">Clear</div>
+        </div>
+        <div class="qual-item">
+          <div class="qual-lbl">Damage</div>
+          <div class="qual-val bad">3</div>
+          <div class="qual-sub">2.1 ppm</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Events -->
+    <div class="panel-section" style="padding-bottom:0;border-bottom:none;">
+      <div class="panel-title">Recent Events</div>
+    </div>
+    <div class="events-list">
+      <div class="event-row">
+        <div class="event-time">14:31</div>
+        <div class="event-dot high"></div>
+        <div class="event-text">Heat Sealer 2 paused — PVC swap</div>
+      </div>
+      <div class="event-row">
+        <div class="event-time">14:28</div>
+        <div class="event-dot ok"></div>
+        <div class="event-text">Bag HSL-019 finalized — 4,100 units</div>
+      </div>
+      <div class="event-row">
+        <div class="event-time">14:22</div>
+        <div class="event-dot info"></div>
+        <div class="event-text">Heat Sealer 3 picked up OmegaPlus</div>
+      </div>
+      <div class="event-row">
+        <div class="event-time">14:15</div>
+        <div class="event-dot med"></div>
+        <div class="event-text">PVC Foil #4622 — 2h 42m remaining</div>
+      </div>
+      <div class="event-row">
+        <div class="event-time">14:09</div>
+        <div class="event-dot ok"></div>
+        <div class="event-text">Induction 1 resumed — Sam D.</div>
+      </div>
+      <div class="event-row">
+        <div class="event-time">14:01</div>
+        <div class="event-dot ok"></div>
+        <div class="event-text">Blister bag BIS-041 started</div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ── KPI strip ──────────────────────────────────────── -->
+<div class="kpi-strip">
+  <div class="kpi-cell">
+    <div class="kpi-label">Bags today</div>
+    <div class="kpi-val">24</div>
+    <div class="kpi-sub">Target <strong>30</strong> · 6 remaining</div>
+  </div>
+  <div class="kpi-cell">
+    <div class="kpi-label">Units out</div>
+    <div class="kpi-val good">31,980</div>
+    <div class="kpi-sub">vs yesterday <strong>+6.2%</strong></div>
+  </div>
+  <div class="kpi-cell">
+    <div class="kpi-label">Bottleneck</div>
+    <div class="kpi-val warn" style="font-size:16px;">Blister queue</div>
+    <div class="kpi-sub">8 bags · oldest <strong>34m</strong></div>
+  </div>
+  <div class="kpi-cell">
+    <div class="kpi-label">Active ops</div>
+    <div class="kpi-val">6</div>
+    <div class="kpi-sub">1 paused · <strong>Maria</strong> leading</div>
+  </div>
+  <div class="kpi-cell">
+    <div class="kpi-label">Yield</div>
+    <div class="kpi-val good">94.2%</div>
+    <div class="kpi-sub">Shift avg · target <strong>92%</strong></div>
+  </div>
+  <div class="kpi-cell">
+    <div class="kpi-label">Downtime</div>
+    <div class="kpi-val warn">12m</div>
+    <div class="kpi-sub">1 pause · PVC swap</div>
+  </div>
+</div>
+
+</body>
+</html>

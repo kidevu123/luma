@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LUMA · Production Command</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg-base: #07090E; --bg-deep: #0B0F16; --bg-panel: #0F141D;
+  --bg-surface: #141A24; --bg-elevated: #1A2230; --bg-card: #11161F;
+  --border-bright: #2A3548; --border-light: #1F2735; --border-subtle: #161D28;
+  --text-primary: #E8ECF1; --text-secondary: #A8B0BD;
+  --text-tertiary: #6F7787; --text-muted: #4A5060;
+  --emerald: #2EE8A5; --emerald-soft: rgba(46,232,165,0.10); --emerald-stroke: rgba(46,232,165,0.4);
+  --amber: #F5B544; --amber-soft: rgba(245,181,68,0.10); --amber-stroke: rgba(245,181,68,0.4);
+  --coral: #FF5A4D; --coral-soft: rgba(255,90,77,0.10); --coral-stroke: rgba(255,90,77,0.4);
+  --steel: #5E9BC4; --steel-soft: rgba(94,155,196,0.10);
+}
+html, body { height: 100%; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-base); color: var(--text-primary); font-size: 11px;
+  letter-spacing: 0.01em; overflow: hidden; }
+.cmd-os { display: flex; flex-direction: column; height: 100vh;
+  background: radial-gradient(ellipse at top left, #0B121C 0%, var(--bg-base) 50%); }
+
+/* TOPBAR */
+.topbar { display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px; height: 48px;
+  background: linear-gradient(180deg, var(--bg-panel) 0%, rgba(15,20,29,0.5) 100%);
+  border-bottom: 1px solid var(--border-bright); flex-shrink: 0; }
+.topbar-left { display: flex; align-items: center; gap: 16px; }
+.logo-mark { font-size: 16px; font-weight: 800; letter-spacing: 0.06em;
+  background: linear-gradient(180deg, #E8ECF1 0%, #A8B0BD 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.logo-sub { font-size: 10px; font-weight: 700; letter-spacing: 0.15em; color: var(--text-tertiary); }
+.divider-v { width: 1px; height: 20px; background: var(--border-bright); }
+.tb-meta { display: flex; flex-direction: column; gap: 1px; }
+.tb-meta-label { font-size: 8.5px; font-weight: 600; letter-spacing: 0.12em; color: var(--text-tertiary); text-transform: uppercase; }
+.tb-meta-value { font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', 'SF Mono', monospace; color: var(--text-primary); }
+.tb-time .tb-meta-value { font-size: 15px; }
+.freshness { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-tertiary); }
+.fresh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--emerald);
+  box-shadow: 0 0 6px var(--emerald); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.route-pill { padding: 4px 10px; font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+  border-radius: 3px; border: 1px solid var(--emerald-stroke); background: var(--emerald-soft); color: var(--emerald); }
+
+/* MAIN */
+.main { display: flex; flex: 1; overflow: hidden; gap: 8px; padding: 8px; }
+.left-col { flex: 1; display: flex; flex-direction: column; gap: 8px; overflow: hidden; min-width: 0; }
+.right-col { width: 260px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex-shrink: 0; }
+
+/* PROD MAP */
+.prod-map { background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
+  border: 1px solid var(--border-bright); border-radius: 6px; padding: 10px 12px;
+  display: flex; flex-direction: column; flex: 1; overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.02); }
+.prod-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; flex-shrink: 0; }
+.prod-title { font-size: 9px; font-weight: 700; letter-spacing: 0.18em; color: var(--text-secondary); text-transform: uppercase; }
+.prod-sub { font-size: 9px; color: var(--text-tertiary); }
+
+/* FLOW AREA */
+.flow-area { display: flex; gap: 6px; align-items: stretch; flex: 1; overflow: hidden; min-height: 0; }
+.routes { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; overflow: hidden; }
+.route-section { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.route-label-bar { font-size: 8px; font-weight: 700; letter-spacing: 0.15em; color: var(--emerald);
+  text-transform: uppercase; margin-bottom: 4px; flex-shrink: 0; }
+.route-label-bar.bottle { color: var(--steel); }
+.route-flow { display: flex; gap: 0; align-items: stretch; flex: 1; overflow-x: auto; padding-bottom: 2px; min-height: 0; }
+.route-flow > .mc { min-width: 115px; flex: 1 1 115px; }
+
+/* MACHINE CARD */
+.mc { background: var(--bg-card); border: 1px solid var(--border-bright); border-radius: 4px;
+  display: flex; flex-direction: column; overflow: hidden; position: relative;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+.mc.running { border-color: var(--emerald-stroke); box-shadow: 0 0 0 1px var(--emerald-stroke), 0 0 16px rgba(46,232,165,0.08); }
+.mc.paused { border-color: var(--amber-stroke); box-shadow: 0 0 0 1px var(--amber-stroke), 0 0 12px rgba(245,181,68,0.10); }
+.mc.idle { opacity: 0.65; }
+.mc-header { padding: 5px 8px; border-bottom: 1px solid var(--border-light);
+  display: flex; justify-content: space-between; align-items: center;
+  background: rgba(255,255,255,0.015); min-height: 22px; flex-shrink: 0; }
+.mc-name { font-size: 8.5px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-primary); text-transform: uppercase; }
+.mc-badge { font-size: 7.5px; font-weight: 700; letter-spacing: 0.08em; padding: 1px 5px; border-radius: 2px; }
+.mc.running .mc-badge { color: var(--emerald); background: var(--emerald-soft); }
+.mc.paused .mc-badge { color: var(--amber); background: var(--amber-soft); }
+.mc.idle .mc-badge { color: var(--text-tertiary); background: var(--bg-surface); }
+.mc-illust { height: 64px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #0E1420 0%, #060912 100%);
+  position: relative; border-bottom: 1px solid var(--border-subtle); overflow: hidden; flex-shrink: 0; }
+.mc-illust::before { content: ''; position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(94,155,196,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(94,155,196,0.04) 1px, transparent 1px);
+  background-size: 6px 6px; pointer-events: none; }
+.mc-illust svg { width: 100%; height: 100%; position: relative; z-index: 1; }
+.mc-illust svg .base { fill: #2D3548; stroke: #4A5468; stroke-width: 0.4; }
+.mc-illust svg .body { fill: #3A4458; stroke: #5A6578; stroke-width: 0.4; }
+.mc-illust svg .body-l { fill: #4A5468; stroke: #6A7488; stroke-width: 0.4; }
+.mc-illust svg .body-d { fill: #1F2735; stroke: #3A4458; stroke-width: 0.3; }
+.mc-illust svg .panel { fill: #0B0F16; stroke: #4A5468; stroke-width: 0.3; }
+.mc-illust svg .glass { fill: #5E9BC4; opacity: 0.10; stroke: #5E9BC4; stroke-width: 0.3; }
+.mc-illust svg .glow { fill: #2EE8A5; }
+.mc-illust svg .glow-d { fill: #2EE8A5; opacity: 0.5; }
+.mc-illust svg .warn { fill: #F5B544; }
+.mc-illust svg .det { stroke: #6A7488; stroke-width: 0.3; fill: none; }
+.mc-illust svg .seam { stroke: #3A4458; stroke-width: 0.25; fill: none; }
+.mc-illust svg .scrn { fill: #2EE8A5; opacity: 0.18; }
+.mc-body { padding: 5px 8px 6px; display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; }
+.mc-sku { font-size: 8.5px; font-weight: 600; color: var(--text-secondary); line-height: 1.25; }
+.mc-line { font-size: 8px; color: var(--text-tertiary); }
+.mc-time { font-size: 9px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text-secondary); }
+.mc-units { font-size: 8.5px; font-family: 'JetBrains Mono', monospace; color: var(--text-tertiary); }
+.mc-units strong { color: var(--text-primary); font-weight: 700; }
+.mc-footer { padding: 4px 8px 5px; border-top: 1px solid var(--border-subtle);
+  display: flex; align-items: center; gap: 5px; background: rgba(0,0,0,0.15); flex-shrink: 0; }
+.mc-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.mc.running .mc-dot { background: var(--emerald); box-shadow: 0 0 4px var(--emerald); animation: pulse 2s infinite; }
+.mc.paused .mc-dot { background: var(--amber); box-shadow: 0 0 4px var(--amber); }
+.mc.idle .mc-dot { background: var(--text-muted); }
+.mc-foot-label { font-size: 8px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.mc.running .mc-foot-label { color: var(--emerald); }
+.mc.paused .mc-foot-label { color: var(--amber); }
+.mc.idle .mc-foot-label { color: var(--text-tertiary); }
+.mc-foot-sub { font-size: 7.5px; color: var(--text-muted); margin-left: auto; font-family: 'JetBrains Mono', monospace; }
+
+/* FLOW CONNECTORS */
+.arrow-link { flex: 0 0 16px; display: flex; align-items: center; justify-content: center;
+  align-self: center; margin: 0 1px; flex-shrink: 0; }
+.arrow-link svg { width: 16px; height: 14px; filter: drop-shadow(0 0 6px rgba(46,232,165,0.55)); }
+.branch-arrows { flex: 0 0 34px; align-self: stretch;
+  filter: drop-shadow(0 0 6px rgba(46,232,165,0.5)); margin: 0 2px; flex-shrink: 0; }
+
+/* QUEUE CAPSULE */
+.queue-cap { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 5px 4px; background: var(--bg-surface); border: 1px dashed var(--border-bright);
+  border-radius: 4px; min-width: 36px; flex-shrink: 0; }
+.queue-cap.warn { background: var(--amber-soft); border-color: var(--amber-stroke); }
+.queue-cap-label { font-size: 7px; font-weight: 700; color: var(--text-tertiary); letter-spacing: 0.08em; }
+.queue-cap.warn .queue-cap-label { color: var(--amber); }
+.queue-cap-value { font-size: 13px; font-weight: 800; font-family: 'JetBrains Mono', monospace;
+  color: var(--text-primary); line-height: 1; margin: 2px 0; }
+.queue-cap.warn .queue-cap-value { color: var(--amber); }
+.queue-cap-time { font-size: 7px; color: var(--text-tertiary); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+.queue-cap.warn .queue-cap-time { color: var(--amber); }
+
+/* SEALER STACKS */
+.sealer-stack { display: flex; flex-direction: column; gap: 4px; flex: 0 0 134px; align-self: stretch; flex-shrink: 0; }
+.sealer-stack .mc { flex: 1; min-height: 0; }
+.sealer-stack .mc-header { padding: 3px 7px; min-height: 16px; }
+.sealer-stack .mc-name { font-size: 7.5px; }
+.sealer-stack .mc-illust { height: 28px; }
+.sealer-stack .mc-body { padding: 3px 7px 3px; gap: 1px; }
+.sealer-stack .mc-body .mc-sku { font-size: 7.5px; }
+.sealer-stack .mc-body .mc-line { font-size: 7px; }
+.sealer-stack .mc-body .mc-units { font-size: 7.5px; }
+.sealer-stack .mc-footer { padding: 2px 7px 3px; gap: 4px; }
+.sealer-stack .mc-foot-label { font-size: 7px; }
+.sealer-stack .mc-foot-sub { font-size: 7px; }
+.ind-stack { display: flex; flex-direction: column; gap: 4px; flex: 0 0 134px; align-self: stretch; flex-shrink: 0; }
+.ind-stack .mc { flex: 1; min-height: 0; }
+.ind-stack .mc-header { padding: 4px 7px; min-height: 18px; }
+.ind-stack .mc-name { font-size: 7.5px; }
+.ind-stack .mc-illust { height: 42px; }
+.ind-stack .mc-body { padding: 4px 7px 4px; gap: 1px; }
+.ind-stack .mc-body .mc-sku { font-size: 7.5px; }
+.ind-stack .mc-body .mc-line { font-size: 7px; }
+.ind-stack .mc-body .mc-units { font-size: 7.5px; }
+.ind-stack .mc-footer { padding: 3px 7px 4px; gap: 4px; }
+.ind-stack .mc-foot-label { font-size: 7px; }
+
+/* PACK STATION */
+.pack-station { flex: 0 0 138px; display: flex; flex-direction: column; border-radius: 4px;
+  overflow: hidden; border: 1px solid var(--emerald-stroke); align-self: stretch;
+  box-shadow: 0 0 0 1px var(--emerald-stroke), 0 0 20px rgba(46,232,165,0.10);
+  background: var(--bg-card); flex-shrink: 0; }
+.pack-station .mc-header { padding: 6px 8px; }
+.pack-station .mc-illust { flex: 1; height: auto; min-height: 0; }
+.pack-station .mc-body { padding: 6px 8px 8px; }
+
+/* RIGHT PANELS */
+.panel { background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
+  border: 1px solid var(--border-bright); border-radius: 6px; overflow: hidden;
+  display: flex; flex-direction: column; flex-shrink: 0; }
+.panel-h { display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-bottom: 1px solid var(--border-light); background: rgba(0,0,0,0.2); flex-shrink: 0; }
+.panel-title { font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+  color: var(--text-secondary); text-transform: uppercase; display: flex; align-items: center; gap: 5px; }
+.panel-title svg { width: 11px; height: 11px; color: var(--text-tertiary); }
+.panel-meta { font-size: 8.5px; color: var(--text-tertiary); }
+.panel-body { padding: 8px 10px; }
+
+/* MATERIAL RISK */
+.mr-table { width: 100%; border-collapse: collapse; }
+.mr-table thead th { font-size: 7.5px; font-weight: 700; color: var(--text-tertiary);
+  letter-spacing: 0.1em; text-transform: uppercase; text-align: left; padding: 3px 3px 6px;
+  border-bottom: 1px solid var(--border-light); }
+.mr-table thead th:last-child, .mr-table tbody td:last-child { text-align: right; }
+.mr-table tbody td { font-size: 9px; padding: 5px 3px; border-bottom: 1px solid var(--border-subtle); color: var(--text-primary); }
+.mr-table tbody tr:last-child td { border-bottom: none; }
+.mr-type { font-weight: 600; font-size: 9px; }
+.mr-time-val { font-size: 9px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.mr-time-val.crit { color: var(--coral); }
+.mr-time-val.warn { color: var(--amber); }
+.mr-time-val.good { color: var(--emerald); }
+.mr-conf { font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 2px; letter-spacing: 0.05em; display: inline-block; }
+.mr-conf.high { background: var(--emerald-soft); color: var(--emerald); }
+.mr-conf.med { background: var(--amber-soft); color: var(--amber); }
+.mr-conf.low { background: var(--coral-soft); color: var(--coral); }
+
+/* QUALITY WATCH */
+.qw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border-light); }
+.qw-cell { background: var(--bg-panel); padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; }
+.qw-label { font-size: 8px; font-weight: 700; color: var(--text-tertiary); letter-spacing: 0.08em; text-transform: uppercase; }
+.qw-value { font-size: 22px; font-weight: 800; font-family: 'JetBrains Mono', monospace;
+  color: var(--emerald); letter-spacing: -0.02em; line-height: 1; }
+.qw-value.warn { color: var(--amber); }
+.qw-value.crit { color: var(--coral); }
+.qw-sub { font-size: 8px; color: var(--text-tertiary); }
+
+/* RECENT EVENTS */
+.ev-list { display: flex; flex-direction: column; }
+.ev-row { display: flex; gap: 7px; padding: 5px 0; border-bottom: 1px solid var(--border-subtle); }
+.ev-row:last-child { border-bottom: none; }
+.ev-time { font-size: 8.5px; font-weight: 700; font-family: 'JetBrains Mono', monospace;
+  color: var(--text-tertiary); width: 32px; flex-shrink: 0; padding-top: 1px; }
+.ev-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--steel); margin-top: 4px; flex-shrink: 0; }
+.ev-dot.amber { background: var(--amber); }
+.ev-dot.coral { background: var(--coral); }
+.ev-dot.emerald { background: var(--emerald); }
+.ev-body { flex: 1; }
+.ev-title { font-size: 9.5px; color: var(--text-primary); font-weight: 600; }
+.ev-sub { font-size: 8px; color: var(--text-tertiary); margin-top: 1px; }
+
+/* KPI STRIP */
+.kpi-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; flex-shrink: 0; }
+.kpi { background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-deep) 100%);
+  border: 1px solid var(--border-bright); border-radius: 5px; padding: 9px 11px;
+  display: flex; flex-direction: column; gap: 3px; }
+.kpi-label { font-size: 8px; font-weight: 700; letter-spacing: 0.12em; color: var(--text-tertiary); text-transform: uppercase; }
+.kpi-main { font-size: 22px; font-weight: 800; font-family: 'JetBrains Mono', monospace;
+  color: var(--text-primary); letter-spacing: -0.02em; line-height: 1; margin-top: 3px; }
+.kpi-main.good { color: var(--emerald); }
+.kpi-main.warn { color: var(--amber); }
+.kpi-main.sm { font-size: 13px; line-height: 1.2; margin-top: 4px; }
+.kpi-sub { font-size: 8px; color: var(--text-tertiary); margin-top: auto; }
+.kpi-sub strong { color: var(--text-secondary); }
+
+/* FOOTER */
+.foot { display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px; height: 26px; background: var(--bg-deep);
+  border-top: 1px solid var(--border-bright); font-size: 8.5px; color: var(--text-tertiary); flex-shrink: 0; }
+.foot-ok { color: var(--emerald); display: flex; align-items: center; gap: 5px; }
+.foot-ok svg { width: 10px; height: 10px; }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div class="cmd-os">
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo-mark">LUMA</div>
+    <div class="logo-sub">PRODUCTION COMMAND</div>
+    <div class="divider-v"></div>
+    <div class="tb-meta tb-time"><div class="tb-meta-value" id="clock">14:32:18</div></div>
+    <div class="divider-v"></div>
+    <div class="tb-meta">
+      <div class="tb-meta-label">Shift B</div>
+      <div class="tb-meta-value" style="font-size:10px;">06:00 – 14:00</div>
+    </div>
+    <div class="divider-v"></div>
+    <div class="freshness">
+      <div class="fresh-dot"></div>
+      <span style="font-weight:700;color:var(--emerald);">Live</span>
+    </div>
+    <div class="divider-v"></div>
+    <div class="route-pill">Card + Bottle Active</div>
+  </div>
+  <div class="topbar-left" style="gap:14px;">
+    <div class="tb-meta" style="align-items:flex-end;">
+      <div class="tb-meta-label">Operators</div>
+      <div class="tb-meta-value">6 Active</div>
+    </div>
+    <div class="divider-v"></div>
+    <div class="tb-meta" style="align-items:flex-end;">
+      <div class="tb-meta-label">Bags today</div>
+      <div class="tb-meta-value" style="color:var(--emerald);">24</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- LEFT COL -->
+  <div class="left-col">
+    <div class="prod-map">
+      <div class="prod-header">
+        <div>
+          <div class="prod-title">Production Flow Map</div>
+          <div class="prod-sub" style="margin-top:2px;">Live · Both Routes · All Machines</div>
+        </div>
+        <div style="font-size:9px;color:var(--text-tertiary);">Order: 9 new <span style="color:var(--amber);">· 3 Partially</span></div>
+      </div>
+
+      <div class="flow-area">
+        <div class="routes">
+
+          <!-- ===== CARD ROUTE ===== -->
+          <div class="route-section">
+            <div class="route-label-bar">Card Route</div>
+            <div class="route-flow">
+
+              <!-- Blister -->
+              <div class="mc running" style="flex: 0 0 210px;">
+                <div class="mc-header"><div class="mc-name">Blister</div><div class="mc-badge">Running</div></div>
+                <div class="mc-illust">
+                  <svg viewBox="0 0 100 60" preserveAspectRatio="xMidYMid meet">
+                    <line x1="0" y1="52" x2="100" y2="52" class="det" stroke-dasharray="1 1"/>
+                    <g transform="translate(4,6)">
+                      <rect x="0" y="42" width="92" height="4" class="base"/>
+                      <rect x="4" y="20" width="18" height="22" class="body-d"/>
+                      <rect x="6" y="22" width="14" height="6" class="panel"/>
+                      <rect x="7" y="23" width="12" height="4" class="scrn"/>
+                      <circle cx="9" cy="32" r="1" class="glow"/>
+                      <circle cx="12" cy="32" r="1" class="warn"/>
+                      <circle cx="15" cy="32" r="1" fill="#5A6578"/>
+                      <rect x="7" y="36" width="12" height="3" class="body"/>
+                      <rect x="24" y="14" width="40" height="28" class="body"/>
+                      <rect x="26" y="16" width="36" height="4" class="body-l"/>
+                      <rect x="26" y="22" width="36" height="14" class="glass"/>
+                      <circle cx="32" cy="29" r="1.5" class="body-d"/><circle cx="32" cy="29" r="0.7" class="glow"/>
+                      <circle cx="42" cy="29" r="1.5" class="body-d"/><circle cx="42" cy="29" r="0.7" class="glow"/>
+                      <circle cx="52" cy="29" r="1.5" class="body-d"/><circle cx="52" cy="29" r="0.7" class="glow"/>
+                      <rect x="26" y="38" width="36" height="3" class="body-d"/>
+                      <rect x="66" y="18" width="18" height="24" class="body-d"/>
+                      <rect x="68" y="20" width="14" height="6" class="panel"/>
+                      <rect x="69" y="21" width="12" height="4" class="scrn"/>
+                      <rect x="68" y="28" width="14" height="3" class="body"/>
+                      <rect x="68" y="32" width="14" height="3" class="body"/>
+                      <circle cx="75" cy="38" r="1.5" class="warn"/>
+                      <rect x="6" y="46" width="3" height="4" class="body-d"/>
+                      <rect x="20" y="46" width="3" height="4" class="body-d"/>
+                      <rect x="66" y="46" width="3" height="4" class="body-d"/>
+                      <rect x="82" y="46" width="3" height="4" class="body-d"/>
+                    </g>
+                  </svg>
+                </div>
+                <div class="mc-body">
+                  <div class="mc-sku">VitaFlex 60ct</div>
+                  <div class="mc-line">Maria R.</div>
+                  <div class="mc-time">01:14:22</div>
+                  <div class="mc-units"><strong>12,450</strong> units</div>
+                </div>
+                <div class="mc-footer"><div class="mc-dot"></div><div class="mc-foot-label">Running</div></div>
+              </div>
+
+              <div class="arrow-link"><svg viewBox="0 0 22 16" fill="none"><line x1="0" y1="8" x2="16" y2="8" stroke="#2EE8A5" stroke-width="1.6" stroke-linecap="round"/><polygon points="13 4,21 8,13 12" fill="#2EE8A5"/></svg></div>
+
+              <div class="queue-cap warn">
+                <div class="queue-cap-label">Queue</div>
+                <div class="queue-cap-value">8</div>
+                <svg style="width:14px;height:11px;margin:2px 0;opacity:0.6;" viewBox="0 0 16 14" fill="none"><rect x="1" y="3" width="3" height="3" fill="#F5B544"/><rect x="6" y="3" width="3" height="3" fill="#F5B544"/><rect x="11" y="3" width="3" height="3" fill="#F5B544"/><rect x="1" y="8" width="3" height="3" fill="#F5B544"/><rect x="6" y="8" width="3" height="3" fill="#F5B544"/></svg>
+                <div class="queue-cap-time">AVG 22m</div>
+              </div>
+
+              <!-- Branch out: 1 → 3 heat sealers -->
+              <svg class="branch-arrows" viewBox="0 0 42 240" preserveAspectRatio="none">
+                <path d="M0 120 L18 120" fill="none" stroke="#2EE8A5" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M18 120 L18 36 L30 36" fill="none" stroke="#2EE8A5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M18 120 L30 120" fill="none" stroke="#2EE8A5" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M18 120 L18 204 L30 204" fill="none" stroke="#F5B544" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <polygon points="30 32,38 36,30 40" fill="#2EE8A5"/>
+                <polygon points="30 116,38 120,30 124" fill="#2EE8A5"/>
+                <polygon points="30 200,38 204,30 208" fill="#F5B544"/>
+                <circle cx="18" cy="120" r="2" fill="#2EE8A5"/>
+              </svg>
+
+              <!-- 3 Heat Sealers -->
+              <div class="sealer-stack">
+                <div class="mc running">
+                  <div class="mc-header"><div class="mc-name">Heat Sealer 1</div><div class="mc-badge">Running</div></div>
+                  <div class="mc-illust">
+                    <svg viewBox="0 0 100 32" preserveAspectRatio="xMidYMid meet">
+                      <g transform="translate(2,3)">
+                        <rect x="0" y="24" width="94" height="3" class="base"/>
+                        <rect x="4" y="8" width="18" height="16" class="body"/>
+                        <rect x="6" y="10" width="14" height="3" class="panel"/>
+                        <rect x="6.5" y="10.5" width="13" height="2" class="scrn"/>
+                        <rect x="6" y="15" width="14" height="2" class="body-d"/>
+                        <circle cx="8" cy="20" r="0.7" class="glow"/>
+                        <circle cx="11" cy="20" r="0.7" fill="#5A6578"/>
+                        <rect x="26" y="4" width="42" height="20" class="body-d"/>
+                        <rect x="28" y="5.5" width="38" height="3" class="body-l"/>
+                        <rect x="28" y="10" width="38" height="11" class="glass"/>
+                        <rect x="31" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="36" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="41" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="46" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="51" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="56" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="61" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="28" y="22" width="38" height="1.5" class="body-d"/>
+                        <rect x="72" y="10" width="16" height="14" class="body"/>
+                        <rect x="74" y="12" width="12" height="3" class="panel"/>
+                        <circle cx="76" cy="18" r="0.8" class="glow"/>
+                        <rect x="44" y="0" width="14" height="6" class="body-d"/>
+                        <circle cx="51" cy="3" r="1.4" class="glow"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <div class="mc-body">
+                    <div class="mc-sku">VitaFlex 60ct</div>
+                    <div class="mc-line">Carter R. · 00:43:11</div>
+                    <div class="mc-units"><strong>8,750</strong></div>
+                  </div>
+                  <div class="mc-footer"><div class="mc-dot"></div><div class="mc-foot-label">Running</div></div>
+                </div>
+
+                <div class="mc paused">
+                  <div class="mc-header"><div class="mc-name">Heat Sealer 2</div><div class="mc-badge">Paused</div></div>
+                  <div class="mc-illust">
+                    <svg viewBox="0 0 100 32" preserveAspectRatio="xMidYMid meet">
+                      <g transform="translate(2,3)">
+                        <rect x="0" y="24" width="94" height="3" class="base"/>
+                        <rect x="4" y="8" width="18" height="16" class="body"/>
+                        <rect x="6" y="10" width="14" height="3" class="panel"/>
+                        <rect x="6.5" y="10.5" width="13" height="2" fill="#F5B544" opacity="0.12"/>
+                        <rect x="6" y="15" width="14" height="2" class="body-d"/>
+                        <circle cx="8" cy="20" r="0.7" class="warn"/>
+                        <circle cx="11" cy="20" r="0.7" class="warn"/>
+                        <rect x="26" y="4" width="42" height="20" class="body-d"/>
+                        <rect x="28" y="5.5" width="38" height="3" class="body-l"/>
+                        <rect x="28" y="10" width="38" height="11" fill="#F5B544" opacity="0.06" stroke="#5E9BC4" stroke-width="0.3"/>
+                        <rect x="31" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="36" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="41" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="46" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="51" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="56" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="28" y="22" width="38" height="1.5" class="body-d"/>
+                        <rect x="43" y="12" width="2.5" height="7" fill="#F5B544" opacity="0.9"/>
+                        <rect x="47" y="12" width="2.5" height="7" fill="#F5B544" opacity="0.9"/>
+                        <rect x="72" y="10" width="16" height="14" class="body"/>
+                        <rect x="74" y="12" width="12" height="3" class="panel"/>
+                        <circle cx="76" cy="18" r="0.8" class="warn"/>
+                        <rect x="44" y="0" width="14" height="6" class="body-d"/>
+                        <circle cx="51" cy="3" r="1.4" class="warn"/>
+                        <circle cx="51" cy="3" r="2.6" fill="#F5B544" opacity="0.4"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <div class="mc-body">
+                    <div class="mc-sku">PVC swap</div>
+                    <div class="mc-line">Jose M. · 00:12:04</div>
+                    <div class="mc-units"><strong>5,200</strong></div>
+                  </div>
+                  <div class="mc-footer"><div class="mc-dot"></div><div class="mc-foot-label">Paused</div><div class="mc-foot-sub">PVC swap</div></div>
+                </div>
+
+                <div class="mc running">
+                  <div class="mc-header"><div class="mc-name">Heat Sealer 3</div><div class="mc-badge">Running</div></div>
+                  <div class="mc-illust">
+                    <svg viewBox="0 0 100 32" preserveAspectRatio="xMidYMid meet">
+                      <g transform="translate(2,3)">
+                        <rect x="0" y="24" width="94" height="3" class="base"/>
+                        <rect x="4" y="8" width="18" height="16" class="body"/>
+                        <rect x="6" y="10" width="14" height="3" class="panel"/>
+                        <rect x="6.5" y="10.5" width="13" height="2" class="scrn"/>
+                        <rect x="6" y="15" width="14" height="2" class="body-d"/>
+                        <circle cx="8" cy="20" r="0.7" class="glow"/>
+                        <circle cx="11" cy="20" r="0.7" fill="#5A6578"/>
+                        <rect x="26" y="4" width="42" height="20" class="body-d"/>
+                        <rect x="28" y="5.5" width="38" height="3" class="body-l"/>
+                        <rect x="28" y="10" width="38" height="11" class="glass"/>
+                        <rect x="31" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="36" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="41" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="46" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="51" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="56" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="61" y="11.5" width="3" height="8" class="warn"/>
+                        <rect x="28" y="22" width="38" height="1.5" class="body-d"/>
+                        <rect x="72" y="10" width="16" height="14" class="body"/>
+                        <rect x="74" y="12" width="12" height="3" class="panel"/>
+                        <circle cx="76" cy="18" r="0.8" class="glow"/>
+                        <rect x="44" y="0" width="14" height="6" class="body-d"/>
+                        <circle cx="51" cy="3" r="1.4" class="glow"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <div class="mc-body">
+                    <div class="mc-sku">OmegaPlus 90ct</div>
+                    <div class="mc-line">Aisha K. · 00:28:55</div>
+                    <div class="mc-units"><strong>4,100</strong></div>
+                  </div>
+                  <div class="mc-footer"><div class="mc-dot"></div><div class="mc-foot-label">Running</div></div>
+                </div>
+              </div><!-- /sealer-stack -->
+
+              <!-- Branch in: 3 sealers → 1 -->
+              <svg class="branch-arrows" viewBox="0 0 42 240" preserveAspectRatio="none">
+                <path d="M0 36 L24 36 L24 120" fill="none" stroke="#2EE8A5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M0 120 L24 120" fill="none" stroke="#2EE8A5" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M0 204 L24 204 L24 120" fill="none" stroke="#F5B544" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M24 120 L34 120" fill="none" stroke="#2EE8A5" stroke-width="1.6" stroke-linecap="round"/>
+                <circle cx="24" cy="120" r="2" fill="#2EE8A5"/>
+                <polygon points="34 116,42 120,34 124" fill="#2EE8A5"/>
+              </svg>
+
+            </div><!-- /route-flow card -->
+          </div>
+
+          <!-- ===== BOTTLE ROUTE ===== -->
+          <div class="route-section">
+            <div class="route-label-bar bottle">Bottle Route</div>
+            <div class="route-flow">
+
+              <!-- Stickering -->
+              <div class="mc running" style="flex: 0 0 210px;">
+                <div class="mc-header"><div class="mc-name">Stickering</div><div class="mc-badge">Running</div></div>
+                <div class="mc-illust">
+                  <svg viewBox="0 0 100 60" preserveAspectRatio="xMidYMid meet">
+                    <line x1="0" y1="52" x2="100" y2="52" class="det" stroke-dasharray="1 1"/>
+                    <g transform="translate(4,6)">
+                      <rect x="0" y="42" width="92" height="4" class="base"/>
+                      <circle cx="20" cy="20" r="14" class="body-d"/>
+                      <circle cx="20" cy="20" r="10" class="body"/>
+                      <circle cx="20" cy="20" r="6" class="body-d"/>
+                      <circle cx="20" cy="20" r="2" class="body-l"/>
+                      <line x1="20" y1="20" x2="28" y2="14" stroke="#6A7488" stroke-width="0.5"/>
+                      <rect x="6" y="36" width="28" height="6" class="body"/>
+                      <line x1="8" y1="39" x2="32" y2="39" class="det"/>
+                      <rect x="40" y="14" width="32" height="28" class="body"/>
+                      <rect x="42" y="16" width="28" height="4" class="body-l"/>
+                      <rect x="42" y="22" width="28" height="18" class="glass"/>
+                      <g><rect x="46" y="26" width="6" height="10" class="body-l"/><rect x="47" y="28" width="4" height="6" fill="#A586E5" opacity="0.7"/></g>
+                      <g><rect x="54" y="26" width="6" height="10" class="body-l"/><rect x="55" y="28" width="4" height="6" fill="#A586E5" opacity="0.7"/></g>
+                      <g><rect x="62" y="26" width="6" height="10" class="body-l"/><rect x="63" y="28" width="4" height="6" fill="#A586E5" opacity="0.7"/></g>
+                      <rect x="76" y="20" width="14" height="22" class="body"/>
+                      <rect x="78" y="22" width="10" height="4" class="panel"/>
+                      <rect x="79" y="23" width="8" height="2" class="scrn"/>
+                      <circle cx="80" cy="30" r="1" class="glow"/>
+                      <rect x="78" y="34" width="10" height="3" class="body-d"/>
+                      <rect x="78" y="38" width="10" height="3" class="body-d"/>
+                      <rect x="4" y="46" width="3" height="4" class="body-d"/>
+                      <rect x="34" y="46" width="3" height="4" class="body-d"/>
+                      <rect x="40" y="46" width="3" height="4" class="body-d"/>
+                      <rect x="70" y="46" width="3" height="4" class="body-d"/>
+                      <rect x="76" y="46" width="3" height="4" class="body-d"/>
+                      <rect x="86" y="46" width="3" height="4" class="body-d"/>
+                    </g>
+                  </svg>
+                </div>
+                <div class="mc-body">
+                  <div class="mc-sku">OmegaPlus 90ct</div>
+                  <div class="mc-line">Lin W.</div>
+                  <div class="mc-time">00:51:30</div>
+                  <div class="mc-units"><strong>3,600</strong> units</div>
+                </div>
+                <div class="mc-footer"><div class="mc-dot"></div><div class="mc-foot-label">Running</div></div>
+              </div>
+
+              <div class="arrow-link" style="filter:drop-shadow(0 0 6px rgba(94,155,196,0.55));"><svg viewBox="0 0 22 16" fill="none"><line x1="0" y1="8" x2="16" y2="8" stroke="#5E9BC4" stroke-width="1.6" stroke-linecap="round"/><polygon points="13 4,21 8,13 12" fill="#5E9BC4"/></svg></div>
+
+              <div class="queue-cap">
+                <div class="queue-cap-label">Queue</div>
+                <div class="queue-cap-value">3</div>
+                <svg style="width:14px;height:11px;margin:2px 0;opacity:0.5;" viewBox="0 0 16 14" fill="none"><rect x="1" y="3" width="3" height="3" fill="#5A6578"/><rect x="6" y="3" width="3" height="3" fill="#5A6578"/><rect x="11" y="3" width="3" height="3" fill="#5A6578"/></svg>
+                <div class="queue-cap-time">AVG 11m</div>
+              </div>
+
+              <!-- Branch out: 1 → 2 induction sealers -->
+              <svg class="branch-arrows" viewBox="0 0 42 160" preserveAspectRatio="none" style="filter:drop-shadow(0 0 6px rgba(94,155,196,0.5));">
+                <path d="M0 80 L18 80" fill="none" stroke="#5E9BC4" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M18 80 L18 36 L30 36" fill="none" stroke="#5E9BC4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M18 80 L18 124 L30 124" fill="none" stroke="#5E9BC4" stroke-width="1.2" stroke-dasharray="3 2" stroke-linecap="round" stroke-linejoin="round"/>
+                <polygon points="30 32,38 36,30 40" fill="#5E9BC4"/>
+                <circle cx="18" cy="80" r="2" fill="#5E9BC4"/>
+              </svg>
+
+              <!-- 2 Induction Sealers -->
+              <div class="ind-stack">
+                <div class="mc running">
+                  <div class="mc-header"><div class="mc-name">Induction 1</div><div class="mc-badge">Running</div></div>
+                  <div class="mc-illust">
+                    <svg viewBox="0 0 100 60" preserveAspectRatio="xMidYMid meet">
+                      <line x1="0" y1="52" x2="100" y2="52" class="det" stroke-dasharray="1 1"/>
+                      <g transform="translate(4,6)">
+                        <rect x="0" y="42" width="92" height="4" class="base"/>
+                        <rect x="6" y="14" width="36" height="28" class="body"/>
+                        <rect x="8" y="16" width="32" height="4" class="body-l"/>
+                        <rect x="8" y="22" width="32" height="14" class="glass"/>
+                        <g><ellipse cx="14" cy="22" rx="2" ry="1" class="body-l"/><rect x="12" y="22" width="4" height="12" fill="#A586E5" opacity="0.7"/></g>
+                        <g><ellipse cx="22" cy="22" rx="2" ry="1" class="body-l"/><rect x="20" y="22" width="4" height="12" fill="#A586E5" opacity="0.7"/></g>
+                        <g><ellipse cx="30" cy="22" rx="2" ry="1" class="body-l"/><rect x="28" y="22" width="4" height="12" fill="#A586E5" opacity="0.7"/></g>
+                        <circle cx="14" cy="20" r="2" class="warn"/>
+                        <circle cx="22" cy="20" r="2" class="warn"/>
+                        <circle cx="30" cy="20" r="2" class="warn"/>
+                        <rect x="8" y="38" width="32" height="3" class="body-d"/>
+                        <rect x="46" y="20" width="40" height="22" class="body-d"/>
+                        <rect x="48" y="22" width="36" height="6" class="body-l"/>
+                        <rect x="48" y="30" width="36" height="10" class="panel"/>
+                        <line x1="50" y1="33" x2="82" y2="33" stroke="#F5B544" stroke-width="0.3"/>
+                        <line x1="50" y1="36" x2="82" y2="36" stroke="#F5B544" stroke-width="0.3"/>
+                        <circle cx="76" cy="26" r="1.5" class="glow"/>
+                        <rect x="44" y="6" width="14" height="8" class="body-d"/>
+                        <circle cx="51" cy="10" r="2" class="warn"/>
+                        <rect x="4" y="46" width="3" height="4" class="body-d"/>
+                        <rect x="42" y="46" width="3" height="4" class="body-d"/>
+                        <rect x="84" y="46" width="3" height="4" class="body-d"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <div class="mc-body">
+                    <div class="mc-sku">OmegaPlus 90ct</div>
+                    <div class="mc-line">Sam D. · 00:19:42</div>
+                    <div class="mc-units"><strong>2,880</strong></div>
+                  </div>
+                  <div class="mc-footer"><div class="mc-dot"></div><div class="mc-foot-label">Running</div></div>
+                </div>
+
+                <div class="mc idle">
+                  <div class="mc-header"><div class="mc-name">Induction 2</div><div class="mc-badge">Standby</div></div>
+                  <div class="mc-illust">
+                    <svg viewBox="0 0 100 60" preserveAspectRatio="xMidYMid meet">
+                      <line x1="0" y1="52" x2="100" y2="52" class="det" stroke-dasharray="1 1"/>
+                      <g transform="translate(4,6)" opacity="0.4">
+                        <rect x="0" y="42" width="92" height="4" class="base"/>
+                        <rect x="6" y="14" width="36" height="28" class="body"/>
+                        <rect x="8" y="16" width="32" height="4" class="body-l"/>
+                        <rect x="8" y="22" width="32" height="14" class="body-d"/>
+                        <g><ellipse cx="14" cy="22" rx="2" ry="1" class="body-l"/><rect x="12" y="22" width="4" height="12" fill="#4A5060" opacity="0.4"/></g>
+                        <g><ellipse cx="22" cy="22" rx="2" ry="1" class="body-l"/><rect x="20" y="22" width="4" height="12" fill="#4A5060" opacity="0.4"/></g>
+                        <g><ellipse cx="30" cy="22" rx="2" ry="1" class="body-l"/><rect x="28" y="22" width="4" height="12" fill="#4A5060" opacity="0.4"/></g>
+                        <rect x="8" y="38" width="32" height="3" class="body-d"/>
+                        <rect x="46" y="20" width="40" height="22" class="body-d"/>
+                        <rect x="48" y="22" width="36" height="6" class="body"/>
+                        <rect x="48" y="30" width="36" height="10" class="panel"/>
+                        <rect x="44" y="6" width="14" height="8" class="body-d"/>
+                        <rect x="4" y="46" width="3" height="4" class="body-d"/>
+                        <rect x="42" y="46" width="3" height="4" class="body-d"/>
+                        <rect x="84" y="46" width="3" height="4" class="body-d"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <div class="mc-body">
+                    <div class="mc-sku" style="color:var(--text-muted);">No bag assigned</div>
+                    <div class="mc-line" style="color:var(--text-muted);">Ready in ~3 min</div>
+                  </div>
+                  <div class="mc-footer"><div class="mc-dot"></div><div class="mc-foot-label">Standby</div></div>
+                </div>
+              </div><!-- /ind-stack -->
+
+              <!-- Branch in: 2 induction → 1 -->
+              <svg class="branch-arrows" viewBox="0 0 42 160" preserveAspectRatio="none" style="filter:drop-shadow(0 0 6px rgba(94,155,196,0.5));">
+                <path d="M0 36 L24 36 L24 80" fill="none" stroke="#5E9BC4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M24 80 L34 80" fill="none" stroke="#5E9BC4" stroke-width="1.6" stroke-linecap="round"/>
+                <circle cx="24" cy="80" r="2" fill="#5E9BC4"/>
+                <polygon points="34 76,42 80,34 84" fill="#5E9BC4"/>
+              </svg>
+
+            </div><!-- /route-flow bottle -->
+          </div>
+
+        </div><!-- /routes -->
+
+        <!-- PACK STATION — handpacking, spans both routes -->
+        <div class="pack-station">
+          <div class="mc-header">
+            <div class="mc-name">Pack Station</div>
+            <div class="mc-badge" style="color:var(--emerald);background:var(--emerald-soft);">Active</div>
+          </div>
+          <!-- Operators — not a machine -->
+          <div style="flex:1;background:linear-gradient(180deg,#0E1420 0%,#060912 100%);
+               display:flex;flex-direction:column;align-items:center;justify-content:center;
+               gap:8px;padding:10px 8px;border-bottom:1px solid var(--border-subtle);overflow:hidden;position:relative;">
+            <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(94,155,196,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(94,155,196,0.04) 1px,transparent 1px);background-size:6px 6px;pointer-events:none;"></div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:7px;font-weight:700;letter-spacing:0.1em;z-index:1;">
+              <span style="color:var(--emerald);">CARD</span>
+              <span style="color:var(--text-muted);">+</span>
+              <span style="color:var(--steel);">BOTTLE</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;width:100%;z-index:1;">
+              <div style="background:#141A24;border:1px solid #2A3548;border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:5px 3px;">
+                <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#1A2230,#0F141D);border:1px solid #3A4458;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:700;color:#A8B0BD;">MR</div>
+                <div style="font-size:6.5px;color:var(--text-tertiary);">Maria R.</div>
+              </div>
+              <div style="background:#141A24;border:1px solid #2A3548;border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:5px 3px;">
+                <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#1A2230,#0F141D);border:1px solid #3A4458;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:700;color:#A8B0BD;">JM</div>
+                <div style="font-size:6.5px;color:var(--text-tertiary);">Jose M.</div>
+              </div>
+              <div style="background:#141A24;border:1px solid #2A3548;border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:5px 3px;">
+                <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#1A2230,#0F141D);border:1px solid #3A4458;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:700;color:#A8B0BD;">LW</div>
+                <div style="font-size:6.5px;color:var(--text-tertiary);">Lin W.</div>
+              </div>
+              <div style="background:#141A24;border:1px solid #2A3548;border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:5px 3px;">
+                <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#1A2230,#0F141D);border:1px solid #2A3548;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:600;color:var(--text-tertiary);">+3</div>
+                <div style="font-size:6.5px;color:var(--text-muted);">3 more</div>
+              </div>
+            </div>
+          </div>
+          <div class="mc-body">
+            <div class="mc-sku">Handpacking · Both routes</div>
+            <div class="mc-units" style="margin-top:2px;"><strong>14</strong> bags · <strong>31,980</strong> units</div>
+            <div style="font-size:7.5px;color:var(--text-muted);margin-top:2px;">6 operators active</div>
+          </div>
+          <div class="mc-footer">
+            <div class="mc-dot" style="background:var(--emerald);box-shadow:0 0 4px var(--emerald);animation:pulse 2s infinite;"></div>
+            <div class="mc-foot-label" style="color:var(--emerald);">Active</div>
+          </div>
+        </div>
+
+      </div><!-- /flow-area -->
+    </div><!-- /prod-map -->
+
+    <!-- KPI STRIP -->
+    <div class="kpi-strip">
+      <div class="kpi">
+        <div class="kpi-label">Bags Today</div>
+        <div class="kpi-main good">24</div>
+        <div class="kpi-sub">Target 30 · <strong style="color:var(--amber);">6 units</strong></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Units Out</div>
+        <div class="kpi-main">31,980</div>
+        <div class="kpi-sub">vs yesterday <strong style="color:var(--emerald);">+0.2%</strong></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Bottleneck</div>
+        <div class="kpi-main sm warn">Blister queue</div>
+        <div class="kpi-sub">6 bags · oldest 34m</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Active Ops</div>
+        <div class="kpi-main">6</div>
+        <div class="kpi-sub">1 paused · <strong>Maria</strong> leading</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Yield</div>
+        <div class="kpi-main good">94.2%</div>
+        <div class="kpi-sub">Shift avg · target 92%</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Downtime</div>
+        <div class="kpi-main warn">12m</div>
+        <div class="kpi-sub">1 pause · PVC swap</div>
+      </div>
+    </div>
+
+  </div><!-- /left-col -->
+
+  <!-- RIGHT COL -->
+  <div class="right-col">
+
+    <div class="panel">
+      <div class="panel-h">
+        <div class="panel-title">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2 L14 13 L2 13 Z"/><line x1="8" y1="6" x2="8" y2="10"/><circle cx="8" cy="11.5" r="0.6" fill="currentColor"/></svg>
+          Material Risk
+        </div>
+      </div>
+      <div class="panel-body">
+        <table class="mr-table">
+          <thead><tr><th>Material</th><th>Time Left</th><th>Conf</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="mr-type">PVC Foil #4622</td>
+              <td><span class="mr-time-val crit">2h 42m</span></td>
+              <td><span class="mr-conf low">LOW</span></td>
+            </tr>
+            <tr>
+              <td class="mr-type">Foil Seal #3130</td>
+              <td><span class="mr-time-val warn">5h 18m</span></td>
+              <td><span class="mr-conf med">MED</span></td>
+            </tr>
+            <tr>
+              <td class="mr-type">Induction Seals</td>
+              <td><span class="mr-time-val good">&gt; 24h</span></td>
+              <td><span class="mr-conf high">HIGH</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-h">
+        <div class="panel-title">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><polyline points="5 8 7 10 11 6"/></svg>
+          Quality Watch
+        </div>
+        <div class="panel-meta">Last 4h</div>
+      </div>
+      <div class="qw-grid">
+        <div class="qw-cell">
+          <div class="qw-label">Yield</div>
+          <div class="qw-value" style="font-size:18px;">94.2%</div>
+          <div class="qw-sub">+1.5% vs avg</div>
+        </div>
+        <div class="qw-cell">
+          <div class="qw-label">Rejects</div>
+          <div class="qw-value crit">1</div>
+          <div class="qw-sub">2.1 ppm</div>
+        </div>
+        <div class="qw-cell">
+          <div class="qw-label">Scrap</div>
+          <div class="qw-value">0</div>
+          <div class="qw-sub">Clear</div>
+        </div>
+        <div class="qw-cell">
+          <div class="qw-label">Rework</div>
+          <div class="qw-value warn">3</div>
+          <div class="qw-sub">2.1 ppm</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="flex:1;min-height:0;">
+      <div class="panel-h">
+        <div class="panel-title">Recent Events</div>
+        <div class="panel-meta">Live</div>
+      </div>
+      <div class="panel-body" style="overflow-y:auto;flex:1;">
+        <div class="ev-list">
+          <div class="ev-row">
+            <div class="ev-time">14:28</div>
+            <div class="ev-dot amber"></div>
+            <div class="ev-body"><div class="ev-title">Heat Sealer 2 paused — PVC swap</div><div class="ev-sub">Jose M. · HSL-002</div></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-time">14:21</div>
+            <div class="ev-dot emerald"></div>
+            <div class="ev-body"><div class="ev-title">Bag HSL-019 finalized · 4,100 units</div><div class="ev-sub">Heat Sealer 3</div></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-time">14:14</div>
+            <div class="ev-dot emerald"></div>
+            <div class="ev-body"><div class="ev-title">Heat Sealer 3 picked up OmegaPlus</div><div class="ev-sub">Aisha K. · HSL-003</div></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-time">14:08</div>
+            <div class="ev-dot coral"></div>
+            <div class="ev-body"><div class="ev-title">PVC Foil #4622 — 2h 42m remaining</div><div class="ev-sub">Material alert · auto-detected</div></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-time">14:02</div>
+            <div class="ev-dot emerald"></div>
+            <div class="ev-body"><div class="ev-title">Induction 1 resumed — Sam D.</div><div class="ev-sub">IND-001 · OmegaPlus 90ct</div></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-time">13:58</div>
+            <div class="ev-dot"></div>
+            <div class="ev-body"><div class="ev-title">Blister bag BIS-041 started</div><div class="ev-sub">Maria R. · BIS-001 · VitaFlex 60ct</div></div>
+          </div>
+          <div class="ev-row">
+            <div class="ev-time">13:51</div>
+            <div class="ev-dot"></div>
+            <div class="ev-body"><div class="ev-title">Stickering lot STK-004 loaded</div><div class="ev-sub">Lin W. · STK-001 · OmegaPlus 90ct</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /right-col -->
+
+</div><!-- /main -->
+
+<div class="foot">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <div class="foot-ok">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><polyline points="5 8 7 10 11 6"/></svg>
+      All systems operational
+    </div>
+    <span>· Auto-refresh every 10s</span>
+  </div>
+  <span>Luma Production Command · Shift B · 06:00–14:00</span>
+  <span>All times local</span>
+</div>
+
+</div><!-- /cmd-os -->
+<script>
+(function tick() {
+  var el = document.getElementById('clock');
+  if (el) el.textContent = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  setTimeout(tick, 1000);
+})();
+</script>
+</body>
+</html>
