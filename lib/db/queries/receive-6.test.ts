@@ -45,3 +45,49 @@ describe("formatFlavorSummary", () => {
     ).toBe("MIT B Grape + 2 more");
   });
 });
+
+describe("QR assignment context formatting", () => {
+  function buildAssignmentContext(intakeBag: {
+    receiveName: string | null;
+    bagNumber: number | null;
+    internalReceiptNumber: string | null;
+    tabletTypeName: string | null;
+  }): string {
+    const parts: string[] = [];
+    if (intakeBag.receiveName) parts.push(intakeBag.receiveName);
+    if (intakeBag.bagNumber != null) parts.push(`Bag ${intakeBag.bagNumber}`);
+    if (intakeBag.internalReceiptNumber) parts.push(`Receipt ${intakeBag.internalReceiptNumber}`);
+    if (intakeBag.tabletTypeName) parts.push(intakeBag.tabletTypeName);
+    return parts.join(" · ") || "Assigned — no bag context found";
+  }
+
+  it("builds full context when all fields present", () => {
+    const ctx = buildAssignmentContext({
+      receiveName: "PO-00238-R1",
+      bagNumber: 2,
+      internalReceiptNumber: "352180",
+      tabletTypeName: "MIT B Green Apple",
+    });
+    expect(ctx).toBe("PO-00238-R1 · Bag 2 · Receipt 352180 · MIT B Green Apple");
+  });
+
+  it("shows fallback when all fields are null", () => {
+    const ctx = buildAssignmentContext({
+      receiveName: null,
+      bagNumber: null,
+      internalReceiptNumber: null,
+      tabletTypeName: null,
+    });
+    expect(ctx).toBe("Assigned — no bag context found");
+  });
+
+  it("handles partial context gracefully", () => {
+    const ctx = buildAssignmentContext({
+      receiveName: "PO-00238-R1",
+      bagNumber: 3,
+      internalReceiptNumber: null,
+      tabletTypeName: null,
+    });
+    expect(ctx).toBe("PO-00238-R1 · Bag 3");
+  });
+});

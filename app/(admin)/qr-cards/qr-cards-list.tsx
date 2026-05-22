@@ -25,6 +25,9 @@ type QrCardRow = {
     id: string | null;
     internalReceiptNumber: string | null;
     batchId: string | null;
+    bagNumber: number | null;
+    receiveName: string | null;
+    tabletTypeName: string | null;
   } | null;
   intakeBatchNumber: string | null;
 };
@@ -307,17 +310,28 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
                       </span>
                     </div>
                   )}
-                  {card.status === "ASSIGNED" && !bag && intakeBag && (
+                  {card.status === "ASSIGNED" && card.cardType === "RAW_BAG" && !bag && intakeBag && (
                     <div className="text-[11px] leading-tight">
                       <span className="text-sky-700 font-semibold">Reserved at receive</span>
                       <span className="text-text-muted">
-                        {intakeBag.internalReceiptNumber ? ` · ${intakeBag.internalReceiptNumber}` : ""}
-                        {intakeBatchNumber ? ` · lot ${intakeBatchNumber}` : ""}
+                        {intakeBag.receiveName ? ` · ${intakeBag.receiveName}` : ""}
+                        {intakeBag.bagNumber != null ? ` · Bag ${intakeBag.bagNumber}` : ""}
+                        {intakeBag.internalReceiptNumber
+                          ? ` · Receipt ${intakeBag.internalReceiptNumber}`
+                          : ""}
+                        {intakeBag.tabletTypeName ? ` · ${intakeBag.tabletTypeName}` : ""}
                       </span>
                     </div>
                   )}
-                  {card.status === "ASSIGNED" && !bag && !intakeBag && (
-                    <span className="text-[11px] text-text-muted italic">Unknown assignment</span>
+                  {card.status === "ASSIGNED" && card.cardType === "RAW_BAG" && !bag && !intakeBag && (
+                    <span className="text-[11px] text-text-muted italic">
+                      Assigned — no bag context found
+                    </span>
+                  )}
+                  {card.status === "ASSIGNED" && card.cardType !== "RAW_BAG" && !bag && (
+                    <span className="text-[11px] text-text-muted italic">
+                      Assigned — no active workflow
+                    </span>
                   )}
                   {card.status !== "RETIRED" && (
                     <RetireButton
