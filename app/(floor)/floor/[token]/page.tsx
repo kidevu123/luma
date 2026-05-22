@@ -87,8 +87,8 @@ export default async function FloorStationPage({
     .leftJoin(products, eq(products.id, workflowBags.productId))
     .where(eq(readStationLive.stationId, station.station.id));
 
-  // RAW_BAG cards available to scan: IDLE or ASSIGNED with no workflow bag
-  // (intake-reserved). Filtered to RAW_BAG type only — VARIETY_PACK and
+  // RAW_BAG cards available to scan: ASSIGNED with no workflow bag
+  // (intake-reserved only). Filtered to RAW_BAG type only — VARIETY_PACK and
   // WORKFLOW_TRAVELER cards must never appear here. Only shown at stations
   // that can start fresh bags; pickup-only stations see only eligiblePickups.
   const canStartFreshBag = FIRST_OP_STATION_KINDS.has(station.station.kind);
@@ -99,7 +99,7 @@ export default async function FloorStationPage({
   const allowedProductKinds =
     STATION_KIND_TO_PRODUCT_KINDS[station.station.kind] ?? [];
 
-  // Eligible RAW_BAG cards: IDLE + intake-reserved (ASSIGNED+no-workflowBag),
+  // Eligible RAW_BAG cards: intake-reserved only (ASSIGNED+no-workflowBag),
   // filtered to bags whose tablet type is compatible with this station.
   // "Compatible" = the tablet type has at least one active product of an
   // allowed kind for this station (e.g. CARD/VARIETY at BLISTER).
@@ -145,10 +145,8 @@ export default async function FloorStationPage({
           .where(
             and(
               eq(qrCards.cardType, "RAW_BAG"),
-              or(
-                eq(qrCards.status, "IDLE"),
-                and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId)),
-              ),
+              eq(qrCards.status, "ASSIGNED"),
+              isNull(qrCards.assignedWorkflowBagId),
               or(
                 isNull(inventoryBags.tabletTypeId),
                 inArray(inventoryBags.tabletTypeId, compatibleTabletTypeIds),
