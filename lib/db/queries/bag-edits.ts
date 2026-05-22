@@ -312,7 +312,7 @@ export async function editInventoryBag(
       if (input.weightGrams !== undefined) patch.weightGrams = input.weightGrams;
       if (input.notes !== undefined) patch.notes = input.notes;
       if (input.internalReceiptNumber !== undefined)
-        patch.internalReceiptNumber = input.internalReceiptNumber;
+        patch.internalReceiptNumber = input.internalReceiptNumber?.trim() ?? null;
       if (input.bagQrCode !== undefined)
         patch.bagQrCode = input.bagQrCode?.trim() ?? null;
       if (newBatchId !== undefined) patch.batchId = newBatchId;
