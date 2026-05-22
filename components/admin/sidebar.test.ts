@@ -144,6 +144,7 @@ describe("WORKFLOW-UX-1 · all sidebar routes present", () => {
     "/zoho-operations",
     "/packaging-receipts",
     "/production-capacity",
+    "/partial-bags",
   ];
   for (const route of currentRoutes) {
     it(`${route} is linked from the sidebar`, () => {
