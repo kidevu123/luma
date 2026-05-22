@@ -33,4 +33,12 @@ describe("saveProductAction field extraction", () => {
     expect(zohoItemIdDisplay).toBe("ZOHO-DISP-789");
     expect(zohoItemIdCase).toBe("ZOHO-CASE-101");
   });
+
+  it("treats empty-string assembly ID as undefined (skip column, not clear)", () => {
+    const fd = new FormData();
+    fd.set("zohoItemIdUnit", "");
+
+    const zohoItemIdUnit = (fd.get("zohoItemIdUnit") as string | null) || undefined;
+    expect(zohoItemIdUnit).toBeUndefined();
+  });
 });

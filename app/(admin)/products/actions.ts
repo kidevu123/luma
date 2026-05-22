@@ -46,6 +46,8 @@ export async function saveProductAction(
     defaultShelfLifeDays: formData.get("defaultShelfLifeDays") || null,
     zohoItemId: (formData.get("zohoItemId") as string | null) || null,
     isActive: formData.get("isActive") === "on",
+    // Assembly IDs: undefined → compact() drops the key → Drizzle skips column entirely.
+    // Empty string also maps to undefined (intentional — use the mapping form to clear).
     zohoItemIdUnit:    (formData.get("zohoItemIdUnit") as string | null) || undefined,
     zohoItemIdDisplay: (formData.get("zohoItemIdDisplay") as string | null) || undefined,
     zohoItemIdCase:    (formData.get("zohoItemIdCase") as string | null) || undefined,
