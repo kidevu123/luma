@@ -134,4 +134,28 @@ describe("matchesQrSearch", () => {
     const noLot = { ...row, intakeBatchNumber: null };
     expect(matchesQrSearch(noLot, "49")).toBe(true);
   });
+
+  it("matches receive name", () => {
+    const withReceive = {
+      ...row,
+      intakeBag: { internalReceiptNumber: "RB-20260514-049", receiveName: "PO-00238-R1" },
+    };
+    expect(matchesQrSearch(withReceive, "PO-00238")).toBe(true);
+  });
+
+  it("returns false when only receive name does not match query", () => {
+    const withReceive = {
+      ...row,
+      intakeBag: { internalReceiptNumber: "RB-20260514-049", receiveName: "PO-00238-R1" },
+    };
+    expect(matchesQrSearch(withReceive, "PO-99999")).toBe(false);
+  });
+
+  it("handles null receiveName without throwing", () => {
+    const noReceive = {
+      ...row,
+      intakeBag: { internalReceiptNumber: "RB-20260514-049", receiveName: null },
+    };
+    expect(matchesQrSearch(noReceive, "49")).toBe(true);
+  });
 });

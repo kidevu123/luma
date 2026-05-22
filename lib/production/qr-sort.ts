@@ -1,6 +1,9 @@
 type QrCardSortable = {
   card: { label: string; cardType: string };
-  intakeBag?: { internalReceiptNumber: string | null } | null;
+  intakeBag?: {
+    internalReceiptNumber: string | null;
+    receiveName?: string | null;
+  } | null;
   intakeBatchNumber?: string | null;
   productName?: string | null;
 };
@@ -40,6 +43,7 @@ export function matchesQrSearch(row: QrCardSortable & { card: { scanToken?: stri
     row.card.label.toLowerCase().includes(qLower) ||
     (row.card.scanToken?.toLowerCase().includes(qLower) ?? false) ||
     (row.intakeBag?.internalReceiptNumber?.toLowerCase().includes(qLower) ?? false) ||
+    (row.intakeBag?.receiveName?.toLowerCase().includes(qLower) ?? false) ||
     (row.intakeBatchNumber?.toLowerCase().includes(qLower) ?? false) ||
     (row.productName?.toLowerCase().includes(qLower) ?? false)
   );

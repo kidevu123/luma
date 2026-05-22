@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.37] — 2026-05-22
+
+### Improved
+- QR Cards admin page is now a compact table instead of tall card rows, dramatically reducing scroll on pages with 100+ cards. Each row shows label + scan token, type badge, status badge, assignment context, and retire action.
+- Numeric sort already in place (bag-card-1 … bag-card-200, not lexicographic). Summary tiles condensed to a 4-column grid.
+- Search now matches receive name in addition to label, token, receipt #, lot, and product.
+
+### Tests
+- Added 3 unit tests for receive-name search in `matchesQrSearch`.
+
 ## [0.2.36] — 2026-05-22
 
 ### Fixed
