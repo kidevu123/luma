@@ -87,9 +87,7 @@ export default async function FloorStationPage({
   // (intake-reserved). Filtered to RAW_BAG type only — VARIETY_PACK and
   // WORKFLOW_TRAVELER cards must never appear here. Only shown at stations
   // that can start fresh bags; pickup-only stations see only eligiblePickups.
-  const canStartFreshBag = (
-    new Set(["BLISTER", "HANDPACK_BLISTER", "BOTTLE_HANDPACK", "COMBINED"])
-  ).has(station.station.kind);
+  const canStartFreshBag = FIRST_OP_STATION_KINDS.has(station.station.kind);
   // Eligible RAW_BAG cards: IDLE + intake-reserved (ASSIGNED+no-workflowBag).
   // Left-joined to inventory_bags and tablet_types for secondary dropdown info
   // (receipt number, tablet type name). Only queried at stations that can
@@ -269,7 +267,9 @@ export default async function FloorStationPage({
         {!currentAtStation ? (
           <div className="py-3">
             <p className="text-sm text-text-muted mb-3">
-              No bag at this station. Scan a bag QR or select one below.
+              {canStartFreshBag
+                ? "No bag at this station. Scan a received bag QR or select one below."
+                : "No bag at this station. This station accepts bags released from a prior stage."}
             </p>
             <ScanCardForm
               token={token}

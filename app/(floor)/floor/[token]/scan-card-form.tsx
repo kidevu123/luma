@@ -222,6 +222,12 @@ export function ScanCardForm({
           </p>
         )}
 
+        {!canStartFreshBag && !hasPickups && (
+          <p className="text-xs text-text-muted rounded-lg border border-border/70 bg-surface px-3 py-2">
+            This station only accepts bags already routed here. Scan the bag QR when it arrives at this station.
+          </p>
+        )}
+
         {/* Dropdown backup — only when there are eligible options */}
         {hasDropdownOptions && (
           <>
@@ -241,7 +247,7 @@ export function ScanCardForm({
               className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
             >
               <option value="" disabled>
-                Select an eligible bag QR…
+                Select a received bag QR…
               </option>
               {hasPickups && (
                 <optgroup label="Pick up released bag (same QR continues)">
@@ -255,7 +261,7 @@ export function ScanCardForm({
                 </optgroup>
               )}
               {hasIdle && (
-                <optgroup label={hasPickups ? "Start a new bag" : "Eligible bag QRs"}>
+                <optgroup label={hasPickups ? "Received bags — start new" : "Received bags"}>
                   {idleCards.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.label}
