@@ -452,8 +452,12 @@ export async function scanCardAction(
     return { error: err instanceof Error ? err.message : "Scan failed." };
   }
 
-  revalidatePath(`/floor/${token}`);
-  revalidatePath(`/floor-board`);
+  try {
+    revalidatePath(`/floor/${token}`);
+    revalidatePath(`/floor-board`);
+  } catch {
+    // Cache invalidation failure is non-fatal; client will see fresh data on next hard refresh.
+  }
   return { ok: true };
 }
 

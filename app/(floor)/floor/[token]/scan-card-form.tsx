@@ -199,6 +199,8 @@ export function ScanCardForm({
             const r = await scanCardAction(form);
             if (r?.error) setError(r.error);
             else router.refresh();
+          } catch {
+            setError("Start failed — please try again or refresh the page.");
           } finally {
             setPending(false);
           }
