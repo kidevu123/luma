@@ -16,6 +16,7 @@ import {
 } from "@/lib/db/schema";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { sortCapacityRows } from "@/lib/production/capacity";
 
 export const dynamic = "force-dynamic";
 
@@ -277,7 +278,7 @@ function CapCell({
 
 export default async function ProductionCapacityPage() {
   await requireAdmin();
-  const rows = await loadCapacity();
+  const rows = sortCapacityRows(await loadCapacity());
 
   return (
     <div className="space-y-5">
