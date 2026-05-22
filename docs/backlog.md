@@ -11,7 +11,21 @@ Items captured for future work. Not scheduled.
 ## Partial bags
 
 - **Available Partial Bags page** — ✅ Done in v0.2.23: `/partial-bags` admin page shows AVAILABLE raw bags with ≥1 closed allocation session. Derived from `rawBagAllocationSessions` ledger — no new DB status. Includes remaining estimate, last product, last used date, Start run link. Sidebar link in Operations.
-- **Variety parent/child QR workflow** — Separate next workflow. Variety packs use a different QR type (`VARIETY_PACK`) and session model. Do not conflate with raw-bag partial lifecycle.
+- **Variety parent/child QR workflow (VARIETY-2)** — Full audit completed in v0.2.23 (VARIETY-1). Two critical gaps found:
+  1. **QR validation gap**: `startOrResumeVarietyRunAction` accepts any string as `parentScanToken` with zero lookup against `qr_cards`. Any mistyped token silently opens a run. Must validate: card exists, `cardType = VARIETY_PACK`, not RETIRED, and respect IDLE/ASSIGNED state (one open run per card enforced by partial index but QR state never updated).
+  2. **QR release bug**: Variety source bags have no `workflow_bag` record, so `BAG_FINALIZED` never fires and `shouldReleaseQrAtFinalization` is never called. VARIETY_PACK QR cards remain permanently ASSIGNED after a variety run depletes the bag — no automatic or manual release path exists today.
+
+  **Chosen approach (Option B):** Add `varietyQrCardId` FK column on `variety_runs` (migration 0043). Code-only validation first (no FK migration yet), then add FK once validated.
+
+  **Minimum safe phase (VARIETY-2a — code only, no migration):**
+  - Look up `qr_cards` by `parentScanToken` in `startOrResumeVarietyRunAction`; reject if not found, not `VARIETY_PACK`, or RETIRED
+  - Set `qr_cards.status = ASSIGNED` when variety run opens (via `updateQrCardStatusAction`)
+  - Set `qr_cards.status = IDLE` when variety run closes (`closeVarietyRunAction`)
+  - Fix RAW_BAG QR release for variety-depleted bags: in `closeVarietyRunAction`, after all source bag sessions are closed/depleted, check `deriveBagStatusAfterClose` for each source bag and release its RAW_BAG QR if depleted (mirrors `shouldReleaseQrAtFinalization` logic)
+
+  **Phase VARIETY-2b (optional, after validation):** Add `varietyQrCardId uuid REFERENCES qr_cards(id)` to `variety_runs` as a formal FK; backfill for existing open runs.
+
+  **Known risks:** (a) existing open variety runs have no QR state — VARIETY-2a must not retroactively force-assign; only validate/set on new opens. (b) source bags can be split across multiple variety runs — QR release must only fire when `endingBalanceQty = 0`, not on every session close.
 - **Start Production: preselect bag from partial-bags page** — Currently clicking "Start run" from `/partial-bags` goes to `/production/start` without the bag pre-selected. A future enhancement could pass `?bagId=` query param and auto-populate Step 1. Requires the Start Production form to read URL params on mount.
 
 ## Production UI
