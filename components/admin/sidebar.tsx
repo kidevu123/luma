@@ -46,41 +46,29 @@ type Section = { heading: string; items: NavItem[]; collapsedByDefault?: boolean
 
 const SECTIONS: Section[] = [
   {
-    heading: "Floor work",
+    heading: "Operations",
     items: [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/floor-board", label: "Live floor", icon: Activity },
-      { href: "/inbound", label: "Receiving", icon: Inbox },
       { href: "/production/start", label: "Start production", icon: QrCode },
-      { href: "/workflow-submissions", label: "Workflow submissions", icon: ClipboardList },
-      { href: "/packaging-output", label: "Packaging / pack-out", icon: Package },
+      { href: "/inbound", label: "Receiving", icon: Inbox },
+      { href: "/packaging-output", label: "Pack-out", icon: Package },
       { href: "/qc-review", label: "QC review", icon: ShieldAlert },
-      { href: "/recall", label: "Lookup receipt / batch", icon: Search },
     ],
   },
   {
-    heading: "Management",
+    heading: "Oversight",
     items: [
+      { href: "/workflow-submissions", label: "Workflows", icon: ClipboardList },
       { href: "/packaging-inventory", label: "Inventory", icon: Boxes },
-      { href: "/production-capacity", label: "Production capacity", icon: Factory },
-      { href: "/material-alerts", label: "Material alerts", icon: TrendingUp },
-      { href: "/invoice-allocations", label: "Invoice allocations", icon: Receipt },
-      { href: "/reports", label: "Production reports", icon: BarChart3 },
-      { href: "/operator-productivity", label: "Operator productivity", icon: Users },
+      { href: "/production-capacity", label: "Capacity", icon: Factory },
       { href: "/finished-lots", label: "Finished lots", icon: PackageCheck },
-      { href: "/active-rolls", label: "Active rolls", icon: Activity },
-      { href: "/metrics", label: "Metrics", icon: BarChart3 },
+      { href: "/metrics", label: "Reports", icon: BarChart3 },
+      { href: "/recall", label: "Find lot / batch", icon: Search },
     ],
   },
   {
-    heading: "Configuration",
+    heading: "Configure",
     items: [
-      { href: "/products", label: "Products & packaging rules", icon: PackageCheck },
-      { href: "/product-packaging-requirements", label: "Product requirements", icon: PackageCheck },
-      { href: "/standards", label: "Standards & targets", icon: Gauge },
-      { href: "/settings/integrations/zoho", label: "Integrations", icon: Plug },
-      { href: "/settings/users", label: "Users", icon: UserCog },
-      { href: "/workflow-validation", label: "Workflow validation", icon: ShieldCheck },
+      { href: "/products", label: "Products", icon: PackageCheck },
       { href: "/settings", label: "Settings", icon: Sliders },
     ],
   },
@@ -88,6 +76,18 @@ const SECTIONS: Section[] = [
     heading: "Advanced",
     collapsedByDefault: true,
     items: [
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/floor-board", label: "Live floor", icon: Activity },
+      { href: "/material-alerts", label: "Material alerts", icon: TrendingUp },
+      { href: "/active-rolls", label: "Active rolls", icon: Activity },
+      { href: "/invoice-allocations", label: "Invoice allocations", icon: Receipt },
+      { href: "/reports", label: "Production reports", icon: BarChart3 },
+      { href: "/operator-productivity", label: "Operator productivity", icon: Users },
+      { href: "/product-packaging-requirements", label: "Product requirements", icon: PackageCheck },
+      { href: "/standards", label: "Standards & targets", icon: Gauge },
+      { href: "/settings/integrations/zoho", label: "Integrations", icon: Plug },
+      { href: "/settings/users", label: "Users", icon: UserCog },
+      { href: "/workflow-validation", label: "Workflow validation", icon: ShieldCheck },
       { href: "/qr-cards", label: "QR card management", icon: QrCode },
       { href: "/genealogy", label: "Bag genealogy", icon: History },
       { href: "/zoho-operations", label: "Zoho Operations", icon: Webhook },
@@ -172,7 +172,7 @@ export function Sidebar() {
     <aside className="hidden lg:flex w-[232px] shrink-0 flex-col bg-surface border-r border-border sticky top-0 h-dvh">
       {/* Brand header — the one inverse band in the sidebar. Sets
           identity, anchors the visual weight at the top. */}
-      <div className="relative bg-inverse text-text-inverse px-5 pt-5 pb-4 border-b border-inverse">
+      <Link href="/dashboard" className="relative block bg-inverse text-text-inverse px-5 pt-5 pb-4 border-b border-inverse hover:opacity-90 transition-opacity">
         <div className="flex items-start justify-between">
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-text-inverse/55">
@@ -190,7 +190,7 @@ export function Sidebar() {
             className="pulse-accent mt-1 inline-block h-2 w-2 rounded-full bg-brand-accent"
           />
         </div>
-      </div>
+      </Link>
 
       <nav className="flex-1 px-2 py-3 space-y-3 overflow-y-auto">
         {SECTIONS.map((sec) => {
