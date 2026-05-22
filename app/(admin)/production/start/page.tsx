@@ -1,17 +1,17 @@
-// START-2 — Start Production workflow.
+// START-3 — Start Production workflow.
 //
 // Guided 4-step flow: scan the raw bag → pick the station → pick product
-// (auto-resolved by station type) → confirm QR card → click Start.
+// (auto-resolved by station type) → click Start.
+// The bag's own QR card (reserved at receiving) is looked up automatically.
 // The CARD_ASSIGNED event fires through projectEvent inside the action,
 // just like the floor PWA does. This is the admin on-ramp; downstream
 // stage events still come from station scans.
 
 import { db } from "@/lib/db";
-import { and, asc, eq, isNull, ne, or } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import {
   productAllowedTablets,
   products,
-  qrCards,
   stations,
 } from "@/lib/db/schema";
 import { requireLead } from "@/lib/auth-guards";
@@ -23,21 +23,7 @@ export const dynamic = "force-dynamic";
 export default async function StartProductionPage() {
   await requireLead();
 
-  const [idleCards, activeStations, allowedRows] = await Promise.all([
-    db
-      .select({ id: qrCards.id, code: qrCards.label, scanToken: qrCards.scanToken })
-      .from(qrCards)
-      .where(
-        and(
-          ne(qrCards.cardType, "VARIETY_PACK"),
-          or(
-            eq(qrCards.status, "IDLE"),
-            and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId))
-          )
-        )
-      )
-      .orderBy(asc(qrCards.label))
-      .limit(200),
+  const [activeStations, allowedRows] = await Promise.all([
     db
       .select({ id: stations.id, label: stations.label, kind: stations.kind })
       .from(stations)
@@ -56,29 +42,18 @@ export default async function StartProductionPage() {
       .where(eq(products.isActive, true)),
   ]);
 
-  const idleCardCount = idleCards.length;
   const stationCount = activeStations.length;
-  const idleReady = idleCardCount > 0;
   const stationReady = stationCount > 0;
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Start production"
-        description="Scan a received raw bag, pick the station, confirm the product (auto-selected by station type), and confirm the QR card. QR card administration (mint / retire / print) lives under Advanced → QR card management."
+        description="Scan a received raw bag, pick the station, confirm the product (auto-selected by station type), and start production. The raw bag's QR card — reserved at receiving — activates automatically."
       />
 
       {/* Readiness badges */}
       <div className="flex flex-wrap gap-2">
-        <span
-          className={`inline-flex items-center h-6 px-2.5 rounded-md border text-[11px] font-mono ${
-            idleReady
-              ? "border-sky-200 bg-sky-50 text-sky-700"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
-        >
-          {idleCardCount} idle or intake-reserved QR card{idleCardCount === 1 ? "" : "s"}
-        </span>
         <span
           className={`inline-flex items-center h-6 px-2.5 rounded-md border text-[11px] font-mono ${
             stationReady
@@ -106,7 +81,7 @@ export default async function StartProductionPage() {
             "Scan raw bag",
             "Pick station",
             "Pick product",
-            "Confirm QR card · Start run",
+            "Start run",
           ].map((stepLabel, i) => (
             <li key={stepLabel} className="flex items-center gap-3">
               <span
@@ -129,7 +104,6 @@ export default async function StartProductionPage() {
       </div>
 
       <StartProductionForm
-        idleCards={idleCards.map((c) => ({ id: c.id, code: c.code, scanToken: c.scanToken }))}
         stations={activeStations}
         allowedProductsByTabletType={groupAllowedProductsByTabletType(allowedRows)}
       />

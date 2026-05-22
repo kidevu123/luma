@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveStartProductionProduct,
+  validateRawBagQrForStart,
   type CandidateProduct,
 } from "./start-production";
 
@@ -205,5 +206,68 @@ describe("resolveStartProductionProduct", () => {
       candidateProducts: [card1, variety1],
     });
     expect(r).toEqual({ kind: "choose", candidates: [card1, variety1] });
+  });
+});
+
+describe("validateRawBagQrForStart", () => {
+  const baseCard = { status: "ASSIGNED", cardType: "RAW_BAG", assignedWorkflowBagId: null };
+
+  // --- no QR on bag ---
+  it("ok:false when bagQrCode is null", () => {
+    expect(validateRawBagQrForStart(null, null).ok).toBe(false);
+  });
+
+  it("error message mentions 'receiving' when bagQrCode is null", () => {
+    const r = validateRawBagQrForStart(null, null);
+    if (!r.ok) expect(r.error).toMatch(/receiving/i);
+  });
+
+  // --- card not found ---
+  it("ok:false when card is null and bagQrCode is set", () => {
+    const r = validateRawBagQrForStart(null, "BAG-abc123");
+    expect(r.ok).toBe(false);
+  });
+
+  // --- wrong card type ---
+  it("ok:false for VARIETY_PACK cardType", () => {
+    expect(validateRawBagQrForStart({ ...baseCard, cardType: "VARIETY_PACK" }, "tok").ok).toBe(false);
+  });
+
+  it("ok:false for WORKFLOW_TRAVELER cardType", () => {
+    expect(validateRawBagQrForStart({ ...baseCard, cardType: "WORKFLOW_TRAVELER" }, "tok").ok).toBe(false);
+  });
+
+  it("ok:false for UNKNOWN cardType", () => {
+    expect(validateRawBagQrForStart({ ...baseCard, cardType: "UNKNOWN" }, "tok").ok).toBe(false);
+  });
+
+  // --- retired card ---
+  it("ok:false when card is RETIRED", () => {
+    expect(validateRawBagQrForStart({ ...baseCard, status: "RETIRED" }, "tok").ok).toBe(false);
+  });
+
+  // --- already in production ---
+  it("ok:false when card is ASSIGNED with non-null assignedWorkflowBagId (already in production)", () => {
+    const r = validateRawBagQrForStart(
+      { status: "ASSIGNED", cardType: "RAW_BAG", assignedWorkflowBagId: "wf-uuid-123" },
+      "tok",
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  // --- unknown future status ---
+  it("ok:false for unrecognised status value (future-proofing)", () => {
+    expect(validateRawBagQrForStart({ ...baseCard, status: "LOST" }, "tok").ok).toBe(false);
+  });
+
+  // --- valid cases ---
+  it("ok:true for IDLE RAW_BAG card (fresh card, no prior assignment)", () => {
+    expect(
+      validateRawBagQrForStart({ status: "IDLE", cardType: "RAW_BAG", assignedWorkflowBagId: null }, "tok").ok,
+    ).toBe(true);
+  });
+
+  it("ok:true for ASSIGNED RAW_BAG card with null assignedWorkflowBagId (intake-reserved)", () => {
+    expect(validateRawBagQrForStart(baseCard, "tok").ok).toBe(true);
   });
 });

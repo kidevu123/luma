@@ -1,11 +1,11 @@
 "use client";
 
-// START-2 — Start Production guided flow.
+// START-3 — Start Production guided flow.
 //
 // Step 1: scan / paste a raw bag receipt # or BAG-uuid QR.
 // Step 2: pick the station (determines product kind filter).
 // Step 3: product auto-resolved from station type, or operator picks from narrowed list.
-// Step 4: confirm QR card + click Start production.
+// Step 4: click Start — the bag's own QR card (reserved at receiving) activates automatically.
 //
 // On success we render a StartedPanel with PO / vendor / product /
 // receipt / QR / IDs and a link back to the live floor.
@@ -28,15 +28,12 @@ import {
   type CandidateProduct,
 } from "@/lib/production/start-production";
 
-type IdleCard = { id: string; code: string | null; scanToken: string };
 type StationOpt = { id: string; label: string; kind: string };
 
 export function StartProductionForm({
-  idleCards,
   stations,
   allowedProductsByTabletType,
 }: {
-  idleCards: IdleCard[];
   stations: StationOpt[];
   allowedProductsByTabletType: Record<string, CandidateProduct[]>;
 }) {
@@ -44,7 +41,6 @@ export function StartProductionForm({
   const [lookup, setLookup] = useState<RawBagLookupResult | null>(null);
   const [stationId, setStationId] = useState("");
   const [productId, setProductId] = useState("");
-  const [qrCardId, setQrCardId] = useState("");
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<StartProductionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,24 +78,12 @@ export function StartProductionForm({
     }
   }, [resolution]);
 
-  // Auto-select the QR card reserved at intake for this bag.
-  useEffect(() => {
-    if (!lookup?.found) return;
-    const bagQrCode = lookup.bag.bagQrCode;
-    if (!bagQrCode) return;
-    const match = idleCards.find((c) => c.scanToken === bagQrCode);
-    if (match) {
-      setQrCardId(match.id);
-    }
-  }, [lookup, idleCards]);
-
   function handleLookup() {
     if (!scanValue.trim()) return;
     setError(null);
     setLookup(null);
     setStationId("");
     setProductId("");
-    setQrCardId("");
     setResult(null);
     startTransition(async () => {
       try {
@@ -115,14 +99,13 @@ export function StartProductionForm({
   }
 
   function handleStart() {
-    if (!resolvedBag || !productId || !qrCardId || !stationId) return;
+    if (!resolvedBag || !productId || !stationId) return;
     setError(null);
     startTransition(async () => {
       try {
         const r = await startProductionForRawBagAction({
           inventoryBagId: resolvedBag.bag.id,
           productId,
-          qrCardId,
           stationId,
         });
         setResult(r);
@@ -140,7 +123,6 @@ export function StartProductionForm({
     setLookup(null);
     setStationId("");
     setProductId("");
-    setQrCardId("");
     setResult(null);
     setError(null);
   }
@@ -369,76 +351,24 @@ export function StartProductionForm({
         )}
       </ProductionSection>
 
-      {/* Step 4 — QR card + Start */}
+      {/* Step 4 — Start run */}
       <ProductionSection
-        title="Step 4 · QR card"
-        subtitle="The raw bag QR card was reserved at receiving and tracks this bag through all stations. If one was pre-reserved for this bag, it is selected automatically below."
-        tone={
-          resolvedBag && stationId && productId && qrCardId
-            ? "GOOD"
-            : resolvedBag && stationId && productId
-              ? "INFO"
-              : "MUTED"
-        }
+        title="Step 4 · Start run"
+        subtitle="The raw bag's QR card — reserved at receiving — will be activated automatically. Click Start to fire the CARD_ASSIGNED event and open this bag on the floor."
+        tone={resolvedBag && stationId && productId ? "INFO" : "MUTED"}
       >
         {!resolvedBag || !stationId || !productId ? (
           <p className="text-sm text-text-muted">Complete the previous steps first.</p>
-        ) : idleCards.length === 0 ? (
-          <ProductionAlertCard
-            tone="WARN"
-            title="No idle QR cards"
-            body={
-              <>
-                All cards are currently ASSIGNED. Mint or retire cards at{" "}
-                <Link className="underline" href="/qr-cards">
-                  /qr-cards
-                </Link>
-                .
-              </>
-            }
-          />
         ) : (
-          <div className="space-y-3">
-            <div>
-              <select
-                value={qrCardId}
-                onChange={(e) => setQrCardId(e.target.value)}
-                className="w-full h-10 px-3 rounded-md border border-border bg-surface font-mono text-sm focus:border-brand-500 focus:outline-none"
-              >
-                <option value="">— select a QR card —</option>
-                {idleCards.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.code}
-                  </option>
-                ))}
-              </select>
-              {resolvedBag?.bag.bagQrCode &&
-              idleCards.some((c) => c.scanToken === resolvedBag.bag.bagQrCode) &&
-              qrCardId &&
-              idleCards.find((c) => c.id === qrCardId)?.scanToken ===
-                resolvedBag.bag.bagQrCode ? (
-                <p className="text-[11px] text-sky-700 mt-1">
-                  QR card assigned at intake for this bag.
-                </p>
-              ) : null}
-              {resolvedBag?.bag.bagQrCode &&
-              !idleCards.some((c) => c.scanToken === resolvedBag.bag.bagQrCode) ? (
-                <p className="text-[11px] text-amber-700 mt-1">
-                  The QR card reserved for this bag ({resolvedBag.bag.bagQrCode}) is not
-                  available. It may already be in production or retired.
-                </p>
-              ) : null}
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={handleStart}
-                disabled={pending || !qrCardId}
-                className="h-10 px-5 rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium"
-              >
-                {pending ? "Starting…" : "Start production"}
-              </button>
-            </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleStart}
+              disabled={pending}
+              className="h-10 px-5 rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium"
+            >
+              {pending ? "Starting…" : "Start production"}
+            </button>
           </div>
         )}
       </ProductionSection>
@@ -458,7 +388,7 @@ function StartedPanel({
       <ProductionAlertCard
         tone="GOOD"
         title="Production started"
-        body="The QR card is now active on this bag. CARD_ASSIGNED + PRODUCT_MAPPED events recorded; the bag will appear on the live floor board."
+        body="Production started. The raw bag's QR card is now linked to this workflow. CARD_ASSIGNED + PRODUCT_MAPPED events recorded; the bag will appear on the live floor board."
       />
       <ProductionSection title="Started bag" tone="GOOD">
         <ProductionIdentityBlock

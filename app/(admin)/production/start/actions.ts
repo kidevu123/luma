@@ -1,13 +1,14 @@
 "use server";
 
-// WORKFLOW-CLEANUP-2 — Start Production server action.
+// START-3 — Start Production server action.
 //
 // Wraps the same projectEvent CARD_ASSIGNED flow the floor PWA uses,
-// but driven from the admin desk: operator looks up a raw bag, picks
-// a product (from the tablet type's allowed products), picks an IDLE
-// QR card, picks a station, clicks Start. The action:
+// but driven from the admin desk: operator scans a raw bag, picks a
+// station, confirms the product (auto-resolved by station type), and
+// clicks Start. The action:
 //   - validates the bag is AVAILABLE
-//   - validates the qr card is IDLE
+//   - looks up the QR card from bag.bagQrCode (reserved at receiving)
+//   - validates the QR card via validateRawBagQrForStart
 //   - validates the station is active
 //   - inserts a workflow_bag (productId + inventoryBagId)
 //   - flips the qr_card to ASSIGNED
@@ -35,6 +36,7 @@ import {
   findRawBagByReceiptOrQr,
   type RawBagLookupResult,
 } from "@/lib/db/queries/raw-bag-intake";
+import { validateRawBagQrForStart } from "@/lib/production/start-production";
 
 export type StartProductionResult =
   | {
@@ -54,7 +56,6 @@ export type StartProductionResult =
 export type StartProductionInput = {
   inventoryBagId: string;
   productId: string;
-  qrCardId: string;
   stationId: string;
 };
 
@@ -88,24 +89,20 @@ export async function startProductionForRawBagAction(
     };
   }
 
-  const [card] = await db
+  if (!bag.bagQrCode) {
+    return { ok: false, error: "This raw bag has no QR card assigned. Assign a QR card at receiving before starting production." };
+  }
+  const [cardRow] = await db
     .select({ id: qrCards.id, status: qrCards.status, assignedWorkflowBagId: qrCards.assignedWorkflowBagId, cardType: qrCards.cardType })
     .from(qrCards)
-    .where(eq(qrCards.id, input.qrCardId))
+    .where(eq(qrCards.scanToken, bag.bagQrCode))
     .limit(1);
-  if (!card) return { ok: false, error: "QR card not found." };
-  const cardIsAvailableForProduction =
-    card.status === "IDLE" ||
-    (card.status === "ASSIGNED" && !card.assignedWorkflowBagId);
-  if (!cardIsAvailableForProduction) {
-    return {
-      ok: false,
-      error: `QR card status is ${card.status}; only IDLE cards (or intake-reserved cards) can be assigned.`,
-    };
+  const qrValidation = validateRawBagQrForStart(cardRow ?? null, bag.bagQrCode);
+  if (!qrValidation.ok) {
+    return { ok: false, error: qrValidation.error };
   }
-  if (card.cardType === "VARIETY_PACK") {
-    return { ok: false, error: "Variety pack cards cannot be used for raw bags." };
-  }
+  // cardRow is guaranteed non-null here: validateRawBagQrForStart returned ok only if card exists.
+  const card = cardRow!;
 
   const [station] = await db
     .select({

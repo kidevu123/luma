@@ -81,3 +81,37 @@ export function resolveStartProductionProduct({
 
   return { kind: "choose", candidates: filtered };
 }
+
+export type QrValidationResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Validates that a QR card looked up from a raw bag's bagQrCode is eligible
+ * to start production. The card parameter is null if no card was found.
+ */
+export function validateRawBagQrForStart(
+  card: { status: string; cardType: string; assignedWorkflowBagId: string | null } | null,
+  bagQrCode: string | null,
+): QrValidationResult {
+  if (!bagQrCode) {
+    return { ok: false, error: "This raw bag has no QR card assigned. Assign a QR card at receiving before starting production." };
+  }
+  if (!card) {
+    return { ok: false, error: `No QR card found for code ${bagQrCode}. Contact admin.` };
+  }
+  if (card.cardType !== "RAW_BAG") {
+    return { ok: false, error: `The QR card for this bag is type ${card.cardType}, not RAW_BAG. Contact admin.` };
+  }
+  if (card.status === "RETIRED") {
+    return { ok: false, error: "The QR card for this bag is retired and cannot be used. Contact admin to replace it." };
+  }
+  if (card.status === "ASSIGNED" && card.assignedWorkflowBagId !== null) {
+    return { ok: false, error: "The QR card for this bag is already assigned to an active production workflow. If this bag is already in production, do not start it again." };
+  }
+  // Allow IDLE or ASSIGNED+null (intake-reserved). Reject anything else, including future status values.
+  if (card.status !== "IDLE" && card.status !== "ASSIGNED") {
+    return { ok: false, error: `QR card status is ${card.status}; cannot start production.` };
+  }
+  return { ok: true };
+}

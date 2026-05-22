@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.19] — 2026-05-22
+
+### Changed
+- Start Production no longer asks the operator to select a QR card. The raw bag's QR card — reserved at receiving — is identified automatically from the bag's `bagQrCode` and activated when production starts. The "Confirm QR card" step is removed; Step 4 is now a single "Start run" button.
+- Start Production page no longer queries or displays the idle/intake-reserved QR card count badge.
+- Start Production server action now auto-derives the QR card from `qrCards.scanToken = bag.bagQrCode` instead of accepting a `qrCardId` input parameter.
+
+### Added
+- Comprehensive QR validation in `startProductionForRawBagAction`: explicit errors for no QR on bag, card not found, wrong card type, retired card, card already assigned to active workflow.
+- `validateRawBagQrForStart` pure helper in `lib/production/start-production.ts`. 11 unit tests.
+
 ## [0.2.18] — 2026-05-22
 
 ### Changed
