@@ -19,6 +19,7 @@ import {
   readStationLive,
   products,
   productPackagingSpecs,
+  productAllowedTablets,
   packagingMaterials,
   inventoryBags,
   tabletTypes,
@@ -88,32 +89,65 @@ export default async function FloorStationPage({
   // WORKFLOW_TRAVELER cards must never appear here. Only shown at stations
   // that can start fresh bags; pickup-only stations see only eligiblePickups.
   const canStartFreshBag = FIRST_OP_STATION_KINDS.has(station.station.kind);
-  // Eligible RAW_BAG cards: IDLE + intake-reserved (ASSIGNED+no-workflowBag).
-  // Left-joined to inventory_bags and tablet_types for secondary dropdown info
-  // (receipt number, tablet type name). Only queried at stations that can
-  // start fresh bags — pickup-only stations skip this entirely.
-  const idleCardsRaw = canStartFreshBag
-    ? await db
-        .select({
-          id: qrCards.id,
-          label: qrCards.label,
-          scanToken: qrCards.scanToken,
-          receiptNumber: inventoryBags.internalReceiptNumber,
-          tabletTypeName: tabletTypes.name,
-        })
-        .from(qrCards)
-        .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
-        .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
-        .where(
-          and(
-            eq(qrCards.cardType, "RAW_BAG"),
-            or(
-              eq(qrCards.status, "IDLE"),
-              and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId)),
+
+  // First-op product kinds for this station (empty at non-first-op stations).
+  // Computed early so both the idle-card eligibility filter and the product
+  // picker can share it.
+  const allowedProductKinds =
+    STATION_KIND_TO_PRODUCT_KINDS[station.station.kind] ?? [];
+
+  // Eligible RAW_BAG cards: IDLE + intake-reserved (ASSIGNED+no-workflowBag),
+  // filtered to bags whose tablet type is compatible with this station.
+  // "Compatible" = the tablet type has at least one active product of an
+  // allowed kind for this station (e.g. CARD/VARIETY at BLISTER).
+  // Pre-fetch the compatible tablet type IDs so the main query stays a
+  // plain inArray filter rather than a correlated sub-select or runtime join.
+  const compatibleTabletTypeIds =
+    canStartFreshBag && allowedProductKinds.length > 0
+      ? (
+          await db
+            .selectDistinct({ tabletTypeId: productAllowedTablets.tabletTypeId })
+            .from(productAllowedTablets)
+            .innerJoin(products, eq(products.id, productAllowedTablets.productId))
+            .where(
+              and(
+                inArray(
+                  products.kind,
+                  allowedProductKinds as ("CARD" | "BOTTLE" | "VARIETY")[],
+                ),
+                eq(products.isActive, true),
+              ),
+            )
+        ).map((r) => r.tabletTypeId)
+      : [];
+
+  const idleCardsRaw =
+    canStartFreshBag && compatibleTabletTypeIds.length > 0
+      ? await db
+          .select({
+            id: qrCards.id,
+            label: qrCards.label,
+            scanToken: qrCards.scanToken,
+            receiptNumber: inventoryBags.internalReceiptNumber,
+            tabletTypeName: tabletTypes.name,
+          })
+          .from(qrCards)
+          .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
+          .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+          .where(
+            and(
+              eq(qrCards.cardType, "RAW_BAG"),
+              or(
+                eq(qrCards.status, "IDLE"),
+                and(eq(qrCards.status, "ASSIGNED"), isNull(qrCards.assignedWorkflowBagId)),
+              ),
+              or(
+                isNull(inventoryBags.tabletTypeId),
+                inArray(inventoryBags.tabletTypeId, compatibleTabletTypeIds),
+              ),
             ),
-          ),
-        )
-    : [];
+          )
+      : [];
   const idleCards = idleCardsRaw.sort((a, b) =>
     a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }),
   );
@@ -121,10 +155,7 @@ export default async function FloorStationPage({
   // First-op product picker (PRD-1): when this station is BLISTER /
   // COMBINED, the operator must pick a product on a fresh-card scan.
   // List active products whose kind is allowed for this station kind.
-  const requireFirstOpProduct = FIRST_OP_STATION_KINDS.has(station.station.kind);
-  const allowedProductKinds =
-    STATION_KIND_TO_PRODUCT_KINDS[station.station.kind] ?? [];
-  const allowedProducts = requireFirstOpProduct && allowedProductKinds.length > 0
+  const allowedProducts = canStartFreshBag && allowedProductKinds.length > 0
     ? await db
         .select({
           id: products.id,
@@ -308,7 +339,7 @@ export default async function FloorStationPage({
                 sku: p.sku,
                 name: p.name,
               }))}
-              requireProductForFreshBag={requireFirstOpProduct}
+              requireProductForFreshBag={canStartFreshBag}
             />
           </div>
         ) : (
