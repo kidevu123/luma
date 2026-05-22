@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   qrCards,
@@ -13,6 +13,9 @@ import {
   readBagState,
   products,
   rawBagAllocationSessions,
+  packagingLots,
+  packagingMaterials,
+  workflowEvents,
 } from "@/lib/db/schema";
 import { isPartialBagResume } from "@/lib/production/bag-allocation";
 import { writeAudit } from "@/lib/db/audit";
@@ -91,6 +94,7 @@ function pickClientEventId(formData: FormData): string | undefined {
 // (still card flow only).
 const ALLOWED_EVENTS_BY_KIND: Record<string, string[]> = {
   BLISTER: ["BLISTER_COMPLETE"],
+  HANDPACK_BLISTER: ["HANDPACK_BLISTER_COMPLETE"],
   SEALING: ["SEALING_COMPLETE"],
   PACKAGING: ["PACKAGING_SNAPSHOT", "PACKAGING_COMPLETE"],
   BOTTLE_HANDPACK: ["BOTTLE_HANDPACK_COMPLETE"],
@@ -437,6 +441,7 @@ const eventSchema = z.object({
   stationId: z.string().uuid(),
   eventType: z.enum([
     "BLISTER_COMPLETE",
+    "HANDPACK_BLISTER_COMPLETE",
     "SEALING_COMPLETE",
     "PACKAGING_SNAPSHOT",
     "BOTTLE_HANDPACK_COMPLETE",
@@ -996,6 +1001,104 @@ export async function packagingCompleteAction(
     return { error: err instanceof Error ? err.message : "Failed." };
   }
   revalidatePath(`/floor/${parsed.data.token}`);
+  revalidatePath(`/floor-board`);
+  return { ok: true };
+}
+
+// ── seal handpack bag ──────────────────────────────────────────────────────
+
+const sealHandpackSchema = z.object({
+  token: z.string().min(1),
+  stationId: z.string().uuid(),
+  workflowBagId: z.string().uuid(),
+  plasticBlisterCount: z.coerce.number().int().positive(),
+});
+
+export async function sealHandpackBagAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const parsed = sealHandpackSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    workflowBagId: formData.get("workflowBagId"),
+    plasticBlisterCount: formData.get("plasticBlisterCount"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  const { token, stationId, workflowBagId, plasticBlisterCount } = parsed.data;
+
+  const station = await authStation(token, stationId);
+  if (!station) return { error: "Invalid station token." };
+  if (station.kind !== "SEALING") return { error: "Only SEALING stations may seal handpack bags." };
+
+  const [bagState] = await db
+    .select({ stage: readBagState.stage, isPaused: readBagState.isPaused, isFinalized: readBagState.isFinalized })
+    .from(readBagState)
+    .where(eq(readBagState.workflowBagId, workflowBagId))
+    .limit(1);
+  if (!bagState) return { error: "Bag not found." };
+  if (bagState.isFinalized) return { error: "Bag is already finalized." };
+  if (bagState.isPaused) return { error: "Resume the bag before sealing." };
+  if (bagState.stage !== "BLISTERED") return { error: `Bag is at stage ${bagState.stage ?? "unknown"}, not BLISTERED.` };
+
+  // FIFO: oldest AVAILABLE pre-made blister lot
+  const [blisterLot] = await db
+    .select({ id: packagingLots.id, qtyOnHand: packagingLots.qtyOnHand })
+    .from(packagingLots)
+    .innerJoin(packagingMaterials, eq(packagingMaterials.id, packagingLots.packagingMaterialId))
+    .where(
+      and(
+        eq(packagingLots.status, "AVAILABLE"),
+        eq(packagingMaterials.kind, "BLISTER_CARD"),
+        eq(packagingMaterials.category, "MATERIAL"),
+      )
+    )
+    .orderBy(asc(packagingLots.receivedAt))
+    .limit(1);
+
+  if (!blisterLot) return { error: "No available pre-made blister lot found. Receive stock first." };
+
+  try {
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, { stationId: station.id });
+
+      await projectEvent(tx, {
+        eventType: "SEALING_COMPLETE",
+        workflowBagId,
+        stationId: station.id,
+        payload: { plastic_blister_count: plasticBlisterCount },
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot: accountability.accountableEmployeeNameSnapshot,
+      });
+
+      const consume = Math.min(plasticBlisterCount, blisterLot.qtyOnHand);
+      await projectEvent(tx, {
+        eventType: "PACKAGING_MATERIAL_ISSUED",
+        workflowBagId,
+        stationId: station.id,
+        payload: {
+          packaging_lot_id: blisterLot.id,
+          qty_issued: consume,
+          reason: "handpack_seal",
+        },
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot: accountability.accountableEmployeeNameSnapshot,
+      });
+
+      await tx
+        .update(packagingLots)
+        .set({ qtyOnHand: sql`qty_on_hand - ${consume}` })
+        .where(eq(packagingLots.id, blisterLot.id));
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Seal failed." };
+  }
+
+  revalidatePath(`/floor/${token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
 }
