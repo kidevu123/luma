@@ -412,6 +412,7 @@ export const products = pgTable(
     zohoItemIdCase:    text("zoho_item_id_case"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    dailyUnitGoal: integer("daily_unit_goal"),
   },
   (t) => [
     uniqueIndex("products_sku_unique").on(t.sku),
@@ -440,6 +441,7 @@ export const machines = pgTable("machines", {
   name: text("name").notNull(),
   kind: machineKindEnum("kind").notNull(),
   cardsPerTurn: integer("cards_per_turn").notNull().default(1),
+  targetBagsPerHour: integer("target_bags_per_hour"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -3757,3 +3759,20 @@ export const zohoAssemblyOps = pgTable(
 
 export type ZohoAssemblyOp = typeof zohoAssemblyOps.$inferSelect;
 export type VarietyRun = typeof varietyRuns.$inferSelect;
+
+export const userDashboardConfig = pgTable(
+  "user_dashboard_config",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").notNull(),
+    boardKey: text("board_key").notNull().default("floor-command"),
+    layoutJson: jsonb("layout_json").$type<Array<Record<string, unknown>>>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [unique("udc_user_board_unique").on(t.userId, t.boardKey)],
+);
+
+export type UserDashboardConfig = typeof userDashboardConfig.$inferSelect;
+export type UserDashboardConfigInsert = typeof userDashboardConfig.$inferInsert;

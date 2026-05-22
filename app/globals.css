@@ -404,3 +404,14 @@
     box-shadow: var(--shadow-pop);
   }
 }
+
+/* v8 machine illustration SVG class grammar */
+svg .mc-base   { fill: #0f1520; }
+svg .mc-body   { fill: #1a2535; }
+svg .mc-body-d { fill: #101820; }
+svg .mc-panel  { fill: #1e2d42; }
+svg .mc-glass  { fill: #2a4060; opacity: 0.6; }
+svg .mc-glow   { fill: #2ee8a5; opacity: 0.8; }
+svg .mc-det    { fill: #2a3548; }
+svg .mc-seam   { fill: #2a3548; }
+svg .mc-scrn   { fill: #0a1525; }
