@@ -21,7 +21,7 @@ type QrCardRow = {
   bag: { id: string } | null;
   productName: string | null;
   intakeBag: {
-    id: string;
+    id: string | null;
     internalReceiptNumber: string | null;
     batchId: string | null;
   } | null;
@@ -145,8 +145,6 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
   const varietyPackAssigned = varietyPackRows.filter(
     (r) => r.card.status === "ASSIGNED",
   ).length;
-
-  const idleRawBagCount = rawBagIdle;
 
   const filtered = rows.filter((r) => {
     const qLower = q.toLowerCase();
@@ -302,7 +300,7 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
                   </StatusPill>
                   {card.status === "ASSIGNED" && !bag && intakeBag && (
                     <span className="text-[11px] text-text-muted">
-                      Assigned at intake: {intakeBag.internalReceiptNumber ?? intakeBag.id.slice(0, 8)}
+                      Assigned at intake: {intakeBag.internalReceiptNumber ?? (intakeBag.id != null ? intakeBag.id.slice(0, 8) : "—")}
                       {intakeBatchNumber ? ` · lot ${intakeBatchNumber}` : ""}
                     </span>
                   )}
