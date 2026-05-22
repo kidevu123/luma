@@ -520,13 +520,17 @@ export async function getHourlyThroughput(
   const now = new Date();
   const { shiftStartUtc } = computeShiftProgress(now, tz);
 
+  // postgres-js rejects Date objects in raw SQL template literals;
+  // cast to ISO string and let Postgres parse it as timestamptz.
+  const shiftStartIso = shiftStartUtc.toISOString();
+
   const rows = await db.execute(sql`
     SELECT
       date_trunc('hour', occurred_at AT TIME ZONE ${tz}) AS hour_local,
       count(*) AS bag_count
     FROM workflow_events
     WHERE event_type = 'BAG_FINALIZED'
-      AND occurred_at >= ${shiftStartUtc}
+      AND occurred_at >= ${shiftStartIso}::timestamptz
     GROUP BY 1
     ORDER BY 1
   `);

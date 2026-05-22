@@ -69,27 +69,36 @@ export default async function PackagingInventoryPage({
           {panel.kindCounts.length === 0 ? (
             <p className="text-sm text-text-muted">No packaging materials configured.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-text-muted text-xs uppercase">
-                  <tr>
-                    <th className="text-left p-2">Kind</th>
-                    <th className="text-right p-2">Lots</th>
-                    <th className="text-right p-2">Total units</th>
-                    <th className="text-right p-2">Total g (rolls)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {panel.kindCounts.map((k) => (
-                    <tr key={k.kind} className="border-t border-border/40">
-                      <td className="p-2">{k.kind}</td>
-                      <td className="p-2 text-right tabular-nums">{k.lots}</td>
-                      <td className="p-2 text-right tabular-nums">{k.totalUnits ?? "Missing"}</td>
-                      <td className="p-2 text-right tabular-nums">{k.totalGrams ?? "Missing"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="flex flex-wrap gap-2">
+              {panel.kindCounts.map((k) => (
+                <div
+                  key={k.kind}
+                  className={`flex flex-col gap-0.5 rounded-lg border px-3 py-2 min-w-[110px] ${
+                    k.lots === 0
+                      ? "border-border/30 bg-page opacity-40"
+                      : "border-border/60 bg-surface"
+                  }`}
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                    {k.kind.replace(/_/g, " ")}
+                  </span>
+                  <span className="text-base font-bold tabular-nums">
+                    {k.lots === 0 ? "—" : k.lots}
+                    <span className="text-xs font-normal text-text-muted ml-1">
+                      {k.lots === 1 ? "lot" : "lots"}
+                    </span>
+                  </span>
+                  {k.lots > 0 && (
+                    <span className="text-[11px] text-text-muted tabular-nums">
+                      {k.totalUnits != null
+                        ? k.totalUnits.toLocaleString() + " units"
+                        : k.totalGrams != null
+                          ? (k.totalGrams / 1000).toFixed(1) + " kg"
+                          : ""}
+                    </span>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </CardContent>

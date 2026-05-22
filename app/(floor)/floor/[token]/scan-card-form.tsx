@@ -103,8 +103,10 @@ export function ScanCardForm({
   const effectiveTabletTypeId = selectedCard?.tabletTypeId ?? scannedTabletTypeId;
   const filteredProducts = React.useMemo(() => {
     if (!effectiveTabletTypeId) return allowedProducts;
-    return allowedProducts.filter(
-      (p) => p.allowedTabletTypeIds.length === 0 || p.allowedTabletTypeIds.includes(effectiveTabletTypeId),
+    // Only show products that explicitly list this tablet type.
+    // Products with no configured tablet types are incomplete, not "accepts all".
+    return allowedProducts.filter((p) =>
+      p.allowedTabletTypeIds.includes(effectiveTabletTypeId),
     );
   }, [effectiveTabletTypeId, allowedProducts]);
 
@@ -165,12 +167,8 @@ export function ScanCardForm({
           setScannedTabletTypeId(ttId);
           setSelectedCardId(cardId);
           const narrowed = ttId
-            ? allowedProducts.filter(
-                (p) =>
-                  p.allowedTabletTypeIds.length === 0 ||
-                  p.allowedTabletTypeIds.includes(ttId),
-              )
-            : allowedProducts;
+            ? allowedProducts.filter((p) => p.allowedTabletTypeIds.includes(ttId))
+            : [];
           if (narrowed.length === 1 && narrowed[0]) {
             // Exactly one compatible product — auto-submit without extra click.
             // Pass product ID explicitly to avoid stale-closure on productId state.
