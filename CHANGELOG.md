@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.29] — 2026-05-22
+
+### Fixed
+- FLOOR-START-3: Added `BOTTLE_HANDPACK` to `FIRST_OP_STATION_KINDS`. Bottle hand-pack is a first-operation station — fresh bag scans now require product selection there, consistent with the existing floor UI behavior.
+- `scanCardAction` server-side guard: rejects fresh-bag starts at downstream stations (SEALING, PACKAGING, BOTTLE_CAP_SEAL, BOTTLE_STICKER). Previously only the floor UI enforced this; a crafted POST could bypass it.
+- Admin `startProductionForRawBagAction` now rejects non-first-op stations with a clear error message.
+- Admin Start Production station dropdown now filters to first-op stations only (BLISTER, HANDPACK_BLISTER, BOTTLE_HANDPACK, COMBINED).
+
+### Added
+- Floor station page: context-aware no-bag message for downstream stations ("accepts bags released from a prior stage") and inline hint when no eligible pickups exist ("scan the bag QR when it arrives").
+- Idle card dropdown placeholder updated to "Select a received bag QR…"; optgroup updated to "Received bags".
+- Receives list: new Tablet type column shows distinct tablet type names for each receive (e.g. "MIT B Orange Citrus"), making multiple receives for the same PO distinguishable.
+
+<!-- FUTURE: Machine vs station model cleanup
+  Machines are physical equipment with output/cycle characteristics.
+  Stations are floor scan locations / URLs.
+  Hand-pack stations should probably be stations, not machines, unless
+  they need machine-like output config. There is visible duplication on
+  the Machines & stations admin page. This needs a future cleanup task.
+-->
+
 ## [0.2.28] — 2026-05-22
 
 ### Added
