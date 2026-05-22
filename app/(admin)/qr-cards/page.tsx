@@ -29,7 +29,7 @@ export default async function QrCardsPage() {
     <div className="space-y-5">
       <PageHeader
         title="QR cards"
-        description="Physical scan badges. Each card carries one workflow bag at a time."
+        description="Physical scan badges. RAW_BAG cards stay with a single bag from receiving through production. Sort is numeric — bag-card-1, bag-card-2, …, bag-card-200."
         actions={
           <div className="flex items-center gap-2">
             {idleRawBagCount > 0 && (

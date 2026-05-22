@@ -16,8 +16,8 @@ Items captured for future work. Not scheduled.
 
 ## QR cards
 
-- **QR Card Management further UX cleanup** — Search, filter, and stats tiles are functional but the page needs visual polish when the card count grows large. Consider pagination or virtual scroll. The "Assigned to" context added in v0.2.13 is a first step.
-- **QR Card Management table redesign** — Current layout is a scrolling card list sorted by label. Needs: numeric/lexicographic sort (card-1, card-2 ... card-10 before card-9 aesthetically), compact row table instead of large cards, clearer "assigned to" inline context (partially addressed in v0.2.13), and a separate section or filter for UNKNOWN/legacy cards that have not been typed. QR type distribution summary (N RAW_BAG, N VARIETY_PACK, N WORKFLOW_TRAVELER, N UNKNOWN) useful for ops.
+- **QR Card Management table redesign** — ✅ Done in v0.2.20: Numeric sort (bag-card-1, bag-card-2, …, bag-card-200), enhanced search (label, token, receipt#, lot#), clearer assigned-to display ("Active workflow" / "Reserved at receive"), print labels page now only prints RAW_BAG idle cards. Compact list layout with tabs and stat tiles already in place.
+- **QR Card Management variety-pack print labels** — Future: add a separate "Print idle variety pack labels" button and page. Currently the labels page only prints RAW_BAG idle cards.
 
 ## Documentation / onboarding
 

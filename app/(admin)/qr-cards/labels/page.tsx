@@ -26,7 +26,7 @@ async function renderQrSvg(value: string): Promise<string> {
 export default async function QrLabelsPage() {
   await requireAdmin();
   const all = await listQrCards();
-  const idle = all.filter((r) => r.card.status === "IDLE");
+  const idle = all.filter((r) => r.card.status === "IDLE" && r.card.cardType === "RAW_BAG");
   const svgs = await Promise.all(idle.map((r) => renderQrSvg(r.card.id)));
 
   return (
@@ -58,7 +58,7 @@ export default async function QrLabelsPage() {
             Print {idle.length} card label{idle.length === 1 ? "" : "s"}
           </h1>
           <p className="text-xs text-text-muted mt-0.5">
-            One QR per IDLE card. Each encodes the card's UUID — that's what
+            One QR per idle RAW_BAG card. Each encodes the card's UUID — that's what
             the floor tablet scans.
           </p>
         </div>

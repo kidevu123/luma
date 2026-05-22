@@ -5,6 +5,7 @@ import { QrCode, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { StatusPill } from "@/components/ui/page-header";
 import { RetireButton } from "./forms";
+import { sortQrRows, matchesQrSearch } from "@/lib/production/qr-sort";
 
 type QrCardType = "RAW_BAG" | "VARIETY_PACK" | "WORKFLOW_TRAVELER" | "UNKNOWN";
 
@@ -36,6 +37,8 @@ type TabFilter =
   | "IDLE"
   | "RETIRED"
   | "UNKNOWN";
+
+type TabDef = { label: string; value: TabFilter; count: number };
 
 const STATUS_KIND: Record<string, "ok" | "warn" | "danger" | "neutral" | "info"> = {
   IDLE: "ok",
@@ -129,6 +132,8 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
   const [q, setQ] = React.useState("");
   const [tabFilter, setTabFilter] = React.useState<TabFilter>("all");
 
+  const sorted = React.useMemo(() => sortQrRows(rows), [rows]);
+
   const idleCount = rows.filter((r) => r.card.status === "IDLE").length;
   const assignedCount = rows.filter((r) => r.card.status === "ASSIGNED").length;
   const retiredCount = rows.filter((r) => r.card.status === "RETIRED").length;
@@ -146,14 +151,8 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
     (r) => r.card.status === "ASSIGNED",
   ).length;
 
-  const filtered = rows.filter((r) => {
-    const qLower = q.toLowerCase();
-    const matchesQ =
-      !q ||
-      r.card.label.toLowerCase().includes(qLower) ||
-      r.card.scanToken.toLowerCase().includes(qLower) ||
-      r.card.id.toLowerCase().includes(qLower) ||
-      (r.productName?.toLowerCase().includes(qLower) ?? false);
+  const filtered = sorted.filter((r) => {
+    const matchesQ = matchesQrSearch(r, q);
 
     let matchesTab: boolean;
     switch (tabFilter) {
@@ -183,7 +182,6 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
     return matchesQ && matchesTab;
   });
 
-  type TabDef = { label: string; value: TabFilter; count: number };
   const tabs: TabDef[] = [
     { label: "All", value: "all", count: rows.length },
     { label: "Raw bag", value: "RAW_BAG", count: rawBagTotal },
@@ -241,7 +239,7 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search label, scan token, or UUID…"
+            placeholder="Search label, token, receipt #, or lot…"
             className="pl-8 h-8 text-xs"
           />
         </div>
@@ -298,17 +296,28 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
                   <StatusPill kind={STATUS_KIND[card.status] ?? "neutral"}>
                     {card.status}
                   </StatusPill>
-                  {card.status === "ASSIGNED" && !bag && intakeBag && (
-                    <span className="text-[11px] text-text-muted">
-                      Assigned at intake: {intakeBag.internalReceiptNumber ?? (intakeBag.id != null ? intakeBag.id.slice(0, 8) : "—")}
-                      {intakeBatchNumber ? ` · lot ${intakeBatchNumber}` : ""}
-                    </span>
-                  )}
                   {card.status === "ASSIGNED" && bag && (
-                    <span className="text-[11px] text-text-muted">
-                      bag {bag.id.slice(0, 8)}
-                      {productName ? ` · ${productName}` : ""}
-                    </span>
+                    <div className="text-[11px] leading-tight">
+                      <span className="text-brand-700 font-semibold">Active workflow</span>
+                      <span className="text-text-muted">
+                        {" · "}
+                        {productName ?? "—"}
+                        {" · "}
+                        <span className="font-mono">{bag.id.slice(0, 12)}</span>
+                      </span>
+                    </div>
+                  )}
+                  {card.status === "ASSIGNED" && !bag && intakeBag && (
+                    <div className="text-[11px] leading-tight">
+                      <span className="text-sky-700 font-semibold">Reserved at receive</span>
+                      <span className="text-text-muted">
+                        {intakeBag.internalReceiptNumber ? ` · ${intakeBag.internalReceiptNumber}` : ""}
+                        {intakeBatchNumber ? ` · lot ${intakeBatchNumber}` : ""}
+                      </span>
+                    </div>
+                  )}
+                  {card.status === "ASSIGNED" && !bag && !intakeBag && (
+                    <span className="text-[11px] text-text-muted italic">Unknown assignment</span>
                   )}
                   {card.status !== "RETIRED" && (
                     <RetireButton

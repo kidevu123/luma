@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.20] — 2026-05-22
+
+### Changed
+- QR Card Management: cards now sorted numerically (bag-card-1, bag-card-2, …, bag-card-49, …, bag-card-200) instead of lexicographically. Sort priority: RAW_BAG → VARIETY_PACK → WORKFLOW_TRAVELER/UNKNOWN.
+- QR Card Management: search now matches receipt number and supplier lot in addition to label and scan token.
+- QR Card Management: assigned-to display now shows clear "Active workflow" or "Reserved at receive" labels with context instead of bare truncated IDs.
+- QR Card Management: print labels page now only prints idle RAW_BAG cards, matching the "Print idle raw bag labels" button label. Previously printed all idle cards regardless of type.
+
+### Added
+- `sortQrRows` and `matchesQrSearch` pure helpers in `lib/production/qr-sort.ts`. 19 unit tests.
+
 ## [0.2.19] — 2026-05-22
 
 ### Changed
