@@ -21,6 +21,7 @@ export type ProductRow = {
   zohoItemIdUnit: string | null;
   zohoItemIdDisplay: string | null;
   zohoItemIdCase: string | null;
+  dailyUnitGoal: number | null;
   isActive: boolean;
   createdAt: Date;
   allowedCount: number;
