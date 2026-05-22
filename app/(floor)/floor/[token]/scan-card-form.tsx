@@ -73,6 +73,10 @@ export function ScanCardForm({
   // Camera state
   const [showCamera, setShowCamera] = React.useState(false);
 
+  // Tablet type of the last scanned bag, from lookupCardByTokenAction.
+  // Used as fallback when the card is not yet in the receivedCards list.
+  const [scannedTabletTypeId, setScannedTabletTypeId] = React.useState<string | null>(null);
+
   const receivedSet = React.useMemo(
     () => new Set(receivedCards.map((c) => c.id)),
     [receivedCards],
@@ -81,14 +85,17 @@ export function ScanCardForm({
     selectedCardId !== "" && receivedSet.has(selectedCardId);
 
   // Filter products to those compatible with the selected bag's tablet type.
+  // Primary: tablet type from the dropdown selection (selectedCard).
+  // Fallback: tablet type from typed/camera scan (scannedTabletTypeId) for
+  // when the card was very recently received and isn't in the dropdown yet.
   const selectedCard = receivedCards.find((c) => c.id === selectedCardId);
+  const effectiveTabletTypeId = selectedCard?.tabletTypeId ?? scannedTabletTypeId;
   const filteredProducts = React.useMemo(() => {
-    if (!selectedCard?.tabletTypeId) return allowedProducts;
-    const tid = selectedCard.tabletTypeId;
+    if (!effectiveTabletTypeId) return allowedProducts;
     return allowedProducts.filter(
-      (p) => p.allowedTabletTypeIds.length === 0 || p.allowedTabletTypeIds.includes(tid),
+      (p) => p.allowedTabletTypeIds.length === 0 || p.allowedTabletTypeIds.includes(effectiveTabletTypeId),
     );
-  }, [selectedCard, allowedProducts]);
+  }, [effectiveTabletTypeId, allowedProducts]);
 
   const showProductPicker =
     requireProductForFreshBag &&
@@ -136,11 +143,20 @@ export function ScanCardForm({
         setScanInput("");
         const cardId = result.cardId;
 
-        // First-op station with idle card: show product picker, wait for
-        // operator to select product then click submit.
+        // First-op station with intake-reserved bag: show product picker.
+        // Auto-select when exactly one product is compatible with this tablet type.
         if (requireProductForFreshBag && result.isIntakeReserved) {
+          const ttId = result.tabletTypeId ?? null;
+          setScannedTabletTypeId(ttId);
           setSelectedCardId(cardId);
-          setProductId("");
+          const narrowed = ttId
+            ? allowedProducts.filter(
+                (p) =>
+                  p.allowedTabletTypeIds.length === 0 ||
+                  p.allowedTabletTypeIds.includes(ttId),
+              )
+            : allowedProducts;
+          setProductId(narrowed.length === 1 && narrowed[0] ? narrowed[0].id : "");
           return;
         }
 
@@ -150,7 +166,7 @@ export function ScanCardForm({
         setScanPending(false);
       }
     },
-    [requireProductForFreshBag, submitWithCardId],
+    [requireProductForFreshBag, submitWithCardId, allowedProducts],
   );
 
   const handleScanKeyDown = async (
@@ -265,6 +281,7 @@ export function ScanCardForm({
               value={selectedCardId}
               onChange={(e) => {
                 setSelectedCardId(e.target.value);
+                setScannedTabletTypeId(null);
                 setProductId("");
                 setScanError(null);
               }}
@@ -334,8 +351,9 @@ export function ScanCardForm({
           isReceivedCardSelected &&
           filteredProducts.length === 0 && (
             <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-              No active products configured for this station kind. Supervisor
-              must add a product to the route.
+              {effectiveTabletTypeId
+                ? "No active products are configured for this tablet type at this station. Ask a supervisor to set up the product mapping."
+                : "No active products configured for this station kind. Supervisor must add a product to the route."}
             </p>
           )}
 
