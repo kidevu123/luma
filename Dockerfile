@@ -10,16 +10,18 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
+# .git is in .dockerignore so git rev-parse doesn't work here.
+# The deploy service exports BUILD_GIT_SHA before calling docker compose build;
+# receive it as a build arg and write it to .git-sha for the run stage.
+ARG BUILD_GIT_SHA=unknown
+ARG BUILD_GIT_BRANCH=main
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN GIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo unknown) \
-    && BUILD_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-    && echo "Building $GIT_SHA at $BUILD_AT" \
-    && BUILD_GIT_SHA=$GIT_SHA BUILD_AT=$BUILD_AT npm run build \
-    && echo "$GIT_SHA" > /app/.git-sha \
-    && echo "$BUILD_AT" > /app/.build-at
+RUN BUILD_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+    && echo "Building ${BUILD_GIT_SHA} (${BUILD_GIT_BRANCH}) at ${BUILD_AT}" \
+    && BUILD_GIT_SHA=${BUILD_GIT_SHA} BUILD_GIT_BRANCH=${BUILD_GIT_BRANCH} BUILD_AT=${BUILD_AT} npm run build \
+    && echo "${BUILD_GIT_SHA}" > /app/.git-sha \
+    && echo "${BUILD_AT}" > /app/.build-at
 
 FROM node:22-bookworm-slim AS run
 WORKDIR /app
