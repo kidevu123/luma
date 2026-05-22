@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.13] — 2026-05-22
+
+### Changed
+- Start Production: step 3 renamed from "Assign a workflow QR card" to "QR card". Subtitle now explains that the QR card was reserved at receiving and is pre-selected automatically. All misleading "reusable floor badge" / "workflow QR" copy removed.
+- Start Production page header: updated description to reflect the receive-first flow.
+- Start Production step list: "Assign QR card" → "Confirm QR card".
+- Start Production success panel body: updated to "The QR card is now active on this bag."
+
+### Fixed
+- Start Production: VARIETY_PACK cards are now excluded from the QR card dropdown and rejected by the server action with error "Variety pack cards cannot be used for raw bags."
+- Receive pills page: "Receive another batch" button now resets all form state and calls `router.refresh()` so the QR card pool reflects the newly-assigned cards. Previously, soft navigation to the same route left stale client state.
+- Receive pills page: "Start production" button in the success panel now links to `/production/start` (was incorrectly `/qr-cards`).
+- Receive pills page: all `type="number"` inputs now blur on mouse-wheel scroll to prevent accidental value changes.
+
+### Added
+- QR Card Management: ASSIGNED cards now show contextual "Assigned to" information. Intake-reserved cards (ASSIGNED, no workflow bag yet) show "Assigned at intake: {receipt} · lot {supplier_lot}". Active production cards continue to show the workflow bag ID and product name.
+- `docs/backlog.md`: backlog items captured for post-save editing, PO line status, Shipments rename, Production output rename, QR UX cleanup.
+
 ## [0.2.12] — 2026-05-21
 
 ### Fixed
