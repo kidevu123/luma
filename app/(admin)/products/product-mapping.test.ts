@@ -68,3 +68,33 @@ describe("ZohoMappingForm unit field fallback", () => {
     expect(defaultValue).toBe("");
   });
 });
+
+describe("zohoItemId back-sync logic", () => {
+  it("syncs zohoItemId when zohoItemIdUnit is <= 60 chars", () => {
+    const zohoItemIdUnit = "ZOHO-UNIT-SHORT";
+    const zohoItemId =
+      zohoItemIdUnit === null ? null
+      : zohoItemIdUnit.length <= 60 ? zohoItemIdUnit
+      : undefined;
+    expect(zohoItemId).toBe("ZOHO-UNIT-SHORT");
+  });
+
+  it("does not sync zohoItemId when zohoItemIdUnit exceeds 60 chars", () => {
+    const zohoItemIdUnit = "Z".repeat(61);
+    const zohoItemId =
+      zohoItemIdUnit === null ? null
+      : zohoItemIdUnit.length <= 60 ? zohoItemIdUnit
+      : undefined;
+    expect(zohoItemId).toBeUndefined();
+  });
+
+  it("sets zohoItemId to null when zohoItemIdUnit is cleared", () => {
+    // Cast to string | null so TypeScript doesn't narrow the const to literal null
+    const zohoItemIdUnit = null as string | null;
+    const zohoItemId =
+      zohoItemIdUnit === null ? null
+      : zohoItemIdUnit.length <= 60 ? zohoItemIdUnit
+      : undefined;
+    expect(zohoItemId).toBeNull();
+  });
+});

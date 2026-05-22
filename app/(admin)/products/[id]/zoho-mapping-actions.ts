@@ -29,7 +29,20 @@ export async function updateProductZohoAssemblyMappingAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
-  const { id, ...patch } = parsed.data;
+  const { id, zohoItemIdUnit, ...rest } = parsed.data;
+
+  // Back-sync zohoItemId (commercial trace, 60-char limit) from unit ID.
+  const zohoItemId =
+    zohoItemIdUnit === null ? null
+    : zohoItemIdUnit !== undefined && zohoItemIdUnit.length <= 60 ? zohoItemIdUnit
+    : undefined; // longer than legacy column — leave existing value unchanged
+
+  const patch = {
+    ...rest,
+    zohoItemIdUnit,
+    ...(zohoItemId !== undefined ? { zohoItemId } : {}),
+  };
+
   try {
     await updateProduct(id, patch, actor);
     revalidatePath(`/products/${id}`);
