@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.21] — 2026-05-22
+
+### Changed
+- "Purchase orders" tab in Receives/Inbound renamed to "Receives" to reflect that it shows receive history, not PO master records.
+- "Receives" page (`/inbound`) title and description updated to match.
+- Sidebar "Pack-out" nav entry renamed to "Production output" to match page title and avoid confusion with packaging materials.
+- `/packaging-output` page title and per-bag breakdown section header renamed from "Packaging output" to "Production output".
+- Zoho Operations page description now explicitly states "Dry-run validation only — live writes are disabled."
+- Sidebar test updated to assert "Production output" label (was "Pack-out").
+
 ## [0.2.20] — 2026-05-22
 
 ### Changed

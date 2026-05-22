@@ -16,8 +16,8 @@ export default async function InboundPage() {
     <div className="space-y-5">
       <ReceivingTabs />
       <PageHeader
-        title="Purchase orders"
-        description="Every truckload becomes a Receive row with N boxes and bags inside. Each box auto-creates (or reuses) the right Quarantine batch."
+        title="Receives"
+        description="History of all tablet and packaging receives. Each receive links to a PO and contains boxes and bags."
         actions={
           <Button asChild>
             <Link href="/inbound/new">

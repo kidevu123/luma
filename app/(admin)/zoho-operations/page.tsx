@@ -187,7 +187,7 @@ export default async function ZohoOperationsPage({
     <div className="space-y-5">
       <PageHeader
         title="Zoho Operations"
-        description="Assembly and receive operations queued for Zoho sync. NEEDS_MAPPING rows require operator action before the worker can proceed."
+        description="Assembly and receive operations queued for Zoho sync. Dry-run validation only — live writes are disabled. NEEDS_MAPPING rows require operator action before the worker can proceed."
       />
 
       {/* Lot filter strip */}

@@ -148,7 +148,7 @@ export default async function PackagingOutputPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Packaging output"
+        title="Production output"
         description="Last 7 days. Unit types are separated end-to-end — cases, displays, and loose are never aggregated into a single number. Source: read_bag_metrics + finished_lots."
         actions={
           <div className="flex items-center gap-2">
@@ -375,7 +375,7 @@ export default async function PackagingOutputPage() {
       {/* Per-bag packaging breakdown */}
       <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <div className="px-4 py-3 border-b border-border/60">
-          <p className="text-[10px] uppercase tracking-wider text-text-subtle">Packaging output</p>
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle">Production output</p>
           <h2 className="text-sm font-semibold text-text-strong">Per-bag rollup — last 7 days</h2>
           <p className="text-[11px] text-text-muted mt-0.5">
             One column per unit type. No aggregation across cases / displays / loose. Source: read_bag_metrics windowed by finalized_at.

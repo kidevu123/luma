@@ -58,9 +58,9 @@ describe("WORKFLOW-UX-1 · Operations entries", () => {
     const slice = sidebarSrc.slice(Math.max(0, startAt - 200), startAt);
     expect(slice).toMatch(/href:\s*"\/production\/start"/);
   });
-  it("Pack-out entry exists in Operations (not 'Packaging output' or 'Packaging / pack-out')", () => {
-    expect(sidebarSrc).toMatch(/label:\s*"Pack-out"/);
-    expect(inOperations('label: "Pack-out"')).toBe(true);
+  it("Production output entry exists in Operations (not 'Packaging output' or 'Pack-out')", () => {
+    expect(sidebarSrc).toMatch(/label:\s*"Production output"/);
+    expect(inOperations('label: "Production output"')).toBe(true);
   });
   it("QC review entry exists in Operations", () => {
     expect(sidebarSrc).toMatch(/label:\s*"QC review"/);
