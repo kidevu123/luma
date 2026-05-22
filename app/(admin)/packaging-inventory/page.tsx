@@ -171,24 +171,14 @@ export default async function PackagingInventoryPage({
                       <td className="p-2 text-right">
                         <div className="flex items-center justify-end gap-3">
                           {l.status !== "SCRAPPED" && (
-                            <form
-                              action={async (fd) => {
-                                "use server";
-                                await scrapLotAction(fd);
-                              }}
-                            >
+                            <form action={scrapLotAction}>
                               <input type="hidden" name="id" value={l.lotId} />
                               <button type="submit" className="text-[10px] text-text-subtle hover:text-amber-600 transition-colors">
                                 Scrap
                               </button>
                             </form>
                           )}
-                          <form
-                            action={async (fd) => {
-                              "use server";
-                              await deleteLotAction(fd);
-                            }}
-                          >
+                          <form action={deleteLotAction}>
                             <input type="hidden" name="id" value={l.lotId} />
                             <button type="submit" className="text-[10px] text-text-subtle hover:text-red-600 transition-colors">
                               Delete

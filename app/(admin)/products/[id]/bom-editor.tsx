@@ -33,6 +33,10 @@ type SpecRow = {
   materialUom: string;
 };
 type Material = { id: string; sku: string; name: string; kind: string; uom: string };
+
+const PACKAGING_KINDS = new Set([
+  "BLISTER_CARD", "DISPLAY", "CASE", "LABEL", "BOTTLE", "CAP", "INSERT",
+]);
 type Tablet = { id: string; name: string };
 
 export function BomEditor({
@@ -53,6 +57,11 @@ export function BomEditor({
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const allowedById = new Map(allowed.map((a) => [a.tabletTypeId, a]));
+
+  const packagingMats = materials.filter((m) => PACKAGING_KINDS.has(m.kind));
+  const rawMats = materials.filter((m) => !PACKAGING_KINDS.has(m.kind));
+  const packagingSpecs = specs.filter((s) => PACKAGING_KINDS.has(s.materialKind));
+  const rawSpecs = specs.filter((s) => !PACKAGING_KINDS.has(s.materialKind));
 
   async function toggleTablet(tabletTypeId: string, enabled: boolean, isPrimary = false) {
     setPending(true);
@@ -130,10 +139,34 @@ export function BomEditor({
               <PackageCheck className="h-3.5 w-3.5 text-text-subtle" /> Packaging
             </Label>
             <span className="text-[11px] text-text-subtle">
-              {specs.length} item{specs.length === 1 ? "" : "s"}
+              {packagingSpecs.length} item{packagingSpecs.length === 1 ? "" : "s"}
             </span>
           </div>
-          <SpecsTable productId={productId} specs={specs} materials={materials} {...(lotSummary ? { lotSummary } : {})} />
+          <SpecsTable
+            productId={productId}
+            specs={packagingSpecs}
+            materials={packagingMats}
+            allSpecs={specs}
+            {...(lotSummary ? { lotSummary } : {})}
+          />
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="flex items-center gap-1.5">
+              <PackageCheck className="h-3.5 w-3.5 text-text-subtle" /> Materials
+            </Label>
+            <span className="text-[11px] text-text-subtle">
+              {rawSpecs.length} item{rawSpecs.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <SpecsTable
+            productId={productId}
+            specs={rawSpecs}
+            materials={rawMats}
+            allSpecs={specs}
+            {...(lotSummary ? { lotSummary } : {})}
+          />
         </section>
 
         {error && (
@@ -173,11 +206,13 @@ function SpecsTable({
   productId,
   specs,
   materials,
+  allSpecs,
   lotSummary,
 }: {
   productId: string;
   specs: SpecRow[];
   materials: Material[];
+  allSpecs: SpecRow[];
   lotSummary?: Map<string, LotSourceSummary>;
 }) {
   const [adding, setAdding] = React.useState(false);
@@ -190,10 +225,9 @@ function SpecsTable({
   const [pending, setPending] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
 
-  const usedKeys = new Set(specs.map((s) => `${s.packagingMaterialId}|${s.perScope}`));
-  const availableMaterials = materials.filter(
-    (m) => !usedKeys.has(`${m.id}|${draft.perScope}`),
-  );
+  // Hide materials already assigned anywhere in the BOM (any scope)
+  const usedMaterialIds = new Set(allSpecs.map((s) => s.packagingMaterialId));
+  const availableMaterials = materials.filter((m) => !usedMaterialIds.has(m.id));
 
   async function add() {
     if (!draft.packagingMaterialId) return;
