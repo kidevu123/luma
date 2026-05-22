@@ -68,8 +68,8 @@ export function ZohoMappingForm({
           className="font-mono text-sm"
         />
         {!zohoItemIdUnit && zohoItemIdFallback && (
-          <p className="text-[11px] text-text-muted mt-1">
-            Pre-filled from product Zoho item ID. Save to confirm.
+          <p className="text-[11px] text-sky-700 mt-1">
+            Prefilled from product setup. Save to confirm.
           </p>
         )}
         <p className="text-[11px] text-text-subtle">

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.37] — 2026-05-22
+
+### Improved
+- Zoho assembly mapping form: "Pre-filled from product Zoho item ID. Save to confirm." helper text is now "Prefilled from product setup. Save to confirm." and styled sky-blue to be more visible when navigating to a freshly created product.
+- Prefill behavior was already functional (product-level `zohoItemId` flowing into `zohoItemIdUnit` field as a fallback); this release confirms and documents it.
+
+### Tests
+- Added 7 new tests in `product-mapping.test.ts` covering: product creation prefill workflow (3 cases), `updateProductZohoAssemblyMappingAction` schema coercion (4 cases).
+
 ## [0.2.36] — 2026-05-22
 
 ### Fixed
