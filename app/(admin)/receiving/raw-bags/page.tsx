@@ -9,7 +9,7 @@
 // + form wiring unchanged from INTAKE-WORKFLOW-1.
 
 import { db } from "@/lib/db";
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   poLines,
   purchaseOrders,
@@ -44,7 +44,12 @@ export default async function ReceiveRawBagsPage() {
         status: purchaseOrders.status,
       })
       .from(purchaseOrders)
-      .where(inArray(purchaseOrders.status, [...RECEIVABLE_PO_STATUSES]))
+      .where(
+        and(
+          inArray(purchaseOrders.status, [...RECEIVABLE_PO_STATUSES]),
+          eq(purchaseOrders.isTabletPo, true),
+        ),
+      )
       .orderBy(desc(purchaseOrders.openedAt)),
     db
       .select({
@@ -86,7 +91,7 @@ export default async function ReceiveRawBagsPage() {
       {/* Badge strip */}
       <div className="flex flex-wrap gap-2">
         <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
-          {pos.length} open/receiving PO{pos.length === 1 ? "" : "s"}
+          {pos.length} tablet PO{pos.length === 1 ? "" : "s"}
         </span>
         <span className="inline-flex items-center h-6 px-2.5 rounded-md border border-border bg-surface-2/60 text-[11px] font-mono text-text-muted">
           {tablets.length} active tablet type{tablets.length === 1 ? "" : "s"}
