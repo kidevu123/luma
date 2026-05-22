@@ -351,6 +351,13 @@ export function ScanCardForm({
         <button
           type="submit"
           disabled={pending || scanPending}
+          onClick={async (e) => {
+            const raw = scanInput.trim();
+            if (raw) {
+              e.preventDefault();
+              await handleResolvedToken(raw);
+            }
+          }}
           className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-base font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60 transition-colors"
         >
           <ScanLine className="h-5 w-5" />
