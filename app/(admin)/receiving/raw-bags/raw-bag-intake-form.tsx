@@ -29,7 +29,6 @@ import {
   type VarianceVerdict,
   verificationStatusLabel,
 } from "@/lib/production/raw-bag-intake";
-import type { ZohoReadiness } from "@/lib/integrations/zoho/gateway";
 import { cn } from "@/lib/utils";
 import {
   createRawBagIntakeAction,
@@ -52,13 +51,11 @@ export function RawBagIntakeForm({
   purchaseOrders,
   poLines,
   tabletTypes,
-  zohoReadiness,
   availableQrCards,
 }: {
   purchaseOrders: PO[];
   poLines: PoLine[];
   tabletTypes: TabletType[];
-  zohoReadiness: ZohoReadiness;
   availableQrCards: { scanToken: string }[];
 }) {
   const [poMode, setPoMode] = React.useState<PoMode>(

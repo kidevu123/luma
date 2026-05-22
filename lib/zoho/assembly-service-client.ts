@@ -47,7 +47,9 @@ export type AssemblyServiceConfig =
 export function validateAssemblyServiceConfig(
   env: Record<string, string | undefined> = process.env,
 ): AssemblyServiceConfig {
-  const rawUrl = env["ZOHO_INTEGRATION_URL"];
+  // ZOHO_SERVICE_BASE_URL is the preferred name; ZOHO_INTEGRATION_URL is the
+  // legacy alias kept for backward compatibility with existing .env files.
+  const rawUrl = env["ZOHO_SERVICE_BASE_URL"] ?? env["ZOHO_INTEGRATION_URL"];
   const rawBearer = env[ZOHO_BEARER_SECRET_ENV];
   const rawBrand = env["ZOHO_BRAND"];
   const rawWarehouseId = env[ZOHO_WAREHOUSE_ID_ENV];
@@ -57,19 +59,19 @@ export function validateAssemblyServiceConfig(
 
   // URL must be present and valid (same service, different path)
   if (!rawUrl || rawUrl.trim().length === 0) {
-    return { ok: false, reason: "ZOHO_INTEGRATION_URL is not configured." };
+    return { ok: false, reason: "ZOHO_SERVICE_BASE_URL (or ZOHO_INTEGRATION_URL) is not configured." };
   }
   const trimmedUrl = rawUrl.trim().replace(/\/+$/, "");
   let parsed: URL;
   try {
     parsed = new URL(trimmedUrl);
   } catch {
-    return { ok: false, reason: "ZOHO_INTEGRATION_URL is not a valid URL." };
+    return { ok: false, reason: "ZOHO_SERVICE_BASE_URL is not a valid URL." };
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return {
       ok: false,
-      reason: `ZOHO_INTEGRATION_URL must use http: or https: (got ${parsed.protocol}).`,
+      reason: `ZOHO_SERVICE_BASE_URL must use http: or https: (got ${parsed.protocol}).`,
     };
   }
 

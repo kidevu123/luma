@@ -18,12 +18,7 @@ import {
 import { RECEIVABLE_PO_STATUSES } from "@/lib/production/raw-bag-intake";
 import { requireLead } from "@/lib/auth-guards";
 import { listAvailableRawBagQrCards } from "@/lib/db/queries/qr-cards";
-import {
-  checkZohoGatewayHealth,
-  deriveZohoReadiness,
-  fetchZohoBrandStatus,
-} from "@/lib/integrations/zoho/gateway";
-import { ShieldAlert, ShieldCheck } from "lucide-react";
+import { ShieldAlert, ShieldCheck, Info } from "lucide-react";
 import { RawBagIntakeForm } from "./raw-bag-intake-form";
 import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 import { PageHeader } from "@/components/ui/page-header";
@@ -72,13 +67,12 @@ export default async function ReceiveRawBagsPage() {
     listAvailableRawBagQrCards(),
   ]);
 
-  // Probe Zoho readiness — read-only; if NEEDS_REAUTH the form shows
-  // the manual-PO fallback as the primary path.
-  const health = await checkZohoGatewayHealth();
-  const brand =
-    health.status === "CONNECTED" ? await fetchZohoBrandStatus() : null;
-  const { readiness } = deriveZohoReadiness({ health, brand });
-  const zohoReady = readiness === "READY_FOR_DRY_RUN";
+  // Zoho readiness is based solely on whether the Integration Service bearer
+  // credentials are configured. We never probe the old OAuth gateway token
+  // state — that is an internal concern of Zoho Integration Service, not Luma.
+  const zohoServiceConfigured =
+    !!(process.env.ZOHO_SERVICE_BEARER_SECRET?.trim()) &&
+    !!(process.env.ZOHO_SERVICE_BASE_URL?.trim() ?? process.env.ZOHO_INTEGRATION_URL?.trim());
 
   return (
     <div className="space-y-5">
@@ -98,47 +92,45 @@ export default async function ReceiveRawBagsPage() {
         </span>
         <span
           className={`inline-flex items-center h-6 px-2.5 rounded-md border text-[11px] font-mono ${
-            zohoReady
+            zohoServiceConfigured
               ? "border-sky-200 bg-sky-50/60 text-sky-800"
               : "border-warn-200 bg-warn-50/60 text-warn-800"
           }`}
         >
-          {zohoReady ? "Zoho: ready" : `Zoho: ${readiness}`}
+          {zohoServiceConfigured ? "Zoho: ready" : "Zoho: not configured"}
         </span>
         <SyncPoButton />
       </div>
 
-      {/* Zoho readiness banner — three-tier */}
-      {zohoReady ? (
-        <div className="rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] text-sky-800 flex items-start gap-2.5">
-          <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
+      {/* Zoho readiness banner — three-tier based on service config + local PO count */}
+      {!zohoServiceConfigured ? (
+        <div className="rounded-xl border border-warn-200 bg-warn-50/60 px-4 py-3 text-[12px] text-warn-800 flex items-start gap-2.5">
+          <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <p className="font-semibold">Zoho PO sync online</p>
+            <p className="font-semibold">Zoho Integration is not configured</p>
             <p className="mt-0.5">
-              Live PO lookup is available. The picker will surface the freshest PO list. Manual PO entry stays available as a fallback.
+              ZOHO_SERVICE_BEARER_SECRET or ZOHO_SERVICE_BASE_URL is missing.
+              Manual PO reference is available in the form below.
             </p>
           </div>
         </div>
       ) : pos.length > 0 ? (
         <div className="rounded-xl border border-border bg-surface/60 px-4 py-3 text-[12px] text-text-muted flex items-start gap-2.5">
-          <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <p className="font-semibold text-text">Using synced PO data from Luma</p>
+            <p className="font-semibold text-text">Using synced tablet PO data from Luma</p>
             <p className="mt-0.5">
-              Live Zoho sync is offline ({readiness}), but {pos.length} PO{pos.length === 1 ? "" : "s"} and
-              their line items are available locally. Use the &ldquo;Sync POs from Zoho&rdquo; button to
-              refresh when Zoho is available.
+              {pos.length} tablet PO{pos.length === 1 ? "" : "s"} available locally. Use &ldquo;Sync POs from Zoho&rdquo; to refresh.
             </p>
           </div>
         </div>
       ) : (
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[12px] text-amber-800 flex items-start gap-2.5">
-          <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+          <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <p className="font-semibold">No local PO data — use manual PO reference</p>
+            <p className="font-semibold">No synced tablet POs yet</p>
             <p className="mt-0.5">
-              Live Zoho sync is offline ({readiness}) and no POs have been synced yet.
-              Use the manual PO reference tab in the form below, or sync POs from Zoho when available.
+              Use &ldquo;Sync POs from Zoho&rdquo; to pull tablet POs, or use manual PO reference below.
             </p>
           </div>
         </div>
@@ -148,7 +140,6 @@ export default async function ReceiveRawBagsPage() {
         purchaseOrders={pos}
         poLines={lines}
         tabletTypes={tablets}
-        zohoReadiness={readiness}
         availableQrCards={availableQrCards.map((c) => ({ scanToken: c.scanToken }))}
       />
     </div>

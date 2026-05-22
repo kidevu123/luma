@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.12] — 2026-05-21
+
+### Fixed
+- Receive pills page: Zoho readiness banner no longer shows `NEEDS_REAUTH` from the old direct-OAuth gateway. Readiness is now based solely on whether `ZOHO_SERVICE_BEARER_SECRET` and `ZOHO_SERVICE_BASE_URL` (or `ZOHO_INTEGRATION_URL`) are configured. Three-tier banner: "not configured" / "synced data available" / "no tablet POs yet".
+- `validateAssemblyServiceConfig` now accepts `ZOHO_SERVICE_BASE_URL` as the preferred env var name, with `ZOHO_INTEGRATION_URL` as a backward-compatible fallback. Existing `.env` files using `ZOHO_INTEGRATION_URL` continue to work without changes.
+- Dead `zohoReadiness` prop removed from `RawBagIntakeForm` (was received but never used).
+
 ## [0.2.11] — 2026-05-21
 
 ### Fixed
