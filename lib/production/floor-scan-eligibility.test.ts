@@ -68,6 +68,18 @@ describe("classifyFloorScanCard", () => {
     }
   });
 
+  it("treats undefined assignedWorkflowBagId as intake-reserved", () => {
+    const result = classifyFloorScanCard({
+      cardType: "RAW_BAG",
+      status: "ASSIGNED",
+      assignedWorkflowBagId: undefined,
+    });
+    expect(result.eligible).toBe(true);
+    if (result.eligible) {
+      expect(result.isIntakeReserved).toBe(true);
+    }
+  });
+
   it("accepts mid-production cards and marks isIntakeReserved=false", () => {
     const result = classifyFloorScanCard({
       cardType: "RAW_BAG",

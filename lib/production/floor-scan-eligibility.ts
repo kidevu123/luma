@@ -29,8 +29,11 @@ export function classifyFloorScanCard(card: FloorScanCard): FloorScanClassificat
         "This bag QR has not been linked to a received bag. Receive the bag first on the Receive Pills page.",
     };
   }
+  if (card.status !== "ASSIGNED") {
+    return { eligible: false, reason: "Unexpected card status." };
+  }
   return {
     eligible: true,
-    isIntakeReserved: card.status === "ASSIGNED" && !card.assignedWorkflowBagId,
+    isIntakeReserved: !card.assignedWorkflowBagId,
   };
 }
