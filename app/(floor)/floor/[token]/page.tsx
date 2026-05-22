@@ -23,6 +23,9 @@ import {
   packagingMaterials,
   inventoryBags,
   tabletTypes,
+  smallBoxes,
+  receives,
+  purchaseOrders,
 } from "@/lib/db/schema";
 import { eq, and, or, inArray, isNotNull, isNull, sql, desc, asc } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
@@ -121,7 +124,7 @@ export default async function FloorStationPage({
         ).map((r) => r.tabletTypeId)
       : [];
 
-  const idleCardsRaw =
+  const receivedCardsRaw =
     canStartFreshBag && compatibleTabletTypeIds.length > 0
       ? await db
           .select({
@@ -130,10 +133,15 @@ export default async function FloorStationPage({
             scanToken: qrCards.scanToken,
             receiptNumber: inventoryBags.internalReceiptNumber,
             tabletTypeName: tabletTypes.name,
+            bagNumber: inventoryBags.bagNumber,
+            poNumber: purchaseOrders.poNumber,
           })
           .from(qrCards)
           .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
           .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+          .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+          .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+          .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
           .where(
             and(
               eq(qrCards.cardType, "RAW_BAG"),
@@ -148,7 +156,7 @@ export default async function FloorStationPage({
             ),
           )
       : [];
-  const idleCards = idleCardsRaw.sort((a, b) =>
+  const receivedCards = receivedCardsRaw.sort((a, b) =>
     a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }),
   );
 
@@ -306,12 +314,14 @@ export default async function FloorStationPage({
               token={token}
               stationId={station.station.id}
               canStartFreshBag={canStartFreshBag}
-              idleCards={idleCards.map((c) => ({
+              receivedCards={receivedCards.map((c) => ({
                 id: c.id,
                 label: c.label,
                 scanToken: c.scanToken,
                 receiptNumber: c.receiptNumber ?? null,
                 tabletTypeName: c.tabletTypeName ?? null,
+                bagNumber: c.bagNumber ?? null,
+                poNumber: c.poNumber ?? null,
               }))}
               eligiblePickups={eligiblePickups
                 .filter(

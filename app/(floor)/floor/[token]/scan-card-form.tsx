@@ -12,7 +12,18 @@ export type EligibleCard = {
   scanToken: string;
   receiptNumber: string | null;
   tabletTypeName: string | null;
+  bagNumber: number | null;
+  poNumber: string | null;
 };
+
+function formatEligibleCardLabel(c: EligibleCard): string {
+  const parts: string[] = [c.label];
+  if (c.poNumber) parts.push(c.poNumber);
+  if (c.bagNumber != null) parts.push(`Bag ${c.bagNumber}`);
+  if (c.tabletTypeName) parts.push(c.tabletTypeName);
+  if (c.receiptNumber) parts.push(`Receipt #${c.receiptNumber}`);
+  return parts.join(" · ");
+}
 
 export type EligiblePickup = {
   id: string;
@@ -32,7 +43,7 @@ export type AllowedProduct = {
 export function ScanCardForm({
   token,
   stationId,
-  idleCards,
+  receivedCards,
   eligiblePickups = [],
   allowedProducts = [],
   requireProductForFreshBag = false,
@@ -40,7 +51,7 @@ export function ScanCardForm({
 }: {
   token: string;
   stationId: string;
-  idleCards: EligibleCard[];
+  receivedCards: EligibleCard[];
   eligiblePickups?: EligiblePickup[];
   allowedProducts?: AllowedProduct[];
   requireProductForFreshBag?: boolean;
@@ -60,20 +71,20 @@ export function ScanCardForm({
   // Camera state
   const [showCamera, setShowCamera] = React.useState(false);
 
-  const idleSet = React.useMemo(
-    () => new Set(idleCards.map((c) => c.id)),
-    [idleCards],
+  const receivedSet = React.useMemo(
+    () => new Set(receivedCards.map((c) => c.id)),
+    [receivedCards],
   );
-  const isIdleCardSelected =
-    selectedCardId !== "" && idleSet.has(selectedCardId);
+  const isReceivedCardSelected =
+    selectedCardId !== "" && receivedSet.has(selectedCardId);
   const showProductPicker =
     requireProductForFreshBag &&
-    isIdleCardSelected &&
+    isReceivedCardSelected &&
     allowedProducts.length > 0;
 
-  const hasIdle = idleCards.length > 0 && canStartFreshBag;
+  const hasReceived = receivedCards.length > 0 && canStartFreshBag;
   const hasPickups = eligiblePickups.length > 0;
-  const hasDropdownOptions = hasIdle || hasPickups;
+  const hasDropdownOptions = hasReceived || hasPickups;
 
   // Submit with an explicit cardId, bypassing the form select.
   const submitWithCardId = React.useCallback(
@@ -114,7 +125,7 @@ export function ScanCardForm({
 
         // First-op station with idle card: show product picker, wait for
         // operator to select product then click submit.
-        if (requireProductForFreshBag && idleSet.has(cardId)) {
+        if (requireProductForFreshBag && result.isIntakeReserved) {
           setSelectedCardId(cardId);
           setProductId("");
           return;
@@ -126,7 +137,7 @@ export function ScanCardForm({
         setScanPending(false);
       }
     },
-    [requireProductForFreshBag, idleSet, submitWithCardId],
+    [requireProductForFreshBag, submitWithCardId],
   );
 
   const handleScanKeyDown = async (
@@ -162,7 +173,7 @@ export function ScanCardForm({
           setError(null);
           if (
             requireProductForFreshBag &&
-            isIdleCardSelected &&
+            isReceivedCardSelected &&
             (!productId || productId === "")
           ) {
             setError(
@@ -260,19 +271,24 @@ export function ScanCardForm({
                   ))}
                 </optgroup>
               )}
-              {hasIdle && (
+              {hasReceived && (
                 <optgroup label={hasPickups ? "Received bags — start new" : "Received bags"}>
-                  {idleCards.map((c) => (
+                  {receivedCards.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.label}
-                      {c.receiptNumber ? ` · ${c.receiptNumber}` : ""}
-                      {c.tabletTypeName ? ` · ${c.tabletTypeName}` : ""}
+                      {formatEligibleCardLabel(c)}
                     </option>
                   ))}
                 </optgroup>
               )}
             </select>
           </>
+        )}
+
+        {canStartFreshBag && !hasReceived && (
+          <p className="text-sm text-text-muted">
+            No received bags are currently available for this station. Use the{" "}
+            <strong>Receive Pills</strong> page to receive bags and assign QR codes.
+          </p>
         )}
 
         {showProductPicker && (
@@ -302,7 +318,7 @@ export function ScanCardForm({
         )}
 
         {requireProductForFreshBag &&
-          isIdleCardSelected &&
+          isReceivedCardSelected &&
           allowedProducts.length === 0 && (
             <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
               No active products configured for this station kind. Supervisor
