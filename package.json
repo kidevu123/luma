@@ -1,6 +1,6 @@
 {
   "name": "luma",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -19,7 +19,8 @@
     "staging:seed": "tsx scripts/seed-staging-validation-data.ts",
     "staging:cleanup": "tsx scripts/cleanup-staging-validation-data.ts",
     "validation:snapshot": "tsx scripts/validation-snapshot.ts",
-    "repair:qr-inventory": "tsx scripts/repair-qr-inventory.ts"
+    "repair:qr-inventory": "tsx scripts/repair-qr-inventory.ts",
+    "verify:deploy": "tsx scripts/verify-deploy.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
