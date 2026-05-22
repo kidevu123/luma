@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.14] — 2026-05-22
+
+### Added
+- Receive detail page (`/inbound/[id]`): bags table below the boxes card. Columns: bag #, receipt number, QR code, supplier lot, weight (kg), status chip. Each row has an "Edit" link to the bag edit page.
+- Bag edit page (`/inbound/[id]/bag/[bagId]/edit`): safe post-save edits for weight, notes, internal receipt number, QR code, and supplier lot. Sensitive field changes require an edit reason. Bags currently in production are locked to notes-only.
+- QR card reassignment at bag edit: transactionally releases the old intake-reserved card to IDLE and assigns the new card. Validates that new cards are not RETIRED, not VARIETY_PACK, and not active in production. Both changes are written to the audit log.
+- `validateBagEditFields` pure helper with 14 unit tests covering all guard conditions.
+- Receive pills page: PO line cards now show local Luma receive counts alongside the PO quantity. Shows "Receiving" (active form), "N bags · N rcvs" (prior receives), or "None yet".
+- Receive pills success panel: "View receive" primary button links directly to the new receive detail page.
+
 ## [0.2.13] — 2026-05-22
 
 ### Changed

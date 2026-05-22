@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   AlertCircle,
   Search,
+  ClipboardList,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -831,6 +832,11 @@ function SaveResultPanel({
         />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
+        <Button asChild size="sm">
+          <Link href={`/inbound/${result.receiveId}`}>
+            <ClipboardList className="h-3.5 w-3.5" /> View receive
+          </Link>
+        </Button>
         <Button asChild size="sm" variant="secondary">
           <Link href="/recall">
             <Search className="h-3.5 w-3.5" /> Lookup receipt / batch
