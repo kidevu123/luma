@@ -8,6 +8,12 @@ Items captured for future work. Not scheduled.
 - **PO line item status should reflect Luma-side receive state** — Currently PO line status reflects Zoho status (to_be_received, partially_received, etc). Add a Luma-side received/intake state that tracks how many bags have been received against a PO line, independent of Zoho sync cadence.
 - **Rename Purchase orders page to Shipments / Receives** — The table on the Purchase orders page shows receive records, not PO master data. Rename page title and nav label to "Shipments" or "Receives" to reduce operator confusion.
 
+## Partial bags
+
+- **Available Partial Bags page** — ✅ Done in v0.2.23: `/partial-bags` admin page shows AVAILABLE raw bags with ≥1 closed allocation session. Derived from `rawBagAllocationSessions` ledger — no new DB status. Includes remaining estimate, last product, last used date, Start run link. Sidebar link in Operations.
+- **Variety parent/child QR workflow** — Separate next workflow. Variety packs use a different QR type (`VARIETY_PACK`) and session model. Do not conflate with raw-bag partial lifecycle.
+- **Start Production: preselect bag from partial-bags page** — Currently clicking "Start run" from `/partial-bags` goes to `/production/start` without the bag pre-selected. A future enhancement could pass `?bagId=` query param and auto-populate Step 1. Requires the Start Production form to read URL params on mount.
+
 ## Production UI
 
 - **Consider renaming Packaging output to Production output** — "Packaging output" could be confused with packaging materials workflow. "Production output" or "Tablet production output" is more accurate for the blister/sealing/packaging station flow.
