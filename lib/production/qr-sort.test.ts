@@ -1,11 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { sortQrRows, matchesQrSearch } from "./qr-sort";
+import { sortQrRows, matchesQrSearch, numericSuffix } from "./qr-sort";
 
 const mkCard = (label: string, cardType: string) => ({
   card: { label, cardType, scanToken: label.replace(/ /g, "-") },
   intakeBag: null,
   intakeBatchNumber: null,
   productName: null,
+});
+
+describe("numericSuffix", () => {
+  it("extracts trailing number from hyphenated label", () => {
+    expect(numericSuffix("bag-card-42")).toBe(42);
+  });
+
+  it("extracts trailing number from spaced title-case label", () => {
+    expect(numericSuffix("Bag Card 42")).toBe(42);
+  });
+
+  it("extracts trailing number when zero-padded", () => {
+    expect(numericSuffix("Bag Card 042")).toBe(42);
+  });
+
+  it("returns 0 for labels with no digits", () => {
+    expect(numericSuffix("old-legacy")).toBe(0);
+  });
+
+  it("handles large numbers correctly", () => {
+    expect(numericSuffix("bag-card-200")).toBe(200);
+  });
 });
 
 describe("sortQrRows", () => {
@@ -69,6 +91,54 @@ describe("sortQrRows", () => {
   });
 
   it("does NOT sort lexicographically (bag-card-10 must come after bag-card-9)", () => {
+    const r9 = mkCard("bag-card-9", "RAW_BAG");
+    const r10 = mkCard("bag-card-10", "RAW_BAG");
+    const result = sortQrRows([r10, r9]);
+    expect(result[0]).toBe(r9);
+    expect(result[1]).toBe(r10);
+  });
+
+  it("sorts bag-card-101 after bag-card-100", () => {
+    const r100 = mkCard("bag-card-100", "RAW_BAG");
+    const r101 = mkCard("bag-card-101", "RAW_BAG");
+    const result = sortQrRows([r101, r100]);
+    expect(result[0]).toBe(r100);
+    expect(result[1]).toBe(r101);
+  });
+
+  it("sorts 'Bag Card N' title-case spaced labels numerically", () => {
+    const r1 = mkCard("Bag Card 1", "RAW_BAG");
+    const r2 = mkCard("Bag Card 2", "RAW_BAG");
+    const r10 = mkCard("Bag Card 10", "RAW_BAG");
+    const r200 = mkCard("Bag Card 200", "RAW_BAG");
+    const result = sortQrRows([r200, r10, r2, r1]);
+    expect(result.map((r) => r.card.label)).toEqual([
+      "Bag Card 1",
+      "Bag Card 2",
+      "Bag Card 10",
+      "Bag Card 200",
+    ]);
+  });
+
+  it("sorts mixed hyphenated and spaced labels by numeric suffix", () => {
+    const r1 = mkCard("bag-card-1", "RAW_BAG");
+    const r2 = mkCard("Bag Card 2", "RAW_BAG");
+    const r9 = mkCard("bag-card-9", "RAW_BAG");
+    const r10 = mkCard("Bag Card 10", "RAW_BAG");
+    const result = sortQrRows([r10, r9, r2, r1]);
+    const nums = result.map((r) => numericSuffix(r.card.label));
+    expect(nums).toEqual([1, 2, 9, 10]);
+  });
+
+  it("Bag Card 2 sorts before Bag Card 10", () => {
+    const r2 = mkCard("Bag Card 2", "RAW_BAG");
+    const r10 = mkCard("Bag Card 10", "RAW_BAG");
+    const result = sortQrRows([r10, r2]);
+    expect(result[0]).toBe(r2);
+    expect(result[1]).toBe(r10);
+  });
+
+  it("bag-card-9 sorts before bag-card-10 (task requirement)", () => {
     const r9 = mkCard("bag-card-9", "RAW_BAG");
     const r10 = mkCard("bag-card-10", "RAW_BAG");
     const result = sortQrRows([r10, r9]);

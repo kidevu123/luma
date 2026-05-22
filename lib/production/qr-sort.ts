@@ -16,8 +16,23 @@ const TYPE_PRIORITY: Record<string, number> = {
 };
 
 /**
+ * Extracts the trailing integer from a label, regardless of separator style.
+ * "bag-card-42"  → 42
+ * "Bag Card 042" → 42
+ * "variety-pack-5" → 5
+ * "old-legacy" → 0 (no digits → sort to front of group)
+ */
+export function numericSuffix(label: string): number {
+  const m = label.match(/(\d+)\D*$/);
+  return m ? parseInt(m[1]!, 10) : 0;
+}
+
+/**
  * Sorts QR card rows: RAW_BAG first, then VARIETY_PACK, then others.
- * Within each group, numerically by label (bag-card-1 < bag-card-2 < bag-card-49 < bag-card-200).
+ * Within each group, sorts by the trailing numeric suffix of the label
+ * so that bag-card-2 < bag-card-10 < bag-card-200 regardless of whether
+ * labels use hyphens ("bag-card-N"), spaces ("Bag Card N"), or mixed case.
+ * Falls back to locale-alphabetical for ties (equal suffix or no digits).
  * Returns a new array; does not mutate input.
  */
 export function sortQrRows<T extends QrCardSortable>(rows: readonly T[]): T[] {
@@ -25,8 +40,10 @@ export function sortQrRows<T extends QrCardSortable>(rows: readonly T[]): T[] {
     const pa = TYPE_PRIORITY[a.card.cardType] ?? 4;
     const pb = TYPE_PRIORITY[b.card.cardType] ?? 4;
     if (pa !== pb) return pa - pb;
+    const na = numericSuffix(a.card.label);
+    const nb = numericSuffix(b.card.label);
+    if (na !== nb) return na - nb;
     return a.card.label.localeCompare(b.card.label, undefined, {
-      numeric: true,
       sensitivity: "base",
     });
   });
