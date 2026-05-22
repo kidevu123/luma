@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.35] — 2026-05-22
+
+### Fixed
+- Number inputs no longer change value on mouse-wheel scroll. The shared `Input` component now blurs on wheel when `type="number"`, preventing accidental increment/decrement across all admin forms (receiving, products, settings, BOM editor, batches, machines, packaging receipts, etc.).
+
+### Improved
+- Sidebar "Pack-out" label renamed to "Production output" to match the page title and reduce ambiguity with packaging materials.
+- "Pack-out queue" section label on the Production output page renamed to "Output queue".
+- Empty-state message updated from "No bags pending pack-out" to "No bags pending output".
+
 ## [0.2.34] — 2026-05-22
 
 ### Fixed

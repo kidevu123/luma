@@ -311,7 +311,6 @@ export function RawBagIntakeForm({
                 min={0}
                 value={orderedQuantityManual}
                 onChange={(e) => setOrderedQuantityManual(e.target.value)}
-                onWheel={(e) => (e.target as HTMLInputElement).blur()}
                 placeholder="e.g. 200000"
               />
             </div>

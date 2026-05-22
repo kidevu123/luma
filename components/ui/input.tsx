@@ -4,18 +4,27 @@ import { cn } from "@/lib/utils";
 export const Input = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement>
->(({ className, ...props }, ref) => (
-  <input
-    ref={ref}
-    className={cn(
-      "block w-full h-9 px-3 rounded-md bg-surface border border-border text-sm text-text placeholder:text-text-subtle",
-      "focus:outline-none focus:ring-2 focus:ring-brand-700/30 focus:border-brand-700",
-      "disabled:opacity-60",
-      className,
-    )}
-    {...props}
-  />
-));
+>(({ className, type, onWheel, ...props }, ref) => {
+  function handleWheel(e: React.WheelEvent<HTMLInputElement>) {
+    // Prevent accidental value changes when scrolling past a focused number input.
+    if (type === "number") e.currentTarget.blur();
+    onWheel?.(e);
+  }
+  return (
+    <input
+      ref={ref}
+      type={type}
+      onWheel={handleWheel}
+      className={cn(
+        "block w-full h-9 px-3 rounded-md bg-surface border border-border text-sm text-text placeholder:text-text-subtle",
+        "focus:outline-none focus:ring-2 focus:ring-brand-700/30 focus:border-brand-700",
+        "disabled:opacity-60",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
 Input.displayName = "Input";
 
 export const Select = React.forwardRef<

@@ -223,7 +223,7 @@ export default async function PackagingOutputPage() {
       {/* Pack-out queue — actionable section */}
       <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <div className="px-4 py-3 border-b border-border/60">
-          <p className="text-[10px] uppercase tracking-wider text-text-subtle">Pack-out queue</p>
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle">Output queue</p>
           <h2 className="text-sm font-semibold text-text-strong">
             {hasQueue
               ? `${awaitingLot.length > 0 ? `${awaitingLot.length} bag${awaitingLot.length === 1 ? "" : "s"} awaiting lot` : ""}${awaitingLot.length > 0 && awaitingFinalize.length > 0 ? " · " : ""}${awaitingFinalize.length > 0 ? `${awaitingFinalize.length} bag${awaitingFinalize.length === 1 ? "" : "s"} on floor` : ""}`
@@ -237,7 +237,7 @@ export default async function PackagingOutputPage() {
           {!hasQueue ? (
             <div className="px-4 py-8 text-center">
               <CheckCircle2 className="h-8 w-8 mx-auto text-text-subtle mb-3" />
-              <p className="text-sm font-medium text-text-muted">No bags pending pack-out</p>
+              <p className="text-sm font-medium text-text-muted">No bags pending output</p>
               <p className="text-[12px] text-text-subtle mt-1">All finalized bags have finished lots. No bags are staged at PACKAGED.</p>
             </div>
           ) : (
