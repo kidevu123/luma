@@ -162,6 +162,7 @@ export function BomEditor({
             specs={rawSpecs}
             materials={rawMats}
             allSpecs={specs}
+            addLabel="Add material"
             {...(lotSummary ? { lotSummary } : {})}
           />
         </section>
@@ -204,12 +205,14 @@ function SpecsTable({
   specs,
   materials,
   allSpecs,
+  addLabel = "Add packaging item",
   lotSummary,
 }: {
   productId: string;
   specs: SpecRow[];
   materials: Material[];
   allSpecs: SpecRow[];
+  addLabel?: string;
   lotSummary?: Map<string, LotSourceSummary>;
 }) {
   const [adding, setAdding] = React.useState(false);
@@ -375,7 +378,7 @@ function SpecsTable({
         </div>
       ) : (
         <Button size="sm" variant="secondary" type="button" onClick={() => setAdding(true)}>
-          <Plus className="h-3.5 w-3.5" /> Add packaging item
+          <Plus className="h-3.5 w-3.5" /> {addLabel}
         </Button>
       )}
 
