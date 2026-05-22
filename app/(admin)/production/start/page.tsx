@@ -59,8 +59,8 @@ export default async function StartProductionPage() {
         description="Supervisor fallback — use the floor station URL for normal production starts."
       />
 
-      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
+        <Info className="h-4 w-4 mt-0.5 shrink-0" />
         <span>
           Preferred workflow: open the floor station URL on the tablet and scan the bag QR there.
           Use this page only as a supervisor fallback when a station scanner or tablet is not working.
