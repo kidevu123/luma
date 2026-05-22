@@ -47,9 +47,12 @@ export function SyncPoButton() {
 
       {lastResult && (
         <p className="text-[10px] text-text-muted">
-          {lastResult.fetched} POs · {lastResult.detailsFetched} details · {lastResult.lineUpserted} lines synced
+          Synced {lastResult.fetched} tablet PO{lastResult.fetched === 1 ? "" : "s"} · {lastResult.detailsFetched} detail{lastResult.detailsFetched === 1 ? "" : "s"} · {lastResult.lineUpserted} line{lastResult.lineUpserted === 1 ? "" : "s"}
           {lastResult.lineSkipped > 0 && (
-            <span className="ml-1">· {lastResult.lineSkipped} skipped</span>
+            <span className="ml-1">· {lastResult.lineSkipped} line{lastResult.lineSkipped === 1 ? "" : "s"} skipped</span>
+          )}
+          {lastResult.nonTabletFlagged > 0 && (
+            <span className="text-warn-700 ml-1">· {lastResult.nonTabletFlagged} anomaly flag{lastResult.nonTabletFlagged === 1 ? "" : "s"}</span>
           )}
           {lastResult.errors.length > 0 && (
             <span className="text-warn-700 ml-1">· {lastResult.errors.length} error{lastResult.errors.length !== 1 ? "s" : ""}</span>
