@@ -44,11 +44,11 @@ export async function saveProductAction(
     unitsPerDisplay: formData.get("unitsPerDisplay") || null,
     displaysPerCase: formData.get("displaysPerCase") || null,
     defaultShelfLifeDays: formData.get("defaultShelfLifeDays") || null,
-    zohoItemId: formData.get("zohoItemId") || null,
+    zohoItemId: (formData.get("zohoItemId") as string | null) || null,
     isActive: formData.get("isActive") === "on",
-    zohoItemIdUnit:    formData.get("zohoItemIdUnit") || null,
-    zohoItemIdDisplay: formData.get("zohoItemIdDisplay") || null,
-    zohoItemIdCase:    formData.get("zohoItemIdCase") || null,
+    zohoItemIdUnit:    (formData.get("zohoItemIdUnit") as string | null) || undefined,
+    zohoItemIdDisplay: (formData.get("zohoItemIdDisplay") as string | null) || undefined,
+    zohoItemIdCase:    (formData.get("zohoItemIdCase") as string | null) || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
