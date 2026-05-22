@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   validateBagEditFields,
   validateQrCardForRawBag,
+  shouldReleaseQrAtBagEdit,
   type BagSnapshot,
   type BagEditInput,
   type QrCardForValidation,
@@ -202,5 +203,47 @@ describe("validateQrCardForRawBag", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/production/i);
+  });
+});
+
+describe("shouldReleaseQrAtBagEdit", () => {
+  it("returns true for intake-reserved card (ASSIGNED + null workflowBagId)", () => {
+    expect(
+      shouldReleaseQrAtBagEdit({
+        cardType: "RAW_BAG",
+        status: "ASSIGNED",
+        assignedWorkflowBagId: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false for IDLE card — not yet linked, nothing to release", () => {
+    expect(
+      shouldReleaseQrAtBagEdit({
+        cardType: "RAW_BAG",
+        status: "IDLE",
+        assignedWorkflowBagId: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false for mid-production card (ASSIGNED + workflowBagId) — must not touch", () => {
+    expect(
+      shouldReleaseQrAtBagEdit({
+        cardType: "RAW_BAG",
+        status: "ASSIGNED",
+        assignedWorkflowBagId: "wfb-uuid-123",
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false for RETIRED card", () => {
+    expect(
+      shouldReleaseQrAtBagEdit({
+        cardType: "RAW_BAG",
+        status: "RETIRED",
+        assignedWorkflowBagId: null,
+      }),
+    ).toBe(false);
   });
 });
