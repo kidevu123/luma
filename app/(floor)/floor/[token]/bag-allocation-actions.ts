@@ -23,12 +23,14 @@ import {
   inventoryBags,
   rawBagAllocationSessions,
   rawBagAllocationEvents,
+  qrCards,
 } from "@/lib/db/schema";
 import {
   resolveStationAccountability,
   withAccountabilityPayload,
 } from "@/lib/production/station-operator-session";
 import { resolveReopenStartingBalance, checkOverAllocation, deriveBagStatusAfterClose } from "@/lib/production/bag-allocation";
+import { writeAudit } from "@/lib/db/audit";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -287,6 +289,13 @@ export async function closeAllocationSessionAction(
       if (overAllocError) return { error: overAllocError };
     }
 
+    const [bagRow] = await db
+      .select({ bagQrCode: inventoryBags.bagQrCode })
+      .from(inventoryBags)
+      .where(eq(inventoryBags.id, session.inventoryBagId))
+      .limit(1);
+    const bagQrCode = bagRow?.bagQrCode ?? null;
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: d.stationId,
@@ -346,6 +355,24 @@ export async function closeAllocationSessionAction(
           .update(inventoryBags)
           .set({ status: newBagStatus })
           .where(eq(inventoryBags.id, session.inventoryBagId));
+      }
+
+      if (newBagStatus === "EMPTIED" && bagQrCode) {
+        const [rawCard] = await tx
+          .select({ id: qrCards.id, cardType: qrCards.cardType, status: qrCards.status })
+          .from(qrCards)
+          .where(eq(qrCards.scanToken, bagQrCode))
+          .limit(1);
+        if (rawCard && rawCard.cardType === "RAW_BAG" && rawCard.status === "ASSIGNED") {
+          await tx.update(qrCards).set({ status: "IDLE" }).where(eq(qrCards.id, rawCard.id));
+          await writeAudit({
+            actorId: accountability.enteredByUserId ?? null,
+            actorRole: null,
+            action: "RAW_BAG_QR_RELEASED",
+            targetType: "qr_card",
+            targetId: rawCard.id,
+          }, tx);
+        }
       }
     });
 
@@ -488,6 +515,13 @@ export async function markBagDepletedAction(
       if (overAllocError) return { error: overAllocError };
     }
 
+    const [bagRow] = await db
+      .select({ bagQrCode: inventoryBags.bagQrCode })
+      .from(inventoryBags)
+      .where(eq(inventoryBags.id, session.inventoryBagId))
+      .limit(1);
+    const bagQrCode = bagRow?.bagQrCode ?? null;
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: d.stationId,
@@ -523,6 +557,24 @@ export async function markBagDepletedAction(
         .update(inventoryBags)
         .set({ status: "EMPTIED" })
         .where(eq(inventoryBags.id, session.inventoryBagId));
+
+      if (bagQrCode) {
+        const [rawCard] = await tx
+          .select({ id: qrCards.id, cardType: qrCards.cardType, status: qrCards.status })
+          .from(qrCards)
+          .where(eq(qrCards.scanToken, bagQrCode))
+          .limit(1);
+        if (rawCard && rawCard.cardType === "RAW_BAG" && rawCard.status === "ASSIGNED") {
+          await tx.update(qrCards).set({ status: "IDLE" }).where(eq(qrCards.id, rawCard.id));
+          await writeAudit({
+            actorId: accountability.enteredByUserId ?? null,
+            actorRole: null,
+            action: "RAW_BAG_QR_RELEASED",
+            targetType: "qr_card",
+            targetId: rawCard.id,
+          }, tx);
+        }
+      }
     });
 
     return { ok: true };

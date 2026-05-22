@@ -14,7 +14,7 @@
 import { z } from "zod";
 import { eq, and, count } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { stations, varietyRuns, rawBagAllocationSessions } from "@/lib/db/schema";
+import { stations, varietyRuns, rawBagAllocationSessions, qrCards } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
 
@@ -70,6 +70,23 @@ export async function startOrResumeVarietyRunAction(
   try {
     await authStation(d.token, d.stationId);
 
+    // Validate the VARIETY_PACK QR card.
+    const [qrCard] = await db
+      .select({ id: qrCards.id, cardType: qrCards.cardType, status: qrCards.status })
+      .from(qrCards)
+      .where(eq(qrCards.scanToken, trimmedToken))
+      .limit(1);
+
+    if (!qrCard) {
+      return { error: "Variety pack QR card not found." };
+    }
+    if (qrCard.cardType !== "VARIETY_PACK") {
+      return { error: "This is not a variety pack QR card." };
+    }
+    if (qrCard.status === "RETIRED") {
+      return { error: "This variety pack QR card is retired." };
+    }
+
     // Check for an existing OPEN run for this token.
     const existing = await db
       .select({ id: varietyRuns.id })
@@ -83,7 +100,7 @@ export async function startOrResumeVarietyRunAction(
       .limit(1);
 
     if (existing[0]) {
-      // Resume path — write audit inside a transaction.
+      // Resume path — card is already ASSIGNED. Just write audit.
       await db.transaction(async (tx) => {
         const accountability = await resolveStationAccountability(tx, {
           stationId: d.stationId,
@@ -102,7 +119,12 @@ export async function startOrResumeVarietyRunAction(
       return { ok: true, runId: existing[0].id, resumed: true };
     }
 
-    // No OPEN run — insert a new one.
+    // No OPEN run — verify QR card is IDLE before starting a new one.
+    if (qrCard.status !== "IDLE") {
+      return { error: "This variety pack QR card is already in use by an open variety run." };
+    }
+
+    // Insert a new run.
     let newId = "";
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
@@ -121,6 +143,16 @@ export async function startOrResumeVarietyRunAction(
       const newRow = inserted[0];
       if (!newRow) throw new Error("Insert returned no row.");
       newId = newRow.id;
+
+      await tx.update(qrCards).set({ status: "ASSIGNED" }).where(eq(qrCards.id, qrCard.id));
+      await writeAudit({
+        actorId: accountability.enteredByUserId ?? null,
+        actorRole: null,
+        action: "VARIETY_QR_ASSIGNED",
+        targetType: "qr_card",
+        targetId: qrCard.id,
+      }, tx);
+
       await writeAudit(
         {
           actorId: accountability.enteredByUserId ?? null,
@@ -213,6 +245,33 @@ export async function closeVarietyRunAction(
           updatedAt: new Date(),
         })
         .where(eq(varietyRuns.id, d.varietyRunId));
+
+      // Release VARIETY_PACK QR card.
+      const [parentCard] = await tx
+        .select({ id: qrCards.id, status: qrCards.status })
+        .from(qrCards)
+        .where(eq(qrCards.scanToken, run.parentScanToken))
+        .limit(1);
+
+      if (parentCard && parentCard.status === "ASSIGNED") {
+        await tx.update(qrCards).set({ status: "IDLE" }).where(eq(qrCards.id, parentCard.id));
+        await writeAudit({
+          actorId: accountability.enteredByUserId ?? null,
+          actorRole: null,
+          action: "VARIETY_QR_RELEASED",
+          targetType: "qr_card",
+          targetId: parentCard.id,
+        }, tx);
+      } else if (!parentCard) {
+        // Legacy run with no QR card record — do not crash.
+        await writeAudit({
+          actorId: accountability.enteredByUserId ?? null,
+          actorRole: null,
+          action: "VARIETY_QR_RELEASE_SKIPPED_LEGACY",
+          targetType: "variety_run",
+          targetId: d.varietyRunId,
+        }, tx);
+      }
 
       await writeAudit(
         {

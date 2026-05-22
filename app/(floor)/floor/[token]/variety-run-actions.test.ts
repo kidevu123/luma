@@ -111,6 +111,7 @@ vi.mock("@/lib/db/schema", () => ({
   stations: {},
   varietyRuns: {},
   rawBagAllocationSessions: {},
+  qrCards: {},
   auditLog: {},
 }));
 
@@ -148,6 +149,12 @@ const VALID_STATION = {
   label: "Test Station",
   kind: "PACKAGING",
   machineId: null,
+};
+
+const VALID_VARIETY_CARD = {
+  id: "00000000-0000-0000-0000-000000000020",
+  cardType: "VARIETY_PACK",
+  status: "IDLE",
 };
 
 function validStartForm(overrides?: Record<string, string>): FormData {
@@ -195,8 +202,10 @@ describe("startOrResumeVarietyRunAction", () => {
   it("resumes an existing OPEN run and returns resumed: true", async () => {
     // slot 0 → authStation (.where() terminal)
     selectResults[0] = [VALID_STATION];
-    // slot 1 → existing OPEN run check (.where().limit(1))
-    selectResults[1] = [{ id: "existing-run-id" }];
+    // slot 1 → QR card lookup (NEW)
+    selectResults[1] = [VALID_VARIETY_CARD];
+    // slot 2 → existing OPEN run check (.where().limit(1))
+    selectResults[2] = [{ id: "existing-run-id" }];
 
     const result = await startOrResumeVarietyRunAction(validStartForm());
 
@@ -207,8 +216,10 @@ describe("startOrResumeVarietyRunAction", () => {
   it("creates a new run when no OPEN run exists and returns resumed: false", async () => {
     // slot 0 → auth
     selectResults[0] = [VALID_STATION];
-    // slot 1 → no existing OPEN run
-    selectResults[1] = [];
+    // slot 1 → QR card lookup (NEW)
+    selectResults[1] = [VALID_VARIETY_CARD];
+    // slot 2 → no existing OPEN run
+    selectResults[2] = [];
     // insert will return a new row
     insertResults = [{ id: "new-run-id" }];
 
@@ -221,7 +232,8 @@ describe("startOrResumeVarietyRunAction", () => {
   it("same token returns existing run (not a second OPEN run)", async () => {
     // Calling start with an existing OPEN run must NOT insert a second run.
     selectResults[0] = [VALID_STATION];
-    selectResults[1] = [{ id: "existing-run-id" }];
+    selectResults[1] = [VALID_VARIETY_CARD];
+    selectResults[2] = [{ id: "existing-run-id" }];
 
     const result = await startOrResumeVarietyRunAction(validStartForm());
 
@@ -238,6 +250,57 @@ describe("startOrResumeVarietyRunAction", () => {
 
     expect("error" in result && result.error).toBeTruthy();
   });
+
+  // ── New QR card validation tests ──────────────────────────────────
+
+  it("returns error when variety QR card is not found", async () => {
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = []; // card not found
+    const result = await startOrResumeVarietyRunAction(validStartForm());
+    expect("error" in result && result.error).toMatch(/not found/i);
+  });
+
+  it("returns error when token is a RAW_BAG card, not VARIETY_PACK", async () => {
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = [{ id: "xxx", cardType: "RAW_BAG", status: "IDLE" }];
+    const result = await startOrResumeVarietyRunAction(validStartForm());
+    expect("error" in result && result.error).toBe("This is not a variety pack QR card.");
+  });
+
+  it("returns error when VARIETY_PACK card is RETIRED", async () => {
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = [{ id: "xxx", cardType: "VARIETY_PACK", status: "RETIRED" }];
+    const result = await startOrResumeVarietyRunAction(validStartForm());
+    expect("error" in result && result.error).toBe("This variety pack QR card is retired.");
+  });
+
+  it("returns error when VARIETY_PACK card is already ASSIGNED (no open run for this token)", async () => {
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = [{ id: "xxx", cardType: "VARIETY_PACK", status: "ASSIGNED" }];
+    selectResults[2] = []; // no open run
+    const result = await startOrResumeVarietyRunAction(validStartForm());
+    expect("error" in result && result.error).toBe("This variety pack QR card is already in use by an open variety run.");
+  });
+
+  it("sets QR card to ASSIGNED when opening a new variety run", async () => {
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = [VALID_VARIETY_CARD];
+    selectResults[2] = []; // no open run
+    insertResults = [{ id: "new-run-id" }];
+    const result = await startOrResumeVarietyRunAction(validStartForm());
+    expect(result).toEqual({ ok: true, runId: "new-run-id", resumed: false });
+    // updateSetSpy should have been called with { status: "ASSIGNED" }
+    expect(updateSetSpy).toHaveBeenCalledWith({ status: "ASSIGNED" });
+  });
+
+  it("does not change QR status when resuming an existing open run", async () => {
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = [{ ...VALID_VARIETY_CARD, status: "ASSIGNED" }]; // already assigned
+    selectResults[2] = [{ id: "existing-run-id" }]; // open run exists
+    const result = await startOrResumeVarietyRunAction(validStartForm());
+    expect(result).toEqual({ ok: true, runId: "existing-run-id", resumed: true });
+    expect(updateSetSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ── closeVarietyRunAction ────────────────────────────────────────────
@@ -246,21 +309,23 @@ describe("closeVarietyRunAction", () => {
   it("closes a run with no open child sessions", async () => {
     // slot 0 → auth
     selectResults[0] = [VALID_STATION];
-    // slot 1 → load run (OPEN)
+    // slot 1 → load run (OPEN) — must include parentScanToken
     selectResults[1] = [
-      { id: "00000000-0000-0000-0000-000000000010", status: "OPEN" },
+      { id: "00000000-0000-0000-0000-000000000010", status: "OPEN", parentScanToken: "VARIETY-CARD-001" },
     ];
     // slot 2 → count open child sessions = 0
     selectResults[2] = [{ count: 0 }];
+    // slot 3 → QR card lookup inside tx (NEW)
+    selectResults[3] = [{ id: "00000000-0000-0000-0000-000000000020", status: "ASSIGNED" }];
 
     const result = await closeVarietyRunAction(validCloseForm());
 
     expect(result).toEqual({ ok: true });
 
-    expect(updateSetSpy).toHaveBeenCalledOnce();
-    const setArg = updateSetSpy.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(setArg.status).toBe("CLOSED");
-    expect(setArg.closedAt).toBeInstanceOf(Date);
+    expect(updateSetSpy).toHaveBeenCalledTimes(2);
+    const firstCall = updateSetSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(firstCall.status).toBe("CLOSED");
+    expect(firstCall.closedAt).toBeInstanceOf(Date);
   });
 
   it("blocks close when child sessions are still OPEN", async () => {
@@ -299,18 +364,19 @@ describe("closeVarietyRunAction", () => {
     expect("error" in result && result.error).toMatch(/not found/);
   });
 
-  it("does not touch child sessions (only one update on varietyRuns)", async () => {
+  it("does not touch child sessions (rawBagAllocationSessions must NOT be updated)", async () => {
     selectResults[0] = [VALID_STATION];
     selectResults[1] = [
-      { id: "00000000-0000-0000-0000-000000000010", status: "OPEN" },
+      { id: "00000000-0000-0000-0000-000000000010", status: "OPEN", parentScanToken: "VARIETY-CARD-001" },
     ];
     selectResults[2] = [{ count: 0 }];
+    // QR card found and ASSIGNED → triggers second update (qrCards, not rawBagAllocationSessions)
+    selectResults[3] = [{ id: "00000000-0000-0000-0000-000000000020", status: "ASSIGNED" }];
 
     await closeVarietyRunAction(validCloseForm());
 
-    // Exactly one db.update() call — the variety run itself.
-    // rawBagAllocationSessions must NOT be updated.
-    expect(updateSetSpy).toHaveBeenCalledOnce();
+    // Two update calls: variety run + QR card. Neither is rawBagAllocationSessions.
+    expect(updateSetSpy).toHaveBeenCalledTimes(2);
   });
 
   it("writes audit log when closing a variety run", async () => {
@@ -318,9 +384,10 @@ describe("closeVarietyRunAction", () => {
 
     selectResults[0] = [VALID_STATION];
     selectResults[1] = [
-      { id: "00000000-0000-0000-0000-000000000010", status: "OPEN" },
+      { id: "00000000-0000-0000-0000-000000000010", status: "OPEN", parentScanToken: "VARIETY-CARD-001" },
     ];
     selectResults[2] = [{ count: 0 }];
+    selectResults[3] = [{ id: "00000000-0000-0000-0000-000000000020", status: "ASSIGNED" }];
 
     const result = await closeVarietyRunAction(validCloseForm());
 
@@ -332,5 +399,36 @@ describe("closeVarietyRunAction", () => {
       }),
       expect.anything(), // tx
     );
+  });
+
+  // ── New QR card release tests ─────────────────────────────────────
+
+  it("releases VARIETY_PACK QR card to IDLE when closing a run", async () => {
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = [{ id: "00000000-0000-0000-0000-000000000010", status: "OPEN", parentScanToken: "VARIETY-CARD-001" }];
+    selectResults[2] = [{ count: 0 }];
+    selectResults[3] = [{ id: "00000000-0000-0000-0000-000000000020", status: "ASSIGNED" }]; // QR card
+
+    const result = await closeVarietyRunAction(validCloseForm());
+    expect(result).toHaveProperty("ok", true);
+
+    // First update: variety run → CLOSED; second update: QR card → IDLE
+    expect(updateSetSpy).toHaveBeenCalledTimes(2);
+    const qrUpdate = updateSetSpy.mock.calls[1]?.[0] as Record<string, unknown>;
+    expect(qrUpdate.status).toBe("IDLE");
+  });
+
+  it("does not crash when VARIETY_PACK QR card is missing (legacy run)", async () => {
+    selectResults[0] = [VALID_STATION];
+    selectResults[1] = [{ id: "00000000-0000-0000-0000-000000000010", status: "OPEN", parentScanToken: "LEGACY-TOKEN" }];
+    selectResults[2] = [{ count: 0 }];
+    selectResults[3] = []; // QR card not found
+
+    const result = await closeVarietyRunAction(validCloseForm());
+    expect(result).toHaveProperty("ok", true);
+    // Only one update (variety run), no QR update
+    expect(updateSetSpy).toHaveBeenCalledOnce();
+    const setArg = updateSetSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(setArg.status).toBe("CLOSED");
   });
 });
