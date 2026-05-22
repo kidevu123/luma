@@ -70,31 +70,28 @@ describe("ZohoMappingForm unit field fallback", () => {
 });
 
 describe("zohoItemId back-sync logic", () => {
-  it("syncs zohoItemId when zohoItemIdUnit is <= 60 chars", () => {
-    const zohoItemIdUnit = "ZOHO-UNIT-SHORT";
-    const zohoItemId =
-      zohoItemIdUnit === null ? null
-      : zohoItemIdUnit.length <= 60 ? zohoItemIdUnit
-      : undefined;
+  it("syncs zohoItemId when zohoItemIdUnit is ≤ 60 chars", () => {
+    const zohoItemIdUnit: string | null = "ZOHO-UNIT-SHORT";
+    const zohoItemId = zohoItemIdUnit === null || zohoItemIdUnit.length > 60 ? null : zohoItemIdUnit;
     expect(zohoItemId).toBe("ZOHO-UNIT-SHORT");
   });
 
-  it("does not sync zohoItemId when zohoItemIdUnit exceeds 60 chars", () => {
-    const zohoItemIdUnit = "Z".repeat(61);
-    const zohoItemId =
-      zohoItemIdUnit === null ? null
-      : zohoItemIdUnit.length <= 60 ? zohoItemIdUnit
-      : undefined;
-    expect(zohoItemId).toBeUndefined();
+  it("clears zohoItemId when zohoItemIdUnit exceeds 60 chars", () => {
+    const zohoItemIdUnit: string | null = "Z".repeat(61);
+    const zohoItemId = zohoItemIdUnit === null || zohoItemIdUnit.length > 60 ? null : zohoItemIdUnit;
+    expect(zohoItemId).toBeNull();
   });
 
   it("sets zohoItemId to null when zohoItemIdUnit is cleared", () => {
-    // Cast to string | null so TypeScript doesn't narrow the const to literal null
-    const zohoItemIdUnit = null as string | null;
-    const zohoItemId =
-      zohoItemIdUnit === null ? null
-      : zohoItemIdUnit.length <= 60 ? zohoItemIdUnit
-      : undefined;
+    // Use a function return to prevent TypeScript narrowing null literal to never
+    const zohoItemIdUnit = ((): string | null => null)();
+    const zohoItemId = zohoItemIdUnit === null || zohoItemIdUnit.length > 60 ? null : zohoItemIdUnit;
     expect(zohoItemId).toBeNull();
+  });
+
+  it("syncs exactly 60-char zohoItemIdUnit (boundary check)", () => {
+    const zohoItemIdUnit: string | null = "Z".repeat(60);
+    const zohoItemId = zohoItemIdUnit === null || zohoItemIdUnit.length > 60 ? null : zohoItemIdUnit;
+    expect(zohoItemId).toBe("Z".repeat(60));
   });
 });

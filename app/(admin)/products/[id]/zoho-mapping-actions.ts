@@ -32,15 +32,17 @@ export async function updateProductZohoAssemblyMappingAction(
   const { id, zohoItemIdUnit, ...rest } = parsed.data;
 
   // Back-sync zohoItemId (commercial trace, 60-char limit) from unit ID.
+  // If unit ID is absent or too long for the legacy column, explicitly clear
+  // zohoItemId so the two columns never diverge.
   const zohoItemId =
-    zohoItemIdUnit === null ? null
-    : zohoItemIdUnit !== undefined && zohoItemIdUnit.length <= 60 ? zohoItemIdUnit
-    : undefined; // longer than legacy column — leave existing value unchanged
+    zohoItemIdUnit === null || zohoItemIdUnit === undefined || zohoItemIdUnit.length > 60
+      ? null
+      : zohoItemIdUnit;
 
   const patch = {
     ...rest,
     zohoItemIdUnit,
-    ...(zohoItemId !== undefined ? { zohoItemId } : {}),
+    zohoItemId,
   };
 
   try {
