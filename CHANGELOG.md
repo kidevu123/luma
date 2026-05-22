@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.32] — 2026-05-22
+
+### Improved
+- Floor station raw-bag picker now filters to bags whose tablet type is compatible with the station's product kinds. A BLISTER/COMBINED/HANDPACK_BLISTER station shows only CARD/VARIETY-compatible bags; BOTTLE_HANDPACK stations show only BOTTLE/VARIETY-compatible bags. Reduces the dropdown from ~200 items to the relevant subset. Cards with no linked inventory bag remain visible as a safety fallback.
+
 ## [0.2.31] — 2026-05-22
 
 ### Changed
