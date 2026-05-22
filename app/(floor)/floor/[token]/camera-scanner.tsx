@@ -48,8 +48,12 @@ export function CameraScanner({
     async function startCamera() {
       if (!navigator.mediaDevices?.getUserMedia) {
         if (mounted) {
+          const isInsecure =
+            typeof window !== "undefined" && !window.isSecureContext;
           setErrorMsg(
-            "Camera API not available in this browser. Use the text input below instead.",
+            isInsecure
+              ? "Camera access requires HTTPS. This page is served over HTTP — ask your IT team to enable HTTPS, or type the bag QR code manually."
+              : "Camera is not available in this browser. Use the text input to scan instead.",
           );
           setPhase("error");
         }
