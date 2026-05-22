@@ -1,0 +1,33 @@
+flowchart TD
+    PO[Purchase Order] --> Receive[Receive Pills\nShipment / Receive record]
+    Receive --> QRPool[QR Card Pool\nRAW_BAG cards — idle]
+    Receive --> InvBags[Inventory Bags\nweighed + batch-assigned]
+    QRPool -->|reserved + assigned at receive| InvBags
+
+    InvBags -->|bag with RELEASED batch| FloorStation[Floor Station Page\n/floor/token]
+    FloorStation -->|scan bag QR| WorkflowEvents[workflow_events\nappend-only event log]
+
+    WorkflowEvents -->|pg_notify → pg-boss projector| ReadModels[Read Models\nread_station_live\nread_bag_state\nread_daily_throughput]
+
+    WorkflowEvents -->|BAG_FINALIZED| FinishedLots[Finished Lots\n+ Genealogy edges]
+
+    FinishedLots --> ZohoQueue[Zoho Operations Queue\nzoho_operations]
+    ZohoQueue -->|dry-run by default| ZohoGW[Zoho Integration Service\nLXC 9503]
+    ZohoGW --> ZohoExternal[(Zoho Inventory / Books\nexternal downstream)]
+
+    FloorBoard[Floor Board\nAdmin live view] -->|SSE stream| ReadModels
+
+    subgraph Admin["Admin UI (office)"]
+        FloorBoard
+        QRAdmin[QR Card Admin]
+        BatchAdmin[Batch Management]
+        ProductAdmin[Products / Tablet Mappings]
+        ReceivingAdmin[Receiving]
+        ZohoOpsAdmin[Zoho Ops Queue UI]
+    end
+
+    QRAdmin -.->|manages| QRPool
+    BatchAdmin -.->|manages| InvBags
+    ProductAdmin -.->|configures| FloorStation
+    ReceivingAdmin -.->|creates| Receive
+    ZohoOpsAdmin -.->|monitors| ZohoQueue
