@@ -1,7 +1,7 @@
 // Printable QR card labels. One QR per IDLE card. Encodes the
-// card's UUID — when the floor tablet's camera scans it, the
-// scan-card form on /floor/<station-token> reads the UUID and
-// fires scanCardAction.
+// card's scanToken — when the floor tablet's camera scans it, the
+// scan-card form on /floor/<station-token> looks up the card by
+// scanToken and fires scanCardAction.
 
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
@@ -27,7 +27,8 @@ export default async function QrLabelsPage() {
   await requireAdmin();
   const all = await listQrCards();
   const idle = all.filter((r) => r.card.status === "IDLE" && r.card.cardType === "RAW_BAG");
-  const svgs = await Promise.all(idle.map((r) => renderQrSvg(r.card.id)));
+  // QR-SCAN-PAYLOAD-1: encode scanToken, not id — floor scan lookup matches by scanToken.
+  const svgs = await Promise.all(idle.map((r) => renderQrSvg(r.card.scanToken)));
 
   return (
     <div className="space-y-5 print:space-y-0">
@@ -58,7 +59,7 @@ export default async function QrLabelsPage() {
             Print {idle.length} card label{idle.length === 1 ? "" : "s"}
           </h1>
           <p className="text-xs text-text-muted mt-0.5">
-            One QR per idle RAW_BAG card. Each encodes the card's UUID — that's what
+            One QR per idle RAW_BAG card. Each encodes the card's scan token — that's what
             the floor tablet scans.
           </p>
         </div>
@@ -82,7 +83,7 @@ export default async function QrLabelsPage() {
               />
               <p className="text-sm font-semibold text-center">{r.card.label}</p>
               <p className="text-[9px] font-mono text-text-subtle text-center break-all">
-                {r.card.id}
+                {r.card.scanToken}
               </p>
             </div>
           ))}
