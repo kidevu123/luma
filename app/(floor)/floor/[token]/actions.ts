@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and, sql, desc, asc } from "drizzle-orm";
+import { eq, and, or, sql, desc, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   qrCards,
@@ -1050,6 +1050,7 @@ export async function lookupCardByTokenAction(
     return { error: "No scan token provided." };
   }
 
+  const token = scanToken.trim();
   const [card] = await db
     .select({
       id: qrCards.id,
@@ -1060,7 +1061,10 @@ export async function lookupCardByTokenAction(
     })
     .from(qrCards)
     .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
-    .where(eq(qrCards.scanToken, scanToken.trim()))
+    // QR-SCAN-PAYLOAD-1: new labels encode scanToken; legacy labels printed before
+    // this fix encode qrCards.id. Support both until old labels are retired/reprinted.
+    // TODO: remove the eq(qrCards.id, token) id fallback once legacy labels are gone.
+    .where(or(eq(qrCards.scanToken, token), eq(qrCards.id, token)))
     .limit(1);
 
   if (!card) return { error: "Bag QR not found." };
