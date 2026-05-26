@@ -307,7 +307,7 @@ export async function setFinishedLotStatus(
   actor: CurrentUser,
   reason?: string,
 ) {
-  return db.transaction(async (tx) => {
+  const { row, beforeStatus } = await db.transaction(async (tx) => {
     const [before] = await tx.select().from(finishedLots).where(eq(finishedLots.id, id));
     if (!before) throw new Error("setFinishedLotStatus: not found");
     const [row] = await tx
@@ -348,6 +348,78 @@ export async function setFinishedLotStatus(
         },
       });
     }
-    return row;
+    return { row, beforeStatus: before.status };
   });
+
+  // Phase A — PackTrack consumption push (fire-and-forget, never blocks lot release).
+  if (next === "RELEASED" && beforeStatus !== "RELEASED") {
+    void (async () => {
+      try {
+        const { isConsumptionConfigured, sendConsumptionToPackTrack } = await import(
+          "@/lib/integrations/packtrack/consumption"
+        );
+        if (!isConsumptionConfigured()) return;
+
+        // Load lot metadata
+        const [lotMeta] = await db
+          .select({
+            finishedLotNumber: finishedLots.finishedLotNumber,
+            unitsProduced: finishedLots.unitsProduced,
+            productSku: products.sku,
+          })
+          .from(finishedLots)
+          .innerJoin(products, eq(products.id, finishedLots.productId))
+          .where(eq(finishedLots.id, id));
+
+        if (!lotMeta) return;
+
+        // Build consumed materials: finishedLotInputs -> batches -> packagingMaterials
+        const inputRows = await db
+          .select({
+            material_code: packagingMaterials.sku,
+            qty_consumed: finishedLotInputs.qtyConsumed,
+          })
+          .from(finishedLotInputs)
+          .innerJoin(batches, eq(batches.id, finishedLotInputs.batchId))
+          .innerJoin(packagingMaterials, eq(packagingMaterials.id, batches.packagingMaterialId))
+          .where(eq(finishedLotInputs.finishedLotId, id));
+
+        const consumedMaterials = inputRows.map((r) => ({
+          material_code: r.material_code,
+          qty_consumed: r.qty_consumed ?? 0,
+        }));
+
+        if (consumedMaterials.length === 0) {
+          await db
+            .update(finishedLots)
+            .set({ packtrackConsumptionError: "No packaging inputs found for lot" })
+            .where(eq(finishedLots.id, id));
+          return;
+        }
+
+        const result = await sendConsumptionToPackTrack({
+          source: "LUMA",
+          finished_lot_id: id,
+          finished_lot_number: lotMeta.finishedLotNumber ?? id,
+          product_sku: lotMeta.productSku,
+          units_produced: lotMeta.unitsProduced ?? 0,
+          released_at: new Date().toISOString(),
+          consumed_materials: consumedMaterials,
+        });
+
+        await db
+          .update(finishedLots)
+          .set(
+            result.ok
+              ? { packtrackConsumptionSentAt: new Date(), packtrackConsumptionError: null }
+              : { packtrackConsumptionError: result.reason },
+          )
+          .where(eq(finishedLots.id, id));
+      } catch (err) {
+        console.error("[packtrack.consumption] fire-and-forget error:", err);
+      }
+    })();
+  }
+
+  return row;
 }
