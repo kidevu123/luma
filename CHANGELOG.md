@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.49] — 2026-05-26
+
+### Fixed
+- **QR label payload mismatch (QR-SCAN-PAYLOAD-1):** Printed bag QR labels were encoding `qrCards.id` (the UUID primary key), but `lookupCardByTokenAction` was matching by `qrCards.scanToken` (a separate column). Every physical scan — camera or USB/Bluetooth barcode scanner — silently returned "Bag QR not found." New labels now encode `qrCards.scanToken`, the correct lookup key. The floor scan lookup now also accepts `qrCards.id` as a backward-compatible fallback so labels printed before this fix continue to resolve (TODO: remove the id fallback once all legacy labels are retired/reprinted).
+- **Floor station footer version metadata:** The station page footer now shows `v{version} · {sha} · {branch}`, matching the admin UI. Operators and supervisors can confirm which deployed version is running on floor tablets.
+
+### Tests added (QR-SCAN-PAYLOAD-1)
+- Source-text guard: `lookupCardByTokenAction` uses `or()` wrapping both `scanToken` and `id` clauses.
+- Source-text guard: QR label page calls `renderQrSvg(r.card.scanToken)` — not `r.card.id`.
+
 ## [0.2.48] — 2026-05-26
 
 ### Added
