@@ -47,6 +47,7 @@ vi.mock("@/lib/db/schema", () => ({
 
 vi.mock("drizzle-orm", () => ({
   eq: (a: unknown, b: unknown) => ({ eq: [a, b] }),
+  or: (...args: unknown[]) => ({ or: args }),
   inArray: (a: unknown, b: unknown) => ({ inArray: [a, b] }),
 }));
 
@@ -512,5 +513,49 @@ describe("CAMERA-SCAN-ROOTCAUSE-1 · camera-scanner.tsx video DOM fix", () => {
   it("stream is stopped after successful scan in jsQR path", () => {
     // getTracks().forEach(t => t.stop()) called before onResult in jsQR path
     expect(cameraSrc).toMatch(/onResult\(code\.data\.trim\(\)\)/);
+  });
+});
+
+// ── QR-SCAN-PAYLOAD-1 · source invariants ────────────────────────────────────
+//
+// These structural tests guard against re-introducing the id/scanToken mismatch.
+// They read source files as text — no DB, no mocks — and assert the correct
+// fields are used. They fail until Tasks 2 and 3 are implemented.
+
+describe("QR-SCAN-PAYLOAD-1 · lookupCardByTokenAction dual lookup", () => {
+  const actionsSrc = readFileSync(resolve(here, "actions.ts"), "utf8");
+
+  it("uses or() to wrap the WHERE clause — not a bare scanToken eq", () => {
+    // The old single-field where: .where(eq(qrCards.scanToken, ...))
+    // The new dual-field where: .where(or(eq(qrCards.scanToken, ...), eq(qrCards.id, ...)))
+    expect(actionsSrc).toMatch(/\.where\s*\(\s*or\s*\(/);
+  });
+
+  it("includes eq(qrCards.scanToken, token) inside the or() clause", () => {
+    expect(actionsSrc).toMatch(/eq\s*\(\s*qrCards\.scanToken\s*,\s*token\s*\)/);
+  });
+
+  it("includes eq(qrCards.id, token) as the legacy fallback inside or()", () => {
+    expect(actionsSrc).toMatch(/eq\s*\(\s*qrCards\.id\s*,\s*token\s*\)/);
+  });
+
+  it("includes a TODO comment about removing the id fallback", () => {
+    expect(actionsSrc).toMatch(/TODO.*id.*fallback|TODO.*legacy.*label/i);
+  });
+});
+
+describe("QR-SCAN-PAYLOAD-1 · QR label payload", () => {
+  const labelsPath = resolve(
+    here,
+    "../../../(admin)/qr-cards/labels/page.tsx",
+  );
+  const labelsSrc = readFileSync(labelsPath, "utf8");
+
+  it("renderQrSvg receives r.card.scanToken — not r.card.id", () => {
+    expect(labelsSrc).toMatch(/renderQrSvg\s*\(\s*r\.card\.scanToken\s*\)/);
+  });
+
+  it("no call to renderQrSvg with r.card.id remains", () => {
+    expect(labelsSrc).not.toMatch(/renderQrSvg\s*\(\s*r\.card\.id\s*\)/);
   });
 });
