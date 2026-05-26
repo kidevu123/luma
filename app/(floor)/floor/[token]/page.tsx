@@ -42,8 +42,20 @@ import { shouldRenderQcPanel } from "@/lib/production/qc-panel-helpers";
 import { QcPanel, type PendingReworkRow } from "./qc-panel";
 import { loadAutoLots, STATION_AUTO_MATERIAL_KINDS, type AutoLoadedLot } from "@/lib/production/auto-load-lots";
 import { SealHandpackForm } from "./seal-handpack-form";
+import { readFileSync } from "fs";
+import path from "path";
 
 export const dynamic = "force-dynamic";
+
+function getPackageVersion(): string {
+  try {
+    const raw = readFileSync(path.join(process.cwd(), "package.json"), "utf-8");
+    const pkg = JSON.parse(raw) as { version?: string };
+    return pkg.version ?? "?";
+  } catch {
+    return "?";
+  }
+}
 
 export default async function FloorStationPage({
   params,
@@ -471,8 +483,9 @@ export default async function FloorStationPage({
         )}
       </section>
 
-      <p className="text-center text-[10px] text-text-subtle">
-        Luma · {process.env.BUILD_GIT_SHA?.slice(0, 7) ?? "dev"}
+      <p className="text-center text-[10px] font-mono text-text-subtle">
+        Luma · v{getPackageVersion()} · {process.env.BUILD_GIT_SHA?.slice(0, 7) ?? "local"}
+        {process.env.BUILD_GIT_BRANCH ? ` · ${process.env.BUILD_GIT_BRANCH}` : ""}
       </p>
     </main>
   );
