@@ -10,10 +10,19 @@
 // Degrades gracefully: if getUserMedia or the Camera API is unavailable
 // (old browser, desktop dev, permissions blocked) the component shows a
 // friendly error and exposes "Use typed input" link instead of crashing.
+//
+// CAMERA-SCAN-ROOTCAUSE-1 fix: <video> is always in the DOM so videoRef.current
+// is non-null when the getUserMedia promise resolves during "starting" phase.
+// Previously it was inside {phase === "scanning" && ...} — the ref was null,
+// if (video) failed silently, and the scanner stayed on the spinner forever.
 
 import * as React from "react";
-import { X, CameraOff, Loader2 } from "lucide-react";
+import { X, CameraOff, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import jsQR from "jsqr";
+import {
+  getStaticCameraDiagnostics,
+  type CameraDiagnostics,
+} from "@/lib/floor/camera-diagnostics";
 
 type BarcodeDetectorInstance = {
   detect(image: HTMLVideoElement): Promise<Array<{ rawValue: string }>>;
@@ -41,6 +50,10 @@ export function CameraScanner({
     "starting",
   );
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const [streamStarted, setStreamStarted] = React.useState(false);
+  const [permissionDenied, setPermissionDenied] = React.useState(false);
+
+  const diag = React.useMemo(() => getStaticCameraDiagnostics(), []);
 
   React.useEffect(() => {
     let mounted = true;
@@ -70,6 +83,7 @@ export function CameraScanner({
           return;
         }
         streamRef.current = stream;
+        setStreamStarted(true);
         const video = videoRef.current;
         if (video) {
           video.srcObject = stream;
@@ -83,6 +97,7 @@ export function CameraScanner({
           if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
             msg =
               "Camera permission denied. Allow camera access in your browser settings and try again.";
+            setPermissionDenied(true);
           } else if (
             err.name === "NotFoundError" ||
             err.name === "DevicesNotFoundError"
@@ -102,6 +117,7 @@ export function CameraScanner({
                 return;
               }
               streamRef.current = fallback;
+              setStreamStarted(true);
               const video = videoRef.current;
               if (video) {
                 video.srcObject = fallback;
@@ -180,7 +196,7 @@ export function CameraScanner({
         stopStream();
       };
     } else {
-      // jsQR fallback path (existing code below — DO NOT MODIFY)
+      // jsQR fallback path (iOS Safari + browsers without BarcodeDetector)
       function tick() {
         if (resolvedRef.current) return;
 
@@ -250,6 +266,11 @@ export function CameraScanner({
           <div className="p-6 text-center space-y-3">
             <CameraOff className="h-10 w-10 mx-auto text-text-muted" />
             <p className="text-sm text-text-muted">{errorMsg}</p>
+            <CameraDiagnosticsPanel
+              diag={diag}
+              streamStarted={streamStarted}
+              permissionDenied={permissionDenied}
+            />
             <button
               type="button"
               onClick={onClose}
@@ -260,23 +281,73 @@ export function CameraScanner({
           </div>
         )}
 
+        {/* Video is ALWAYS in the DOM so videoRef.current is non-null when the
+            getUserMedia promise resolves during the "starting" phase.
+            Root cause fix: was inside {phase === "scanning" && ...} — ref was null,
+            if (video) failed silently, scanner stayed on spinner forever on HTTPS. */}
+        <video
+          ref={videoRef}
+          muted
+          playsInline
+          className={`w-full aspect-square object-cover bg-black${phase !== "scanning" ? " hidden" : ""}`}
+        />
         {phase === "scanning" && (
-          <>
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video
-              ref={videoRef}
-              muted
-              playsInline
-              className="w-full aspect-square object-cover bg-black"
-            />
-            <p className="text-center text-xs text-text-muted py-3 px-4">
-              Point camera at the bag QR label
-            </p>
-          </>
+          <p className="text-center text-xs text-text-muted py-3 px-4">
+            Point camera at the bag QR label
+          </p>
         )}
 
         <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
       </div>
+    </div>
+  );
+}
+
+// ── Diagnostics panel ─────────────────────────────────────────────────────────
+
+function DiagItem({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div className="flex items-center gap-2 text-left text-xs">
+      {ok ? (
+        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+      ) : (
+        <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+      )}
+      <span className={ok ? "text-text-muted" : "text-red-700"}>{label}</span>
+    </div>
+  );
+}
+
+function CameraDiagnosticsPanel({
+  diag,
+  streamStarted,
+  permissionDenied,
+}: {
+  diag: CameraDiagnostics;
+  streamStarted: boolean;
+  permissionDenied: boolean;
+}) {
+  return (
+    <div className="text-left rounded-lg border border-border bg-surface-2/60 px-3 py-2.5 space-y-1.5">
+      <p className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">
+        Diagnostics
+      </p>
+      <DiagItem label="HTTPS secure context" ok={diag.isSecureContext} />
+      <DiagItem label="Camera API available" ok={diag.hasCameraApi} />
+      <DiagItem
+        label={permissionDenied ? "Camera permission — denied" : "Camera permission"}
+        ok={!permissionDenied}
+      />
+      <DiagItem
+        label={
+          diag.hasBarcodeDetector
+            ? "Hardware decoder (BarcodeDetector)"
+            : "Hardware decoder — using jsQR fallback"
+        }
+        ok={diag.hasBarcodeDetector || diag.hasJsQrFallback}
+      />
+      <DiagItem label="jsQR software fallback" ok={diag.hasJsQrFallback} />
+      <DiagItem label="Camera stream started" ok={streamStarted} />
     </div>
   );
 }

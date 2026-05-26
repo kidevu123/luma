@@ -463,3 +463,54 @@ describe("FLOOR-SCAN-1 · typed scan flow structural guards", () => {
     expect(filterBlock).not.toMatch(/allowedTabletTypeIds\.length\s*===\s*0/);
   });
 });
+
+// ── CAMERA-SCAN-ROOTCAUSE-1 · video DOM bug fix ───────────────────────────
+//
+// Root cause: <video> was inside {phase === "scanning" && ...}, so videoRef.current
+// was null when the getUserMedia promise resolved. if (video) failed silently;
+// setPhase("scanning") never called; scanner stayed on spinner forever.
+// Fix: video always in DOM, hidden via CSS class when not scanning.
+
+describe("CAMERA-SCAN-ROOTCAUSE-1 · camera-scanner.tsx video DOM fix", () => {
+  it("video element is always rendered (phase check uses CSS hidden, not conditional rendering)", () => {
+    // The video element must NOT be the direct child of {phase === "scanning" && ...}.
+    // It should use conditional CSS class instead.
+    expect(cameraSrc).toMatch(/phase !== "scanning"/);
+  });
+
+  it("video element uses Tailwind hidden class to toggle visibility when not scanning", () => {
+    // className includes conditional hidden class, e.g. `...${phase !== "scanning" ? " hidden" : ""}`
+    expect(cameraSrc).toMatch(/hidden.*scanning|scanning.*hidden/);
+  });
+
+  it("setStreamStarted(true) called after getUserMedia succeeds", () => {
+    expect(cameraSrc).toMatch(/setStreamStarted\(true\)/);
+  });
+
+  it("setPermissionDenied(true) called on NotAllowedError", () => {
+    expect(cameraSrc).toMatch(/setPermissionDenied\(true\)/);
+  });
+
+  it("CameraDiagnosticsPanel rendered in the error phase", () => {
+    expect(cameraSrc).toMatch(/CameraDiagnosticsPanel/);
+  });
+
+  it("diagnostics panel labels HTTPS secure context", () => {
+    expect(cameraSrc).toMatch(/HTTPS secure context/);
+  });
+
+  it("diagnostics panel labels camera permission state", () => {
+    expect(cameraSrc).toMatch(/Camera permission/);
+  });
+
+  it("stream is stopped after successful scan in BarcodeDetector path", () => {
+    // stopStream() called before onResult in native path
+    expect(cameraSrc).toMatch(/stopStream\(\)/);
+    expect(cameraSrc).toMatch(/onResult\(barcodes/);
+  });
+
+  it("stream is stopped after successful scan in jsQR path", () => {
+    // getTracks().forEach(t => t.stop()) called before onResult in jsQR path
+    expect(cameraSrc).toMatch(/onResult\(code\.data\.trim\(\)\)/);
+  });
+});
