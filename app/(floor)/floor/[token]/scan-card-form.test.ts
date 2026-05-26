@@ -479,8 +479,8 @@ describe("CAMERA-SCAN-ROOTCAUSE-1 · camera-scanner.tsx video DOM fix", () => {
   });
 
   it("video element uses Tailwind hidden class to toggle visibility when not scanning", () => {
-    // className includes conditional hidden class, e.g. `...${phase !== "scanning" ? " hidden" : ""}`
-    expect(cameraSrc).toMatch(/hidden.*scanning|scanning.*hidden/);
+    // className includes conditional: phase !== "scanning" ? " hidden" : ""
+    expect(cameraSrc).toMatch(/phase !== "scanning".*hidden/);
   });
 
   it("setStreamStarted(true) called after getUserMedia succeeds", () => {
