@@ -12,6 +12,11 @@ import { ZohoMappingForm } from "./zoho-mapping-form";
 import { db } from "@/lib/db";
 import { productPackagingSpecs } from "@/lib/db/schema";
 import { floorReadinessLevel, floorReadinessLabel } from "@/lib/production/product-floor-readiness";
+import {
+  classifyProductZohoReadiness,
+  zohoReadinessLabel,
+  zohoReadinessReasonLabel,
+} from "@/lib/zoho/product-zoho-readiness";
 
 export const dynamic = "force-dynamic";
 
@@ -100,10 +105,21 @@ export default async function ProductBomPage({
           <CardTitle>Zoho assembly mapping</CardTitle>
         </CardHeader>
         <CardContent>
+          <ZohoReadinessCard
+            isActive={product.isActive}
+            zohoItemIdUnit={product.zohoItemIdUnit ?? null}
+            zohoItemIdDisplay={product.zohoItemIdDisplay ?? null}
+            zohoItemIdCase={product.zohoItemIdCase ?? null}
+            unitsPerDisplay={product.unitsPerDisplay ?? null}
+            displaysPerCase={product.displaysPerCase ?? null}
+            tabletMappingCount={product.allowed.length}
+          />
           <p className="text-[11px] text-text-muted mb-4 leading-relaxed">
             These IDs map Luma product levels to existing Zoho composite items. Luma will use
             these later for tablet receiving and assembly jobs. They must match the Zoho item IDs
-            exactly — Luma does not create or validate Zoho items.
+            exactly — Luma does not create or validate Zoho items. Run{" "}
+            <code className="font-mono text-[10px]">scripts/audit-product-zoho-readiness.ts</code>{" "}
+            for a fleet-wide readiness summary before enabling Zoho operations.
           </p>
           <ZohoMappingForm
             productId={product.id}
@@ -138,6 +154,90 @@ function SpecRow({
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+// ── Zoho readiness ───────────────────────────────────────────────────────────
+
+function ZohoReadinessCard({
+  isActive,
+  zohoItemIdUnit,
+  zohoItemIdDisplay,
+  zohoItemIdCase,
+  unitsPerDisplay,
+  displaysPerCase,
+  tabletMappingCount,
+}: {
+  isActive: boolean;
+  zohoItemIdUnit: string | null;
+  zohoItemIdDisplay: string | null;
+  zohoItemIdCase: string | null;
+  unitsPerDisplay: number | null;
+  displaysPerCase: number | null;
+  tabletMappingCount: number;
+}) {
+  const result = classifyProductZohoReadiness({
+    isActive,
+    zohoItemIdUnit,
+    zohoItemIdDisplay,
+    zohoItemIdCase,
+    unitsPerDisplay,
+    displaysPerCase,
+  });
+
+  const styles = {
+    ready: {
+      container: "border-emerald-200 bg-emerald-50/60",
+      icon: <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />,
+      title: "text-emerald-900",
+      body: "text-emerald-800/80",
+    },
+    partial: {
+      container: "border-amber-200 bg-amber-50/60",
+      icon: <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />,
+      title: "text-amber-900",
+      body: "text-amber-800/80",
+    },
+    missing: {
+      container: "border-amber-200 bg-amber-50/60",
+      icon: <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />,
+      title: "text-amber-900",
+      body: "text-amber-800/80",
+    },
+    inactive: {
+      container: "border-border bg-surface-2/40",
+      icon: <XCircle className="h-4 w-4 text-text-muted flex-shrink-0 mt-0.5" />,
+      title: "text-text-muted",
+      body: "text-text-subtle",
+    },
+  }[result.level];
+
+  const floorNote =
+    isActive && tabletMappingCount === 0
+      ? "Floor: Missing tablet mapping — product cannot be selected at a station."
+      : null;
+
+  return (
+    <div className={`rounded-xl border px-4 py-3 flex gap-3 mb-4 ${styles.container}`}>
+      {styles.icon}
+      <div className="space-y-1 min-w-0">
+        <p className={`text-sm font-semibold ${styles.title}`}>
+          Zoho: {zohoReadinessLabel(result.level)}
+        </p>
+        {result.reasons.length > 0 && (
+          <ul className="space-y-0.5">
+            {result.reasons.map((r) => (
+              <li key={r} className={`text-xs ${styles.body}`}>
+                {zohoReadinessReasonLabel(r)}
+              </li>
+            ))}
+          </ul>
+        )}
+        {floorNote && (
+          <p className="text-xs text-text-muted mt-0.5">{floorNote}</p>
+        )}
+      </div>
     </div>
   );
 }
