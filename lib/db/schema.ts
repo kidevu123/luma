@@ -1070,6 +1070,9 @@ export const finishedLots = pgTable(
     /** LOT-1B — optional secondary code printed for a specific
      *  customer (e.g. their internal SKU). */
     finishedLotCodeAlias: text("finished_lot_code_alias"),
+    // Phase A — PackTrack consumption push state
+    packtrackConsumptionSentAt: timestamp("packtrack_consumption_sent_at", { withTimezone: true }),
+    packtrackConsumptionError: text("packtrack_consumption_error"),
   },
   (t) => [
     uniqueIndex("finished_lots_number_unique").on(t.finishedLotNumber),
