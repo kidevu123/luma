@@ -24,3 +24,24 @@ describe("RECEIVE-EDIT-AUDIT-1 · receive detail bag edit discoverability", () =
     expect(src).toMatch(/weightGrams \/ 1000/);
   });
 });
+
+describe("RECEIVE-EDIT-2A-1 · per-bag edit history", () => {
+  const panelSrc = readFileSync(join(__dirname, "bag-edit-history-panel.tsx"), "utf8");
+
+  it("page loads audit logs and renders BagEditHistoryPanel", () => {
+    expect(src).toMatch(/listAuditLogsForInventoryBags/);
+    expect(src).toMatch(/listQrCardBagEditAudits/);
+    expect(src).toMatch(/BagEditHistoryPanel/);
+    expect(src).toMatch(/groupBagEditHistories/);
+  });
+
+  it("page shows per-row edit count column", () => {
+    expect(src).toMatch(/<TH>Edits<\/TH>/);
+    expect(src).toMatch(/No edits/);
+  });
+
+  it("panel uses expandable details for history entries", () => {
+    expect(panelSrc).toMatch(/<details/);
+    expect(panelSrc).toMatch(/release\/reserve/i);
+  });
+});

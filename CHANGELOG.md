@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.4] — 2026-05-27
+
+### Added
+- **Per-bag edit history on receive detail (RECEIVE-EDIT-2A-1):** `/inbound/[id]` now loads `audit_log` rows for each inventory bag on the receive. The bags table shows an **Edits** column (`No edits` / `N edits` linking to history). Below the table, an **Edit history** section uses expandable panels per bag with timestamp, actor, action label, and readable before/after summaries (weight in kg, receipt #, QR token, notes, supplier lot). Related `qr_card.released_at_bag_edit` and `qr_card.reserved_at_bag_edit` rows are included when they match scan tokens from bag edits. Read-only — no change to edit behavior.
+
+### Tests added (RECEIVE-EDIT-2A-1)
+- `lib/receive/bag-edit-history.test.ts` — audit summarization and grouping.
+- `app/(admin)/inbound/[id]/page.test.ts` — structural guards for audit fetch and history UI.
+
 ## [0.3.3] — 2026-05-27
 
 ### Improved
