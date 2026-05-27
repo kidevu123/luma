@@ -3,9 +3,18 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Box as BoxIcon, Truck, FileText } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
 import { getReceive } from "@/lib/db/queries/receives";
+import {
+  listAuditLogsForInventoryBags,
+  listQrCardBagEditAudits,
+} from "@/lib/db/queries/audit-log";
+import {
+  collectQrTokensFromBagAudits,
+  groupBagEditHistories,
+} from "@/lib/receive/bag-edit-history";
 import { db } from "@/lib/db";
 import { batches, tabletTypes } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
+import { BagEditHistoryPanel } from "./bag-edit-history-panel";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -49,6 +58,34 @@ export default async function ReceiveDetailPage({
   const totalPills = r.bags.reduce((s, b) => s + (b.pillCount ?? 0), 0);
   const totalWeightKg = r.bags.reduce((s, b) => s + (b.weightGrams ?? 0), 0) / 1000;
   const availableBags = r.bags.filter((b) => b.status === "AVAILABLE").length;
+
+  const bagIds = r.bags.map((b) => b.id);
+  const bagAudits = await listAuditLogsForInventoryBags(bagIds);
+  const qrTokens = new Set<string>();
+  for (const bag of r.bags) {
+    const bagOnly = bagAudits.filter((row) => row.targetId === bag.id);
+    for (const token of collectQrTokensFromBagAudits(
+      bagOnly,
+      bag.bagQrCode ?? null,
+    )) {
+      qrTokens.add(token);
+    }
+  }
+  const qrAudits = await listQrCardBagEditAudits([...qrTokens]);
+  const batchLabels = new Map(
+    batchRows.map((b) => [b.id, b.batchNumber ?? b.id.slice(0, 8)]),
+  );
+  const bagEditHistories = groupBagEditHistories({
+    bags: r.bags.map((b) => ({
+      id: b.id,
+      bagNumber: b.bagNumber,
+      internalReceiptNumber: b.internalReceiptNumber ?? null,
+      bagQrCode: b.bagQrCode ?? null,
+    })),
+    bagAudits,
+    qrAudits,
+    batchLabels,
+  });
 
   return (
     <div className="space-y-5">
@@ -155,12 +192,15 @@ export default async function ReceiveDetailPage({
                       <TH className="text-right">Weight (kg)</TH>
                       <TH>Notes</TH>
                       <TH>Status</TH>
+                      <TH>Edits</TH>
                       <TH className="text-right">Actions</TH>
                     </TR>
                   </THead>
                   <tbody>
                     {r.bags.map((bag) => {
                       const batch = bag.batchId ? byBatch.get(bag.batchId) : null;
+                      const history = bagEditHistories.find((h) => h.bagId === bag.id);
+                      const editCount = history?.entries.length ?? 0;
                       return (
                         <TR key={bag.id}>
                           <TD className="tabular-nums font-semibold text-xs">{bag.bagNumber}</TD>
@@ -187,6 +227,18 @@ export default async function ReceiveDetailPage({
                           <TD>
                             <BagStatus status={bag.status} />
                           </TD>
+                          <TD className="text-xs text-text-muted">
+                            {editCount === 0 ? (
+                              "No edits"
+                            ) : (
+                              <a
+                                href={`#bag-history-${bag.id}`}
+                                className="text-brand-700 hover:underline font-medium"
+                              >
+                                {editCount === 1 ? "1 edit" : `${editCount} edits`}
+                              </a>
+                            )}
+                          </TD>
                           <TD className="text-right">
                             <Link
                               href={`/inbound/${r.receive.id}/bag/${bag.id}/edit`}
@@ -200,6 +252,11 @@ export default async function ReceiveDetailPage({
                     })}
                   </tbody>
                 </DataTable>
+              )}
+              {r.bags.length > 0 && (
+                <div id="bag-edit-history">
+                  <BagEditHistoryPanel histories={bagEditHistories} />
+                </div>
               )}
             </CardContent>
           </Card>
