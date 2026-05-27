@@ -105,7 +105,7 @@ export default async function ReceiveDetailPage({
           }
           actions={
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
+              <Button variant="secondary" size="sm" asChild>
                 <Link href={`/inbound/${id}/edit`}>Edit receive</Link>
               </Button>
               <StatusPill kind={r.receive.closedAt ? "neutral" : "ok"}>
