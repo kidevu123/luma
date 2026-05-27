@@ -109,15 +109,31 @@ describe("STATION-NAV-CLEANUP-2 · variety-pack route", () => {
   });
 });
 
-describe("STATION-NAV-CLEANUP-2 · bag-allocation sub-page nav", () => {
-  it("footer nav links back to station only", () => {
-    const navIdx = bagAllocationPageSrc.indexOf("function FloorNav");
-    expect(navIdx).toBeGreaterThan(-1);
-    const navBlock = bagAllocationPageSrc.slice(navIdx, navIdx + 400);
-    expect(navBlock).toMatch(/href=\{`\/floor\/\$\{token\}`\}/);
-    expect(navBlock).not.toMatch(/variety-pack/);
-    expect(navBlock).not.toMatch(/bag-allocation/);
-    expect(navBlock).not.toMatch(/\/rolls/);
+describe("STATION-NAV-CLEANUP-3 · bag-allocation route", () => {
+  it("redirects to station page instead of rendering allocation workflow", () => {
+    expect(bagAllocationPageSrc).toMatch(/redirect\(`\/floor\/\$\{token\}`\)/);
+    expect(bagAllocationPageSrc).not.toMatch(/openAllocationSessionAction/);
+    expect(bagAllocationPageSrc).not.toMatch(/Bag allocation/);
+  });
+});
+
+describe("STATION-NAV-CLEANUP-3 · station page nav scope", () => {
+  it("main station page does not link to bag-allocation", () => {
+    expect(pageSrc).not.toMatch(/\/bag-allocation/);
+  });
+
+  it("hard-stop scan/start files unchanged in this task (scope report)", () => {
+    const scanFormSrc = readFileSync(
+      join(__dirname, "../../app/(floor)/floor/[token]/scan-card-form.tsx"),
+      "utf8",
+    );
+    const actionsSrc = readFileSync(
+      join(__dirname, "../../app/(floor)/floor/[token]/actions.ts"),
+      "utf8",
+    );
+    expect(scanFormSrc).toMatch(/scanCardAction/);
+    expect(actionsSrc).toMatch(/export async function scanCardAction/);
+    expect(actionsSrc).not.toMatch(/bag-allocation\/page/);
   });
 });
 

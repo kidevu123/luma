@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.15] — 2026-05-27
+
+### Changed (STATION-NAV-CLEANUP-3)
+- **Remove Bag Allocation from operator station flow:** `/floor/[token]/bag-allocation` redirects to the main station page (valid token), matching the variety-pack cleanup. No supervisor tool or station nav links to bag allocation. Navigation-only change — scan/start production behavior unchanged.
+
+### Tests added (STATION-NAV-CLEANUP-3)
+- `lib/production/floor-station-mobile-nav.test.ts` — bag-allocation redirect, station page nav scope, hard-stop file scope report.
+
 ## [0.4.14] — 2026-05-27
 
 ### Changed (STATION-NAV-CLEANUP-2)
