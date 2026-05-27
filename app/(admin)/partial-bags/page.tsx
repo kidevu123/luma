@@ -112,10 +112,10 @@ export default async function PartialBagsPage() {
                         </td>
                         <td className="py-2">
                           <Link
-                            href="/production/start"
+                            href="/floor-board"
                             className="inline-flex items-center px-2 py-1 rounded border border-brand-300 bg-brand-50 text-brand-700 text-[11px] font-medium hover:bg-brand-100 transition-colors"
                           >
-                            Start run
+                            Live floor
                           </Link>
                         </td>
                       </tr>

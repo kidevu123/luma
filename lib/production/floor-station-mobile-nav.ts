@@ -10,12 +10,6 @@ export const FLOOR_ROLL_STATION_KINDS = new Set([
   "SEALING",
 ]);
 
-/** Partial raw-bag allocation sessions (VALIDATION-2A machine feed). */
-export const FLOOR_BAG_ALLOCATION_STATION_KINDS = new Set([
-  "BLISTER",
-  "COMBINED",
-]);
-
 /** Multi-component variety-pack allocation (VALIDATION-2A). */
 export const FLOOR_VARIETY_PACK_STATION_KINDS = new Set([
   "BLISTER",
@@ -24,7 +18,7 @@ export const FLOOR_VARIETY_PACK_STATION_KINDS = new Set([
   "BOTTLE_HANDPACK",
 ]);
 
-export type FloorSupervisorToolId = "rolls" | "bag-allocation" | "variety-pack";
+export type FloorSupervisorToolId = "rolls" | "variety-pack";
 
 export type FloorSupervisorToolLink = {
   id: FloorSupervisorToolId;
@@ -42,13 +36,6 @@ export function floorSupervisorToolsForStation(
       id: "rolls",
       href: `/floor/${token}/rolls`,
       label: "Rolls",
-    });
-  }
-  if (FLOOR_BAG_ALLOCATION_STATION_KINDS.has(stationKind)) {
-    links.push({
-      id: "bag-allocation",
-      href: `/floor/${token}/bag-allocation`,
-      label: "Bag allocation",
     });
   }
   if (FLOOR_VARIETY_PACK_STATION_KINDS.has(stationKind)) {

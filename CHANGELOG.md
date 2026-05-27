@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.5] — 2026-05-27
+
+### Changed
+- **Station nav cleanup (STATION-NAV-CLEANUP-1):** Removed **Start production** from the admin sidebar; `/production/start` now redirects to **Live floor** (`/floor-board`) with no fallback form. Removed **Bag allocation** from all station supervisor-tool links (the `/floor/[token]/bag-allocation` route remains for validation tooling). Receive success and partial-bags links now point to Live floor instead of the obsolete start page.
+
+### Tests added (STATION-NAV-CLEANUP-1)
+- `app/(admin)/production/start/page.test.ts` — redirect-only page, sidebar not promoted.
+- `lib/production/floor-station-mobile-nav.test.ts` — no station shows bag allocation in supervisor tools.
+
 ## [0.4.4] — 2026-05-27
 
 ### Tests added (FLOOR-FIRST-RUN-E2E-2)

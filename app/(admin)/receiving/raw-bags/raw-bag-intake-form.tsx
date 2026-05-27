@@ -882,8 +882,8 @@ function SaveResultPanel({
           </Link>
         </Button>
         <Button asChild size="sm" variant="secondary">
-          <Link href="/production/start">
-            <ArrowRight className="h-3.5 w-3.5" /> Start production
+          <Link href="/floor-board">
+            <ArrowRight className="h-3.5 w-3.5" /> Live floor
           </Link>
         </Button>
         <Button size="sm" onClick={onAnother}>

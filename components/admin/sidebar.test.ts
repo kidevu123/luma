@@ -65,8 +65,8 @@ describe("NAV-REDESIGN-1 · Operations entries", () => {
     return start > -1 && at > start && at < end;
   }
 
-  it("Start production is in Operations", () => {
-    expect(inOps('"/production/start"')).toBe(true);
+  it("Start production is not in Operations", () => {
+    expect(inOps('"/production/start"')).toBe(false);
   });
   it("Receiving is in Operations", () => {
     expect(inOps('"/inbound"')).toBe(true);
@@ -141,7 +141,6 @@ describe("NAV-REDESIGN-1 · sidebar routes", () => {
   const routes = [
     "/dashboard",
     "/floor-board",
-    "/production/start",
     "/partial-bags",
     "/inbound",
     "/packaging-output",
@@ -163,6 +162,12 @@ describe("NAV-REDESIGN-1 · sidebar routes", () => {
 });
 
 // ─── Routes that moved OUT of sidebar ───────────────────────────────────
+
+describe("STATION-NAV-CLEANUP-1 · removed sidebar routes", () => {
+  it("/production/start is not a sidebar href", () => {
+    expect(src).not.toMatch(/href:\s*"\/production\/start"/);
+  });
+});
 
 describe("NAV-REDESIGN-1 · removed sidebar routes", () => {
   const removed = [

@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  FLOOR_BAG_ALLOCATION_STATION_KINDS,
   FLOOR_ROLL_STATION_KINDS,
   FLOOR_VARIETY_PACK_STATION_KINDS,
   floorSupervisorToolsForStation,
@@ -11,13 +10,29 @@ import {
 const TOKEN = "station-token-abc";
 
 describe("STATION-MOBILE-UX-1 · floorSupervisorToolsForStation", () => {
-  it("BLISTER gets rolls, bag allocation, and variety pack", () => {
+  it("BLISTER gets rolls and variety pack only", () => {
     const tools = floorSupervisorToolsForStation(TOKEN, "BLISTER");
-    expect(tools.map((t) => t.id)).toEqual([
-      "rolls",
-      "bag-allocation",
-      "variety-pack",
-    ]);
+    expect(tools.map((t) => t.id)).toEqual(["rolls", "variety-pack"]);
+  });
+
+  it("COMBINED gets rolls and variety pack only", () => {
+    expect(
+      floorSupervisorToolsForStation(TOKEN, "COMBINED").map((t) => t.id),
+    ).toEqual(["rolls", "variety-pack"]);
+  });
+
+  it("no station exposes bag allocation in supervisor tools", () => {
+    for (const kind of [
+      "BLISTER",
+      "COMBINED",
+      "SEALING",
+      "HANDPACK_BLISTER",
+      "BOTTLE_HANDPACK",
+      "PACKAGING",
+    ]) {
+      const ids = floorSupervisorToolsForStation(TOKEN, kind).map((t) => t.id);
+      expect(ids).not.toContain("bag-allocation");
+    }
   });
 
   it("PACKAGING gets no supervisor tool links", () => {
@@ -74,11 +89,6 @@ describe("STATION-MOBILE-UX-1 · station kind sets", () => {
   it("roll kinds are blister-path machine stations", () => {
     expect(FLOOR_ROLL_STATION_KINDS.has("BLISTER")).toBe(true);
     expect(FLOOR_ROLL_STATION_KINDS.has("PACKAGING")).toBe(false);
-  });
-
-  it("bag allocation kinds are partial-feed blister stations", () => {
-    expect(FLOOR_BAG_ALLOCATION_STATION_KINDS.has("COMBINED")).toBe(true);
-    expect(FLOOR_BAG_ALLOCATION_STATION_KINDS.has("SEALING")).toBe(false);
   });
 
   it("variety pack kinds match first-op variety-capable stations", () => {
