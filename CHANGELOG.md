@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.5] — 2026-05-27
+
+### Fixed
+- **Server Components render error after floor scan (FLOOR-SCAN-ERROR-1):** Scanning a bag QR at the Blister Hand Pack Station (and any station that renders or imports the QC panel) showed the Next.js "An error occurred in the Server Components render" overlay immediately after a successful scan. Root cause: `qc-actions.ts` and `app/(admin)/qc-review/actions.ts` both exported `__testInternals` (a plain object) from a `"use server"` file. Next.js App Router validates "use server" module exports during RSC renders triggered by `router.refresh()` — any non-async export throws digest `2276167736` at runtime. The initial page load used a cached module evaluation that bypassed the check; `router.refresh()` (called after `scanCardAction` succeeds) performed a fresh RSC fetch that triggered the validation. Fix: removed both `__testInternals` const exports. The private `assertNoLinkedConflict`, `loadLinkedEventAccountability`, and `hasExistingResolution` functions remain in their respective files for internal use.
+
+### Tests added (FLOOR-SCAN-ERROR-1)
+- `FLOOR-SCAN-ERROR-1 · use-server file export guard` — 5 structural tests in `scan-card-form.test.ts`:
+  - `qc-actions.ts` starts with `"use server"`.
+  - `qc-actions.ts` does not export `__testInternals`.
+  - `qc-actions.ts` does not export any plain `const` object.
+  - `admin/qc-review/actions.ts` does not export `__testInternals`.
+  - `admin/qc-review/actions.ts` does not export any plain `const` object.
+
 ## [0.3.4] — 2026-05-27
 
 ### Added

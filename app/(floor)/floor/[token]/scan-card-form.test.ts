@@ -664,3 +664,44 @@ describe("FLOOR-SCAN-UX-2 · lookupCardByTokenAction returns cardLabel", () => {
     expect(actionsSrc).toMatch(/cardLabel\s*:\s*string/);
   });
 });
+
+// ── FLOOR-SCAN-ERROR-1 · "use server" file export safety ─────────────────────
+//
+// Regression guard for digest 2276167736: qc-actions.ts exported a plain object
+// (__testInternals) from a "use server" file. Next.js validates "use server"
+// module exports on RSC renders — any non-async export throws at runtime and
+// shows the "Server Components render error" overlay to operators.
+//
+// Fix: remove the export. These tests prevent it coming back.
+
+describe("FLOOR-SCAN-ERROR-1 · use-server file export guard", () => {
+  const qcActionsSrc = readFileSync(resolve(here, "qc-actions.ts"), "utf8");
+  const adminQcActionsSrc = readFileSync(
+    resolve(here, "../../../(admin)/qc-review/actions.ts"),
+    "utf8",
+  );
+
+  it("qc-actions.ts starts with 'use server'", () => {
+    expect(qcActionsSrc.trimStart()).toMatch(/^"use server"/);
+  });
+
+  it("qc-actions.ts does not export __testInternals — non-async object export crashes RSC render", () => {
+    expect(qcActionsSrc).not.toMatch(/export\s+const\s+__testInternals/);
+  });
+
+  it("qc-actions.ts does not export any plain const object — all exports must be async functions", () => {
+    // Allow: export async function, export type, export { ... } (re-exports)
+    // Disallow: export const x = { ... } (non-async object)
+    const illegalExports = qcActionsSrc.match(/^export\s+const\s+\w+\s*=/gm) ?? [];
+    expect(illegalExports).toHaveLength(0);
+  });
+
+  it("admin qc-review/actions.ts does not export __testInternals", () => {
+    expect(adminQcActionsSrc).not.toMatch(/export\s+const\s+__testInternals/);
+  });
+
+  it("admin qc-review/actions.ts does not export any plain const object", () => {
+    const illegalExports = adminQcActionsSrc.match(/^export\s+const\s+\w+\s*=/gm) ?? [];
+    expect(illegalExports).toHaveLength(0);
+  });
+});

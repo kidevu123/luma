@@ -737,9 +737,3 @@ export async function adminReworkReceivedAction(
   }
 }
 
-// Pure helpers exported for tests so the accountability-preservation
-// branch can be exercised without standing up the full action.
-export const __testInternals = {
-  loadLinkedEventAccountability,
-  hasExistingResolution,
-};

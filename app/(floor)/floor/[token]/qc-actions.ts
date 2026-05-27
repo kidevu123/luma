@@ -531,6 +531,3 @@ export async function reworkReceivedAction(
   }
 }
 
-// Pure helper exported for tests — wraps the conflict check so test
-// harnesses can exercise it independent of the action flow.
-export const __testInternals = { assertNoLinkedConflict };
