@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3] — 2026-05-27
+
+### Improved
+- **Receive detail post-save edit discoverability (RECEIVE-EDIT-AUDIT-1):** Confirmed bag edit workflow is fully implemented at `/inbound/[id]/bag/[bagId]/edit` (weight, notes, receipt #, QR scan token, supplier lot, edit reason, audit log). Receive detail bags table now includes a short helper explaining post-save edits, renames the row action to **Edit bag**, and labels the actions column. No backend or schema changes.
+
+### Tests added (RECEIVE-EDIT-AUDIT-1)
+- `app/(admin)/inbound/[id]/page.test.ts` — structural guards for edit route link, helper copy, kg display.
+
 ## [0.3.2] — 2026-05-27
 
 ### Fixed
