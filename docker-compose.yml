@@ -60,6 +60,13 @@ services:
       # receipts/route.ts). Empty default = webhook returns 503 until
       # the operator sets it in /opt/luma/.env.
       PACKTRACK_INTEGRATION_SECRET: ${PACKTRACK_INTEGRATION_SECRET:-}
+      # Phase C — sales feedback loop secrets.
+      # ZOHO_WEBHOOK_SECRET: shared with PackTrack; validates inbound
+      #   sales-confirmed webhooks at POST /api/webhooks/zoho-sales.
+      # LUMA_PACKTRACK_SECRET: validates PackTrack reads of the BOM API
+      #   at GET /api/internal/product-packaging-specs.
+      ZOHO_WEBHOOK_SECRET: ${ZOHO_WEBHOOK_SECRET:-}
+      LUMA_PACKTRACK_SECRET: ${LUMA_PACKTRACK_SECRET:-}
       STORAGE_ROOT: /data
       NODE_ENV: production
     volumes:
