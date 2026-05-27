@@ -301,6 +301,41 @@ export type FinishedLotStatus =
   | "SHIPPED"
   | "RECALLED";
 
+// ---------------------------------------------------------------------------
+// Phase B — Zoho manufacturing BOM helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the Zoho BOM for a finished lot.
+ * Queries finishedLotInputs -> batches -> packagingMaterials and maps
+ * zohoItemId + qtyConsumed into the BOM array.
+ * Skips materials without a zohoItemId (logged as warning).
+ */
+async function buildZohoBom(
+  finishedLotId: string,
+): Promise<Array<{ item_id: string; quantity: number }>> {
+  const rows = await db
+    .select({
+      zohoItemId: packagingMaterials.zohoItemId,
+      qtyConsumed: finishedLotInputs.qtyConsumed,
+      materialName: packagingMaterials.name,
+    })
+    .from(finishedLotInputs)
+    .innerJoin(batches, eq(batches.id, finishedLotInputs.batchId))
+    .innerJoin(packagingMaterials, eq(packagingMaterials.id, batches.packagingMaterialId))
+    .where(eq(finishedLotInputs.finishedLotId, finishedLotId));
+
+  const bom: Array<{ item_id: string; quantity: number }> = [];
+  for (const r of rows) {
+    if (!r.zohoItemId) {
+      console.warn(`[zoho.manufacturing] skipping ${r.materialName} — no zohoItemId`);
+      continue;
+    }
+    bom.push({ item_id: r.zohoItemId, quantity: r.qtyConsumed ?? 0 });
+  }
+  return bom;
+}
+
 export async function setFinishedLotStatus(
   id: string,
   next: FinishedLotStatus,
@@ -417,6 +452,128 @@ export async function setFinishedLotStatus(
           .where(eq(finishedLots.id, id));
       } catch (err) {
         console.error("[packtrack.consumption] fire-and-forget error:", err);
+      }
+    })();
+  }
+
+  // Phase E — Nexus batch registration (fire-and-forget, never blocks lot release).
+  if (next === "RELEASED" && beforeStatus !== "RELEASED") {
+    void (async () => {
+      try {
+        const { isBatchRegistrationConfigured, registerBatchInNexus } = await import(
+          "@/lib/integrations/nexus/batch-registration"
+        );
+        if (!isBatchRegistrationConfigured()) return;
+
+        // Load lot metadata including product SKU and name
+        const [lotMeta] = await db
+          .select({
+            finishedLotNumber: finishedLots.finishedLotNumber,
+            producedOn: finishedLots.producedOn,
+            unitsProduced: finishedLots.unitsProduced,
+            productSku: products.sku,
+            productName: products.name,
+          })
+          .from(finishedLots)
+          .innerJoin(products, eq(products.id, finishedLots.productId))
+          .where(eq(finishedLots.id, id));
+
+        if (!lotMeta) return;
+
+        // Build packaging_inputs from finishedLotInputs -> batches -> packagingMaterials
+        const inputs = await db
+          .select({
+            materialCode: packagingMaterials.sku,
+            materialName: packagingMaterials.name,
+            vendorLotNumber: batches.vendorLotNumber,
+          })
+          .from(finishedLotInputs)
+          .innerJoin(batches, eq(batches.id, finishedLotInputs.batchId))
+          .innerJoin(packagingMaterials, eq(packagingMaterials.id, batches.packagingMaterialId))
+          .where(
+            and(
+              eq(finishedLotInputs.finishedLotId, id),
+              eq(batches.kind, "PACKAGING"),
+            )
+          );
+
+        const result = await registerBatchInNexus({
+          lot_number: lotMeta.finishedLotNumber,
+          product_sku: lotMeta.productSku,
+          product_description: lotMeta.productName,
+          produced_on: lotMeta.producedOn,
+          units_produced: lotMeta.unitsProduced ?? 0,
+          luma_finished_lot_id: id,
+          packaging_inputs: inputs.map((i) => ({
+            material_code: i.materialCode,
+            material_name: i.materialName,
+            supplier_lot_number: i.vendorLotNumber ?? "",
+          })),
+        });
+
+        await db
+          .update(finishedLots)
+          .set(
+            result.ok
+              ? { nexusBatchRegisteredAt: new Date(), nexusBatchRegisterError: null }
+              : { nexusBatchRegisterError: result.reason },
+          )
+          .where(eq(finishedLots.id, id));
+      } catch (err) {
+        console.error("[nexus.batch-registration] fire-and-forget error:", err);
+      }
+    })();
+  }
+
+  // Phase B — Zoho manufacture order (fire-and-forget, never blocks lot release).
+  if (next === "RELEASED" && beforeStatus !== "RELEASED") {
+    void (async () => {
+      try {
+        const { isManufacturingConfigured, createManufactureOrder } = await import(
+          "@/lib/integrations/zoho/manufacturing"
+        );
+        if (!isManufacturingConfigured()) return;
+
+        const [lotMeta] = await db
+          .select({
+            unitsProduced: finishedLots.unitsProduced,
+            zohoItemId: products.zohoItemId,
+            producedOn: finishedLots.producedOn,
+          })
+          .from(finishedLots)
+          .innerJoin(products, eq(products.id, finishedLots.productId))
+          .where(eq(finishedLots.id, id));
+
+        if (!lotMeta?.zohoItemId) {
+          await db
+            .update(finishedLots)
+            .set({ zohoManufactureError: "Product has no zohoItemId" })
+            .where(eq(finishedLots.id, id));
+          return;
+        }
+
+        const bom = await buildZohoBom(id);
+        // producedOn is a Drizzle date() column — returned as string "YYYY-MM-DD"
+        const manufactureDate = String(lotMeta.producedOn ?? new Date().toISOString()).slice(0, 10);
+
+        const result = await createManufactureOrder({
+          composite_item_id: lotMeta.zohoItemId,
+          quantity_to_manufacture: lotMeta.unitsProduced ?? 0,
+          manufacture_date: manufactureDate,
+          bill_of_materials: bom,
+          luma_finished_lot_id: id,
+        });
+
+        await db
+          .update(finishedLots)
+          .set(
+            result.ok
+              ? { zohoManufactureOrderId: result.manufacture_order_id, zohoManufactureError: null }
+              : { zohoManufactureError: result.reason },
+          )
+          .where(eq(finishedLots.id, id));
+      } catch (err) {
+        console.error("[zoho.manufacturing] fire-and-forget error:", err);
       }
     })();
   }
