@@ -11,6 +11,7 @@ import {
 const baseBag: BagSnapshot = {
   id: "bag-1",
   weightGrams: 1000,
+  declaredPillCount: 5000,
   notes: null,
   internalReceiptNumber: "PO123-R1-B1-001",
   bagQrCode: "bag-card-001",
@@ -33,6 +34,16 @@ describe("validateBagEditFields", () => {
 
   it("blocks weight edit on in-production bag", () => {
     const r = validateBagEditFields(baseBag, { weightGrams: 1200 }, true);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/in production/);
+  });
+
+  it("blocks declared pill count edit on in-production bag", () => {
+    const r = validateBagEditFields(
+      baseBag,
+      { declaredPillCount: 6000 },
+      true,
+    );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/in production/);
   });

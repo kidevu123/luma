@@ -94,6 +94,13 @@ function summarizeInventoryBagEdit(
   );
   if (weight) lines.push(weight);
 
+  const declared = formatFieldChange(
+    "Declared pills",
+    b.declaredPillCount,
+    a.declaredPillCount,
+  );
+  if (declared) lines.push(declared);
+
   const receipt = formatFieldChange(
     "Receipt #",
     b.internalReceiptNumber,

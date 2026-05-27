@@ -14,6 +14,7 @@ import type { CurrentUser } from "@/lib/auth";
 export type BagSnapshot = {
   id: string;
   weightGrams: number | null;
+  declaredPillCount: number | null;
   notes: string | null;
   internalReceiptNumber: string | null;
   bagQrCode: string | null;
@@ -23,6 +24,7 @@ export type BagSnapshot = {
 
 export type BagEditInput = {
   weightGrams?: number | null;
+  declaredPillCount?: number | null;
   notes?: string | null;
   internalReceiptNumber?: string | null;
   supplierLotNumber?: string | null;
@@ -32,6 +34,7 @@ export type BagEditInput = {
 
 type BagPatch = {
   weightGrams?: number | null;
+  declaredPillCount?: number | null;
   notes?: string | null;
   internalReceiptNumber?: string | null;
   bagQrCode?: string | null;
@@ -50,7 +53,9 @@ export function validateBagEditFields(
   isInProduction: boolean,
 ): { ok: true } | { ok: false; error: string } {
   const nonNotes = (
-    ["weightGrams", ...SENSITIVE_FIELDS] as Array<keyof BagEditInput>
+    ["weightGrams", "declaredPillCount", ...SENSITIVE_FIELDS] as Array<
+      keyof BagEditInput
+    >
   ).some((k) => input[k] !== undefined);
 
   if (isInProduction && nonNotes) {
@@ -128,6 +133,7 @@ export async function editInventoryBag(
   const snapshot: BagSnapshot = {
     id: bag.id,
     weightGrams: bag.weightGrams ?? null,
+    declaredPillCount: bag.declaredPillCount ?? null,
     notes: bag.notes ?? null,
     internalReceiptNumber: bag.internalReceiptNumber ?? null,
     bagQrCode: bag.bagQrCode ?? null,
@@ -310,6 +316,8 @@ export async function editInventoryBag(
       // ── Apply patch ───────────────────────────────────────────────────────
       const patch: BagPatch = {};
       if (input.weightGrams !== undefined) patch.weightGrams = input.weightGrams;
+      if (input.declaredPillCount !== undefined)
+        patch.declaredPillCount = input.declaredPillCount;
       if (input.notes !== undefined) patch.notes = input.notes;
       if (input.internalReceiptNumber !== undefined)
         patch.internalReceiptNumber = input.internalReceiptNumber?.trim() ?? null;

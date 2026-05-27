@@ -48,6 +48,7 @@ export default async function BagEditPage({
             bag={{
               id: bag.id,
               weightGrams: bag.weightGrams ?? null,
+              declaredPillCount: bag.declaredPillCount ?? null,
               notes: bag.notes ?? null,
               internalReceiptNumber: bag.internalReceiptNumber ?? null,
               bagQrCode: bag.bagQrCode ?? null,

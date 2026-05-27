@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 
 export type EditBagFormData = {
   weightKg?: string;
+  declaredPillCount?: string;
   notes?: string;
   internalReceiptNumber?: string;
   supplierLotNumber?: string;
@@ -28,6 +29,19 @@ export async function editBagAction(
     input.weightGrams = Math.round(kg * 1000);
   } else if (raw.weightKg === "") {
     input.weightGrams = null;
+  }
+
+  if (raw.declaredPillCount !== undefined) {
+    const trimmed = raw.declaredPillCount.trim();
+    if (trimmed === "") {
+      input.declaredPillCount = null;
+    } else {
+      const n = Number(trimmed);
+      if (!Number.isInteger(n) || n < 0) {
+        return { ok: false, error: "Invalid declared pill count." };
+      }
+      input.declaredPillCount = n;
+    }
   }
 
   if (raw.notes !== undefined) input.notes = raw.notes.trim() || null;

@@ -88,6 +88,41 @@ describe("editBagAction — no-op: unchanged fields not forwarded", () => {
   });
 });
 
+describe("RECEIVE-EDIT-2B-2 · editBagAction — declared pill count", () => {
+  it("forwards a valid integer declared pill count", async () => {
+    await editBagAction(RECEIVE_ID, BAG_ID, { declaredPillCount: "4800" });
+    const [, input] = mockEditInventoryBag.mock.calls[0] as [
+      unknown,
+      { declaredPillCount?: number | null },
+    ];
+    expect(input.declaredPillCount).toBe(4800);
+  });
+
+  it("clears declared pill count when empty string", async () => {
+    await editBagAction(RECEIVE_ID, BAG_ID, { declaredPillCount: "" });
+    const [, input] = mockEditInventoryBag.mock.calls[0] as [
+      unknown,
+      { declaredPillCount?: number | null },
+    ];
+    expect(input.declaredPillCount).toBeNull();
+  });
+
+  it("rejects negative declared pill count", async () => {
+    const result = await editBagAction(RECEIVE_ID, BAG_ID, {
+      declaredPillCount: "-1",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/invalid declared pill count/i);
+    expect(mockEditInventoryBag).not.toHaveBeenCalled();
+  });
+
+  it("does not forward pillCount (live count)", async () => {
+    await editBagAction(RECEIVE_ID, BAG_ID, { declaredPillCount: "100" });
+    const [, input] = mockEditInventoryBag.mock.calls[0] as [unknown, Record<string, unknown>];
+    expect("pillCount" in input).toBe(false);
+  });
+});
+
 describe("editBagAction — notes trimming and blank→null", () => {
   it("trims whitespace from notes", async () => {
     await editBagAction(RECEIVE_ID, BAG_ID, { notes: "  padded  " });

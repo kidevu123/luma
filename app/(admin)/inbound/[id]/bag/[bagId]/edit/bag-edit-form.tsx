@@ -9,6 +9,7 @@ import { editBagAction, type EditBagFormData } from "./actions";
 export type BagFormData = {
   id: string;
   weightGrams: number | null;
+  declaredPillCount: number | null;
   notes: string | null;
   internalReceiptNumber: string | null;
   bagQrCode: string | null;
@@ -48,7 +49,11 @@ export function BagEditForm({
   const origWeightKg =
     bag.weightGrams != null ? (bag.weightGrams / 1000).toFixed(3) : "";
 
+  const origDeclaredPills =
+    bag.declaredPillCount != null ? String(bag.declaredPillCount) : "";
+
   const [weightKg, setWeightKg] = React.useState(origWeightKg);
+  const [declaredPillCount, setDeclaredPillCount] = React.useState(origDeclaredPills);
   const [notes, setNotes] = React.useState(bag.notes ?? "");
   const [receiptNumber, setReceiptNumber] = React.useState(
     bag.internalReceiptNumber ?? "",
@@ -69,6 +74,8 @@ export function BagEditForm({
     try {
       const data: EditBagFormData = {};
       if (weightKg !== origWeightKg) data.weightKg = weightKg;
+      if (declaredPillCount !== origDeclaredPills)
+        data.declaredPillCount = declaredPillCount;
       if (notes !== (bag.notes ?? "")) data.notes = notes;
       if (receiptNumber !== (bag.internalReceiptNumber ?? ""))
         data.internalReceiptNumber = receiptNumber;
@@ -103,6 +110,22 @@ export function BagEditForm({
           min="0"
           value={weightKg}
           onChange={(e) => setWeightKg(e.target.value)}
+          onWheel={(e) => (e.target as HTMLInputElement).blur()}
+          disabled={bag.isInProduction}
+          className="h-8 text-sm font-mono"
+        />
+      </Field>
+
+      <Field
+        label="Declared pill count"
+        hint="Intake declaration at receive. Does not change the live working pill count."
+      >
+        <Input
+          type="number"
+          step="1"
+          min="0"
+          value={declaredPillCount}
+          onChange={(e) => setDeclaredPillCount(e.target.value)}
           onWheel={(e) => (e.target as HTMLInputElement).blur()}
           disabled={bag.isInProduction}
           className="h-8 text-sm font-mono"

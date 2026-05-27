@@ -36,6 +36,16 @@ describe("summarizeAuditRow", () => {
     expect(lines.some((l) => l.includes("re-weighed"))).toBe(true);
   });
 
+  it("summarizes declared pill count change", () => {
+    const lines = summarizeAuditRow({
+      action: "inventory_bag.edit",
+      before: { declaredPillCount: 5000 },
+      after: { declaredPillCount: 4800 },
+    });
+    expect(lines.some((l) => l.includes("Declared pills"))).toBe(true);
+    expect(lines.some((l) => l.includes("5000") && l.includes("4800"))).toBe(true);
+  });
+
   it("summarizes QR token change", () => {
     const lines = summarizeAuditRow({
       action: "inventory_bag.edit",

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0] — 2026-05-27
+
+### Added
+- **Declared pill count on bag edit (RECEIVE-EDIT-2B-2):** Supervisors (`requireLead`) can correct a bag’s declared pill count from `/inbound/[receiveId]/bag/[bagId]/edit`. Updates `inventory_bags.declared_pill_count` only; live `pill_count` is unchanged. Audited under existing `inventory_bag.edit` with `declaredPillCount` in before/after snapshots. Bag edit history and `/reports/audit-log` show a readable “Declared pills” diff. Blocked when the bag is in production (notes-only policy).
+
+### Tests added (RECEIVE-EDIT-2B-2)
+- `lib/db/queries/bag-edits.test.ts` — production guard for declared pill count.
+- `lib/receive/bag-edit-history.test.ts` — declared pills diff line.
+- `app/(admin)/inbound/[id]/bag/[bagId]/edit/actions.test.ts` — parsing and validation.
+- `app/(admin)/inbound/[id]/bag/[bagId]/edit/bag-edit-form.test.ts` — structural guards (no `pill_count` writes).
+
 ## [0.3.9] — 2026-05-27
 
 ### Fixed
