@@ -1,6 +1,6 @@
 {
   "name": "luma",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -20,7 +20,8 @@
     "staging:cleanup": "tsx scripts/cleanup-staging-validation-data.ts",
     "validation:snapshot": "tsx scripts/validation-snapshot.ts",
     "repair:qr-inventory": "tsx scripts/repair-qr-inventory.ts",
-    "verify:deploy": "tsx scripts/verify-deploy.ts"
+    "verify:deploy": "tsx scripts/verify-deploy.ts",
+    "audit:product-zoho-readiness": "tsx scripts/audit-product-zoho-readiness.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",

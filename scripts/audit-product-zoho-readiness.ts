@@ -70,12 +70,22 @@ async function main() {
     }
   }
 
-  type Bucket = { name: string; sku: string; reasons: string[] };
+  type Bucket = {
+    id: string;
+    name: string;
+    sku: string;
+    kind: string;
+    reasons: string[];
+  };
   const ready: Bucket[] = [];
   const partial: Bucket[] = [];
   const missing: Bucket[] = [];
   const inactive: Bucket[] = [];
   const missingTabletMapping: string[] = [];
+
+  function formatProductLine(b: Bucket): string {
+    return `${b.name} (${b.sku}) · ${b.kind} · ${b.id}`;
+  }
 
   for (const product of allProducts) {
     const result = classifyProductZohoReadiness({
@@ -88,8 +98,10 @@ async function main() {
     });
 
     const bucket: Bucket = {
+      id: product.id,
       name: product.name,
       sku: product.sku,
+      kind: product.kind,
       reasons: result.reasons.map(zohoReadinessReasonLabel),
     };
 
@@ -102,7 +114,9 @@ async function main() {
 
     const tabletCount = tabletCountByProduct.get(product.id) ?? 0;
     if (product.isActive && tabletCount === 0) {
-      missingTabletMapping.push(`${product.name} (${product.sku})`);
+      missingTabletMapping.push(
+        `${product.name} (${product.sku}) · ${product.kind} · ${product.id}`,
+      );
     }
   }
 
@@ -116,20 +130,30 @@ async function main() {
   console.log(`  Missing      : ${missing.length}`);
   console.log(`Inactive       : ${inactive.length}`);
 
+  if (ready.length > 0) {
+    console.log("\n--- Zoho ready ---");
+    for (const b of ready) console.log(`  • ${formatProductLine(b)}`);
+  }
+
   if (partial.length > 0) {
-    console.log("\n--- Partially mapped (some Zoho IDs missing) ---");
+    console.log("\n--- Zoho mapping incomplete ---");
     for (const b of partial) {
-      console.log(`  • ${b.name} (${b.sku})`);
+      console.log(`  • ${formatProductLine(b)}`);
       for (const r of b.reasons) console.log(`      – ${r}`);
     }
   }
 
   if (missing.length > 0) {
-    console.log("\n--- Not mapped (no Zoho assembly IDs) ---");
+    console.log("\n--- Zoho IDs missing ---");
     for (const b of missing) {
-      console.log(`  • ${b.name} (${b.sku})`);
+      console.log(`  • ${formatProductLine(b)}`);
       for (const r of b.reasons) console.log(`      – ${r}`);
     }
+  }
+
+  if (inactive.length > 0) {
+    console.log("\n--- Inactive products ---");
+    for (const b of inactive) console.log(`  • ${formatProductLine(b)}`);
   }
 
   if (missingTabletMapping.length > 0) {

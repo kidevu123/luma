@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   classifyProductZohoReadiness,
   zohoReadinessLabel,
+  zohoReadinessShortLabel,
   zohoReadinessReasonLabel,
 } from "./product-zoho-readiness";
 
@@ -126,6 +127,16 @@ describe("classifyProductZohoReadiness", () => {
     expect(result.level).toBe("missing");
     expect(result.reasons).toContain("no_unit_id");
   });
+
+  it("long unit ID (>60 chars) in zohoItemIdUnit counts as present for READY", () => {
+    const longId = "Z".repeat(80);
+    const result = classifyProductZohoReadiness({
+      ...BASE,
+      zohoItemIdUnit: longId,
+    });
+    expect(result.level).toBe("ready");
+    expect(result.reasons).toHaveLength(0);
+  });
 });
 
 describe("zohoReadinessLabel", () => {
@@ -134,6 +145,15 @@ describe("zohoReadinessLabel", () => {
     expect(zohoReadinessLabel("partial")).toMatch(/partial/i);
     expect(zohoReadinessLabel("missing")).toMatch(/missing/i);
     expect(zohoReadinessLabel("inactive")).toMatch(/inactive/i);
+  });
+});
+
+describe("zohoReadinessShortLabel", () => {
+  it("returns compact banner copy for all four levels", () => {
+    expect(zohoReadinessShortLabel("ready")).toBe("Zoho ready");
+    expect(zohoReadinessShortLabel("partial")).toBe("Zoho mapping incomplete");
+    expect(zohoReadinessShortLabel("missing")).toBe("Zoho IDs missing");
+    expect(zohoReadinessShortLabel("inactive")).toBe("Inactive product");
   });
 });
 
