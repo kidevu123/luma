@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -53,36 +54,44 @@ export function RetireButton({
   id: string;
   disabled?: boolean;
 }) {
+  const router = useRouter();
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   return (
-    <Button
-      size="sm"
-      variant="ghost"
-      type="button"
-      disabled={pending || disabled}
-      title={
-        error
-          ? error
-          : disabled
-            ? "Card is mid-bag — finalize first"
-            : "Retire this card"
-      }
-      onClick={async () => {
-        if (!confirm("Retire this card? It can't accept new scans after.")) return;
-        setPending(true);
-        setError(null);
-        try {
-          const r = await retireQrCardAction(id);
-          if (r && "error" in r && r.error) setError(r.error);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "Retire failed.");
-        } finally {
-          setPending(false);
+    <div className="inline-flex flex-col items-end gap-1">
+      <Button
+        size="sm"
+        variant="ghost"
+        type="button"
+        disabled={pending || disabled}
+        title={
+          disabled ? "Card is mid-bag — finalize first" : "Retire this card"
         }
-      }}
-    >
-      <Archive className="h-3.5 w-3.5" /> {pending ? "…" : "Retire"}
-    </Button>
+        onClick={async () => {
+          if (!confirm("Retire this card? It can't accept new scans after.")) return;
+          setPending(true);
+          setError(null);
+          try {
+            const r = await retireQrCardAction(id);
+            if (r && "error" in r && r.error) {
+              setError(r.error);
+              return;
+            }
+            router.refresh();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Retire failed.");
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        <Archive className="h-3.5 w-3.5" /> {pending ? "…" : "Retire"}
+      </Button>
+      {error && (
+        <p className="max-w-[14rem] text-right text-[11px] leading-snug text-red-700">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

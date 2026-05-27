@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { qrCards, workflowBags, products, inventoryBags, batches, smallBoxes, receives, tabletTypes } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
+import { isQrCardMidProduction } from "@/lib/production/qr-card-retire";
 
 export type QrCardRow = typeof qrCards.$inferSelect;
 
@@ -66,7 +67,7 @@ export async function retireQrCard(id: string, actor: CurrentUser) {
     // (ASSIGNED with a live workflow bag). Intake-reserved cards
     // (ASSIGNED+null workflowBagId) have not entered production and
     // may be retired freely.
-    if (before.status === "ASSIGNED" && before.assignedWorkflowBagId !== null) {
+    if (isQrCardMidProduction(before)) {
       throw new Error("Cannot retire a card that's mid-bag. Finalize the bag first.");
     }
     const [row] = await tx

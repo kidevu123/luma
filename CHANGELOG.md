@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.7] — 2026-05-27
+
+### Fixed
+- **QR card retire (QR-CARDS-RETIRE-1):** Retire on `/qr-cards` now refreshes the list after success and shows inline errors instead of silent failure. Retire stays enabled for intake-reserved cards (`ASSIGNED` without a workflow bag); only mid-production cards (`ASSIGNED` + active bag) are blocked, matching server rules.
+
+### Tests added (QR-CARDS-RETIRE-1)
+- `app/(admin)/qr-cards/actions.test.ts` — action auth, revalidate, friendly errors.
+- `app/(admin)/qr-cards/qr-cards-retire.test.ts` — Retire button wiring, refresh, disable rules.
+- `lib/production/qr-card-retire.test.ts` — mid-production eligibility matrix.
+
 ## [0.4.6] — 2026-05-27
 
 ### Added (STATION-ACTIVE-UX-1)

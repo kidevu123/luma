@@ -4,6 +4,7 @@ import * as React from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { RetireButton } from "./forms";
+import { isQrCardMidProduction } from "@/lib/production/qr-card-retire";
 import { sortQrRows, matchesQrSearch } from "@/lib/production/qr-sort";
 
 type QrCardType = "RAW_BAG" | "VARIETY_PACK" | "WORKFLOW_TRAVELER" | "UNKNOWN";
@@ -15,6 +16,7 @@ type QrCardRow = {
     scanToken: string;
     status: string;
     cardType: QrCardType;
+    assignedWorkflowBagId: string | null;
     retiredAt: Date | null;
     notes: string | null;
   };
@@ -390,7 +392,7 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
                     {card.status !== "RETIRED" && (
                       <RetireButton
                         id={card.id}
-                        disabled={card.status === "ASSIGNED"}
+                        disabled={isQrCardMidProduction(card)}
                       />
                     )}
                   </td>
