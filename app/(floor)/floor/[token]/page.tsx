@@ -396,10 +396,7 @@ export default async function FloorStationPage({
               {currentAtStation.product ? (
                 <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900 space-y-0.5">
                   <div className="font-semibold">
-                    Making: {currentAtStation.product.sku}
-                    {currentAtStation.product.name
-                      ? ` — ${currentAtStation.product.name}`
-                      : ""}
+                    Making: {currentAtStation.product.name}
                   </div>
                   {currentAtStation.product.unitsPerDisplay != null &&
                   currentAtStation.product.displaysPerCase != null ? (

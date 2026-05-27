@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.9] — 2026-05-27
+
+### Fixed
+- **Floor product dropdown shows product names only (PRODUCT-DROPDOWN-1):** The product select shown after scanning a bag at a first-op station was rendering `{sku} — {name}` (e.g. `LUMA-fix-beyond-cocoa-cal-6Q2PS — FIX Beyond - Cocoa Calm`). Floor operators only need the product name. Also fixed the "Making:" chip on the active-bag panel which showed `Making: SKU — Name`. Both now show product name only. No filtering, scan, or QR lookup logic changed.
+- **Build fix — Button variant (from RECEIVE-EDIT-2B-1):** `app/(admin)/inbound/[id]/page.tsx` used `variant="outline"` which is not a valid variant for the Luma Button component. Changed to `variant="secondary"`.
+
+### Tests added (PRODUCT-DROPDOWN-1)
+- `PRODUCT-DROPDOWN-1 · floor product select shows name only` — 2 structural tests.
+- `PRODUCT-DROPDOWN-1 · floor Making chip shows name only` — 2 structural tests.
+
 ## [0.3.8] — 2026-05-27
 
 ### Added

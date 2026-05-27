@@ -751,3 +751,38 @@ describe("FLOOR-SCAN-ERROR-2 · non-UUID scan token does not hit UUID column", (
     expect(result).toHaveProperty("ok", true);
   });
 });
+
+// ── PRODUCT-DROPDOWN-1 · floor product dropdown shows name only ───────────────
+//
+// Regression guard: the product select used to render "{p.sku} — {p.name}".
+// Floor operators should see the product name only — no SKU, no internal code,
+// no Zoho ID, no generated slug. The page.tsx "Making:" chip had the same issue.
+
+describe("PRODUCT-DROPDOWN-1 · floor product select shows name only", () => {
+  it("product option text is p.name — not a combined sku/name label", () => {
+    expect(formSrc).toMatch(/<option[^>]*>\s*\{p\.name\}\s*<\/option>/s);
+  });
+
+  it("p.sku is not interpolated into the product option text", () => {
+    const optionBlock = formSrc.slice(
+      formSrc.indexOf("filteredProducts.map"),
+      formSrc.indexOf("</select>", formSrc.indexOf("filteredProducts.map")),
+    );
+    expect(optionBlock).not.toMatch(/\{p\.sku\}/);
+  });
+});
+
+describe("PRODUCT-DROPDOWN-1 · floor Making chip shows name only", () => {
+  const pageSrc = readFileSync(resolve(here, "page.tsx"), "utf8");
+
+  it("Making chip renders product.name — not product.sku as primary label", () => {
+    expect(pageSrc).toMatch(/Making:\s*\{currentAtStation\.product\.name\}/);
+  });
+
+  it("Making chip does not render product.sku as a JSX interpolation", () => {
+    const makingIdx = pageSrc.indexOf("Making:");
+    expect(makingIdx).toBeGreaterThan(-1);
+    const chipBlock = pageSrc.slice(makingIdx, makingIdx + 200);
+    expect(chipBlock).not.toMatch(/\{currentAtStation\.product\.sku\}/);
+  });
+});
