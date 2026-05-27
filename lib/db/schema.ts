@@ -1073,6 +1073,12 @@ export const finishedLots = pgTable(
     // Phase A — PackTrack consumption push state
     packtrackConsumptionSentAt: timestamp("packtrack_consumption_sent_at", { withTimezone: true }),
     packtrackConsumptionError: text("packtrack_consumption_error"),
+    // Phase B — Zoho manufacture order push state
+    zohoManufactureOrderId: text("zoho_manufacture_order_id"),
+    zohoManufactureError: text("zoho_manufacture_error"),
+    // Phase E — Nexus batch registration
+    nexusBatchRegisteredAt: timestamp("nexus_batch_registered_at", { withTimezone: true }),
+    nexusBatchRegisterError: text("nexus_batch_register_error"),
   },
   (t) => [
     uniqueIndex("finished_lots_number_unique").on(t.finishedLotNumber),
