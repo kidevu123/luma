@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.11] — 2026-05-27
+
+### Added (FLOW-OVERLAP-2A)
+- **Overlap readiness foundation (no floor behavior change):** Pure helper `lib/production/flow-overlap-readiness.ts` models proposed lane overlap (blister / sealing / packaging) separately from current serial pickup and complete guards. Documents data gaps when partial output cannot be derived from today's event types while global stage remains `STARTED` or `BLISTERED`.
+
+### Tests added (FLOW-OVERLAP-2A)
+- `lib/production/flow-overlap-readiness.test.ts` — 12 tests: insufficient data at STARTED, partial-signal overlap vs complete strictness, current serial semantics at BLISTERED/SEALED, global pause assumption.
+
+### Docs (FLOW-OVERLAP-2A)
+- `docs/superpowers/plans/2026-05-26-flow-overlap-2a-foundation.md` — implementation memo for FLOW-OVERLAP-2B (what is derivable today, required events/read-model fields, pause model, hard stops).
+
 ## [0.4.10] — 2026-05-27
 
 ### Fixed (STATION-PAUSE-REASONS-1)
