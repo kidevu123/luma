@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] — 2026-05-27
+
+### Changed
+- **Camera scan is now the primary floor workflow (FLOOR-SCAN-UX-2):** After a successful QR scan (camera or typed), the scan input now shows the bag card's human label (e.g., `bag-card-117`) instead of going blank. A green confirmation chip appears below showing the full resolved context: card label, PO number, bag number, and tablet type. Operators have immediate visual confirmation of what was scanned without touching the dropdown.
+- **Dropdown is explicitly backup-only:** The dropdown comment and surrounding hint text clarify that physical QR scanning is the primary path. The dropdown exists for recovery scenarios only.
+- **Enter-on-resolved-input submits:** After a camera or typed scan resolves a card, pressing Enter in the scan input submits the workflow (or shows a product-required error) rather than trying to re-scan the label text.
+- **Typing invalidates resolved card:** If an operator edits the scan input after a resolved scan, the resolved state clears and the next Enter triggers a fresh lookup.
+
+### Internal
+- `lookupCardByTokenAction` now returns `cardLabel: string` (from `qrCards.label`) alongside `cardId`.
+- Source-text guard tests added for the scan confirmation lifecycle and the `cardLabel` return value.
+
+### Version rationale
+v0.3.0 (not a patch): this completes the camera scan as the trusted primary production floor path. Without visual confirmation, operators default to the dropdown and camera scanning is not viable in practice. With it, camera scan is the production-validated primary workflow.
+
 ## [0.2.49] — 2026-05-26
 
 ### Fixed
