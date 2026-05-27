@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.2] — 2026-05-27
+
+### Fixed
+- **Camera scan input blank after scan (FLOOR-SCAN-LIVE-1):** Two bugs caused the scan input to appear empty after a camera QR scan.
+  1. `handleResolvedToken` had no `catch` block. If `lookupCardByTokenAction` threw (DB error, network failure, Next.js serialization error), the exception propagated silently — `setScanInput` never ran and no error was displayed. The form appeared unresponsive.
+  2. `setScanInput` was only called *after* the server lookup completed. During the roundtrip (~100–500 ms) and on the auto-submit path (where `router.refresh()` fires immediately), the input showed only the placeholder text. Operators had no visible confirmation of what was scanned.
+- **Fix:** Raw scan token is now set in the input immediately when the scan starts (before the server round-trip). On successful lookup, it is overwritten with the human-readable bag label and the green confirmation chip. On error, the raw token remains so operators can verify the QR payload.
+- **`?debug=1` diagnostic mode:** Appending `?debug=1` to any floor station URL now logs the raw camera-decoded QR value to the browser console (`[floor-scan] camera decoded: ...`). Use this to diagnose QR encoding issues in the field without polluting normal operation.
+
+### Tests added (FLOOR-SCAN-LIVE-1)
+- `handleResolvedToken sets scanInput to raw.trim() immediately — before lookup` — index-order guard confirming the pre-lookup assignment precedes the `await lookupCardByTokenAction(fd)` call.
+- `handleResolvedToken has catch block` — confirms a `} catch (err) {` block exists within `handleResolvedToken` (narrowed to function body, not `submitWithCardId`) and calls `setScanError`.
+- `handleCameraResult logs decoded QR value to console when ?debug=1 is set in URL` — confirms the debug guard and log statement are present.
+
 ## [0.3.1] — 2026-05-27
 
 ### Added

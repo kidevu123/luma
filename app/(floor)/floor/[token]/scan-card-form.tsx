@@ -159,17 +159,22 @@ export function ScanCardForm({
       setScanError(null);
       setScannedContext(null);
       setScanPending(true);
+      // Show raw token immediately so the operator can see what was scanned
+      // even before the server lookup completes. Overwritten with the
+      // human-readable label on success.
+      setScanInput(raw.trim());
       try {
         const fd = new FormData();
         fd.set("scanToken", raw.trim());
         const result = await lookupCardByTokenAction(fd);
         if (!("ok" in result)) {
           setScanError(result.error);
+          // Leave scanInput showing the raw token so operator can verify the QR.
           return;
         }
         const cardId = result.cardId;
 
-        // Populate scan input with the human label and show a confirmation chip.
+        // Overwrite raw token with the human-readable bag label and show chip.
         const matchedCard = receivedCards.find((c) => c.id === cardId);
         setScanInput(result.cardLabel);
         setScannedContext({
@@ -201,6 +206,12 @@ export function ScanCardForm({
 
         setSelectedCardId(cardId);
         await submitWithCardId(cardId);
+      } catch (err) {
+        // Catch thrown exceptions from server actions (DB error, network failure,
+        // serialization error). Without this, the form goes blank with no feedback.
+        setScanError(
+          err instanceof Error ? err.message : "Scan failed — please try again.",
+        );
       } finally {
         setScanPending(false);
       }
@@ -231,6 +242,11 @@ export function ScanCardForm({
 
   const handleCameraResult = React.useCallback(
     async (scanToken: string) => {
+      // Debug: append ?debug=1 to the floor URL to log camera payloads to
+      // the browser console. Helps diagnose QR encoding issues in the field.
+      if (new URLSearchParams(window.location.search).get("debug") === "1") {
+        console.log("[floor-scan] camera decoded:", JSON.stringify(scanToken));
+      }
       setShowCamera(false);
       await handleResolvedToken(scanToken);
     },
