@@ -41,6 +41,10 @@ import { getActiveStationSession } from "@/lib/production/station-operator-sessi
 import { shouldRenderQcPanel } from "@/lib/production/qc-panel-helpers";
 import { QcPanel, type PendingReworkRow } from "./qc-panel";
 import { loadAutoLots, STATION_AUTO_MATERIAL_KINDS, type AutoLoadedLot } from "@/lib/production/auto-load-lots";
+import {
+  floorSupervisorToolsForStation,
+  type FloorSupervisorToolLink,
+} from "@/lib/production/floor-station-mobile-nav";
 import { SealHandpackForm } from "./seal-handpack-form";
 import { readFileSync } from "fs";
 import path from "path";
@@ -278,6 +282,11 @@ export default async function FloorStationPage({
   // Load the product's packaging BOM so the packaging close-out form
   // can preview expected material consumption as the operator types.
   const currentProductId = currentAtStation?.bag.productId ?? null;
+  const supervisorTools = floorSupervisorToolsForStation(
+    token,
+    station.station.kind,
+  );
+
   const packagingSpecsForForm =
     currentProductId != null &&
     (station.station.kind === "PACKAGING" || station.station.kind === "COMBINED")
@@ -298,8 +307,8 @@ export default async function FloorStationPage({
       : [];
 
   return (
-    <main className="min-h-dvh bg-page p-4 sm:p-6 pb-[calc(1rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-5">
-      <header className="flex items-baseline justify-between">
+    <main className="min-h-dvh bg-page px-4 pt-3 sm:px-6 sm:pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-4">
+      <header className="flex items-baseline justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-subtle">
             Station
@@ -314,18 +323,6 @@ export default async function FloorStationPage({
           Online
         </span>
       </header>
-
-      <nav className="flex flex-wrap gap-2 text-xs">
-        <a href={`/floor/${token}/rolls`} className="inline-flex items-center rounded border border-border/70 bg-surface px-4 min-h-[44px] hover:bg-page">
-          Rolls
-        </a>
-        <a href={`/floor/${token}/bag-allocation`} className="inline-flex items-center rounded border border-border/70 bg-surface px-4 min-h-[44px] hover:bg-page">
-          Bag allocation
-        </a>
-        <a href={`/floor/${token}/variety-pack`} className="inline-flex items-center rounded border border-border/70 bg-surface px-4 min-h-[44px] hover:bg-page">
-          Variety pack
-        </a>
-      </nav>
 
       <OperatorSessionPanel
         token={token}
@@ -480,6 +477,8 @@ export default async function FloorStationPage({
         )}
       </section>
 
+      <SupervisorToolsPanel tools={supervisorTools} />
+
       <p className="text-center text-[10px] font-mono text-text-subtle">
         Luma · v{getPackageVersion()} · {process.env.BUILD_GIT_SHA?.slice(0, 7) ?? "local"}
         {process.env.BUILD_GIT_BRANCH ? ` · ${process.env.BUILD_GIT_BRANCH}` : ""}
@@ -629,6 +628,38 @@ function BagAdvancedBanner({
       <p className="font-semibold">Bag already {stageWord} at this station.</p>
       <p className="text-xs">{nextHint}</p>
     </div>
+  );
+}
+
+function SupervisorToolsPanel({ tools }: { tools: FloorSupervisorToolLink[] }) {
+  if (tools.length === 0) return null;
+  return (
+    <details className="rounded-xl border border-border/60 bg-surface/80 text-sm">
+      <summary className="cursor-pointer list-none px-4 py-3 min-h-[44px] flex items-center justify-between gap-2 font-medium text-text-muted [&::-webkit-details-marker]:hidden">
+        <span>Supervisor tools</span>
+        <span className="text-[11px] font-normal text-text-subtle">
+          {tools.length} optional
+        </span>
+      </summary>
+      <div className="border-t border-border/60 px-4 pb-4 pt-2 space-y-2">
+        <p className="text-[11px] text-text-subtle leading-relaxed">
+          Not part of the normal scan flow. Use only when mounting rolls,
+          allocating partial bags, or running variety-pack validation.
+        </p>
+        <ul className="space-y-2">
+          {tools.map((tool) => (
+            <li key={tool.id}>
+              <a
+                href={tool.href}
+                className="flex items-center justify-center rounded-lg border border-border/70 bg-page px-4 min-h-[44px] text-sm font-medium hover:bg-surface-2/60"
+              >
+                {tool.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
   );
 }
 

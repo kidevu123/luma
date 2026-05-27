@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.2] — 2026-05-27
+
+### Changed
+- **Floor station mobile UX (STATION-MOBILE-UX-1):** Removed the always-visible top row of Rolls / Bag allocation / Variety pack links from `/floor/[token]`. Those validation tools now appear only inside a collapsed **Supervisor tools** section at the bottom of the page, and only on station kinds where each tool is relevant. Primary mobile flow is station header → operator shift → loaded materials (when applicable) → current bag scan/start. No scan, QR lookup, or production-start logic changes.
+
+### Tests added (STATION-MOBILE-UX-1)
+- `lib/production/floor-station-mobile-nav.test.ts` — station-kind tool visibility matrix.
+- `app/(floor)/floor/[token]/page.test.ts` — layout guards (no primary nav, scan card + footer preserved).
+
 ## [0.4.1] — 2026-05-27
 
 ### Fixed
