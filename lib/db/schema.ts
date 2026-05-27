@@ -3785,3 +3785,31 @@ export const userDashboardConfig = pgTable(
 
 export type UserDashboardConfig = typeof userDashboardConfig.$inferSelect;
 export type UserDashboardConfigInsert = typeof userDashboardConfig.$inferInsert;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase C — Sales feedback loop
+// One row per (finished_lot_id, zoho_order_id) — idempotent.
+// Closes the genealogy loop: sale → lot → batch → materials.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const finishedLotSales = pgTable(
+  "finished_lot_sales",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    finishedLotId: uuid("finished_lot_id")
+      .notNull()
+      .references(() => finishedLots.id, { onDelete: "cascade" }),
+    zohoOrderId: text("zoho_order_id").notNull(),
+    productSku: text("product_sku").notNull(),
+    qtySold: integer("qty_sold").notNull(),
+    soldAt: timestamp("sold_at", { withTimezone: true }).notNull(),
+    linkedAt: timestamp("linked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("finished_lot_sales_pair_unique").on(t.finishedLotId, t.zohoOrderId),
+    index("finished_lot_sales_order_idx").on(t.zohoOrderId),
+    index("finished_lot_sales_lot_idx").on(t.finishedLotId),
+  ],
+);
+
+export type FinishedLotSale = typeof finishedLotSales.$inferSelect;
