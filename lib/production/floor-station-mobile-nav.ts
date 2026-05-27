@@ -10,13 +10,9 @@ export const FLOOR_ROLL_STATION_KINDS = new Set([
   "SEALING",
 ]);
 
-/** Multi-component variety-pack allocation (VALIDATION-2A). */
-export const FLOOR_VARIETY_PACK_STATION_KINDS = new Set([
-  "BLISTER",
-  "HANDPACK_BLISTER",
-  "COMBINED",
-  "BOTTLE_HANDPACK",
-]);
+/** Bottle variety-pack allocation (VALIDATION-2A). Card/blister stations
+ *  run VARIETY products via scan/start on the main page, not this tool. */
+export const FLOOR_VARIETY_PACK_STATION_KINDS = new Set(["BOTTLE_HANDPACK"]);
 
 export type FloorSupervisorToolId = "rolls" | "variety-pack";
 
