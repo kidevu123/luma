@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.12] — 2026-05-27
+
+### Fixed (STATION-PAUSE-2)
+- **Station-specific pause reasons:** Explicit per-`StationKind` matrix in `lib/production/station-pause-reasons.ts` so hand-work stations (HANDPACK_BLISTER, BOTTLE_HANDPACK, PACKAGING, bottle finish) never show PVC roll swap or Machine jam. Machine-bound stations (BLISTER, SEALING, COMBINED) keep roll/jam options. Default selection is `shift_end` on hand-work and `pvc_swap` on machine stations; floor UI resyncs if the selected reason is not valid for the station.
+
+### Tests added (STATION-PAUSE-2)
+- `lib/production/station-pause-reasons.test.ts` — matrix coverage, PACKAGING/BOTTLE_HANDPACK guards, default-in-options.
+- `app/(floor)/floor/[token]/stage-action-buttons.test.ts` — default helper + `useEffect` resync.
+
 ## [0.4.11] — 2026-05-27
 
 ### Added (FLOW-OVERLAP-2A)
