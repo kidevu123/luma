@@ -65,6 +65,7 @@ function makeForm(scanToken: string): FormData {
 
 const IDLE_RAW_BAG = {
   id: "00000000-0000-0000-0000-000000000001",
+  label: "bag-card-001",
   cardType: "RAW_BAG",
   status: "IDLE",
   assignedWorkflowBagId: null,
@@ -73,6 +74,7 @@ const IDLE_RAW_BAG = {
 
 const INTAKE_RESERVED_RAW_BAG = {
   id: "00000000-0000-0000-0000-000000000002",
+  label: "bag-card-002",
   cardType: "RAW_BAG",
   status: "ASSIGNED",
   assignedWorkflowBagId: null,
@@ -81,6 +83,7 @@ const INTAKE_RESERVED_RAW_BAG = {
 
 const ASSIGNED_RAW_BAG = {
   id: "00000000-0000-0000-0000-000000000003",
+  label: "bag-card-003",
   cardType: "RAW_BAG",
   status: "ASSIGNED",
   assignedWorkflowBagId: "00000000-0000-0000-0000-000000000099",
@@ -144,8 +147,9 @@ describe("lookupCardByTokenAction", () => {
     selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
     const result = await lookupCardByTokenAction(makeForm("bag-card-2"));
     expect(result).toHaveProperty("ok", true);
-    const ok = result as { ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null };
+    const ok = result as { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean; tabletTypeId: string | null };
     expect(ok.cardId).toBe(INTAKE_RESERVED_RAW_BAG.id);
+    expect(ok.cardLabel).toBe("bag-card-002");
     expect(ok.isIntakeReserved).toBe(true);
     expect(ok.tabletTypeId).toBe("tt-001");
   });
@@ -154,8 +158,9 @@ describe("lookupCardByTokenAction", () => {
     selectResults[0] = [ASSIGNED_RAW_BAG];
     const result = await lookupCardByTokenAction(makeForm("pickup-bag-token"));
     expect(result).toHaveProperty("ok", true);
-    const ok = result as { ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null };
+    const ok = result as { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean; tabletTypeId: string | null };
     expect(ok.cardId).toBe(ASSIGNED_RAW_BAG.id);
+    expect(ok.cardLabel).toBe("bag-card-003");
     expect(ok.isIntakeReserved).toBe(false);
     expect(ok.tabletTypeId).toBe("tt-002");
   });
@@ -169,6 +174,7 @@ describe("lookupCardByTokenAction", () => {
   it("returns tabletTypeId null when leftJoin finds no inventory bag", async () => {
     selectResults[0] = [{
       id: "00000000-0000-0000-0000-000000000004",
+      label: "bag-card-004",
       cardType: "RAW_BAG",
       status: "ASSIGNED",
       assignedWorkflowBagId: null,
@@ -176,7 +182,8 @@ describe("lookupCardByTokenAction", () => {
     }];
     const result = await lookupCardByTokenAction(makeForm("unlinked-token"));
     expect(result).toHaveProperty("ok", true);
-    const ok = result as { ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null };
+    const ok = result as { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean; tabletTypeId: string | null };
+    expect(ok.cardLabel).toBe("bag-card-004");
     expect(ok.tabletTypeId).toBeNull();
   });
 });
@@ -557,5 +564,61 @@ describe("QR-SCAN-PAYLOAD-1 · QR label payload", () => {
 
   it("no call to renderQrSvg with r.card.id remains", () => {
     expect(labelsSrc).not.toMatch(/renderQrSvg\s*\(\s*r\.card\.id\s*\)/);
+  });
+});
+
+// ── FLOOR-SCAN-UX-2 · scan confirmation UX structural guards ──────────────────
+//
+// Ensure the scan confirmation state and chip are present and correctly wired.
+// Source-text tests catch regressions without mounting the component.
+
+describe("FLOOR-SCAN-UX-2 · scan confirmation state", () => {
+  it("declares scannedContext state initialized to null", () => {
+    expect(formSrc).toMatch(/useState.*null.*scannedContext|scannedContext.*useState.*null/s);
+  });
+
+  it("handleResolvedToken sets scannedContext with label and detail", () => {
+    expect(formSrc).toMatch(/setScannedContext\s*\(\s*\{/);
+    expect(formSrc).toMatch(/label\s*:\s*result\.cardLabel/);
+    expect(formSrc).toMatch(/detail\s*:/);
+  });
+
+  it("handleResolvedToken calls setScanInput with result.cardLabel — not empty string", () => {
+    expect(formSrc).toMatch(/setScanInput\s*\(\s*result\.cardLabel\s*\)/);
+    expect(formSrc).not.toMatch(/setScanInput\s*\(\s*['"]\s*['"]\s*\)/);
+  });
+
+  it("handleResolvedToken clears scannedContext at the start of each call", () => {
+    expect(formSrc).toMatch(/setScannedContext\s*\(\s*null\s*\)/);
+  });
+
+  it("onChange clears resolvedCardId and scannedContext when operator types", () => {
+    expect(formSrc).toMatch(/setScannedContext\s*\(\s*null\s*\)/);
+    expect(formSrc).toMatch(/setResolvedCardId\s*\(\s*null\s*\)/);
+  });
+
+  it("confirmation chip renders scannedContext.detail when scannedContext is set and no scanError", () => {
+    expect(formSrc).toMatch(/scannedContext\s*&&\s*!scanError/);
+    expect(formSrc).toMatch(/scannedContext\.detail/);
+  });
+
+  it("dropdown section comment identifies it as backup-only", () => {
+    expect(formSrc).toMatch(/Dropdown.*backup only|backup only.*Dropdown/i);
+  });
+});
+
+describe("FLOOR-SCAN-UX-2 · lookupCardByTokenAction returns cardLabel", () => {
+  const actionsSrc = readFileSync(resolve(here, "actions.ts"), "utf8");
+
+  it("select block includes label: qrCards.label", () => {
+    expect(actionsSrc).toMatch(/label\s*:\s*qrCards\.label/);
+  });
+
+  it("return statement includes cardLabel: card.label", () => {
+    expect(actionsSrc).toMatch(/cardLabel\s*:\s*card\.label/);
+  });
+
+  it("return type union includes cardLabel: string", () => {
+    expect(actionsSrc).toMatch(/cardLabel\s*:\s*string/);
   });
 });
