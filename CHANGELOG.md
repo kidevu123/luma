@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.3] — 2026-05-27
+
+### Changed
+- **Floor station mobile polish (STATION-MOBILE-UX-2):** Tighter mobile layout on `/floor/[token]` — compact station header (no “Online” badge), shorter idle-bag copy, de-emphasized internal bag id, slimmer materials and supervisor-tools panels. Tool and loaded-material visibility remain gated by station kind. No scan/start or dropdown behavior changes.
+
+### Tests added (STATION-MOBILE-UX-2)
+- `lib/production/floor-station-mobile-nav.test.ts` — BOTTLE_HANDPACK, BOTTLE_CAP_SEAL, BOTTLE_STICKER, loaded-material visibility.
+- `app/(floor)/floor/[token]/page.test.ts` — mobile layout structural guards.
+
 ## [0.4.2] — 2026-05-27
 
 ### Changed

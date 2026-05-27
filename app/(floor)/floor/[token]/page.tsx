@@ -43,6 +43,7 @@ import { QcPanel, type PendingReworkRow } from "./qc-panel";
 import { loadAutoLots, STATION_AUTO_MATERIAL_KINDS, type AutoLoadedLot } from "@/lib/production/auto-load-lots";
 import {
   floorSupervisorToolsForStation,
+  formatStationPageSubtitle,
   type FloorSupervisorToolLink,
 } from "@/lib/production/floor-station-mobile-nav";
 import { SealHandpackForm } from "./seal-handpack-form";
@@ -307,21 +308,17 @@ export default async function FloorStationPage({
       : [];
 
   return (
-    <main className="min-h-dvh bg-page px-4 pt-3 sm:px-6 sm:pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-4">
-      <header className="flex items-baseline justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-subtle">
-            Station
-          </p>
-          <h1 className="text-2xl font-semibold tracking-tight">{station.station.label}</h1>
-          <p className="text-xs text-text-muted">
-            {station.station.kind}
-            {station.machine ? ` · ${station.machine.name}` : ""}
-          </p>
-        </div>
-        <span className="rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-[11px] font-medium">
-          Online
-        </span>
+    <main className="min-h-dvh bg-page px-4 pt-2 sm:px-6 sm:pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-3">
+      <header className="space-y-0.5">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight leading-snug">
+          {station.station.label}
+        </h1>
+        <p className="text-[11px] text-text-subtle capitalize">
+          {formatStationPageSubtitle(
+            station.station.kind,
+            station.machine?.name ?? null,
+          )}
+        </p>
       </header>
 
       <OperatorSessionPanel
@@ -333,16 +330,16 @@ export default async function FloorStationPage({
 
       <AutoLoadedLotsPanel lots={autoLots} stationKind={station.station.kind} />
 
-      <section className="rounded-2xl bg-surface border border-border p-5 space-y-4">
+      <section className="rounded-2xl bg-surface border border-border p-4 space-y-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-subtle">
           Current bag
         </p>
         {!currentAtStation ? (
-          <div className="py-3">
-            <p className="text-sm text-text-muted mb-3">
+          <div className="py-1">
+            <p className="text-sm text-text-muted mb-2">
               {canStartFreshBag
-                ? "No bag at this station. Scan a received bag QR or select one below."
-                : "No bag at this station. This station accepts bags released from a prior stage."}
+                ? "Scan a bag QR to start, or pick a backup below."
+                : "Scan a bag QR released from the prior stage."}
             </p>
             <ScanCardForm
               token={token}
@@ -381,15 +378,10 @@ export default async function FloorStationPage({
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="rounded-xl border border-border/70 bg-surface-2/40 p-4">
-              <div className="flex items-baseline justify-between mb-2">
-                <p className="text-base font-semibold tracking-tight">
-                  {currentAtStation.card?.label ?? "—"}
-                </p>
-                <span className="font-mono text-[11px] text-text-subtle">
-                  {currentAtStation.bag.id.slice(0, 8)}
-                </span>
-              </div>
+            <div className="rounded-xl border border-border/70 bg-surface-2/40 p-3 sm:p-4">
+              <p className="text-base font-semibold tracking-tight mb-2">
+                {currentAtStation.card?.label ?? "—"}
+              </p>
               {currentAtStation.product ? (
                 <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900 space-y-0.5">
                   <div className="font-semibold">
@@ -634,18 +626,12 @@ function BagAdvancedBanner({
 function SupervisorToolsPanel({ tools }: { tools: FloorSupervisorToolLink[] }) {
   if (tools.length === 0) return null;
   return (
-    <details className="rounded-xl border border-border/60 bg-surface/80 text-sm">
-      <summary className="cursor-pointer list-none px-4 py-3 min-h-[44px] flex items-center justify-between gap-2 font-medium text-text-muted [&::-webkit-details-marker]:hidden">
-        <span>Supervisor tools</span>
-        <span className="text-[11px] font-normal text-text-subtle">
-          {tools.length} optional
-        </span>
+    <details className="rounded-lg border border-border/50 bg-surface/60 text-sm">
+      <summary className="cursor-pointer list-none px-3 py-2.5 min-h-[44px] flex items-center gap-2 text-text-muted [&::-webkit-details-marker]:hidden">
+        <span className="font-medium">Supervisor tools</span>
+        <span className="text-[10px] text-text-subtle">(optional)</span>
       </summary>
-      <div className="border-t border-border/60 px-4 pb-4 pt-2 space-y-2">
-        <p className="text-[11px] text-text-subtle leading-relaxed">
-          Not part of the normal scan flow. Use only when mounting rolls,
-          allocating partial bags, or running variety-pack validation.
-        </p>
+      <div className="border-t border-border/50 px-3 pb-3 pt-1 space-y-2">
         <ul className="space-y-2">
           {tools.map((tool) => (
             <li key={tool.id}>
@@ -672,23 +658,25 @@ function AutoLoadedLotsPanel({
 }) {
   if (!STATION_AUTO_MATERIAL_KINDS[stationKind]) return null;
   return (
-    <div className="rounded-xl border border-border bg-surface p-4 space-y-2">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
-        Loaded materials
+    <div className="rounded-lg border border-border/70 bg-surface px-3 py-2.5 space-y-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-text-subtle">
+        Materials on hand
       </p>
       {lots.length === 0 ? (
-        <p className="text-sm text-amber-700 font-medium">
-          No available lots found — receive stock before starting.
+        <p className="text-sm text-amber-800 font-medium leading-snug">
+          No stock on hand — receive materials before starting.
         </p>
       ) : (
         <ul className="space-y-1">
           {lots.map((lot) => (
-            <li key={lot.lotId} className="flex items-center justify-between gap-3 text-sm">
-              <span className="font-medium">{lot.materialName}</span>
-              <span className="tabular-nums text-text-muted font-mono text-xs">
-                {lot.qtyOnHand.toLocaleString()} on hand
-                {lot.boxNumber ? ` · box ${lot.boxNumber}` : ""}
-                {lot.supplierLotNumber ? ` · lot ${lot.supplierLotNumber}` : ""}
+            <li
+              key={lot.lotId}
+              className="flex items-center justify-between gap-2 text-sm leading-snug"
+            >
+              <span className="font-medium truncate">{lot.materialName}</span>
+              <span className="tabular-nums text-text-muted text-xs shrink-0">
+                {lot.qtyOnHand.toLocaleString()}
+                {lot.supplierLotNumber ? ` · ${lot.supplierLotNumber}` : ""}
               </span>
             </li>
           ))}

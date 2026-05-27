@@ -38,3 +38,27 @@ describe("STATION-MOBILE-UX-1 · floor station page layout", () => {
     expect(footerIdx).toBeGreaterThan(toolsIdx);
   });
 });
+
+describe("STATION-MOBILE-UX-2 · mobile-first station page", () => {
+  it("does not show Online badge or Station label clutter", () => {
+    expect(pageSrc).not.toMatch(/>\s*Online\s*</);
+    expect(pageSrc).not.toMatch(/>\s*Station\s*</);
+  });
+
+  it("uses collapsed details for supervisor tools, not top nav", () => {
+    expect(pageSrc).toMatch(/<details className=.*Supervisor tools/s);
+    expect(pageSrc).not.toMatch(/<nav className="flex flex-wrap/);
+  });
+
+  it("uses compact station subtitle helper", () => {
+    expect(pageSrc).toMatch(/formatStationPageSubtitle/);
+  });
+
+  it("does not show internal bag id chip on active bag", () => {
+    expect(pageSrc).not.toMatch(/bag\.id\.slice\(0, 8\)/);
+  });
+
+  it("keeps ScanCardForm for backup dropdown path", () => {
+    expect(pageSrc).toMatch(/ScanCardForm/);
+  });
+});

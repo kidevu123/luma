@@ -4,6 +4,8 @@ import {
   FLOOR_ROLL_STATION_KINDS,
   FLOOR_VARIETY_PACK_STATION_KINDS,
   floorSupervisorToolsForStation,
+  formatStationPageSubtitle,
+  stationShowsLoadedMaterialsPanel,
 } from "./floor-station-mobile-nav";
 
 const TOKEN = "station-token-abc";
@@ -34,6 +36,38 @@ describe("STATION-MOBILE-UX-1 · floorSupervisorToolsForStation", () => {
     ).toEqual(["variety-pack"]);
   });
 
+  it("BOTTLE_HANDPACK gets variety pack only", () => {
+    expect(
+      floorSupervisorToolsForStation(TOKEN, "BOTTLE_HANDPACK").map((t) => t.id),
+    ).toEqual(["variety-pack"]);
+  });
+
+  it("BOTTLE_CAP_SEAL and BOTTLE_STICKER get no supervisor tools", () => {
+    expect(floorSupervisorToolsForStation(TOKEN, "BOTTLE_CAP_SEAL")).toEqual([]);
+    expect(floorSupervisorToolsForStation(TOKEN, "BOTTLE_STICKER")).toEqual([]);
+  });
+});
+
+describe("STATION-MOBILE-UX-2 · loaded materials panel visibility", () => {
+  it("HANDPACK_BLISTER shows loaded materials", () => {
+    expect(stationShowsLoadedMaterialsPanel("HANDPACK_BLISTER")).toBe(true);
+  });
+
+  it("PACKAGING does not show loaded materials", () => {
+    expect(stationShowsLoadedMaterialsPanel("PACKAGING")).toBe(false);
+  });
+
+  it("BLISTER does not show unit loaded-material panel", () => {
+    expect(stationShowsLoadedMaterialsPanel("BLISTER")).toBe(false);
+  });
+});
+
+describe("STATION-MOBILE-UX-2 · formatStationPageSubtitle", () => {
+  it("formats kind and machine", () => {
+    expect(formatStationPageSubtitle("BLISTER", "Blister Machine")).toBe(
+      "blister · Blister Machine",
+    );
+  });
 });
 
 describe("STATION-MOBILE-UX-1 · station kind sets", () => {
