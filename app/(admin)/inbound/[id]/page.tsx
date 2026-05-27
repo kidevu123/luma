@@ -133,6 +133,14 @@ export default async function ReceiveDetailPage({
               <CardTitle>Bags ({r.bags.length})</CardTitle>
             </CardHeader>
             <CardContent>
+              {r.bags.length > 0 && (
+                <p className="text-xs text-text-muted bg-surface-2 border border-border/60 rounded-md px-3 py-2 mb-4 leading-relaxed">
+                  After save, use <span className="font-medium text-text">Edit bag</span> on
+                  any row to correct weight (kg), QR scan token, receipt number, supplier lot,
+                  or notes. QR, receipt, and lot changes require an edit reason and are written
+                  to the audit log. Bags already in production can only have notes updated.
+                </p>
+              )}
               {r.bags.length === 0 ? (
                 <p className="text-sm text-text-muted">No bags on this receive.</p>
               ) : (
@@ -147,7 +155,7 @@ export default async function ReceiveDetailPage({
                       <TH className="text-right">Weight (kg)</TH>
                       <TH>Notes</TH>
                       <TH>Status</TH>
-                      <TH>{""}</TH>
+                      <TH className="text-right">Actions</TH>
                     </TR>
                   </THead>
                   <tbody>
@@ -179,12 +187,12 @@ export default async function ReceiveDetailPage({
                           <TD>
                             <BagStatus status={bag.status} />
                           </TD>
-                          <TD>
+                          <TD className="text-right">
                             <Link
                               href={`/inbound/${r.receive.id}/bag/${bag.id}/edit`}
-                              className="text-xs text-brand-700 hover:underline"
+                              className="text-xs font-medium text-brand-700 hover:underline"
                             >
-                              Edit
+                              Edit bag
                             </Link>
                           </TD>
                         </TR>
