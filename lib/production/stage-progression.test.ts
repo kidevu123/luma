@@ -182,6 +182,26 @@ describe("station pickup eligibility — same QR scanned downstream", () => {
     expect(STATION_PICKUP_FROM_STAGE.PACKAGING).toContain("SEALED");
   });
 
+  it("PACKAGING also picks up bags at BLISTERED (overlap scan — sealing still running)", () => {
+    expect(STATION_PICKUP_FROM_STAGE.PACKAGING).toContain("BLISTERED");
+  });
+
+  it("PACKAGING_COMPLETE still requires SEALED even though pickup allows BLISTERED", () => {
+    expect(
+      checkStageProgression({ eventType: "PACKAGING_COMPLETE", currentStage: "BLISTERED" }).allowed,
+    ).toBe(false);
+  });
+
+  it("PACKAGING_COMPLETE still allowed from SEALED (unchanged)", () => {
+    expect(
+      checkStageProgression({ eventType: "PACKAGING_COMPLETE", currentStage: "SEALED" }).allowed,
+    ).toBe(true);
+  });
+
+  it("PACKAGING cannot pick up at STARTED — too early, sealing has not started", () => {
+    expect(STATION_PICKUP_FROM_STAGE.PACKAGING).not.toContain("STARTED");
+  });
+
   it("BLISTER does NOT pick up assigned cards (first-station only)", () => {
     expect(STATION_PICKUP_FROM_STAGE.BLISTER).toBeUndefined();
   });
@@ -192,11 +212,14 @@ describe("station pickup eligibility — same QR scanned downstream", () => {
 });
 
 describe("multi-station travel — invariants the workflow guarantees", () => {
-  it("After BLISTER_COMPLETE the bag is releasable from BLISTER but NOT yet pickable by PACKAGING", () => {
-    // Invariant: blister → sealing → packaging. Packaging cannot
-    // skip sealing.
+  it("After BLISTER_COMPLETE the bag is releasable from BLISTER and PACKAGING may begin overlap scan", () => {
+    // PRODUCTION-OVERLAP-2: PACKAGING now accepts BLISTERED for overlap pickup.
+    // Packaging still cannot COMPLETE until SEALED — PACKAGING_COMPLETE guards that.
     expect(STATION_RELEASE_FROM_STAGE.BLISTER).toBe("BLISTERED");
-    expect(STATION_PICKUP_FROM_STAGE.PACKAGING).not.toContain("BLISTERED");
+    expect(STATION_PICKUP_FROM_STAGE.PACKAGING).toContain("BLISTERED");
+    expect(
+      checkStageProgression({ eventType: "PACKAGING_COMPLETE", currentStage: "BLISTERED" }).allowed,
+    ).toBe(false);
   });
 
   it("After SEALING_COMPLETE the bag is releasable from SEALING and pickable by PACKAGING", () => {

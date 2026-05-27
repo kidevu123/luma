@@ -43,7 +43,10 @@ export const STATION_PICKUP_FROM_STAGE: Readonly<Record<string, ReadonlyArray<st
   // is still running (overlap scan). SEALING_COMPLETE still requires
   // BLISTERED — the Complete button stays gated until upstream finishes.
   SEALING: ["STARTED", "BLISTERED"],
-  PACKAGING: ["SEALED"],
+  // PACKAGING accepts BLISTERED so operators can claim a bag while sealing
+  // is still running (overlap scan). PACKAGING_COMPLETE still requires
+  // SEALED — the Complete button stays gated until upstream finishes.
+  PACKAGING: ["BLISTERED", "SEALED"],
   BOTTLE_CAP_SEAL: ["BLISTERED"],
   BOTTLE_STICKER: ["SEALED"],
   // BLISTER + BOTTLE_HANDPACK + COMBINED accept the bag via first

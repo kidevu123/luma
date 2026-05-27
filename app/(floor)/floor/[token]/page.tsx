@@ -626,6 +626,17 @@ function BagAdvancedBanner({
       </div>
     );
   }
+  if (stationKind === "PACKAGING" && currentStage === "BLISTERED") {
+    return (
+      <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 space-y-0.5">
+        <p className="font-semibold">Waiting for sealing to complete.</p>
+        <p className="text-xs">
+          This bag is still being sealed. Packaging will unlock automatically
+          once the sealing station completes.
+        </p>
+      </div>
+    );
+  }
   const prereq = STATION_PREREQ_STAGE[stationKind];
   if (!prereq || currentStage === prereq) return null;
 

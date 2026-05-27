@@ -162,6 +162,38 @@ describe("PRODUCTION-OVERLAP-1 · SEALING waiting banner", () => {
   });
 });
 
+describe("PRODUCTION-OVERLAP-2 · PACKAGING waiting banner", () => {
+  it("BagAdvancedBanner guards on PACKAGING + BLISTERED before the generic prereq check", () => {
+    const guardIdx = pageSrc.indexOf(
+      'stationKind === "PACKAGING" && currentStage === "BLISTERED"',
+    );
+    const prereqIdx = pageSrc.indexOf("STATION_PREREQ_STAGE[stationKind]");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(prereqIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(prereqIdx);
+  });
+
+  it("waiting banner says Waiting for sealing to complete", () => {
+    expect(pageSrc).toMatch(/Waiting for sealing to complete/);
+  });
+
+  it("waiting banner uses amber border/background (not red or blue)", () => {
+    const waitIdx = pageSrc.indexOf("Waiting for sealing to complete");
+    const chunk = pageSrc.slice(waitIdx - 200, waitIdx + 50);
+    expect(chunk).toMatch(/amber/);
+    expect(chunk).not.toMatch(/red/);
+    expect(chunk).not.toMatch(/sky/);
+  });
+
+  it("waiting banner text mentions sealing station", () => {
+    expect(pageSrc).toMatch(/sealing station completes/);
+  });
+
+  it("STATION_PREREQ_STAGE still maps PACKAGING to SEALED (completion gate unchanged)", () => {
+    expect(pageSrc).toMatch(/PACKAGING:\s*"SEALED"/);
+  });
+});
+
 describe('STATION-ACTIVE-UX-1 · Op label clarity', () => {
   const sab = require('fs').readFileSync(
     require('path').join(__dirname, 'stage-action-buttons.tsx'),

@@ -102,7 +102,8 @@ describe("FLOW-OVERLAP-2A · packaging overlap readiness", () => {
       }),
     );
     expect(r.packagingLane.canBeginOverlapWork).toBe(false);
-    expect(r.packagingLane.canBeginUnderCurrentSerialRules).toBe(false);
+    // PRODUCTION-OVERLAP-2: PACKAGING now accepts BLISTERED in STATION_PICKUP_FROM_STAGE
+    expect(r.packagingLane.canBeginUnderCurrentSerialRules).toBe(true);
   });
 
   it("sealing in progress (partial sealed signal) at BLISTERED: packaging may begin only with sealed output", () => {
@@ -120,7 +121,8 @@ describe("FLOW-OVERLAP-2A · packaging overlap readiness", () => {
     );
     expect(withPartial.packagingLane.canBeginOverlapWork).toBe(true);
     expect(withPartial.packagingLane.canCompleteStation).toBe(false);
-    expect(withPartial.packagingLane.canBeginUnderCurrentSerialRules).toBe(false);
+    // PRODUCTION-OVERLAP-2: PACKAGING accepts BLISTERED in serial rules now
+    expect(withPartial.packagingLane.canBeginUnderCurrentSerialRules).toBe(true);
   });
 
   it("SEALED bag: packaging may begin under current serial semantics", () => {

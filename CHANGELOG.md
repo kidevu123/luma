@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.16] — 2026-05-27
+
+### Changed (PRODUCTION-OVERLAP-2)
+- **PACKAGING overlap pickup:** `STATION_PICKUP_FROM_STAGE.PACKAGING` expanded from `["SEALED"]` to `["BLISTERED", "SEALED"]`. A PACKAGING station operator may now scan and claim a bag that sealing is actively working on (bag at BLISTERED stage). `PACKAGING_COMPLETE` remains gated on `SEALED` — the Complete button stays locked until sealing finishes.
+- **Waiting-for-sealing banner:** `BagAdvancedBanner` in the floor page shows an amber "Waiting for sealing to complete" card when a PACKAGING station has claimed a bag still at BLISTERED, matching the SEALING waiting banner added in PRODUCTION-OVERLAP-1.
+
+### Tests added (PRODUCTION-OVERLAP-2)
+- `lib/production/stage-progression.test.ts` — PACKAGING picks up at BLISTERED; PACKAGING_COMPLETE still rejects BLISTERED; PACKAGING_COMPLETE allows SEALED; PACKAGING cannot pick up STARTED; updated "multi-station travel" invariant to reflect overlap.
+- `app/(floor)/floor/[token]/page.test.ts` — PACKAGING banner guard ordering, text, amber styling, sealing mention, PACKAGING prereq stage unchanged.
+- `lib/production/flow-overlap-readiness.test.ts` — updated `canBeginUnderCurrentSerialRules` assertions to reflect PACKAGING now accepting BLISTERED in serial rules.
+
 ## [0.4.15] — 2026-05-27
 
 ### Changed (STATION-NAV-CLEANUP-3)
