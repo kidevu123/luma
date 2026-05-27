@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.1] — 2026-05-27
+
+### Added
+- **`npm run audit:product-zoho-readiness` (PRODUCT-MAP-3):** Runs the read-only `scripts/audit-product-zoho-readiness.ts` fleet audit. Requires `DATABASE_URL`.
+
+### Improved
+- **Zoho readiness banner copy (PRODUCT-MAP-3):** Product detail banner now uses compact labels (`Zoho ready`, `Zoho mapping incomplete`, `Zoho IDs missing`, `Inactive product`) via `zohoReadinessShortLabel`. Long-form labels remain in `zohoReadinessLabel` for tooling.
+- **Audit script output (PRODUCT-MAP-3):** Lists product name, SKU, kind, and ID on every row; prints ready/inactive buckets; section headers match banner vocabulary.
+
+### Tests added (PRODUCT-MAP-3)
+- Long unit ID (>60 chars) in `zohoItemIdUnit` → READY (assembly columns accept 100 chars; legacy `zoho_item_id` back-sync limit does not affect readiness).
+- `zohoReadinessShortLabel` compact copy (4 assertions).
+
+No schema changes. No Zoho outbound write behavior changes. No floor/station/camera/QR scan changes.
+
 ## [0.3.0] — 2026-05-27
 
 ### Changed

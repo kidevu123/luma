@@ -56,6 +56,20 @@ export function zohoReadinessLabel(level: ZohoReadinessLevel): string {
   }
 }
 
+/** Compact label for product-detail banner chips. */
+export function zohoReadinessShortLabel(level: ZohoReadinessLevel): string {
+  switch (level) {
+    case "ready":
+      return "Zoho ready";
+    case "partial":
+      return "Zoho mapping incomplete";
+    case "missing":
+      return "Zoho IDs missing";
+    case "inactive":
+      return "Inactive product";
+  }
+}
+
 export function zohoReadinessReasonLabel(reason: ZohoReadinessReason): string {
   switch (reason) {
     case "no_unit_id":

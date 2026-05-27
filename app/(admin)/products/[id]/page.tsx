@@ -14,7 +14,7 @@ import { productPackagingSpecs } from "@/lib/db/schema";
 import { floorReadinessLevel, floorReadinessLabel } from "@/lib/production/product-floor-readiness";
 import {
   classifyProductZohoReadiness,
-  zohoReadinessLabel,
+  zohoReadinessShortLabel,
   zohoReadinessReasonLabel,
 } from "@/lib/zoho/product-zoho-readiness";
 
@@ -223,7 +223,7 @@ function ZohoReadinessCard({
       {styles.icon}
       <div className="space-y-1 min-w-0">
         <p className={`text-sm font-semibold ${styles.title}`}>
-          Zoho: {zohoReadinessLabel(result.level)}
+          {zohoReadinessShortLabel(result.level)}
         </p>
         {result.reasons.length > 0 && (
           <ul className="space-y-0.5">
