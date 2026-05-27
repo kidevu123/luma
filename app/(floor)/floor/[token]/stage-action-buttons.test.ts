@@ -85,3 +85,33 @@ describe("STATION-PAUSE-2 · pause reasons via helper", () => {
     expect(pauseBlock).not.toMatch(/pvc_swap.*PVC roll swap/);
   });
 });
+
+describe("PRODUCTION-OVERLAP-3 · completion gate at overlap stages", () => {
+  it("EVENT_STAGE_PREREQ.SEALING_COMPLETE requires BLISTERED — button filter will hide it at STARTED", () => {
+    // stages = allStages.filter(s => prereq.includes(currentStage))
+    // If currentStage=STARTED and prereq=["BLISTERED"], STARTED is not included → button hidden.
+    expect(src).toMatch(/EVENT_STAGE_PREREQ/);
+    expect(src).toMatch(/prereq.*includes.*currentStage/s);
+  });
+
+  it("packagingReady requires currentStage === SEALED — BLISTERED is not ready", () => {
+    // const packagingReady = !currentStage || currentStage === "SEALED"
+    // BLISTERED ≠ SEALED → packagingReady = false → packaging form hidden.
+    expect(src).toMatch(/packagingReady.*currentStage.*SEALED/s);
+    expect(src).not.toMatch(/packagingReady.*BLISTERED/);
+  });
+
+  it("SEALING stage list filters on EVENT_STAGE_PREREQ — stages const derived from allStages.filter", () => {
+    expect(src).toMatch(/allStages\.filter/);
+    expect(src).toMatch(/prereq\.includes/);
+  });
+
+  it("PACKAGING completion path is gated by packagingReady, not by generic stages filter", () => {
+    // PACKAGING overrides STAGE_BY_KIND with [] — it has no generic stage buttons.
+    // The rich packaging form renders only when packagingReady is true.
+    const packagingKindIdx = src.indexOf('PACKAGING: []');
+    expect(packagingKindIdx).toBeGreaterThan(-1);
+    const packReadyIdx = src.indexOf('packagingReady');
+    expect(packReadyIdx).toBeGreaterThan(-1);
+  });
+});

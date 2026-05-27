@@ -341,7 +341,7 @@ export default async function FloorStationPage({
             <p className="text-sm text-text-muted mb-2">
               {canStartFreshBag
                 ? "Scan a bag QR to start, or pick a backup below."
-                : "Scan a bag QR released from the prior stage."}
+                : "Scan a QR card or pick from the list below."}
             </p>
             <ScanCardForm
               token={token}

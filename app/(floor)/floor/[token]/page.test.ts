@@ -63,6 +63,25 @@ describe("STATION-MOBILE-UX-2 · mobile-first station page", () => {
   });
 });
 
+describe("PRODUCTION-OVERLAP-3 · idle-state copy and pickup labels", () => {
+  it("idle copy for pickup-only stations does not say 'released from the prior stage'", () => {
+    expect(pageSrc).not.toMatch(/Scan a bag QR released from the prior stage/);
+  });
+
+  it("idle copy for pickup-only stations says 'Scan a QR card or pick from the list below'", () => {
+    expect(pageSrc).toMatch(/Scan a QR card or pick from the list below/);
+  });
+
+  it("pickup dropdown label does not say 'released bag' (overlap pickup ≠ released bag)", () => {
+    const formSrc = require('fs').readFileSync(
+      require('path').join(__dirname, 'scan-card-form.tsx'),
+      'utf8'
+    );
+    expect(formSrc).not.toMatch(/Pick up released bag/);
+    expect(formSrc).toMatch(/Pick up bag \(same QR continues\)/);
+  });
+});
+
 describe('STATION-ACTIVE-UX-1 · active bag Eastern time', () => {
   it('imports formatFloorTimeEastern from floor-time helper', () => {
     expect(pageSrc).toMatch(/formatFloorTimeEastern/);

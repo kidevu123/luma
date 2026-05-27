@@ -376,7 +376,7 @@ export function ScanCardForm({
                 Select a received bag QR…
               </option>
               {hasPickups && (
-                <optgroup label="Pick up released bag (same QR continues)">
+                <optgroup label="Pick up bag (same QR continues)">
                   {eligiblePickups.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.label}

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.17] — 2026-05-27
+
+### Fixed (PRODUCTION-OVERLAP-3)
+- **Idle copy for pickup-only stations:** Changed "Scan a bag QR released from the prior stage" to "Scan a QR card or pick from the list below." — SEALING and PACKAGING can now pick up bags that are still active upstream (overlap), so requiring a release is no longer accurate.
+- **Pickup dropdown label:** Changed `optgroup` label from "Pick up released bag (same QR continues)" to "Pick up bag (same QR continues)" in `scan-card-form.tsx` — overlap pickup is not a released-bag operation.
+
+### Tests added (PRODUCTION-OVERLAP-3)
+- `stage-action-buttons.test.ts` — completion gate assertions: SEALING_COMPLETE button hidden at STARTED stage (via `EVENT_STAGE_PREREQ` filter); PACKAGING form gated by `packagingReady = currentStage === "SEALED"` (BLISTERED is not ready); PACKAGING stage list uses `[]` override.
+- `page.test.ts` — idle copy no longer contains "released from the prior stage"; new text confirmed; scan-card-form optgroup no longer says "released bag".
+
 ## [0.4.16] — 2026-05-27
 
 ### Changed (PRODUCTION-OVERLAP-2)
