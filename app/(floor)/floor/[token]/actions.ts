@@ -1042,7 +1042,7 @@ export async function packagingCompleteAction(
 export async function lookupCardByTokenAction(
   formData: FormData,
 ): Promise<
-  | { ok: true; cardId: string; isIntakeReserved: boolean; tabletTypeId: string | null }
+  | { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean; tabletTypeId: string | null }
   | { error: string }
 > {
   const scanToken = formData.get("scanToken");
@@ -1054,6 +1054,7 @@ export async function lookupCardByTokenAction(
   const [card] = await db
     .select({
       id: qrCards.id,
+      label: qrCards.label,
       cardType: qrCards.cardType,
       status: qrCards.status,
       assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
@@ -1077,6 +1078,7 @@ export async function lookupCardByTokenAction(
   return {
     ok: true,
     cardId: card.id,
+    cardLabel: card.label,
     isIntakeReserved: classification.isIntakeReserved,
     tabletTypeId: card.tabletTypeId ?? null,
   };

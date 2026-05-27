@@ -83,6 +83,13 @@ export function ScanCardForm({
   // Cleared when the user switches to the dropdown.
   const [resolvedCardId, setResolvedCardId] = React.useState<string | null>(null);
 
+  // Display context for the last successfully resolved scan — shown as a
+  // confirmation chip. Cleared when the operator types in the scan input.
+  const [scannedContext, setScannedContext] = React.useState<{
+    label: string;
+    detail: string;
+  } | null>(null);
+
   const receivedSet = React.useMemo(
     () => new Set(receivedCards.map((c) => c.id)),
     [receivedCards],
@@ -145,10 +152,12 @@ export function ScanCardForm({
     [token, stationId, productId, router],
   );
 
-  // Shared handler used by both typed scan and camera scan paths.
+  // Primary scan resolution path — shared by camera and typed scan.
+  // Dropdown is fallback only; this is the intended production floor path.
   const handleResolvedToken = React.useCallback(
     async (raw: string) => {
       setScanError(null);
+      setScannedContext(null);
       setScanPending(true);
       try {
         const fd = new FormData();
@@ -158,8 +167,17 @@ export function ScanCardForm({
           setScanError(result.error);
           return;
         }
-        setScanInput("");
         const cardId = result.cardId;
+
+        // Populate scan input with the human label and show a confirmation chip.
+        const matchedCard = receivedCards.find((c) => c.id === cardId);
+        setScanInput(result.cardLabel);
+        setScannedContext({
+          label: result.cardLabel,
+          detail: matchedCard
+            ? formatEligibleCardLabel(matchedCard)
+            : result.cardLabel,
+        });
 
         // First-op station with intake-reserved bag: resolve product then submit.
         if (requireProductForFreshBag && result.isIntakeReserved) {
@@ -187,7 +205,7 @@ export function ScanCardForm({
         setScanPending(false);
       }
     },
-    [requireProductForFreshBag, submitWithCardId, allowedProducts],
+    [requireProductForFreshBag, submitWithCardId, allowedProducts, receivedCards],
   );
 
   const handleScanKeyDown = async (
@@ -195,6 +213,17 @@ export function ScanCardForm({
   ) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
+    // Card already resolved by scan — Enter submits rather than re-scanning the label.
+    if (resolvedCardId && scannedContext) {
+      if (requireProductForFreshBag && filteredProducts.length > 0 && !productId) {
+        setError(
+          "Pick a product before starting. The first production station must record what's being made.",
+        );
+        return;
+      }
+      await submitWithCardId(resolvedCardId);
+      return;
+    }
     const raw = scanInput.trim();
     if (!raw || scanPending) return;
     await handleResolvedToken(raw);
@@ -256,6 +285,13 @@ export function ScanCardForm({
               onChange={(e) => {
                 setScanInput(e.target.value);
                 setScanError(null);
+                // Operator typing invalidates the resolved card — clear scan state.
+                if (scannedContext !== null) {
+                  setScannedContext(null);
+                  setResolvedCardId(null);
+                  setSelectedCardId("");
+                  setScannedTabletTypeId(null);
+                }
               }}
               onKeyDown={handleScanKeyDown}
               placeholder="Scan bag QR…"
@@ -285,13 +321,22 @@ export function ScanCardForm({
           </p>
         )}
 
+        {scannedContext && !scanError && (
+          <div className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+            <p className="text-xs text-emerald-800 leading-snug">
+              <span className="font-semibold">Scanned: </span>
+              {scannedContext.detail}
+            </p>
+          </div>
+        )}
+
         {!canStartFreshBag && !hasPickups && (
           <p className="text-xs text-text-muted rounded-lg border border-border/70 bg-surface px-3 py-2">
             This station only accepts bags already routed here. Scan the bag QR when it arrives at this station.
           </p>
         )}
 
-        {/* Dropdown backup — only when there are eligible options */}
+        {/* Dropdown — backup only. Camera/typed physical QR scan is the primary floor path. */}
         {hasDropdownOptions && (
           <>
             <p className="text-[11px] text-text-muted">
