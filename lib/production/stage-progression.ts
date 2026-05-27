@@ -39,7 +39,10 @@ export const STATION_RELEASE_FROM_STAGE: Readonly<Record<string, string>> = {
 // (already attached to a workflow_bag) and no other station can
 // currently hold the bag.
 export const STATION_PICKUP_FROM_STAGE: Readonly<Record<string, ReadonlyArray<string>>> = {
-  SEALING: ["BLISTERED"],
+  // SEALING accepts STARTED so operators can claim a bag while blister
+  // is still running (overlap scan). SEALING_COMPLETE still requires
+  // BLISTERED — the Complete button stays gated until upstream finishes.
+  SEALING: ["STARTED", "BLISTERED"],
   PACKAGING: ["SEALED"],
   BOTTLE_CAP_SEAL: ["BLISTERED"],
   BOTTLE_STICKER: ["SEALED"],

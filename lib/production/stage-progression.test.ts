@@ -162,6 +162,22 @@ describe("station pickup eligibility — same QR scanned downstream", () => {
     expect(STATION_PICKUP_FROM_STAGE.SEALING).toContain("BLISTERED");
   });
 
+  it("SEALING also picks up bags at STARTED (overlap scan — blister still running)", () => {
+    expect(STATION_PICKUP_FROM_STAGE.SEALING).toContain("STARTED");
+  });
+
+  it("SEALING_COMPLETE still requires BLISTERED even though pickup allows STARTED", () => {
+    expect(
+      checkStageProgression({ eventType: "SEALING_COMPLETE", currentStage: "STARTED" }).allowed,
+    ).toBe(false);
+  });
+
+  it("SEALING_COMPLETE still allowed from BLISTERED (unchanged)", () => {
+    expect(
+      checkStageProgression({ eventType: "SEALING_COMPLETE", currentStage: "BLISTERED" }).allowed,
+    ).toBe(true);
+  });
+
   it("PACKAGING picks up bags at SEALED", () => {
     expect(STATION_PICKUP_FROM_STAGE.PACKAGING).toContain("SEALED");
   });

@@ -42,12 +42,13 @@ describe("FLOW-OVERLAP-2A · deriveLaneWipFromEvents", () => {
 });
 
 describe("FLOW-OVERLAP-2A · sealing overlap readiness", () => {
-  it("STARTED with no blister output: sealing cannot begin (proposed or current)", () => {
+  it("STARTED with no blister output: overlap cannot begin (no WIP); pickup now allowed under updated serial rules", () => {
     const r = evaluateFlowOverlapReadiness(
       snap({ globalStage: "STARTED", laneWip: { blisterOutputUnits: 0, sealedOutputUnits: 0, packagedOutputUnits: 0 } }),
     );
     expect(r.sealingLane.canBeginOverlapWork).toBe(false);
-    expect(r.sealingLane.canBeginUnderCurrentSerialRules).toBe(false);
+    // PRODUCTION-OVERLAP-1: SEALING now accepts STARTED in STATION_PICKUP_FROM_STAGE
+    expect(r.sealingLane.canBeginUnderCurrentSerialRules).toBe(true);
     expect(r.dataGaps.some((g) => g.includes("STARTED"))).toBe(true);
   });
 
@@ -60,7 +61,8 @@ describe("FLOW-OVERLAP-2A · sealing overlap readiness", () => {
       }),
     );
     expect(r.sealingLane.canBeginOverlapWork).toBe(true);
-    expect(r.sealingLane.canBeginUnderCurrentSerialRules).toBe(false);
+    // PRODUCTION-OVERLAP-1: pickup now allowed from STARTED
+    expect(r.sealingLane.canBeginUnderCurrentSerialRules).toBe(true);
     expect(r.sealingLane.canCompleteStation).toBe(false);
     expect(r.sealingLane.canCompleteUnderCurrentSerialRules).toBe(false);
     expect(r.bag.globalStage).toBe("STARTED");

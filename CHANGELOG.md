@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.12] — 2026-05-27
+
+### Changed (PRODUCTION-OVERLAP-1)
+- **Allow SEALING to scan bags while still STARTED (overlap pickup):** `STATION_PICKUP_FROM_STAGE.SEALING` now accepts `["STARTED", "BLISTERED"]`. Operators can scan the same bag card at the sealing station while blister/hand-pack is still running. SEALING_COMPLETE still requires the bag to be at BLISTERED — the Complete button stays locked until the upstream station fires. An amber waiting banner ("Waiting for blister to complete") appears on the sealing station page while the bag is STARTED, so the operator knows the scan succeeded and sealing is pending upstream.
+
+### Tests added (PRODUCTION-OVERLAP-1)
+- `lib/production/stage-progression.test.ts` — 3 new tests: SEALING pickup accepts STARTED, SEALING pickup still accepts BLISTERED, SEALING_COMPLETE still rejects STARTED.
+- `app/(floor)/floor/[token]/page.test.ts` — 6 new tests: guard precedes prereq check, banner text, amber styling, stationKind wiring, blister/hand-pack mention, completion gate unchanged.
+- `lib/production/flow-overlap-readiness.test.ts` — 2 existing assertions updated to reflect updated serial rules (STARTED now pickup-eligible).
+
 ## [0.4.11] — 2026-05-27
 
 ### Added (FLOW-OVERLAP-2A)

@@ -126,6 +126,42 @@ describe('STATION-ACTIVE-UX-1 · elapsed timer component', () => {
   });
 });
 
+describe("PRODUCTION-OVERLAP-1 · SEALING waiting banner", () => {
+  it("BagAdvancedBanner guards on SEALING + STARTED before the generic prereq check", () => {
+    const guardIdx = pageSrc.indexOf(
+      'stationKind === "SEALING" && currentStage === "STARTED"',
+    );
+    const prereqIdx = pageSrc.indexOf("STATION_PREREQ_STAGE[stationKind]");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(prereqIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(prereqIdx);
+  });
+
+  it("waiting banner says Waiting for blister to complete", () => {
+    expect(pageSrc).toMatch(/Waiting for blister to complete/);
+  });
+
+  it("waiting banner uses amber border/background (not red or blue)", () => {
+    const waitIdx = pageSrc.indexOf("Waiting for blister to complete");
+    const chunk = pageSrc.slice(waitIdx - 200, waitIdx + 50);
+    expect(chunk).toMatch(/amber/);
+    expect(chunk).not.toMatch(/red/);
+    expect(chunk).not.toMatch(/sky/);
+  });
+
+  it("BagAdvancedBanner is rendered with stationKind from station data", () => {
+    expect(pageSrc).toMatch(/stationKind=\{station\.station\.kind\}/);
+  });
+
+  it("waiting banner text mentions blister and hand-pack", () => {
+    expect(pageSrc).toMatch(/blistered or hand-packed/);
+  });
+
+  it("STATION_PREREQ_STAGE still maps SEALING to BLISTERED (completion gate unchanged)", () => {
+    expect(pageSrc).toMatch(/SEALING:\s*"BLISTERED"/);
+  });
+});
+
 describe('STATION-ACTIVE-UX-1 · Op label clarity', () => {
   const sab = require('fs').readFileSync(
     require('path').join(__dirname, 'stage-action-buttons.tsx'),
