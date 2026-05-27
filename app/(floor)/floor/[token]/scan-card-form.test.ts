@@ -276,8 +276,10 @@ describe("FLOOR-START-5 · scan-card-form.tsx structural invariants", () => {
     expect(formSrc).toMatch(/explicitProductId\s*\?\?\s*productId/);
   });
 
-  it("handleResolvedToken auto-submits with explicit product ID when narrowed list has one entry", () => {
-    expect(formSrc).toMatch(/await submitWithCardId\(cardId,\s*narrowed\[0\]\.id\)/);
+  it("handleResolvedToken auto-submits via decideScanStartAfterLookup auto-start branch", () => {
+    expect(formSrc).toMatch(/decideScanStartAfterLookup/);
+    expect(formSrc).toMatch(/decision\.kind === "auto-start"/);
+    expect(formSrc).toMatch(/submitWithCardId\(cardId,\s*decision\.productId/);
   });
 
   it("setResolvedCardId(null) is called in dropdown onChange to reset scan path", () => {
@@ -286,7 +288,7 @@ describe("FLOOR-START-5 · scan-card-form.tsx structural invariants", () => {
 
   it("submit button onClick intercepts when resolvedCardId is set", () => {
     expect(formSrc).toMatch(/if\s*\(\s*resolvedCardId\s*\)/);
-    expect(formSrc).toMatch(/submitWithCardId\(resolvedCardId\)/);
+    expect(formSrc).toMatch(/submitWithCardId\(\s*resolvedCardId/);
   });
 
   it("zero-products error uses hasCardSelected (fires for scan-resolved cards too)", () => {
@@ -360,11 +362,67 @@ describe("FLOOR-START-5 · auto-submit on single compatible product", () => {
     expect(narrowed.length === 0).toBe(true);
   });
 
-  it("auto-submit uses narrowed[0].id directly (not productId state) to avoid stale closure", () => {
-    // Verified structurally: submitWithCardId(cardId, narrowed[0].id) passes
-    // the product ID as an explicit argument, not relying on the productId state
-    // variable which would be stale in the same render cycle.
-    expect(formSrc).toMatch(/submitWithCardId\(cardId,\s*narrowed\[0\]\.id\)/);
+  it("auto-submit passes decision.productId explicitly (not productId state)", () => {
+    expect(formSrc).toMatch(/submitWithCardId\(cardId,\s*decision\.productId/);
+  });
+});
+
+// ── STATION-3B · scan-to-start UX hardening ─────────────────────────────────
+
+describe("STATION-3B · scan-card-form.tsx structural guards", () => {
+  it("imports decideScanStartAfterLookup from floor-scan-start-flow", () => {
+    expect(formSrc).toMatch(/decideScanStartAfterLookup/);
+    expect(formSrc).toMatch(/floor-scan-start-flow/);
+  });
+
+  it("pickup-auto path auto-submits without extra click", () => {
+    expect(formSrc).toMatch(/decision\.kind === "pickup-auto"|pickup-auto/);
+    expect(formSrc).toMatch(/submitWithCardId\(cardId,\s*undefined,\s*"pickup"\)/);
+  });
+
+  it("guards duplicate scan with shouldIgnoreDuplicateScan", () => {
+    expect(formSrc).toMatch(/shouldIgnoreDuplicateScan/);
+    expect(formSrc).toMatch(/scanInFlightTokenRef/);
+    expect(formSrc).toMatch(/submitInFlightRef/);
+  });
+
+  it("does not clear scannedContext before lookup completes", () => {
+    const fnStart = formSrc.indexOf("const handleResolvedToken");
+    const lookupIdx = formSrc.indexOf("await lookupCardByTokenAction(fd)", fnStart);
+    const clearNullIdx = formSrc.indexOf("setScannedContext(null)", fnStart);
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(lookupIdx).toBeGreaterThan(fnStart);
+    // STATION-3B: no setScannedContext(null) at start of handleResolvedToken
+    if (clearNullIdx > fnStart && clearNullIdx < lookupIdx) {
+      throw new Error("scannedContext cleared before lookup");
+    }
+  });
+
+  it("shows Looking up bag status while scanPending", () => {
+    expect(formSrc).toMatch(/Looking up bag…/);
+    expect(formSrc).toMatch(/scanPending && !pending/);
+  });
+
+  it("shows Starting bag and Picking up bag labels during submit", () => {
+    expect(formSrc).toMatch(/Starting bag…/);
+    expect(formSrc).toMatch(/Picking up bag…/);
+  });
+
+  it("surfaces productConfigError from scan decision", () => {
+    expect(formSrc).toMatch(/productConfigError/);
+    expect(formSrc).toMatch(/decision\.kind === "config-error"/);
+  });
+
+  it("lookup errors include scanned token context", () => {
+    expect(formSrc).toMatch(/scanned:/i);
+  });
+
+  it("dropdown select is not required when scan resolved cardId", () => {
+    expect(formSrc).toMatch(/required=\{!resolvedCardId\}/);
+  });
+
+  it("scan headline makes scan primary", () => {
+    expect(formSrc).toMatch(/Scan the physical bag QR/);
   });
 });
 
@@ -439,13 +497,8 @@ describe("FLOOR-SCAN-1 · typed scan flow structural guards", () => {
     expect(formSrc).toMatch(/handleResolvedToken/);
   });
 
-  it("handleResolvedToken narrows products by tabletTypeId before deciding auto-submit", () => {
-    // The narrowed computation inside handleResolvedToken uses allowedProducts
-    // (server-rendered prop) not the filteredProducts state variable, so the
-    // auto-submit trigger fires in the same async frame without waiting for
-    // a React re-render.
-    expect(formSrc).toMatch(/allowedProducts\.filter/);
-    expect(formSrc).toMatch(/allowedTabletTypeIds\.includes\(ttId\)/);
+  it("handleResolvedToken uses decideScanStartAfterLookup for product/start decision", () => {
+    expect(formSrc).toMatch(/decideScanStartAfterLookup/);
   });
 
   it("card not in server-rendered dropdown can still reach product picker (resolvedCardId path)", () => {
@@ -458,17 +511,14 @@ describe("FLOOR-SCAN-1 · typed scan flow structural guards", () => {
   });
 
   it("zero compatible products shows config error not silent no-op", () => {
-    // The JSX condition: requireProductForFreshBag && hasCardSelected && filteredProducts.length === 0
-    expect(formSrc).toMatch(/No active products are configured for this tablet type/);
-    expect(formSrc).toMatch(/No active products configured for this station kind/);
+    expect(formSrc).toMatch(/productConfigError/);
+    expect(formSrc).toMatch(/decision\.kind === "config-error"/);
+    expect(formSrc).toMatch(/productConfigErrorMessage/);
   });
 
-  it("product narrowing: unmapped products (empty allowedTabletTypeIds) are excluded when tablet type is known", () => {
-    // The filter uses .includes() only — no length === 0 bypass.
-    // This matches the intentional policy: empty = incomplete, not "accepts all".
-    const filterBlock = formSrc.match(/allowedProducts\.filter[\s\S]{0,200}allowedTabletTypeIds\.includes/)?.[0] ?? "";
-    expect(filterBlock).toBeTruthy();
-    expect(filterBlock).not.toMatch(/allowedTabletTypeIds\.length\s*===\s*0/);
+  it("product narrowing: unmapped products excluded via narrowProductsByTablet", () => {
+    expect(formSrc).toMatch(/narrowProductsByTablet/);
+    expect(formSrc).not.toMatch(/allowedTabletTypeIds\.length\s*===\s*0/);
   });
 });
 
@@ -583,15 +633,12 @@ describe("FLOOR-SCAN-UX-2 · scan confirmation state", () => {
     expect(formSrc).toMatch(/detail\s*:/);
   });
 
-  it("handleResolvedToken sets scanInput to raw.trim() immediately — before lookup, so operator sees something", () => {
-    // FLOOR-SCAN-LIVE-1 fix: input was blank during lookup. Now the raw token is
-    // shown immediately (before the server round-trip), then overwritten with the
-    // human-readable label on success. Use await-call position not import line.
-    const rawTrimIdx = formSrc.indexOf("setScanInput(raw.trim())");
-    const lookupCallIdx = formSrc.indexOf("await lookupCardByTokenAction(fd)");
-    expect(rawTrimIdx).toBeGreaterThan(-1);
-    expect(lookupCallIdx).toBeGreaterThan(-1);
-    expect(rawTrimIdx).toBeLessThan(lookupCallIdx);
+  it("handleResolvedToken sets scanInput to trimmed token immediately — before lookup", () => {
+    const fnStart = formSrc.indexOf("const handleResolvedToken");
+    const setInputIdx = formSrc.indexOf("setScanInput(trimmed)", fnStart);
+    const lookupCallIdx = formSrc.indexOf("await lookupCardByTokenAction(fd)", fnStart);
+    expect(setInputIdx).toBeGreaterThan(fnStart);
+    expect(lookupCallIdx).toBeGreaterThan(setInputIdx);
   });
 
   it("handleResolvedToken overwrites raw token with result.cardLabel on successful lookup", () => {
@@ -626,12 +673,12 @@ describe("FLOOR-SCAN-UX-2 · scan confirmation state", () => {
     expect(formSrc).toMatch(/floor-scan.*camera decoded|camera decoded.*floor-scan/);
   });
 
-  it("handleResolvedToken clears scannedContext before setting it — null call precedes object call", () => {
-    const nullIdx = formSrc.indexOf("setScannedContext(null)");
-    const setIdx = formSrc.indexOf("setScannedContext({");
-    expect(nullIdx).toBeGreaterThan(-1);
-    expect(setIdx).toBeGreaterThan(-1);
-    expect(nullIdx).toBeLessThan(setIdx);
+  it("handleResolvedToken sets scannedContext with raw token before lookup", () => {
+    const fnStart = formSrc.indexOf("const handleResolvedToken");
+    const rawSetIdx = formSrc.indexOf("rawToken: trimmed", fnStart);
+    const lookupIdx = formSrc.indexOf("await lookupCardByTokenAction(fd)", fnStart);
+    expect(rawSetIdx).toBeGreaterThan(fnStart);
+    expect(lookupIdx).toBeGreaterThan(rawSetIdx);
   });
 
   it("onChange clears resolvedCardId and scannedContext when operator types", () => {
@@ -645,7 +692,7 @@ describe("FLOOR-SCAN-UX-2 · scan confirmation state", () => {
   });
 
   it("dropdown section comment identifies it as backup-only", () => {
-    expect(formSrc).toMatch(/Dropdown.*backup only|backup only.*Dropdown/i);
+    expect(formSrc).toMatch(/dropdown only as a backup|Use the dropdown only/i);
   });
 });
 

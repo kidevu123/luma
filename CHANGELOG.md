@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.6] — 2026-05-27
+
+### Improved
+- **Floor scan-to-start UX (STATION-3B):** Scanning a physical bag QR is now the clear primary path on the station page. Camera and typed scans share one resolver; duplicate scans/submits are ignored while a lookup or start is in flight. First-op stations with exactly one compatible product auto-start without an extra **Start bag** tap. Downstream stations auto-pick up eligible bags after scan. Multi-product scans keep the bag label visible and show a narrowed product picker (no bag dropdown required). Zero-product mapping shows an explicit config error. Lookup/submit failures keep the scanned token visible for debugging. Loading states: **Looking up bag…**, **Starting bag…**, **Picking up bag…**.
+
+### Added
+- `lib/production/floor-scan-start-flow.ts` — pure scan-start decision helper (narrow products, auto-start vs picker vs config error vs pickup).
+
+### Tests added (STATION-3B)
+- `lib/production/floor-scan-start-flow.test.ts` — auto-start, multi-product, config error, pickup, duplicate-scan guard.
+- `scan-card-form.test.ts` — STATION-3B structural guards for dedupe, loading copy, pickup auto-submit, dropdown backup.
+
 ## [0.3.5] — 2026-05-27
 
 ### Fixed

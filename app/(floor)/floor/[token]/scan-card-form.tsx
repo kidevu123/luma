@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { ScanLine, Camera } from "lucide-react";
 import { scanCardAction, lookupCardByTokenAction } from "./actions";
 import { CameraScanner } from "./camera-scanner";
+import {
+  decideScanStartAfterLookup,
+  narrowProductsByTablet,
+  productConfigErrorMessage,
+  shouldIgnoreDuplicateScan,
+} from "@/lib/production/floor-scan-start-flow";
 
 export type EligibleCard = {
   id: string;
@@ -65,74 +71,67 @@ export function ScanCardForm({
   const [selectedCardId, setSelectedCardId] = React.useState("");
   const [productId, setProductId] = React.useState("");
 
-  // Text scanner state
   const [scanInput, setScanInput] = React.useState("");
   const [scanError, setScanError] = React.useState<string | null>(null);
   const [scanPending, setScanPending] = React.useState(false);
+  const [productConfigError, setProductConfigError] = React.useState<string | null>(
+    null,
+  );
 
-  // Camera state
   const [showCamera, setShowCamera] = React.useState(false);
-
-  // Tablet type of the last scanned bag, from lookupCardByTokenAction.
-  // Used as fallback when the card is not yet in the receivedCards list.
-  const [scannedTabletTypeId, setScannedTabletTypeId] = React.useState<string | null>(null);
-
-  // Card ID resolved by typed/camera scan at a first-op station (fresh bag
-  // path). Lets the product picker and submit button work for cards that
-  // aren't in the server-rendered receivedCards dropdown.
-  // Cleared when the user switches to the dropdown.
+  const [scannedTabletTypeId, setScannedTabletTypeId] = React.useState<string | null>(
+    null,
+  );
   const [resolvedCardId, setResolvedCardId] = React.useState<string | null>(null);
-
-  // Display context for the last successfully resolved scan — shown as a
-  // confirmation chip. Cleared when the operator types in the scan input.
   const [scannedContext, setScannedContext] = React.useState<{
     label: string;
     detail: string;
+    rawToken?: string;
   } | null>(null);
+
+  const scanInFlightTokenRef = React.useRef<string | null>(null);
+  const submitInFlightRef = React.useRef(false);
+  const submitModeRef = React.useRef<"start" | "pickup">("start");
 
   const receivedSet = React.useMemo(
     () => new Set(receivedCards.map((c) => c.id)),
     [receivedCards],
   );
-  // True when selectedCardId was picked from the dropdown (server-rendered list).
-  const isReceivedCardSelected =
-    selectedCardId !== "" && receivedSet.has(selectedCardId);
-  // True when a card is selected via either the dropdown or typed/camera scan.
   const hasCardSelected =
     selectedCardId !== "" &&
     (receivedSet.has(selectedCardId) || resolvedCardId === selectedCardId);
 
-  // Filter products to those compatible with the selected bag's tablet type.
-  // Primary: tablet type from the dropdown selection (selectedCard).
-  // Fallback: tablet type from typed/camera scan (scannedTabletTypeId) for
-  // when the card was very recently received and isn't in the dropdown yet.
   const selectedCard = receivedCards.find((c) => c.id === selectedCardId);
   const effectiveTabletTypeId = selectedCard?.tabletTypeId ?? scannedTabletTypeId;
   const filteredProducts = React.useMemo(() => {
-    if (!effectiveTabletTypeId) return allowedProducts;
-    // Only show products that explicitly list this tablet type.
-    // Products with no configured tablet types are incomplete, not "accepts all".
-    return allowedProducts.filter((p) =>
-      p.allowedTabletTypeIds.includes(effectiveTabletTypeId),
-    );
+    return narrowProductsByTablet(allowedProducts, effectiveTabletTypeId);
   }, [effectiveTabletTypeId, allowedProducts]);
+
+  const awaitingProductPick =
+    requireProductForFreshBag &&
+    resolvedCardId !== null &&
+    filteredProducts.length > 1 &&
+    !productId;
 
   const showProductPicker =
     requireProductForFreshBag &&
     hasCardSelected &&
-    filteredProducts.length > 0;
+    filteredProducts.length > 0 &&
+    !productConfigError;
 
   const hasReceived = receivedCards.length > 0 && canStartFreshBag;
   const hasPickups = eligiblePickups.length > 0;
   const hasDropdownOptions = hasReceived || hasPickups;
 
-  // Submit with an explicit cardId, bypassing the form select.
-  // explicitProductId overrides the productId state for the stale-closure
-  // case (single auto-selected product called before setProductId settles).
+  const isBusy = pending || scanPending;
+
   const submitWithCardId = React.useCallback(
-    async (cardId: string, explicitProductId?: string) => {
+    async (cardId: string, explicitProductId?: string, mode: "start" | "pickup" = "start") => {
+      if (submitInFlightRef.current) return;
+      submitInFlightRef.current = true;
       setPending(true);
       setError(null);
+      setScanError(null);
       try {
         const fd = new FormData();
         fd.set("token", token);
@@ -141,109 +140,166 @@ export function ScanCardForm({
         const pid = explicitProductId ?? productId;
         if (pid) fd.set("productId", pid);
         const r = await scanCardAction(fd);
-        if (r?.error) setError(r.error);
-        else router.refresh();
-      } catch {
-        setError("Start failed — please try again or refresh the page.");
+        if (r?.error) {
+          setError(r.error);
+          if (scannedContext?.rawToken) {
+            setScanError(
+              `Could not ${mode === "pickup" ? "pick up" : "start"} bag. Scanned: ${scannedContext.rawToken}`,
+            );
+          }
+        } else {
+          router.refresh();
+        }
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Start failed — please try again or refresh the page.";
+        setError(msg);
+        if (scannedContext?.rawToken) {
+          setScanError(`Scanned: ${scannedContext.rawToken}`);
+        }
       } finally {
         setPending(false);
+        submitInFlightRef.current = false;
+        scanInFlightTokenRef.current = null;
       }
     },
-    [token, stationId, productId, router],
+    [token, stationId, productId, router, scannedContext?.rawToken],
   );
 
-  // Primary scan resolution path — shared by camera and typed scan.
-  // Dropdown is fallback only; this is the intended production floor path.
   const handleResolvedToken = React.useCallback(
     async (raw: string) => {
+      const trimmed = raw.trim();
+      if (
+        shouldIgnoreDuplicateScan({
+          rawToken: trimmed,
+          inFlightToken: scanInFlightTokenRef.current,
+          submitInFlight: submitInFlightRef.current,
+          scanPending,
+        })
+      ) {
+        return;
+      }
+
+      scanInFlightTokenRef.current = trimmed;
       setScanError(null);
-      setScannedContext(null);
+      setError(null);
+      setProductConfigError(null);
+      setScanInput(trimmed);
+      setScannedContext({
+        label: trimmed,
+        detail: trimmed,
+        rawToken: trimmed,
+      });
       setScanPending(true);
-      // Show raw token immediately so the operator can see what was scanned
-      // even before the server lookup completes. Overwritten with the
-      // human-readable label on success.
-      setScanInput(raw.trim());
+
       try {
         const fd = new FormData();
-        fd.set("scanToken", raw.trim());
+        fd.set("scanToken", trimmed);
         const result = await lookupCardByTokenAction(fd);
         if (!("ok" in result)) {
-          setScanError(result.error);
-          // Leave scanInput showing the raw token so operator can verify the QR.
+          setScanError(
+            result.error +
+              (trimmed.length > 0 ? ` (scanned: ${trimmed})` : ""),
+          );
           return;
         }
-        const cardId = result.cardId;
 
-        // Overwrite raw token with the human-readable bag label and show chip.
+        const cardId = result.cardId;
         const matchedCard = receivedCards.find((c) => c.id === cardId);
+        const detail = matchedCard
+          ? formatEligibleCardLabel(matchedCard)
+          : result.cardLabel;
+
         setScanInput(result.cardLabel);
         setScannedContext({
           label: result.cardLabel,
-          detail: matchedCard
-            ? formatEligibleCardLabel(matchedCard)
-            : result.cardLabel,
+          detail,
+          rawToken: trimmed,
+        });
+        setSelectedCardId(cardId);
+
+        const decision = decideScanStartAfterLookup({
+          requireProductForFreshBag,
+          isIntakeReserved: result.isIntakeReserved,
+          tabletTypeId: result.tabletTypeId,
+          allowedProducts,
         });
 
-        // First-op station with intake-reserved bag: resolve product then submit.
-        if (requireProductForFreshBag && result.isIntakeReserved) {
-          const ttId = result.tabletTypeId ?? null;
-          setScannedTabletTypeId(ttId);
-          setSelectedCardId(cardId);
-          const narrowed = ttId
-            ? allowedProducts.filter((p) => p.allowedTabletTypeIds.includes(ttId))
-            : [];
-          if (narrowed.length === 1 && narrowed[0]) {
-            // Exactly one compatible product — auto-submit without extra click.
-            // Pass product ID explicitly to avoid stale-closure on productId state.
-            await submitWithCardId(cardId, narrowed[0].id);
-          } else {
-            // Zero or multiple products — surface the picker/error to the operator.
-            setResolvedCardId(cardId);
-            setProductId("");
-          }
+        if (decision.kind === "config-error") {
+          submitModeRef.current = "start";
+          setScannedTabletTypeId(result.tabletTypeId ?? null);
+          setResolvedCardId(cardId);
+          setProductId("");
+          setProductConfigError(decision.message);
           return;
         }
 
-        setSelectedCardId(cardId);
-        await submitWithCardId(cardId);
+        if (decision.kind === "pick-product") {
+          submitModeRef.current = "start";
+          setScannedTabletTypeId(result.tabletTypeId ?? null);
+          setResolvedCardId(cardId);
+          setProductId("");
+          return;
+        }
+
+        if (decision.kind === "auto-start") {
+          submitModeRef.current = "start";
+          setScannedTabletTypeId(result.tabletTypeId ?? null);
+          setResolvedCardId(cardId);
+          await submitWithCardId(cardId, decision.productId, "start");
+          return;
+        }
+
+        // pickup-auto — downstream pickup or in-flight bag at first-op
+        submitModeRef.current = "pickup";
+        setResolvedCardId(null);
+        await submitWithCardId(cardId, undefined, "pickup");
       } catch (err) {
-        // Catch thrown exceptions from server actions (DB error, network failure,
-        // serialization error). Without this, the form goes blank with no feedback.
         setScanError(
-          err instanceof Error ? err.message : "Scan failed — please try again.",
+          (err instanceof Error ? err.message : "Scan failed — please try again.") +
+            (trimmed.length > 0 ? ` (scanned: ${trimmed})` : ""),
         );
       } finally {
         setScanPending(false);
+        if (!submitInFlightRef.current) {
+          scanInFlightTokenRef.current = null;
+        }
       }
     },
-    [requireProductForFreshBag, submitWithCardId, allowedProducts, receivedCards],
+    [
+      requireProductForFreshBag,
+      submitWithCardId,
+      allowedProducts,
+      receivedCards,
+      scanPending,
+    ],
   );
 
-  const handleScanKeyDown = async (
-    e: React.KeyboardEvent<HTMLInputElement>,
-  ) => {
+  const handleScanKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    // Card already resolved by scan — Enter submits rather than re-scanning the label.
-    if (resolvedCardId && scannedContext) {
-      if (requireProductForFreshBag && filteredProducts.length > 0 && !productId) {
+    if (resolvedCardId && scannedContext && !scanPending && !pending) {
+      if (productConfigError) return;
+      if (awaitingProductPick || (showProductPicker && !productId)) {
         setError(
           "Pick a product before starting. The first production station must record what's being made.",
         );
         return;
       }
-      await submitWithCardId(resolvedCardId);
+      await submitWithCardId(
+        resolvedCardId,
+        productId || undefined,
+        submitModeRef.current,
+      );
       return;
     }
     const raw = scanInput.trim();
-    if (!raw || scanPending) return;
+    if (!raw || scanPending || pending) return;
     await handleResolvedToken(raw);
   };
 
   const handleCameraResult = React.useCallback(
     async (scanToken: string) => {
-      // Debug: append ?debug=1 to the floor URL to log camera payloads to
-      // the browser console. Helps diagnose QR encoding issues in the field.
       if (new URLSearchParams(window.location.search).get("debug") === "1") {
         console.log("[floor-scan] camera decoded:", JSON.stringify(scanToken));
       }
@@ -252,6 +308,21 @@ export function ScanCardForm({
     },
     [handleResolvedToken],
   );
+
+  const primaryButtonLabel = (() => {
+    if (scanPending && !pending) return "Looking up bag…";
+    if (pending) {
+      return submitModeRef.current === "pickup" ? "Picking up bag…" : "Starting bag…";
+    }
+    if (showProductPicker || awaitingProductPick) return "Start production";
+    return "Start bag";
+  })();
+
+  const showPrimaryButton =
+    hasDropdownOptions ||
+    resolvedCardId !== null ||
+    scanInput.trim().length > 0 ||
+    hasCardSelected;
 
   return (
     <>
@@ -292,7 +363,10 @@ export function ScanCardForm({
         <input type="hidden" name="token" value={token} />
         <input type="hidden" name="stationId" value={stationId} />
 
-        {/* Primary scan row: text input + camera button */}
+        <p className="text-sm font-medium text-text">
+          Scan the physical bag QR to start or pick up a bag
+        </p>
+
         <div className="flex gap-2">
           <div className="flex-1 space-y-1">
             <input
@@ -301,17 +375,18 @@ export function ScanCardForm({
               onChange={(e) => {
                 setScanInput(e.target.value);
                 setScanError(null);
-                // Operator typing invalidates the resolved card — clear scan state.
+                setProductConfigError(null);
                 if (scannedContext !== null) {
                   setScannedContext(null);
                   setResolvedCardId(null);
                   setSelectedCardId("");
                   setScannedTabletTypeId(null);
+                  scanInFlightTokenRef.current = null;
                 }
               }}
               onKeyDown={handleScanKeyDown}
               placeholder="Scan bag QR…"
-              disabled={pending || scanPending}
+              disabled={isBusy}
               className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             />
           </div>
@@ -322,7 +397,7 @@ export function ScanCardForm({
               setError(null);
               setShowCamera(true);
             }}
-            disabled={pending || scanPending}
+            disabled={isBusy}
             title="Open camera"
             aria-label="Open camera scanner"
             className="h-12 w-12 flex-shrink-0 inline-flex items-center justify-center rounded-lg bg-surface border border-border text-text-muted hover:text-text hover:bg-page disabled:opacity-60 transition-colors"
@@ -330,6 +405,12 @@ export function ScanCardForm({
             <Camera className="h-5 w-5" />
           </button>
         </div>
+
+        {scanPending && !pending && (
+          <p className="text-sm text-text-muted" role="status">
+            Looking up bag…
+          </p>
+        )}
 
         {scanError && (
           <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
@@ -348,27 +429,30 @@ export function ScanCardForm({
 
         {!canStartFreshBag && !hasPickups && (
           <p className="text-xs text-text-muted rounded-lg border border-border/70 bg-surface px-3 py-2">
-            This station only accepts bags already routed here. Scan the bag QR when it arrives at this station.
+            This station only accepts bags already routed here. Scan the bag QR when it
+            arrives at this station.
           </p>
         )}
 
-        {/* Dropdown — backup only. Camera/typed physical QR scan is the primary floor path. */}
         {hasDropdownOptions && (
           <>
             <p className="text-[11px] text-text-muted">
-              Scanning the physical bag QR above is preferred. Use the dropdown
-              only as a backup.
+              Scanning the physical bag QR above is preferred. Use the dropdown only as a
+              backup.
             </p>
             <select
               name="cardId"
-              required
+              required={!resolvedCardId}
               value={selectedCardId}
               onChange={(e) => {
                 setSelectedCardId(e.target.value);
                 setScannedTabletTypeId(null);
                 setProductId("");
                 setScanError(null);
+                setProductConfigError(null);
                 setResolvedCardId(null);
+                setScannedContext(null);
+                scanInFlightTokenRef.current = null;
               }}
               className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
             >
@@ -387,7 +471,13 @@ export function ScanCardForm({
                 </optgroup>
               )}
               {hasReceived && (
-                <optgroup label={hasPickups ? "Received bags available for this station — start new run" : "Received bags available for this station"}>
+                <optgroup
+                  label={
+                    hasPickups
+                      ? "Received bags available for this station — start new run"
+                      : "Received bags available for this station"
+                  }
+                >
                   {receivedCards.map((c) => (
                     <option key={c.id} value={c.id}>
                       {formatEligibleCardLabel(c)}
@@ -410,14 +500,18 @@ export function ScanCardForm({
           <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
             <div className="font-semibold text-sm">What are you making?</div>
             <div className="text-amber-900/80">
-              Pick the finished SKU for this production run. It will travel with
-              the bag through sealing and packaging.
+              Pick the finished SKU for this production run. It will travel with the bag
+              through sealing and packaging.
             </div>
             <select
               name="productId"
               required
               value={productId}
-              onChange={(e) => setProductId(e.target.value)}
+              onChange={(e) => {
+                const pid = e.target.value;
+                setProductId(pid);
+                setError(null);
+              }}
               className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
             >
               <option value="" disabled>
@@ -432,15 +526,15 @@ export function ScanCardForm({
           </div>
         )}
 
-        {requireProductForFreshBag &&
-          hasCardSelected &&
-          filteredProducts.length === 0 && (
-            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-              {effectiveTabletTypeId
-                ? "No active products are configured for this tablet type at this station. Ask a supervisor to set up the product mapping."
-                : "No active products configured for this station kind. Supervisor must add a product to the route."}
-            </p>
-          )}
+        {(productConfigError ||
+          (requireProductForFreshBag &&
+            hasCardSelected &&
+            filteredProducts.length === 0 &&
+            !productConfigError)) && (
+          <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            {productConfigError ?? productConfigErrorMessage(effectiveTabletTypeId)}
+          </p>
+        )}
 
         {error && (
           <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
@@ -448,41 +542,39 @@ export function ScanCardForm({
           </p>
         )}
 
-        {/* Submit button — primarily for the dropdown selection path */}
-        <button
-          type="submit"
-          disabled={pending || scanPending}
-          onClick={async (e) => {
-            // Typed scan input takes highest priority.
-            const raw = scanInput.trim();
-            if (raw) {
-              e.preventDefault();
-              await handleResolvedToken(raw);
-              return;
-            }
-            // Scan-resolved card path: card was found by typed/camera scan, not
-            // by dropdown. Native form submit won't have the right cardId in the
-            // select element, so we must call submitWithCardId directly.
-            if (resolvedCardId) {
-              e.preventDefault();
-              if (requireProductForFreshBag && filteredProducts.length > 0 && !productId) {
-                setError(
-                  "Pick a product before starting. The first production station must record what's being made.",
-                );
+        {showPrimaryButton && (
+          <button
+            type="submit"
+            disabled={isBusy || !!productConfigError}
+            onClick={async (e) => {
+              const raw = scanInput.trim();
+              if (raw && !resolvedCardId) {
+                e.preventDefault();
+                await handleResolvedToken(raw);
                 return;
               }
-              await submitWithCardId(resolvedCardId);
-            }
-          }}
-          className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-base font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60 transition-colors"
-        >
-          <ScanLine className="h-5 w-5" />
-          {pending
-            ? "Starting…"
-            : showProductPicker
-              ? "Start production"
-              : "Start bag"}
-        </button>
+              if (resolvedCardId) {
+                e.preventDefault();
+                if (productConfigError) return;
+                if (awaitingProductPick || (showProductPicker && !productId)) {
+                  setError(
+                    "Pick a product before starting. The first production station must record what's being made.",
+                  );
+                  return;
+                }
+                await submitWithCardId(
+                  resolvedCardId,
+                  productId || undefined,
+                  submitModeRef.current,
+                );
+              }
+            }}
+            className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-base font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60 transition-colors"
+          >
+            <ScanLine className="h-5 w-5" />
+            {primaryButtonLabel}
+          </button>
+        )}
       </form>
     </>
   );
