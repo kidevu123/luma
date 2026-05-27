@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { auditLog, qrCards, users } from "@/lib/db/schema";
 
@@ -98,6 +98,52 @@ export async function listQrCardBagEditAudits(
         inArray(auditLog.action, [...QR_BAG_EDIT_ACTIONS]),
       ),
     )
+    .orderBy(desc(auditLog.createdAt))
+    .limit(limit);
+}
+
+const MAX_RECENT_AUDIT_LIMIT = 100;
+
+export type ListRecentAuditLogsParams = {
+  limit?: number;
+  /** Case-insensitive substring match on action. */
+  actionContains?: string;
+  targetType?: string;
+  /** Case-insensitive substring match on actor email. */
+  actorEmailContains?: string;
+};
+
+/** Newest-first audit rows across the system (read-only admin viewer). */
+export async function listRecentAuditLogs(
+  params: ListRecentAuditLogsParams = {},
+): Promise<AuditLogRow[]> {
+  const limit = Math.min(
+    params.limit ?? MAX_RECENT_AUDIT_LIMIT,
+    MAX_RECENT_AUDIT_LIMIT,
+  );
+
+  const conditions: SQL[] = [];
+  const actionQ = params.actionContains?.trim();
+  if (actionQ) {
+    conditions.push(ilike(auditLog.action, `%${actionQ}%`));
+  }
+  const targetType = params.targetType?.trim();
+  if (targetType) {
+    conditions.push(eq(auditLog.targetType, targetType));
+  }
+  const actorQ = params.actorEmailContains?.trim();
+  if (actorQ) {
+    conditions.push(ilike(users.email, `%${actorQ}%`));
+  }
+
+  const whereClause =
+    conditions.length === 0 ? undefined : and(...conditions);
+
+  return db
+    .select(auditSelect)
+    .from(auditLog)
+    .leftJoin(users, eq(auditLog.actorId, users.id))
+    .where(whereClause)
     .orderBy(desc(auditLog.createdAt))
     .limit(limit);
 }
