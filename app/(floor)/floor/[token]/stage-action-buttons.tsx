@@ -104,7 +104,7 @@ export function StageActionButtons({
   const [operatorCode, setOperatorCode] = React.useState("");
   const [pauseReason, setPauseReason] = React.useState<
     "pvc_swap" | "shift_end" | "machine_jam" | "qa_check" | "other"
-  >("pvc_swap");
+  >(stationKind === "HANDPACK_BLISTER" ? "shift_end" : "pvc_swap");
   const [pauseOpen, setPauseOpen] = React.useState(false);
   const [packagingOpen, setPackagingOpen] = React.useState(false);
   const [sealingOpen, setSealingOpen] = React.useState(false);
@@ -137,6 +137,9 @@ export function StageActionButtons({
   // These events use their own rich close-out forms instead of the
   // shared single-count input + immediate-fire button.
   const RICH_FORM_EVENTS = new Set(["SEALING_COMPLETE", "BLISTER_COMPLETE"]);
+  // Timed-only events fire immediately with no count input — the
+  // duration is captured by the elapsed timer, not a manual count.
+  const TIMED_ONLY_EVENTS = new Set(["HANDPACK_BLISTER_COMPLETE"]);
   // Hide forward-stage buttons whose prereq is not satisfied by the
   // bag's current stage. The server enforces the same rule; this
   // just stops the operator tapping a button that will be rejected.
@@ -147,9 +150,11 @@ export function StageActionButtons({
     return prereq.includes(currentStage);
   });
   // Whether any of this station's stage events still use the generic
-  // single-count path (bottle stations). If all events are rich-form
-  // events, hide the shared count input.
-  const hasGenericStages = stages.some(s => !RICH_FORM_EVENTS.has(s.eventType));
+  // single-count path (bottle stations). Rich-form and timed-only
+  // events both suppress the shared count input.
+  const hasGenericStages = stages.some(
+    s => !RICH_FORM_EVENTS.has(s.eventType) && !TIMED_ONLY_EVENTS.has(s.eventType),
+  );
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
   const packagingReady = !currentStage || currentStage === "SEALED";
 
@@ -402,7 +407,9 @@ export function StageActionButtons({
             onChange={(e) => setPauseReason(e.target.value as typeof pauseReason)}
             className="w-full h-12 px-3 rounded-lg bg-surface border border-border text-base"
           >
-            <option value="pvc_swap">PVC roll swap</option>
+            {stationKind !== "HANDPACK_BLISTER" && (
+              <option value="pvc_swap">PVC roll swap</option>
+            )}
             <option value="shift_end">Shift ending</option>
             <option value="machine_jam">Machine jam</option>
             <option value="qa_check">QA check</option>

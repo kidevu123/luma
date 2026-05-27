@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.8] — 2026-05-27
+
+### Fixed (STATION-HANDPACK-1)
+- **HANDPACK_BLISTER timed-only completion:** `HANDPACK_BLISTER_COMPLETE` is now in a `TIMED_ONLY_EVENTS` set, excluding it from `hasGenericStages`. The count input no longer renders on the Blister Hand Pack station — completion is one tap ("Hand-pack complete") with no count or packs-remaining field.
+- **Station-kind-aware pause reasons:** The "PVC roll swap" pause option is hidden on `HANDPACK_BLISTER` stations, which don't use PVC film. Pause reason defaults to "Shift ending" on HANDPACK_BLISTER and "PVC roll swap" on all other stations.
+
+### Tests added (STATION-HANDPACK-1)
+- `app/(floor)/floor/[token]/stage-action-buttons.test.ts` — 11 tests: HANDPACK_BLISTER_COMPLETE in TIMED_ONLY_EVENTS, not in RICH_FORM_EVENTS, hasGenericStages gate, no count field, BLISTER path preserved (BLISTER_COMPLETE in RICH_FORM_EVENTS, BlisterCompleteForm exists, triggered by BLISTER_COMPLETE only), PVC option gated by station kind, pause defaults, shift_end/other always available.
+
 ## [0.4.7] — 2026-05-27
 
 ### Fixed
