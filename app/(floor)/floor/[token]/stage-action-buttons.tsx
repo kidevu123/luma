@@ -62,6 +62,7 @@ const STAGE_BY_KIND: Record<string, { label: string; eventType: string }[]> = {
 
 import { EVENT_STAGE_PREREQ } from "@/lib/production/stage-progression";
 import {
+  getDefaultPauseReasonForStation,
   getPauseReasonsForStation,
   type PauseReasonValue,
 } from "@/lib/production/station-pause-reasons";
@@ -107,10 +108,19 @@ export function StageActionButtons({
   const [count, setCount] = React.useState("");
   const [operatorCode, setOperatorCode] = React.useState("");
   const pauseReasonOptions = getPauseReasonsForStation(stationKind);
-  const [pauseReason, setPauseReason] = React.useState<PauseReasonValue>(
-    pauseReasonOptions[0]?.value ?? "other",
+  const [pauseReason, setPauseReason] = React.useState<PauseReasonValue>(() =>
+    getDefaultPauseReasonForStation(stationKind),
   );
   const [pauseOpen, setPauseOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    const options = getPauseReasonsForStation(stationKind);
+    setPauseReason((current) =>
+      options.some((o) => o.value === current)
+        ? current
+        : getDefaultPauseReasonForStation(stationKind),
+    );
+  }, [stationKind]);
   const [packagingOpen, setPackagingOpen] = React.useState(false);
   const [sealingOpen, setSealingOpen] = React.useState(false);
   const [blisterOpen, setBlisterOpen] = React.useState(false);

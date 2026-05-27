@@ -48,9 +48,10 @@ describe("STATION-HANDPACK-1 · BLISTER station preserved", () => {
   });
 });
 
-describe("STATION-PAUSE-REASONS-1 · pause reasons via helper", () => {
+describe("STATION-PAUSE-2 · pause reasons via helper", () => {
   it("imports getPauseReasonsForStation from station-pause-reasons helper", () => {
     expect(src).toMatch(/getPauseReasonsForStation/);
+    expect(src).toMatch(/getDefaultPauseReasonForStation/);
     expect(src).toMatch(/from.*station-pause-reasons/);
   });
 
@@ -67,8 +68,13 @@ describe("STATION-PAUSE-REASONS-1 · pause reasons via helper", () => {
     expect(selectChunk).not.toMatch(/value="machine_jam"/);
   });
 
-  it("pauseReason initial value comes from pauseReasonOptions[0]", () => {
-    expect(src).toMatch(/pauseReasonOptions\[0\].*value/s);
+  it("pauseReason initial value uses getDefaultPauseReasonForStation", () => {
+    expect(src).toMatch(/getDefaultPauseReasonForStation\(stationKind\)/);
+  });
+
+  it("resyncs pause reason when stationKind changes", () => {
+    expect(src).toMatch(/useEffect/);
+    expect(src).toMatch(/getDefaultPauseReasonForStation\(stationKind\)/);
   });
 
   it("no inline station-kind checks remain in the JSX for pause reasons", () => {

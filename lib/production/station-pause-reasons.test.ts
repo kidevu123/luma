@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { getPauseReasonsForStation } from "./station-pause-reasons";
+import {
+  getDefaultPauseReasonForStation,
+  getPauseReasonsForStation,
+  STATION_PAUSE_REASON_MATRIX,
+} from "./station-pause-reasons";
 
 const MACHINE_KINDS = ["BLISTER", "SEALING", "COMBINED"] as const;
 const HAND_KINDS = [
@@ -11,7 +15,14 @@ const HAND_KINDS = [
 ] as const;
 const ALL_KINDS = [...MACHINE_KINDS, ...HAND_KINDS];
 
-describe("STATION-PAUSE-REASONS-1 · pause reason matrix", () => {
+describe("STATION-PAUSE-2 · pause reason matrix", () => {
+  it("matrix covers every StationKind with non-empty options", () => {
+    for (const [kind, options] of Object.entries(STATION_PAUSE_REASON_MATRIX)) {
+      expect(options.length, kind).toBeGreaterThan(0);
+      expect(getPauseReasonsForStation(kind)).toEqual(options);
+    }
+  });
+
   it("machine-bound stations include pvc_swap and machine_jam", () => {
     for (const kind of MACHINE_KINDS) {
       const values = getPauseReasonsForStation(kind).map((r) => r.value);
@@ -48,22 +59,37 @@ describe("STATION-PAUSE-REASONS-1 · pause reason matrix", () => {
     }
   });
 
-  it("machine-bound default (first reason) is pvc_swap", () => {
+  it("machine-bound default is pvc_swap via getDefaultPauseReasonForStation", () => {
     for (const kind of MACHINE_KINDS) {
-      expect(
-        getPauseReasonsForStation(kind)[0]?.value,
-        kind,
-      ).toBe("pvc_swap");
+      expect(getDefaultPauseReasonForStation(kind), kind).toBe("pvc_swap");
     }
   });
 
-  it("hand-work default (first reason) is shift_end", () => {
+  it("hand-work default is shift_end via getDefaultPauseReasonForStation", () => {
     for (const kind of HAND_KINDS) {
-      expect(
-        getPauseReasonsForStation(kind)[0]?.value,
-        kind,
-      ).toBe("shift_end");
+      expect(getDefaultPauseReasonForStation(kind), kind).toBe("shift_end");
     }
+  });
+
+  it("default reason is always included in station options", () => {
+    for (const kind of ALL_KINDS) {
+      const options = getPauseReasonsForStation(kind).map((r) => r.value);
+      expect(options).toContain(getDefaultPauseReasonForStation(kind));
+    }
+  });
+
+  it("PACKAGING has no pvc_swap", () => {
+    const values = getPauseReasonsForStation("PACKAGING").map((r) => r.value);
+    expect(values).not.toContain("pvc_swap");
+    expect(values).not.toContain("machine_jam");
+  });
+
+  it("BOTTLE_HANDPACK has no pvc_swap and no machine_jam", () => {
+    const values = getPauseReasonsForStation("BOTTLE_HANDPACK").map(
+      (r) => r.value,
+    );
+    expect(values).not.toContain("pvc_swap");
+    expect(values).not.toContain("machine_jam");
   });
 
   it("unknown station kind falls back to hand-work reasons", () => {
