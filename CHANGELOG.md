@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.8] — 2026-05-27
+
+### Changed
+- **Station supervisor tools (STATION-TOOLS-CLEANUP-2):** Tightened which optional floor sub-pages appear under **Supervisor tools**. `HANDPACK_BLISTER` and packaging/bottle finish stations show no tools. Card/blister kinds no longer link to **Variety pack** (bottle allocation workflow). **Variety pack** remains on `BOTTLE_HANDPACK` only. **Rolls** stays on `BLISTER`, `SEALING`, and `COMBINED` (PVC/foil machine path). Bag allocation and admin Start production remain removed.
+
+### Tests added (STATION-TOOLS-CLEANUP-2)
+- `lib/production/floor-station-mobile-nav.test.ts` — per-kind tool matrix, empty panel guard.
+
 ## [0.4.7] — 2026-05-27
 
 ### Fixed
