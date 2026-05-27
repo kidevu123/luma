@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1] — 2026-05-27
+
+### Fixed
+- **Floor scan → product select → Start production works end-to-end (FLOOR-FIRST-RUN-E2E-1):** After a camera or typed scan resolved a bag QR, clicking "Start production" would re-enter `handleResolvedToken` instead of submitting. Root cause: the button `onClick` checked `scanInput.trim()` before `resolvedCardId`. After a successful scan, `scanInput` holds the card label (e.g. "bag-card-117"), making it truthy — so the click re-scanned, clearing the selected product ID and resetting the product picker. Fix: reordered the priority in `onClick` to check `resolvedCardId` first (matching the existing `handleScanKeyDown` priority order). Operator can now: scan bag QR → see confirmation chip → pick product by name → tap Start → bag enters production without any RSC overlay or native browser validation popup.
+
+### Tests added (FLOOR-FIRST-RUN-E2E-1)
+- `FLOOR-FIRST-RUN-E2E-1 · submit button onClick priority` — 4 structural tests asserting correct priority order and early-return in button onClick.
+
 ## [0.4.0] — 2026-05-27
 
 ### Added

@@ -786,3 +786,47 @@ describe("PRODUCT-DROPDOWN-1 · floor Making chip shows name only", () => {
     expect(chipBlock).not.toMatch(/\{currentAtStation\.product\.sku\}/);
   });
 });
+
+// ── FLOOR-FIRST-RUN-E2E-1 · submit button onClick priority ───────────────────
+//
+// Root cause: button onClick checked scanInput.trim() BEFORE resolvedCardId.
+// After a camera or typed scan resolved a bag QR, scanInput holds the card label
+// (e.g. "bag-card-117"), making it truthy. When the operator then selected a product
+// and clicked Start, scanInput.trim() was non-empty → handleResolvedToken re-ran →
+// productId was cleared → product picker reset → operator could never submit.
+//
+// Fix: check resolvedCardId first (matching the existing handleScanKeyDown priority order).
+
+describe("FLOOR-FIRST-RUN-E2E-1 · submit button onClick priority", () => {
+  it("resolvedCardId check precedes scanInput.trim() check in button onClick — prevents re-scan loop after camera scan", () => {
+    const onClickStart = formSrc.indexOf("onClick={async (e) => {");
+    expect(onClickStart).toBeGreaterThan(-1);
+    const onClickBlock = formSrc.slice(onClickStart, onClickStart + 1200);
+    const resolvedCheckIdx = onClickBlock.indexOf("if (resolvedCardId)");
+    const rawTrimIdx = onClickBlock.indexOf("scanInput.trim()");
+    expect(resolvedCheckIdx).toBeGreaterThan(-1);
+    expect(rawTrimIdx).toBeGreaterThan(-1);
+    expect(resolvedCheckIdx).toBeLessThan(rawTrimIdx);
+  });
+
+  it("resolvedCardId path returns early so scanInput is not consulted for scan-resolved cards", () => {
+    const onClickStart = formSrc.indexOf("onClick={async (e) => {");
+    const onClickBlock = formSrc.slice(onClickStart, onClickStart + 1000);
+    // await submitWithCardId(resolvedCardId) must be followed by a return
+    expect(onClickBlock).toMatch(/await submitWithCardId\(resolvedCardId\);\s*\n\s*return;/);
+  });
+
+  it("button onClick comment explains the re-scan-loop risk for scanInput", () => {
+    expect(formSrc).toMatch(/re-scan loop|scanInput holds the card label/);
+  });
+
+  it("handleScanKeyDown and button onClick share the same priority: resolvedCardId before scanInput", () => {
+    const keydownStart = formSrc.indexOf("const handleScanKeyDown");
+    const keydownBlock = formSrc.slice(keydownStart, keydownStart + 700);
+    const kdResolvedIdx = keydownBlock.indexOf("if (resolvedCardId");
+    const kdRawIdx = keydownBlock.indexOf("scanInput.trim()");
+    expect(kdResolvedIdx).toBeGreaterThan(-1);
+    expect(kdRawIdx).toBeGreaterThan(-1);
+    expect(kdResolvedIdx).toBeLessThan(kdRawIdx);
+  });
+});

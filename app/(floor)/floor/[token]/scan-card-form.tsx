@@ -453,16 +453,10 @@ export function ScanCardForm({
           type="submit"
           disabled={pending || scanPending}
           onClick={async (e) => {
-            // Typed scan input takes highest priority.
-            const raw = scanInput.trim();
-            if (raw) {
-              e.preventDefault();
-              await handleResolvedToken(raw);
-              return;
-            }
-            // Scan-resolved card path: card was found by typed/camera scan, not
-            // by dropdown. Native form submit won't have the right cardId in the
-            // select element, so we must call submitWithCardId directly.
+            // Priority 1: Scan-resolved card — submit directly.
+            // Must check before scanInput because scanInput holds the card label
+            // after a successful scan, which would otherwise trigger a re-scan loop
+            // clearing the selected productId before the form can submit.
             if (resolvedCardId) {
               e.preventDefault();
               if (requireProductForFreshBag && filteredProducts.length > 0 && !productId) {
@@ -472,7 +466,16 @@ export function ScanCardForm({
                 return;
               }
               await submitWithCardId(resolvedCardId);
+              return;
             }
+            // Priority 2: Raw typed input not yet resolved — scan it first.
+            const raw = scanInput.trim();
+            if (raw) {
+              e.preventDefault();
+              await handleResolvedToken(raw);
+              return;
+            }
+            // Priority 3: Dropdown path — native form submit handles it.
           }}
           className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-brand-700 text-white text-base font-semibold shadow-sm hover:bg-brand-800 disabled:opacity-60 transition-colors"
         >
