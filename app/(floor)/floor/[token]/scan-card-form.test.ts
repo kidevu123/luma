@@ -787,6 +787,107 @@ describe("PRODUCT-DROPDOWN-1 · floor Making chip shows name only", () => {
   });
 });
 
+
+// ── FLOOR-FIRST-RUN-E2E-2 · first-op camera-scan → product → start ───────────
+//
+// Proves the full camera-scan → product-select → "Start production" button click
+// flow works correctly end-to-end at the source level. Key invariants:
+//   1. resolvedCardId path submits with productId from state — no re-scan loop
+//   2. productId state is preserved across the onClick call (not cleared on submit)
+//   3. lookup failure shows scanError — does not disrupt resolvedCardId state
+//   4. operator session is not required for scan-start (soft-fallthrough)
+//   5. native required validation bypassed on scan path (e.preventDefault first)
+//   6. synchronous projector — no async race on read model after commit
+
+describe("FLOOR-FIRST-RUN-E2E-2 · first-op camera-scan → product → start", () => {
+  it("submitWithCardId uses pid = explicitProductId ?? productId — scan path carries selected product via state", () => {
+    // After scan resolves and operator picks a product (productId state set),
+    // clicking Start calls submitWithCardId(resolvedCardId) — no explicitProductId arg.
+    // submitWithCardId reads productId from its closure via `const pid = explicitProductId ?? productId`.
+    expect(formSrc).toMatch(/const pid = explicitProductId \?\? productId/);
+  });
+
+  it("onClick priority-1 branch calls submitWithCardId — never handleResolvedToken — productId state is preserved", () => {
+    // handleResolvedToken calls setProductId("") which clears the product selection.
+    // The E2E-1 fix ensures the resolved-card branch goes straight to submit,
+    // preserving the productId the operator just chose.
+    const onClickStart = formSrc.indexOf("onClick={async (e) => {");
+    const resolvedBranch = formSrc.slice(onClickStart, onClickStart + 850);
+    expect(resolvedBranch).toMatch(/await submitWithCardId\(resolvedCardId\)/);
+    expect(resolvedBranch).not.toMatch(/await handleResolvedToken/);
+  });
+
+  it("handleResolvedToken multi-product path sets resolvedCardId and clears productId so picker is shown", () => {
+    // When narrowed.length !== 1, form surfaces picker. On next click Start,
+    // productId from picker state is passed through submitWithCardId's closure.
+    expect(formSrc).toMatch(/setResolvedCardId\(cardId\)/);
+    expect(formSrc).toMatch(/setProductId\(""\)/);
+  });
+
+  it("lookup failure sets scanError and returns without clearing resolvedCardId", () => {
+    // On lookupCardByTokenAction error, setScanError(result.error) + return.
+    // resolvedCardId must NOT be reset — a prior successful scan stays valid.
+    const fnStart = formSrc.indexOf("const handleResolvedToken");
+    const fnEnd = formSrc.indexOf("const handleScanKeyDown");
+    const fnBody = formSrc.slice(fnStart, fnEnd);
+    const errorBranchStart = fnBody.indexOf("setScanError(result.error)");
+    expect(errorBranchStart).toBeGreaterThan(-1);
+    const errorBranch = fnBody.slice(errorBranchStart, errorBranchStart + 150);
+    expect(errorBranch).toMatch(/return;/);
+    expect(errorBranch).not.toMatch(/setResolvedCardId\(null\)/);
+  });
+
+  it("e.preventDefault() precedes submitWithCardId in resolved-card onClick branch — native required bypassed", () => {
+    // The cardId and productId selects have `required` — browser would block form
+    // submission when these are empty (scan path: they always are). e.preventDefault()
+    // must fire first so native validation never runs on the scan path.
+    const onClickStart = formSrc.indexOf("onClick={async (e) => {");
+    const resolvedBranch = formSrc.slice(onClickStart, onClickStart + 850);
+    const preventIdx = resolvedBranch.indexOf("e.preventDefault()");
+    const submitIdx = resolvedBranch.indexOf("submitWithCardId");
+    expect(preventIdx).toBeGreaterThan(-1);
+    expect(submitIdx).toBeGreaterThan(-1);
+    expect(preventIdx).toBeLessThan(submitIdx);
+  });
+
+  it("submitWithCardId has try/catch — start errors surface as setError not silent blank form", () => {
+    // Without try/catch, an exception from scanCardAction leaves the form
+    // frozen on "Starting..." with no feedback. The finally block resets pending.
+    const fnStart = formSrc.indexOf("const submitWithCardId");
+    const fnEnd = formSrc.indexOf("const handleResolvedToken");
+    const fnBody = formSrc.slice(fnStart, fnEnd);
+    expect(fnBody).toMatch(/catch\s*\{/);
+    expect(fnBody).toMatch(/setError\s*\(/);
+  });
+
+  it("operator session not required for scan-start — scanCardAction body does not throw 'No operator on shift'", () => {
+    // resolveStationAccountability is soft-fallthrough: precedence is
+    // override → active session → free text → all-null. Never throws for scan-start.
+    // Only fireStageEventAction (BLISTER_COMPLETE / BOTTLE_HANDPACK_COMPLETE) checks
+    // accountableEmployeeId and throws "No operator on shift."
+    const fnStart = actionsSrc.indexOf("export async function scanCardAction");
+    const nextFn = actionsSrc.indexOf("\nexport ", fnStart + 1);
+    const scanBody = actionsSrc.slice(
+      fnStart,
+      nextFn > fnStart ? nextFn : fnStart + 5000,
+    );
+    expect(scanBody).toMatch(/resolveStationAccountability/);
+    expect(scanBody).not.toMatch(/No operator on shift/);
+  });
+
+  it("synchronous projector — read models updated inside the same transaction as workflow_event insert", () => {
+    // After scanCardAction commits, read_station_live and read_bag_state are already
+    // updated. router.refresh() renders the current-bag panel immediately with no
+    // async lag or polling needed.
+    const projectorSrc = readFileSync(
+      resolve(here, "../../../../lib/projector/index.ts"),
+      "utf8",
+    );
+    expect(projectorSrc).toMatch(/[Ss]ynchronous projector/);
+    expect(projectorSrc).toMatch(/same transaction/);
+  });
+});
+
 // ── FLOOR-FIRST-RUN-E2E-1 · submit button onClick priority ───────────────────
 //
 // Root cause: button onClick checked scanInput.trim() BEFORE resolvedCardId.

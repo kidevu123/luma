@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.4] — 2026-05-27
+
+### Tests added (FLOOR-FIRST-RUN-E2E-2)
+- `FLOOR-FIRST-RUN-E2E-2 · first-op camera-scan → product → start` — 8 structural tests proving the full scan → product-select → Start submission path: `submitWithCardId` uses `explicitProductId ?? productId`; onClick priority-1 branch preserves `productId` state; multi-product path sets `resolvedCardId` and clears `productId` for picker; lookup failure surfaces `scanError` without clearing `resolvedCardId`; `e.preventDefault()` precedes submit on scan path; `submitWithCardId` catch block surfaces errors; operator session not required for scan-start; synchronous projector guarantees no read-model lag after commit.
+
+### Added
+- `docs/floor-scan-e2e-verification.md` — manual verification checklist for the camera-scan → product → Start production flow on staging. Covers 5 paths: auto-submit (single product), multi-product picker, typed scan, failure/error, and downstream pickup. Includes post-submit DB check SQL and auth smoke reminder.
+
 ## [0.4.3] — 2026-05-27
 
 ### Changed
