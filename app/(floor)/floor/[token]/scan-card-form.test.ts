@@ -588,8 +588,12 @@ describe("FLOOR-SCAN-UX-2 · scan confirmation state", () => {
     expect(formSrc).not.toMatch(/setScanInput\s*\(\s*['"]\s*['"]\s*\)/);
   });
 
-  it("handleResolvedToken clears scannedContext at the start of each call", () => {
-    expect(formSrc).toMatch(/setScannedContext\s*\(\s*null\s*\)/);
+  it("handleResolvedToken clears scannedContext before setting it — null call precedes object call", () => {
+    const nullIdx = formSrc.indexOf("setScannedContext(null)");
+    const setIdx = formSrc.indexOf("setScannedContext({");
+    expect(nullIdx).toBeGreaterThan(-1);
+    expect(setIdx).toBeGreaterThan(-1);
+    expect(nullIdx).toBeLessThan(setIdx);
   });
 
   it("onChange clears resolvedCardId and scannedContext when operator types", () => {
