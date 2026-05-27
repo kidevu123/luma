@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.10] — 2026-05-27
+
+### Fixed (STATION-PAUSE-REASONS-1)
+- **Station-specific pause reasons (complete fix):** `machine_jam` was still shown on all stations including HANDPACK_BLISTER, which has no machine. Extracted pause reason lists into `lib/production/station-pause-reasons.ts`. Machine-bound stations (BLISTER, SEALING, COMBINED) retain "PVC roll swap" and "Machine jam". All hand-work stations (HANDPACK_BLISTER, BOTTLE_HANDPACK, PACKAGING, BOTTLE_CAP_SEAL, BOTTLE_STICKER) now show only "Shift ending", "QA check", and "Other". Staging was on v0.4.8 (partial fix — pvc_swap gated but machine_jam not yet gated).
+
+### Tests added (STATION-PAUSE-REASONS-1)
+- `lib/production/station-pause-reasons.test.ts` — 8 tests: machine/hand kind matrices, HANDPACK_BLISTER specifics, shift_end/qa_check/other universal presence, per-category defaults, unknown-kind fallback, non-empty labels.
+- `app/(floor)/floor/[token]/stage-action-buttons.test.ts` — updated: pause reason tests now verify helper import/usage and that no inline station-kind conditionals remain in JSX.
+
 ## [0.4.9] — 2026-05-27
 
 ### Changed

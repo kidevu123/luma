@@ -61,6 +61,10 @@ const STAGE_BY_KIND: Record<string, { label: string; eventType: string }[]> = {
 };
 
 import { EVENT_STAGE_PREREQ } from "@/lib/production/stage-progression";
+import {
+  getPauseReasonsForStation,
+  type PauseReasonValue,
+} from "@/lib/production/station-pause-reasons";
 
 type PackagingSpecLine = {
   materialName: string;
@@ -102,9 +106,10 @@ export function StageActionButtons({
   const [error, setError] = React.useState<string | null>(null);
   const [count, setCount] = React.useState("");
   const [operatorCode, setOperatorCode] = React.useState("");
-  const [pauseReason, setPauseReason] = React.useState<
-    "pvc_swap" | "shift_end" | "machine_jam" | "qa_check" | "other"
-  >(stationKind === "HANDPACK_BLISTER" ? "shift_end" : "pvc_swap");
+  const pauseReasonOptions = getPauseReasonsForStation(stationKind);
+  const [pauseReason, setPauseReason] = React.useState<PauseReasonValue>(
+    pauseReasonOptions[0]?.value ?? "other",
+  );
   const [pauseOpen, setPauseOpen] = React.useState(false);
   const [packagingOpen, setPackagingOpen] = React.useState(false);
   const [sealingOpen, setSealingOpen] = React.useState(false);
@@ -407,13 +412,11 @@ export function StageActionButtons({
             onChange={(e) => setPauseReason(e.target.value as typeof pauseReason)}
             className="w-full h-12 px-3 rounded-lg bg-surface border border-border text-base"
           >
-            {stationKind !== "HANDPACK_BLISTER" && (
-              <option value="pvc_swap">PVC roll swap</option>
-            )}
-            <option value="shift_end">Shift ending</option>
-            <option value="machine_jam">Machine jam</option>
-            <option value="qa_check">QA check</option>
-            <option value="other">Other</option>
+            {pauseReasonOptions.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
           </select>
           <div className="grid grid-cols-2 gap-2">
             <button

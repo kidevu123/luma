@@ -11,7 +11,6 @@ describe("STATION-HANDPACK-1 · HANDPACK_BLISTER timed-only completion", () => {
 
   it("HANDPACK_BLISTER_COMPLETE is in TIMED_ONLY_EVENTS — not RICH_FORM_EVENTS", () => {
     expect(src).toMatch(/TIMED_ONLY_EVENTS.*HANDPACK_BLISTER_COMPLETE/s);
-    // Must NOT appear in the RICH_FORM_EVENTS set
     const richIdx = src.indexOf("RICH_FORM_EVENTS = new Set");
     const richLine = src.slice(richIdx, richIdx + 120);
     expect(richLine).not.toMatch(/HANDPACK_BLISTER_COMPLETE/);
@@ -21,10 +20,7 @@ describe("STATION-HANDPACK-1 · HANDPACK_BLISTER timed-only completion", () => {
     expect(src).toMatch(/hasGenericStages.*RICH_FORM_EVENTS.*TIMED_ONLY_EVENTS/s);
   });
 
-  it("does not hardcode a blister count or packs-remaining field for HANDPACK_BLISTER", () => {
-    // The count input is gated by hasGenericStages — HANDPACK_BLISTER_COMPLETE
-    // is in TIMED_ONLY_EVENTS so hasGenericStages is false for that station.
-    // Verify that the count input render is gated by hasGenericStages.
+  it("count input render is gated by hasGenericStages", () => {
     expect(src).toMatch(/hasGenericStages.*Count/s);
   });
 });
@@ -52,29 +48,34 @@ describe("STATION-HANDPACK-1 · BLISTER station preserved", () => {
   });
 });
 
-describe("STATION-HANDPACK-1 · pause reasons station-kind-aware", () => {
-  it("PVC roll swap option is gated by station kind — not shown for HANDPACK_BLISTER", () => {
-    // Look for the JSX option tag value="pvc_swap"; the conditional guard
-    // that excludes HANDPACK_BLISTER must appear within 200 chars before it.
-    const optionIdx = src.indexOf('value="pvc_swap"');
-    expect(optionIdx).toBeGreaterThan(-1);
-    const context = src.slice(optionIdx - 200, optionIdx + 60);
-    expect(context).toMatch(/HANDPACK_BLISTER/);
+describe("STATION-PAUSE-REASONS-1 · pause reasons via helper", () => {
+  it("imports getPauseReasonsForStation from station-pause-reasons helper", () => {
+    expect(src).toMatch(/getPauseReasonsForStation/);
+    expect(src).toMatch(/from.*station-pause-reasons/);
   });
 
-  it("shift_end, machine_jam, qa_check, other remain available for all stations", () => {
-    expect(src).toMatch(/shift_end/);
-    expect(src).toMatch(/machine_jam/);
-    expect(src).toMatch(/qa_check/);
-    // other is always present
-    const otherMatches = (src.match(/value="other"/g) ?? []).length;
-    expect(otherMatches).toBeGreaterThanOrEqual(1);
+  it("imports PauseReasonValue type from helper", () => {
+    expect(src).toMatch(/PauseReasonValue/);
   });
 
-  it("HANDPACK_BLISTER defaults pause reason to shift_end, not pvc_swap", () => {
-    // Initial state is station-kind-aware
-    expect(src).toMatch(/HANDPACK_BLISTER.*shift_end/s);
-    // Default for non-HANDPACK is pvc_swap — verify pvc_swap appears as the else branch
-    expect(src).toMatch(/shift_end.*pvc_swap/s);
+  it("pause options are rendered from pauseReasonOptions — not hardcoded", () => {
+    expect(src).toMatch(/pauseReasonOptions\.map/);
+    const selectIdx = src.indexOf("pauseReasonOptions.map");
+    expect(selectIdx).toBeGreaterThan(-1);
+    const selectChunk = src.slice(selectIdx - 50, selectIdx + 200);
+    expect(selectChunk).not.toMatch(/value="pvc_swap"/);
+    expect(selectChunk).not.toMatch(/value="machine_jam"/);
+  });
+
+  it("pauseReason initial value comes from pauseReasonOptions[0]", () => {
+    expect(src).toMatch(/pauseReasonOptions\[0\].*value/s);
+  });
+
+  it("no inline station-kind checks remain in the JSX for pause reasons", () => {
+    const pauseBlockIdx = src.indexOf("Why pausing?");
+    expect(pauseBlockIdx).toBeGreaterThan(-1);
+    const pauseBlock = src.slice(pauseBlockIdx, pauseBlockIdx + 600);
+    expect(pauseBlock).not.toMatch(/stationKind !== "HANDPACK_BLISTER"/);
+    expect(pauseBlock).not.toMatch(/pvc_swap.*PVC roll swap/);
   });
 });
