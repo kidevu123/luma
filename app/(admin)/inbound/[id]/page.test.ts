@@ -25,6 +25,13 @@ describe("RECEIVE-EDIT-AUDIT-1 · receive detail bag edit discoverability", () =
   });
 });
 
+describe("RECEIVE-EDIT-2B-1 · receive-level edit entry", () => {
+  it("links to the receive edit route from the header", () => {
+    expect(src).toMatch(/\/inbound\/\$\{id\}\/edit/);
+    expect(src).toMatch(/Edit receive/);
+  });
+});
+
 describe("RECEIVE-EDIT-2A-1 · per-bag edit history", () => {
   const panelSrc = readFileSync(join(__dirname, "bag-edit-history-panel.tsx"), "utf8");
 

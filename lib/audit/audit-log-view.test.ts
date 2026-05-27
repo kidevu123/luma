@@ -74,4 +74,18 @@ describe("AUDIT-LOG-1 · buildAuditLogViewRow", () => {
     const v = buildAuditLogViewRow(row({ action: "machine.create" }));
     expect(v.actorLabel).toBe("lead@example.com");
   });
+
+  it("formats receive.edit with generic notes/closedAt diff", () => {
+    const v = buildAuditLogViewRow(
+      row({
+        action: "receive.edit",
+        targetType: "Receive",
+        before: { notes: "old", closedAt: null },
+        after: { notes: "new", closedAt: "2026-05-27T12:00:00.000Z" },
+      }),
+    );
+    expect(v.actionLabel).toBe("Receive edited");
+    expect(v.detailLines.some((l) => l.includes("notes"))).toBe(true);
+    expect(v.detailLines.some((l) => l.includes("closedAt"))).toBe(true);
+  });
 });

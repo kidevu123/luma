@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.8] — 2026-05-27
+
+### Added
+- **Receive notes and open/close edit (RECEIVE-EDIT-2B-1):** Supervisors (`requireLead`) can edit receive-level notes and mark a receive open or closed from `/inbound/[id]/edit`. Only `receives.notes` and `receives.closed_at` are updated; PO, shipment, receive name, bags, and batches are unchanged. Changes are audited as `receive.edit` on target `Receive` with before/after snapshots of notes and closedAt. Receive detail page includes a secondary **Edit receive** link.
+
+### Tests added (RECEIVE-EDIT-2B-1)
+- `lib/db/queries/receive-edits.test.ts` — patch builder for notes and open/close.
+- `app/(admin)/inbound/[id]/edit/page.test.ts` — structural guards (editable scope, requireLead).
+- `app/(admin)/inbound/[id]/edit/actions.test.ts` — requireLead enforcement and delegation.
+- `app/(admin)/inbound/[id]/page.test.ts` — Edit receive link on detail page.
+- `lib/audit/audit-log-view.test.ts` — receive.edit display in audit log viewer.
+
 ## [0.3.7] — 2026-05-27
 
 ### Added

@@ -104,9 +104,14 @@ export default async function ReceiveDetailPage({
               : "Walk-in receive (no PO)"
           }
           actions={
-            <StatusPill kind={r.receive.closedAt ? "neutral" : "ok"}>
-              {r.receive.closedAt ? "Closed" : "Open"}
-            </StatusPill>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/inbound/${id}/edit`}>Edit receive</Link>
+              </Button>
+              <StatusPill kind={r.receive.closedAt ? "neutral" : "ok"}>
+                {r.receive.closedAt ? "Closed" : "Open"}
+              </StatusPill>
+            </div>
           }
         />
       </div>

@@ -36,6 +36,8 @@ export function formatAuditActionLabel(action: string): string {
       return "QR card released";
     case "qr_card.reserved_at_bag_edit":
       return "QR card reserved";
+    case "receive.edit":
+      return "Receive edited";
     default:
       return action.replace(/_/g, " ");
   }
