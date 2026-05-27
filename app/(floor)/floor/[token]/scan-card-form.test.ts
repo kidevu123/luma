@@ -583,9 +583,47 @@ describe("FLOOR-SCAN-UX-2 · scan confirmation state", () => {
     expect(formSrc).toMatch(/detail\s*:/);
   });
 
-  it("handleResolvedToken calls setScanInput with result.cardLabel — not empty string", () => {
+  it("handleResolvedToken sets scanInput to raw.trim() immediately — before lookup, so operator sees something", () => {
+    // FLOOR-SCAN-LIVE-1 fix: input was blank during lookup. Now the raw token is
+    // shown immediately (before the server round-trip), then overwritten with the
+    // human-readable label on success. Use await-call position not import line.
+    const rawTrimIdx = formSrc.indexOf("setScanInput(raw.trim())");
+    const lookupCallIdx = formSrc.indexOf("await lookupCardByTokenAction(fd)");
+    expect(rawTrimIdx).toBeGreaterThan(-1);
+    expect(lookupCallIdx).toBeGreaterThan(-1);
+    expect(rawTrimIdx).toBeLessThan(lookupCallIdx);
+  });
+
+  it("handleResolvedToken overwrites raw token with result.cardLabel on successful lookup", () => {
     expect(formSrc).toMatch(/setScanInput\s*\(\s*result\.cardLabel\s*\)/);
     expect(formSrc).not.toMatch(/setScanInput\s*\(\s*['"]\s*['"]\s*\)/);
+  });
+
+  it("handleResolvedToken has catch block — silent failures from thrown server actions are surfaced as scanError", () => {
+    // FLOOR-SCAN-LIVE-1: without this, a DB error or network failure in
+    // lookupCardByTokenAction throws past the finally block, leaving the form
+    // blank with no error message visible to the operator.
+    // Narrow to handleResolvedToken body to avoid matching submitWithCardId's try/finally.
+    const fnStart = formSrc.indexOf("const handleResolvedToken");
+    const fnEnd = formSrc.indexOf("const handleScanKeyDown");
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const fnBody = formSrc.slice(fnStart, fnEnd);
+    const catchIdx = fnBody.indexOf("} catch (err) {");
+    const finallyIdx = fnBody.indexOf("} finally {");
+    expect(catchIdx).toBeGreaterThan(-1);
+    expect(finallyIdx).toBeGreaterThan(-1);
+    expect(catchIdx).toBeLessThan(finallyIdx);
+    const catchBlock = fnBody.slice(catchIdx, finallyIdx);
+    expect(catchBlock).toMatch(/setScanError/);
+  });
+
+  it("handleCameraResult logs decoded QR value to console when ?debug=1 is set in URL", () => {
+    // FLOOR-SCAN-LIVE-1: helps field-diagnose QR encoding issues without
+    // polluting normal operation. Guard is URLSearchParams('debug') === '1'.
+    expect(formSrc).toMatch(/debug.*===.*"1"|"1".*===.*debug/);
+    expect(formSrc).toMatch(/console\.log/);
+    expect(formSrc).toMatch(/floor-scan.*camera decoded|camera decoded.*floor-scan/);
   });
 
   it("handleResolvedToken clears scannedContext before setting it — null call precedes object call", () => {
