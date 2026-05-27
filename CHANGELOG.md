@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.14] — 2026-05-27
+
+### Changed (STATION-NAV-CLEANUP-2)
+- **Remove Variety pack from station supervisor tools:** No station kind links to `/floor/[token]/variety-pack`. BLISTER, SEALING, and COMBINED keep **Rolls** only; all other kinds show no supervisor tools panel. Variety pack production is expected from the main station scan flow.
+- **`/floor/[token]/variety-pack`:** Redirects to the station page (valid token) instead of the legacy allocation workflow UI.
+- **Bag allocation sub-page nav:** Footer links back to **Station** only (removed cross-links to Variety pack, Bag allocation, Rolls).
+
+### Tests added (STATION-NAV-CLEANUP-2)
+- `lib/production/floor-station-mobile-nav.test.ts` — no variety pack on any kind, BOTTLE_HANDPACK empty tools, variety-pack redirect, bag-allocation nav cleanup.
+
 ## [0.4.13] — 2026-05-27
 
 ### Fixed (STATION-PAUSE-2)

@@ -252,7 +252,7 @@ export default async function BagAllocationPage({
                 {productsList.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} · {p.sku} · {p.route_code ?? "no route"}
-                    {p.has_components ? " · variety pack (use variety-pack page)" : ""}
+                    {p.has_components ? " · multi-component product" : ""}
                   </option>
                 ))}
               </select>
@@ -605,24 +605,6 @@ function FloorNav({ token }: { token: string }) {
         className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page"
       >
         Station
-      </Link>
-      <Link
-        href={`/floor/${token}/rolls`}
-        className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page"
-      >
-        Rolls
-      </Link>
-      <Link
-        href={`/floor/${token}/bag-allocation`}
-        className="rounded border border-brand-300 bg-brand-50 text-brand-800 px-3 py-1.5 font-medium"
-      >
-        Bag allocation
-      </Link>
-      <Link
-        href={`/floor/${token}/variety-pack`}
-        className="rounded border border-border/70 bg-surface px-3 py-1.5 hover:bg-page"
-      >
-        Variety pack
       </Link>
     </nav>
   );

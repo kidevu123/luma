@@ -10,11 +10,7 @@ export const FLOOR_ROLL_STATION_KINDS = new Set([
   "SEALING",
 ]);
 
-/** Bottle variety-pack allocation (VALIDATION-2A). Card/blister stations
- *  run VARIETY products via scan/start on the main page, not this tool. */
-export const FLOOR_VARIETY_PACK_STATION_KINDS = new Set(["BOTTLE_HANDPACK"]);
-
-export type FloorSupervisorToolId = "rolls" | "variety-pack";
+export type FloorSupervisorToolId = "rolls";
 
 export type FloorSupervisorToolLink = {
   id: FloorSupervisorToolId;
@@ -26,22 +22,16 @@ export function floorSupervisorToolsForStation(
   token: string,
   stationKind: string,
 ): FloorSupervisorToolLink[] {
-  const links: FloorSupervisorToolLink[] = [];
   if (FLOOR_ROLL_STATION_KINDS.has(stationKind)) {
-    links.push({
-      id: "rolls",
-      href: `/floor/${token}/rolls`,
-      label: "Rolls",
-    });
+    return [
+      {
+        id: "rolls",
+        href: `/floor/${token}/rolls`,
+        label: "Rolls",
+      },
+    ];
   }
-  if (FLOOR_VARIETY_PACK_STATION_KINDS.has(stationKind)) {
-    links.push({
-      id: "variety-pack",
-      href: `/floor/${token}/variety-pack`,
-      label: "Variety pack",
-    });
-  }
-  return links;
+  return [];
 }
 
 /** Loaded-material panel (unit lots) — not roll mount; see auto-load-lots. */

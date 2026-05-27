@@ -3,7 +3,6 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import {
   FLOOR_ROLL_STATION_KINDS,
-  FLOOR_VARIETY_PACK_STATION_KINDS,
   floorSupervisorToolsForStation,
   formatStationPageSubtitle,
   stationShowsLoadedMaterialsPanel,
@@ -12,6 +11,14 @@ import {
 const TOKEN = "station-token-abc";
 const pageSrc = readFileSync(
   join(__dirname, "../../app/(floor)/floor/[token]/page.tsx"),
+  "utf8",
+);
+const varietyPackPageSrc = readFileSync(
+  join(__dirname, "../../app/(floor)/floor/[token]/variety-pack/page.tsx"),
+  "utf8",
+);
+const bagAllocationPageSrc = readFileSync(
+  join(__dirname, "../../app/(floor)/floor/[token]/bag-allocation/page.tsx"),
   "utf8",
 );
 
@@ -26,27 +33,38 @@ const ALL_STATION_KINDS = [
   "COMBINED",
 ] as const;
 
-describe("STATION-TOOLS-CLEANUP-2 · floorSupervisorToolsForStation", () => {
+describe("STATION-NAV-CLEANUP-2 · floorSupervisorToolsForStation", () => {
+  it("no station kind exposes variety pack", () => {
+    for (const kind of ALL_STATION_KINDS) {
+      const ids = floorSupervisorToolsForStation(TOKEN, kind).map((t) => t.id);
+      expect(ids, kind).not.toContain("variety-pack");
+    }
+  });
+
   it("HANDPACK_BLISTER has no supervisor tools", () => {
     expect(floorSupervisorToolsForStation(TOKEN, "HANDPACK_BLISTER")).toEqual([]);
   });
 
-  it("BLISTER gets rolls only (no variety pack)", () => {
+  it("BOTTLE_HANDPACK has no supervisor tools", () => {
+    expect(floorSupervisorToolsForStation(TOKEN, "BOTTLE_HANDPACK")).toEqual([]);
+  });
+
+  it("BLISTER gets rolls only", () => {
     expect(floorSupervisorToolsForStation(TOKEN, "BLISTER").map((t) => t.id)).toEqual(
       ["rolls"],
     );
   });
 
-  it("COMBINED gets rolls only (no variety pack)", () => {
-    expect(floorSupervisorToolsForStation(TOKEN, "COMBINED").map((t) => t.id)).toEqual(
+  it("SEALING gets rolls only", () => {
+    expect(floorSupervisorToolsForStation(TOKEN, "SEALING").map((t) => t.id)).toEqual(
       ["rolls"],
     );
   });
 
-  it("BOTTLE_HANDPACK gets variety pack only (no rolls)", () => {
-    expect(
-      floorSupervisorToolsForStation(TOKEN, "BOTTLE_HANDPACK").map((t) => t.id),
-    ).toEqual(["variety-pack"]);
+  it("COMBINED gets rolls only", () => {
+    expect(floorSupervisorToolsForStation(TOKEN, "COMBINED").map((t) => t.id)).toEqual(
+      ["rolls"],
+    );
   });
 
   it("PACKAGING, BOTTLE_CAP_SEAL, and BOTTLE_STICKER get no tools", () => {
@@ -55,23 +73,10 @@ describe("STATION-TOOLS-CLEANUP-2 · floorSupervisorToolsForStation", () => {
     expect(floorSupervisorToolsForStation(TOKEN, "BOTTLE_STICKER")).toEqual([]);
   });
 
-  it("SEALING keeps rolls for machine roll management", () => {
-    expect(floorSupervisorToolsForStation(TOKEN, "SEALING").map((t) => t.id)).toEqual(
-      ["rolls"],
-    );
-  });
-
   it("no station exposes bag allocation in supervisor tools", () => {
     for (const kind of ALL_STATION_KINDS) {
       const ids = floorSupervisorToolsForStation(TOKEN, kind).map((t) => t.id);
       expect(ids).not.toContain("bag-allocation");
-    }
-  });
-
-  it("card/blister kinds never expose variety pack", () => {
-    for (const kind of ["BLISTER", "HANDPACK_BLISTER", "COMBINED", "SEALING"] as const) {
-      const ids = floorSupervisorToolsForStation(TOKEN, kind).map((t) => t.id);
-      expect(ids).not.toContain("variety-pack");
     }
   });
 
@@ -89,10 +94,30 @@ describe("STATION-TOOLS-CLEANUP-2 · floorSupervisorToolsForStation", () => {
   });
 });
 
-describe("STATION-TOOLS-CLEANUP-2 · station page hides empty supervisor tools", () => {
+describe("STATION-NAV-CLEANUP-2 · station page hides empty supervisor tools", () => {
   it("SupervisorToolsPanel returns null when tools array is empty", () => {
     expect(pageSrc).toMatch(/function SupervisorToolsPanel/);
     expect(pageSrc).toMatch(/if \(tools\.length === 0\) return null/);
+  });
+});
+
+describe("STATION-NAV-CLEANUP-2 · variety-pack route", () => {
+  it("redirects to station page instead of rendering allocation workflow", () => {
+    expect(varietyPackPageSrc).toMatch(/redirect\(`\/floor\/\$\{token\}`\)/);
+    expect(varietyPackPageSrc).not.toMatch(/Variety pack allocation/);
+    expect(varietyPackPageSrc).not.toMatch(/startOrResumeVarietyRunAction/);
+  });
+});
+
+describe("STATION-NAV-CLEANUP-2 · bag-allocation sub-page nav", () => {
+  it("footer nav links back to station only", () => {
+    const navIdx = bagAllocationPageSrc.indexOf("function FloorNav");
+    expect(navIdx).toBeGreaterThan(-1);
+    const navBlock = bagAllocationPageSrc.slice(navIdx, navIdx + 400);
+    expect(navBlock).toMatch(/href=\{`\/floor\/\$\{token\}`\}/);
+    expect(navBlock).not.toMatch(/variety-pack/);
+    expect(navBlock).not.toMatch(/bag-allocation/);
+    expect(navBlock).not.toMatch(/\/rolls/);
   });
 });
 
@@ -118,16 +143,11 @@ describe("STATION-MOBILE-UX-2 · formatStationPageSubtitle", () => {
   });
 });
 
-describe("STATION-TOOLS-CLEANUP-2 · station kind sets", () => {
+describe("STATION-NAV-CLEANUP-2 · station kind sets", () => {
   it("roll kinds are PVC/foil machine stations only", () => {
     expect(FLOOR_ROLL_STATION_KINDS.has("BLISTER")).toBe(true);
     expect(FLOOR_ROLL_STATION_KINDS.has("HANDPACK_BLISTER")).toBe(false);
     expect(FLOOR_ROLL_STATION_KINDS.has("PACKAGING")).toBe(false);
-  });
-
-  it("variety pack tool is bottle handpack only", () => {
-    expect(FLOOR_VARIETY_PACK_STATION_KINDS.has("BOTTLE_HANDPACK")).toBe(true);
-    expect(FLOOR_VARIETY_PACK_STATION_KINDS.has("BLISTER")).toBe(false);
-    expect(FLOOR_VARIETY_PACK_STATION_KINDS.has("BOTTLE_CAP_SEAL")).toBe(false);
+    expect(FLOOR_ROLL_STATION_KINDS.has("BOTTLE_HANDPACK")).toBe(false);
   });
 });
