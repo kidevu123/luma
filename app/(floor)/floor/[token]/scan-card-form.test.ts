@@ -532,10 +532,11 @@ describe("CAMERA-SCAN-ROOTCAUSE-1 · camera-scanner.tsx video DOM fix", () => {
 describe("QR-SCAN-PAYLOAD-1 · lookupCardByTokenAction dual lookup", () => {
   const actionsSrc = readFileSync(resolve(here, "actions.ts"), "utf8");
 
-  it("uses or() to wrap the WHERE clause — not a bare scanToken eq", () => {
-    // The old single-field where: .where(eq(qrCards.scanToken, ...))
-    // The new dual-field where: .where(or(eq(qrCards.scanToken, ...), eq(qrCards.id, ...)))
-    expect(actionsSrc).toMatch(/\.where\s*\(\s*or\s*\(/);
+  it("UUID_RE.test(token) gates the id fallback — non-UUID tokens never reach the UUID column", () => {
+    // FLOOR-SCAN-ERROR-2: unconditional or(eq(qrCards.id, token)) crashes with
+    // PostgresError 22P02 when token is a slug like "bag-card-117". The fix gates
+    // the id path on UUID format so slugs only hit the scanToken column.
+    expect(actionsSrc).toMatch(/UUID_RE\.test\s*\(\s*token\s*\)/);
   });
 
   it("includes eq(qrCards.scanToken, token) inside the or() clause", () => {
@@ -703,5 +704,50 @@ describe("FLOOR-SCAN-ERROR-1 · use-server file export guard", () => {
   it("admin qc-review/actions.ts does not export any plain const object", () => {
     const illegalExports = adminQcActionsSrc.match(/^export\s+const\s+\w+\s*=/gm) ?? [];
     expect(illegalExports).toHaveLength(0);
+  });
+});
+
+// ── FLOOR-SCAN-ERROR-2 · non-UUID scan token does not hit UUID column ─────────
+//
+// Regression guard for digest 2676337210: lookupCardByTokenAction passed any
+// scanned token directly to eq(qrCards.id, token). When token is a slug like
+// "bag-card-117", PostgreSQL throws 22P02 (invalid input syntax for type uuid),
+// which surfaces as the RSC render error overlay. Fix: UUID_RE gate + try-catch.
+
+describe("FLOOR-SCAN-ERROR-2 · non-UUID scan token does not hit UUID column", () => {
+  it("lookupCardByTokenAction DB query is wrapped in try-catch", () => {
+    const actionsSrc = readFileSync(resolve(here, "actions.ts"), "utf8");
+    const fnStart = actionsSrc.indexOf("export async function lookupCardByTokenAction");
+    const fnEnd = actionsSrc.indexOf("\nexport ", fnStart + 1);
+    const fnBody = actionsSrc.slice(fnStart, fnEnd > fnStart ? fnEnd : undefined);
+    expect(fnBody).toMatch(/try\s*\{/);
+    expect(fnBody).toMatch(/catch\s*\(err\)\s*\{/);
+    const catchIdx = fnBody.indexOf("catch (err)");
+    const catchBlock = fnBody.slice(catchIdx, catchIdx + 200);
+    expect(catchBlock).toMatch(/return\s*\{\s*error:/);
+    expect(catchBlock).not.toMatch(/\bthrow\b/);
+  });
+
+  it("returns ok for non-UUID slug token when card exists by scanToken", async () => {
+    selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
+    const result = await lookupCardByTokenAction(makeForm("bag-card-117"));
+    expect(result).toHaveProperty("ok", true);
+    const ok = result as { ok: true; cardId: string; cardLabel: string };
+    expect(ok.cardId).toBe(INTAKE_RESERVED_RAW_BAG.id);
+  });
+
+  it("returns not-found error for non-UUID slug with no matching card", async () => {
+    selectResults[0] = [];
+    const result = await lookupCardByTokenAction(makeForm("bag-card-999"));
+    expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toMatch(/not found/i);
+  });
+
+  it("returns ok for UUID-format token (legacy label path)", async () => {
+    selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
+    const result = await lookupCardByTokenAction(
+      makeForm("00000000-0000-0000-0000-000000000002"),
+    );
+    expect(result).toHaveProperty("ok", true);
   });
 });

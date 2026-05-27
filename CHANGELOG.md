@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.6] — 2026-05-27
+
+### Fixed
+- **PostgresError 22P02 crash on floor bag scan (FLOOR-SCAN-ERROR-2):** Scanning any bag QR whose `scanToken` is a slug (e.g. `bag-card-117`) caused a Server Components render error overlay (digest `2676337210`) after the camera decoded the code. Root cause: `lookupCardByTokenAction` used `or(eq(qrCards.scanToken, token), eq(qrCards.id, token))` unconditionally. When `token` is a slug, Drizzle passes it as the `$2` parameter to the UUID-typed `id` column, and PostgreSQL throws `invalid input syntax for type uuid: "bag-card-117"` (22P02). Fix: added a `UUID_RE.test(token)` guard — non-UUID tokens only hit `scanToken`; UUID-format tokens (legacy labels printed before QR-SCAN-PAYLOAD-1) continue to search both columns. Also wrapped the DB query in try-catch so any future unexpected DB error surfaces as an inline error rather than an RSC overlay.
+
+### Tests added (FLOOR-SCAN-ERROR-2)
+- `FLOOR-SCAN-ERROR-2 · non-UUID scan token does not hit UUID column` — 4 tests in `scan-card-form.test.ts`:
+  - DB query wrapped in try-catch with `return { error }` (not rethrow).
+  - Non-UUID slug returns `ok` when card found by `scanToken`.
+  - Non-UUID slug returns not-found error when no card.
+  - UUID-format token (legacy label) still resolves via both columns.
+- Updated `QR-SCAN-PAYLOAD-1 · lookupCardByTokenAction dual lookup` test 1 to assert `UUID_RE.test(token)` gate instead of unconditional `.where(or(`.
+
 ## [0.3.5] — 2026-05-27
 
 ### Fixed

@@ -1051,37 +1051,48 @@ export async function lookupCardByTokenAction(
   }
 
   const token = scanToken.trim();
-  const [card] = await db
-    .select({
-      id: qrCards.id,
-      label: qrCards.label,
-      cardType: qrCards.cardType,
-      status: qrCards.status,
-      assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
-      tabletTypeId: inventoryBags.tabletTypeId,
-    })
-    .from(qrCards)
-    .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
-    // QR-SCAN-PAYLOAD-1: new labels encode scanToken; legacy labels printed before
-    // this fix encode qrCards.id. Support both until old labels are retired/reprinted.
-    // TODO: remove the eq(qrCards.id, token) id fallback once legacy labels are gone.
-    .where(or(eq(qrCards.scanToken, token), eq(qrCards.id, token)))
-    .limit(1);
+  // QR-SCAN-PAYLOAD-1: new labels encode scanToken (e.g. "bag-card-117").
+  // Legacy labels printed before QR-SCAN-PAYLOAD-1 encode qrCards.id (a UUID).
+  // Gate the id fallback on UUID format — passing a non-UUID to the UUID id
+  // column throws PostgresError 22P02 (string_to_uuid, digest 2676337210).
+  // TODO: remove the id fallback once legacy labels are reprinted.
+  try {
+    const [card] = await db
+      .select({
+        id: qrCards.id,
+        label: qrCards.label,
+        cardType: qrCards.cardType,
+        status: qrCards.status,
+        assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
+        tabletTypeId: inventoryBags.tabletTypeId,
+      })
+      .from(qrCards)
+      .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
+      .where(
+        UUID_RE.test(token)
+          ? or(eq(qrCards.scanToken, token), eq(qrCards.id, token))
+          : eq(qrCards.scanToken, token),
+      )
+      .limit(1);
 
-  if (!card) return { error: "Bag QR not found." };
+    if (!card) return { error: "Bag QR not found." };
 
-  const classification = classifyFloorScanCard(card);
-  if (!classification.eligible) {
-    return { error: classification.reason };
+    const classification = classifyFloorScanCard(card);
+    if (!classification.eligible) {
+      return { error: classification.reason };
+    }
+
+    return {
+      ok: true,
+      cardId: card.id,
+      cardLabel: card.label,
+      isIntakeReserved: classification.isIntakeReserved,
+      tabletTypeId: card.tabletTypeId ?? null,
+    };
+  } catch (err) {
+    console.error("[lookupCardByTokenAction] DB error:", err);
+    return { error: "Bag QR lookup failed — please try again." };
   }
-
-  return {
-    ok: true,
-    cardId: card.id,
-    cardLabel: card.label,
-    isIntakeReserved: classification.isIntakeReserved,
-    tabletTypeId: card.tabletTypeId ?? null,
-  };
 }
 
 // ── seal handpack bag ──────────────────────────────────────────────────────
