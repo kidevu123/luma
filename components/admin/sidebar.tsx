@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   ClipboardList,
   Archive,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -60,6 +61,7 @@ const SECTIONS: Section[] = [
     items: [
       { href: "/metrics",                label: "Metrics",      icon: BarChart3 },
       { href: "/operator-productivity",  label: "Productivity", icon: Users },
+      { href: "/reports/audit-log",      label: "Audit log",    icon: ScrollText },
     ],
   },
 ];

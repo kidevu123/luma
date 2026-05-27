@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.7] — 2026-05-27
+
+### Added
+- **Admin audit log viewer (AUDIT-LOG-1):** Read-only `/reports/audit-log` page for supervisors (`requireLead`). Shows the latest 100 `audit_log` rows with time, actor, action, target, compact summary, and per-row details expansion (human-readable lines + collapsed before/after JSON). Optional filters: action substring, target type, actor email substring. Sidebar link under Reports.
+
+### Tests added (AUDIT-LOG-1)
+- `lib/audit/audit-log-view.test.ts` — summary formatting helpers.
+- `app/(admin)/reports/audit-log/page.test.ts` — structural guards for page, filters, nav.
+
 ## [0.3.6] — 2026-05-27
 
 ### Fixed
