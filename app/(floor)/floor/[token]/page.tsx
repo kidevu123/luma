@@ -47,6 +47,8 @@ import {
   type FloorSupervisorToolLink,
 } from "@/lib/production/floor-station-mobile-nav";
 import { SealHandpackForm } from "./seal-handpack-form";
+import { ElapsedTimer } from "./elapsed-timer";
+import { formatFloorTimeEastern } from "@/lib/floor-time";
 import { readFileSync } from "fs";
 import path from "path";
 
@@ -411,15 +413,35 @@ export default async function FloorStationPage({
               <p className="text-xs text-text-muted mt-2">
                 Started{" "}
                 {currentAtStation.bag.startedAt
-                  ? new Date(
-                      currentAtStation.bag.startedAt as unknown as string,
-                    ).toLocaleTimeString()
+                  ? formatFloorTimeEastern(
+                      new Date(
+                        currentAtStation.bag.startedAt as unknown as string,
+                      ),
+                    )
                   : "—"}
                 {currentAtStation.state?.currentOperatorCode
                   ? ` · operator ${currentAtStation.state.currentOperatorCode}`
                   : ""}
               </p>
             </div>
+            {currentAtStation.bag.startedAt && (
+              <ElapsedTimer
+                startedAtMs={new Date(
+                  currentAtStation.bag.startedAt as unknown as string,
+                ).getTime()}
+                pausedSecondsAccum={
+                  currentAtStation.state?.pausedSecondsAccum ?? 0
+                }
+                isPaused={currentAtStation.state?.isPaused ?? false}
+                pausedAtMs={
+                  currentAtStation.state?.pausedAt
+                    ? new Date(
+                        currentAtStation.state.pausedAt as unknown as string,
+                      ).getTime()
+                    : null
+                }
+              />
+            )}
             <StageActionButtons
               token={token}
               stationId={station.station.id}

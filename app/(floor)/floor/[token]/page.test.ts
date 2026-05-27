@@ -62,3 +62,85 @@ describe("STATION-MOBILE-UX-2 · mobile-first station page", () => {
     expect(pageSrc).toMatch(/ScanCardForm/);
   });
 });
+
+describe('STATION-ACTIVE-UX-1 · active bag Eastern time', () => {
+  it('imports formatFloorTimeEastern from floor-time helper', () => {
+    expect(pageSrc).toMatch(/formatFloorTimeEastern/);
+    expect(pageSrc).toMatch(/from.*floor-time/);
+  });
+
+  it('does not call bare toLocaleTimeString on startedAt', () => {
+    // Eastern formatting is done via formatFloorTimeEastern, never bare
+    const startedIdx = pageSrc.indexOf('startedAt');
+    const chunk = pageSrc.slice(startedIdx, startedIdx + 300);
+    expect(chunk).not.toMatch(/\.toLocaleTimeString\(\)/);
+  });
+
+  it('wraps startedAt in formatFloorTimeEastern call', () => {
+    expect(pageSrc).toMatch(/formatFloorTimeEastern\s*\(\s*new Date/);
+  });
+});
+
+describe('STATION-ACTIVE-UX-1 · elapsed timer component', () => {
+  it('imports ElapsedTimer from elapsed-timer module', () => {
+    expect(pageSrc).toMatch(/ElapsedTimer/);
+    expect(pageSrc).toMatch(/from.*elapsed-timer/);
+  });
+
+  it('places ElapsedTimer after Current bag label', () => {
+    const bagIdx = pageSrc.indexOf('Current bag');
+    // Use the JSX usage (<ElapsedTimer), not the import line
+    const timerIdx = pageSrc.indexOf('<ElapsedTimer');
+    expect(timerIdx).toBeGreaterThan(bagIdx);
+  });
+
+  it('passes startedAtMs prop as number via getTime()', () => {
+    // JSX spans multiple lines — use s flag
+    expect(pageSrc).toMatch(/startedAtMs=\{[\s\S]*?\.getTime\(\)/);
+  });
+
+  it('passes pausedSecondsAccum from state', () => {
+    expect(pageSrc).toMatch(/pausedSecondsAccum=\{/);
+    expect(pageSrc).toMatch(/pausedSecondsAccum/);
+  });
+
+  it('passes isPaused from state', () => {
+    expect(pageSrc).toMatch(/isPaused=\{.*state\?.*isPaused/);
+  });
+
+  it('passes pausedAtMs as null when state.pausedAt is absent', () => {
+    expect(pageSrc).toMatch(/pausedAtMs=\{/);
+    // null fallback for pausedAt — multiline JSX, use s flag
+    expect(pageSrc).toMatch(/pausedAtMs=\{[\s\S]*?null[\s\S]*?\}/);
+  });
+
+  it('elapsed-timer is a use-client component', () => {
+    const timerSrc = require('fs').readFileSync(
+      require('path').join(__dirname, 'elapsed-timer.tsx'),
+      'utf8'
+    );
+    expect(timerSrc).toMatch(/^"use client"/);
+    expect(timerSrc).toMatch(/setInterval/);
+    expect(timerSrc).toMatch(/clearInterval/);
+    expect(timerSrc).toMatch(/Paused at/);
+  });
+});
+
+describe('STATION-ACTIVE-UX-1 · Op label clarity', () => {
+  const sab = require('fs').readFileSync(
+    require('path').join(__dirname, 'stage-action-buttons.tsx'),
+    'utf8'
+  );
+
+  it('does not use the old Op # (4 digits) placeholder text', () => {
+    expect(sab).not.toMatch(/Op # \(4 digits\)/);
+  });
+
+  it('uses Operator code as placeholder', () => {
+    expect(sab).toMatch(/placeholder="Operator code"/);
+  });
+
+  it('keeps aria-label describing the operator badge field', () => {
+    expect(sab).toMatch(/aria-label="Operator code"/);
+  });
+});

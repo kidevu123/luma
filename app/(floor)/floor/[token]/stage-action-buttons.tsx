@@ -282,7 +282,7 @@ export function StageActionButtons({
           pattern="[0-9]{4}"
           value={operatorCode}
           onChange={(e) => updateOperatorCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
-          placeholder="Op # (4 digits)"
+          placeholder="Operator code"
           maxLength={4}
           aria-label="Operator code"
           title="4-digit operator badge — saved for this shift on this device"

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.6] — 2026-05-27
+
+### Added (STATION-ACTIVE-UX-1)
+- **Eastern station times:** `formatFloorTimeEastern` helper (`lib/floor-time.ts`) formats all floor-visible timestamps in `America/New_York` with DST awareness instead of relying on the Docker container's UTC locale.
+- **Live elapsed timer:** `ElapsedTimer` client component (`elapsed-timer.tsx`) displays active production time ticking every second; freezes with "Paused at" label when `isPaused=true`. Formula accounts for accumulated pause seconds and current pause delta.
+- **Clearer operator field label:** `placeholder="Operator code"` replaces the ambiguous "Op # (4 digits)" text in the stage-action-buttons input.
+
+### Tests added (STATION-ACTIVE-UX-1)
+- `lib/floor-time.test.ts` — 10 tests covering `formatFloorTimeEastern` (winter/summer DST, string input, minute padding) and `formatElapsedSeconds` (zero, sub-minute, minutes, hours, negative clamping, fractional floor).
+- `app/(floor)/floor/[token]/page.test.ts` — 13 new tests: Eastern time import/usage, no bare `toLocaleTimeString()` on `startedAt`, `ElapsedTimer` placement + props (startedAtMs, pausedSecondsAccum, isPaused, pausedAtMs), use-client directive, setInterval/clearInterval, "Paused at" label, updated Op placeholder.
+
 ## [0.4.5] — 2026-05-27
 
 ### Changed
