@@ -4,7 +4,7 @@
 // surfaced as a tone panel, top finalized flavors in a standard section
 // div, quick-links as simple bordered Link divs.
 // Per metrics-strategy.md §13.1 every number drives an action; vanity
-// metrics are out. Data loading logic unchanged from the prior page.
+// metrics are out. Finalized counts/tablets load from ./loaders.ts.
 
 import Link from "next/link";
 import {
@@ -17,205 +17,20 @@ import {
   TrendingUp,
   Sparkles,
 } from "lucide-react";
-import { sql, and, isNull, lt, gte, eq, isNotNull } from "drizzle-orm";
-import { db } from "@/lib/db";
-import {
-  inventoryBags,
-  workflowBags,
-  workflowEvents,
-  qrCards,
-  readDailyThroughput,
-  readBagState,
-  products,
-  tabletTypes,
-} from "@/lib/db/schema";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireSession } from "@/lib/auth-guards";
+import {
+  getFinalizedToday,
+  getCashOnFloor,
+  getAgedUnfinalized,
+  getForgottenBagCount,
+  getPredictedShippableThisWeek,
+  getTopFlavorsByFinalized,
+  getActivityHeartbeat,
+  getActiveQrCardCount,
+} from "./loaders";
 
 export const dynamic = "force-dynamic";
-
-// ── Loaders (unchanged) ───────────────────────────────────────────
-
-async function getFinalizedToday() {
-  const today = new Date().toISOString().slice(0, 10);
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
-  const [todayRow] = await db
-    .select({
-      n: sql<number>`COALESCE(SUM(${readDailyThroughput.bagsFinalized}),0)::int`,
-    })
-    .from(readDailyThroughput)
-    .where(eq(readDailyThroughput.day, today));
-  const [last7Row] = await db
-    .select({
-      n: sql<number>`COALESCE(SUM(${readDailyThroughput.bagsFinalized}),0)::int`,
-      days: sql<number>`COALESCE(COUNT(DISTINCT ${readDailyThroughput.day}),0)::int`,
-    })
-    .from(readDailyThroughput)
-    .where(
-      and(
-        sql`${readDailyThroughput.day} >= ${sevenDaysAgo}::date`,
-        sql`${readDailyThroughput.day} < ${today}::date`,
-      ),
-    );
-  const todayN = todayRow?.n ?? 0;
-  const last7N = last7Row?.n ?? 0;
-  const days = Math.max(last7Row?.days ?? 7, 1);
-  const avg7 = last7N / days;
-  return { todayN, last7N, avg7 };
-}
-
-async function getCashOnFloor() {
-  const [received] = await db
-    .select({
-      bags: sql<number>`COUNT(*)::int`,
-      units: sql<number>`COALESCE(SUM(${inventoryBags.pillCount}),0)::int`,
-    })
-    .from(inventoryBags)
-    .where(eq(inventoryBags.status, "AVAILABLE"));
-  const [inUse] = await db
-    .select({
-      bags: sql<number>`COUNT(*)::int`,
-      units: sql<number>`COALESCE(SUM(${inventoryBags.pillCount}),0)::int`,
-    })
-    .from(inventoryBags)
-    .where(eq(inventoryBags.status, "IN_USE"));
-  const [unfinalized] = await db
-    .select({
-      bags: sql<number>`COUNT(*)::int`,
-      units: sql<number>`COALESCE(SUM(${inventoryBags.pillCount}),0)::int`,
-    })
-    .from(workflowBags)
-    .leftJoin(inventoryBags, eq(workflowBags.inventoryBagId, inventoryBags.id))
-    .where(isNull(workflowBags.finalizedAt));
-  const total =
-    (received?.units ?? 0) + (inUse?.units ?? 0) + (unfinalized?.units ?? 0);
-  const stages = [
-    { label: "Received",      units: received?.units    ?? 0, bags: received?.bags    ?? 0 },
-    { label: "In production", units: unfinalized?.units ?? 0, bags: unfinalized?.bags ?? 0 },
-    { label: "In use",        units: inUse?.units       ?? 0, bags: inUse?.bags       ?? 0 },
-  ];
-  stages.sort((a, b) => b.units - a.units);
-  return { totalUnits: total, biggest: stages[0] };
-}
-
-async function getAgedUnfinalized() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const [agg] = await db
-    .select({
-      count: sql<number>`COUNT(*)::int`,
-      units: sql<number>`COALESCE(SUM(${inventoryBags.pillCount}),0)::int`,
-    })
-    .from(workflowBags)
-    .leftJoin(inventoryBags, eq(workflowBags.inventoryBagId, inventoryBags.id))
-    .where(
-      and(
-        isNull(workflowBags.finalizedAt),
-        lt(workflowBags.startedAt, thirtyDaysAgo),
-      ),
-    );
-  return { count: agg?.count ?? 0, units: agg?.units ?? 0 };
-}
-
-async function getForgottenBagCount() {
-  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
-  const [r] = await db
-    .select({ n: sql<number>`COUNT(*)::int` })
-    .from(readBagState)
-    .innerJoin(workflowBags, eq(workflowBags.id, readBagState.workflowBagId))
-    .where(
-      and(
-        eq(readBagState.isPaused, true),
-        isNotNull(readBagState.pausedAt),
-        lt(readBagState.pausedAt, thirtyMinAgo),
-        isNull(workflowBags.finalizedAt),
-      ),
-    );
-  return r?.n ?? 0;
-}
-
-async function getPredictedShippableThisWeek() {
-  const now = new Date();
-  const dow = now.getDay();
-  const daysSinceMon = (dow + 6) % 7;
-  const mondayMs = now.getTime() - daysSinceMon * 24 * 60 * 60 * 1000;
-  const mondayStr = new Date(mondayMs).toISOString().slice(0, 10);
-  const todayStr = now.toISOString().slice(0, 10);
-  const [thisWeek] = await db
-    .select({
-      n: sql<number>`COALESCE(SUM(${readDailyThroughput.bagsFinalized}),0)::int`,
-    })
-    .from(readDailyThroughput)
-    .where(
-      and(
-        sql`${readDailyThroughput.day} >= ${mondayStr}::date`,
-        sql`${readDailyThroughput.day} <= ${todayStr}::date`,
-      ),
-    );
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
-  const [last7Row] = await db
-    .select({
-      n: sql<number>`COALESCE(SUM(${readDailyThroughput.bagsFinalized}),0)::int`,
-      days: sql<number>`COALESCE(COUNT(DISTINCT ${readDailyThroughput.day}),0)::int`,
-    })
-    .from(readDailyThroughput)
-    .where(sql`${readDailyThroughput.day} >= ${sevenDaysAgo}::date`);
-  const dailyAvg = (last7Row?.n ?? 0) / Math.max(last7Row?.days ?? 7, 1);
-  const businessDaysSoFar = Math.min(daysSinceMon + 1, 5);
-  const businessDaysRemaining = Math.max(5 - businessDaysSoFar, 0);
-  const predictedExtra = Math.round(dailyAvg * businessDaysRemaining);
-  return {
-    thisWeekSoFar: thisWeek?.n ?? 0,
-    predictedExtra,
-    total: (thisWeek?.n ?? 0) + predictedExtra,
-    dailyAvg7: Math.round(dailyAvg),
-  };
-}
-
-async function getTopFlavorsByFinalized() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const rows = await db
-    .select({
-      tabletName:    tabletTypes.name,
-      productName:   products.name,
-      bagsFinalized: sql<number>`COUNT(*)::int`,
-      unitsFinalized: sql<number>`COALESCE(SUM(${inventoryBags.pillCount}),0)::int`,
-    })
-    .from(workflowBags)
-    .leftJoin(products, eq(workflowBags.productId, products.id))
-    .leftJoin(inventoryBags, eq(workflowBags.inventoryBagId, inventoryBags.id))
-    .leftJoin(tabletTypes, eq(inventoryBags.tabletTypeId, tabletTypes.id))
-    .where(
-      and(
-        gte(workflowBags.finalizedAt, thirtyDaysAgo),
-        isNotNull(workflowBags.finalizedAt),
-      ),
-    )
-    .groupBy(tabletTypes.name, products.name)
-    .orderBy(sql`COUNT(*) DESC`)
-    .limit(3);
-  return rows;
-}
-
-async function getActivityHeartbeat() {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [r] = await db
-    .select({ n: sql<number>`COUNT(*)::int` })
-    .from(workflowEvents)
-    .where(gte(workflowEvents.occurredAt, since));
-  return r?.n ?? 0;
-}
-
-async function getActiveQrCardCount() {
-  const [r] = await db
-    .select({ n: sql<number>`COUNT(*)::int` })
-    .from(qrCards)
-    .where(eq(qrCards.status, "ASSIGNED"));
-  return r?.n ?? 0;
-}
 
 // ── Page ───────────────────────────────────────────────────────────
 

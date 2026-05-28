@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.31] — 2026-05-28
+
+### Fixed (DASHBOARD-FINALIZED-TABLETS-1)
+- **Dashboard finalized today:** Counts finalized bags from `workflow_bags.finalized_at` bucketed in `America/New_York` instead of `read_daily_throughput.bags_finalized` (which skips events when the firing station has no `machine_id`, e.g. packaging).
+- **Top flavors tablet totals:** Sums `read_bag_metrics.units_yielded` instead of `inventory_bags.pill_count`, so floor workflow bags without a linked raw inventory bag show correct yielded tablets.
+- **Predicted this week:** Uses the same finalized-bag source for consistency.
+
+### Tests added (DASHBOARD-FINALIZED-TABLETS-1)
+- `app/(admin)/dashboard/loaders.test.ts` — source-table contracts, ET day bucketing, bag/tablet consistency.
+
 ## [0.4.30] — 2026-05-28
 
 ### Fixed (WORKFLOW-DATA-VISIBILITY-1)
