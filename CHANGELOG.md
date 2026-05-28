@@ -3,13 +3,14 @@
 ## [0.4.18] — 2026-05-28
 
 ### Fixed (STATION-KIND-FIX-1)
-- **Root cause:** "Blister Hand Pack Station" (live DB, station id `6e69f0dc`) was created before the `HANDPACK_BLISTER` station kind was added (migration 0044/0045) and was incorrectly seeded as `kind=BLISTER`. No code logic was wrong — the entire UI behavior difference (timed-only vs. machine close-out) already correctly follows the station kind.
-- **Data correction script:** `scripts/fix-station-kind-handpack-blister.ts` — idempotent, safe to re-run. Reclassifies the station as `HANDPACK_BLISTER`. Must be run in the container after deployment.
-- **Before fix (kind=BLISTER):** Shows "Blister complete" button, blister count input, blister close-out panel, PVC roll swap / Machine jam pause options, Rolls supervisor tool.
-- **After fix (kind=HANDPACK_BLISTER):** Shows "Hand-pack complete" button, no count input, no close-out panel, timed-only one-tap completion, Shift ending / QA check / Other pause options only, no supervisor tools.
+- **Root cause:** Floor stations are admin-managed (`/machines`); `scripts/seed.ts` does not create them. **Blister Hand Pack Station** was created as `kind=BLISTER` before `HANDPACK_BLISTER` existed (migration 0044) and was never corrected. UI behavior already follows `stations.kind` — no floor logic change required.
+- **Kind catalog:** `lib/production/station-kind-catalog.ts` records expected label→kind mappings and marks duplicate **Hand Pack Blister Smoke** for deactivation.
+- **Repair script:** `npm run repair:station-handpack-kind` (`scripts/fix-station-handpack-kind.ts`) — dry-run by default; `--apply` with `ALLOW_STATION_KIND_FIX=true` on production. Corrects hand-pack kind, clears machine binding, deactivates smoke duplicate, writes audit rows.
+- **After apply:** Blister Hand Pack Station shows timed-only **Hand-pack complete**, hand-work pause reasons (default Shift ending), no Rolls, no count close-out.
 
 ### Tests added (STATION-KIND-FIX-1)
-- `app/(floor)/floor/[token]/stage-action-buttons.test.ts` — 6 new tests in "STATION-KIND-FIX-1 · behavior follows station kind, not station name": HANDPACK_BLISTER maps to "Hand-pack complete"; HANDPACK_BLISTER_COMPLETE not in RICH_FORM_EVENTS; no count input (TIMED_ONLY); no blister close-out panel; BLISTER retains close-out; `stationKind` prop (not station label) drives event routing.
+- `lib/production/station-kind-catalog.test.ts` — catalog mappings, deactivation list, HANDPACK_BLISTER vs BLISTER floor expectations.
+- `app/(floor)/floor/[token]/stage-action-buttons.test.ts` — behavior follows station kind, not station name.
 
 ## [0.4.17] — 2026-05-27
 
