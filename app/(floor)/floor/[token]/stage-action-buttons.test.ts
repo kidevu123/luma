@@ -276,10 +276,10 @@ describe("SEALING-COUNTER-1 · sealing completion uses machine counter", () => {
     expect(formBlock).not.toMatch(/fd\.set\("countTotal"/);
   });
 
-  it("BlisterCompleteForm unchanged — still uses blister count", () => {
+  it("BlisterCompleteForm uses Machine counter — countTotal payload preserved", () => {
     const blisterIdx = src.indexOf("function BlisterCompleteForm");
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
-    expect(blisterBlock).toMatch(/Blister count/);
+    expect(blisterBlock).toMatch(/Machine counter/);
     expect(blisterBlock).toMatch(/countTotal/);
   });
 
@@ -340,10 +340,11 @@ describe("SEALING-COUNTER-UI-2 · counter-only sealing close-out", () => {
     expect(block).not.toMatch(/fd\.set\("cardsReopened"/);
   });
 
-  it("BlisterCompleteForm still has packs remaining — unchanged", () => {
+  it("BlisterCompleteForm uses Machine counter — packs remaining removed", () => {
     const blisterIdx = src.indexOf("function BlisterCompleteForm");
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
-    expect(blisterBlock).toMatch(/Packs remaining/);
+    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).not.toMatch(/Packs remaining/);
   });
 });
 
@@ -394,11 +395,12 @@ describe("PACKAGING-CLOSEOUT-UX-1 · scroll-safe inputs and clearer labels", () 
     expect(block).not.toMatch(/Packs remaining/);
   });
 
-  it("BlisterCompleteForm still has blister count and packs remaining", () => {
+  it("BlisterCompleteForm uses Machine counter — blister count and packs remaining removed", () => {
     const blisterIdx = src.indexOf("function BlisterCompleteForm");
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
-    expect(blisterBlock).toMatch(/Blister count/);
-    expect(blisterBlock).toMatch(/Packs remaining/);
+    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).not.toMatch(/Blister count/);
+    expect(blisterBlock).not.toMatch(/Packs remaining/);
   });
 
   it("NumField scrollSafe blurs on wheel", () => {
@@ -484,11 +486,12 @@ describe("PACKAGING-AUTO-FINALIZE-1 · manual finalize fallback for legacy PACKA
     expect(block).toMatch(/maybeAutoFinalizeAfterPackagingComplete/);
   });
 
-  it("blister close-out unchanged", () => {
+  it("blister close-out uses machine counter — blister count and packs remaining removed", () => {
     const blisterIdx = src.indexOf("function BlisterCompleteForm");
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
-    expect(blisterBlock).toMatch(/Packs remaining/);
-    expect(blisterBlock).toMatch(/Blister count/);
+    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).not.toMatch(/Blister count/);
+    expect(blisterBlock).not.toMatch(/Packs remaining/);
   });
 });
 
@@ -527,5 +530,67 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging g
     expect(pkgBlock).toMatch(/fd\.set\("looseCards"/);
     expect(pkgBlock).toMatch(/fd\.set\("damagedPackaging"/);
     expect(pkgBlock).toMatch(/fd\.set\("rippedCards"/);
+  });
+});
+
+describe("BLISTER-MACHINE-COUNTER-1 · blister close-out uses machine counter", () => {
+  function blisterFormBlock(): string {
+    const formIdx = src.indexOf("function BlisterCompleteForm");
+    return src.slice(formIdx, formIdx + 2500);
+  }
+
+  it("BlisterCompleteForm renders Machine counter field", () => {
+    expect(blisterFormBlock()).toMatch(/Machine counter/);
+  });
+
+  it("BlisterCompleteForm does not render Blister count", () => {
+    expect(blisterFormBlock()).not.toMatch(/Blister count/);
+  });
+
+  it("BlisterCompleteForm does not render Packs remaining", () => {
+    expect(blisterFormBlock()).not.toMatch(/Packs remaining/);
+  });
+
+  it("BlisterCompleteForm submits countTotal — not packsRemaining", () => {
+    const block = blisterFormBlock();
+    expect(block).toMatch(/fd\.set\("countTotal"/);
+    expect(block).not.toMatch(/fd\.set\("packsRemaining"/);
+  });
+
+  it("BlisterCompleteForm still fires BLISTER_COMPLETE event", () => {
+    expect(blisterFormBlock()).toMatch(/BLISTER_COMPLETE/);
+  });
+
+  it("HANDPACK_BLISTER remains timed-only — TIMED_ONLY_EVENTS unchanged", () => {
+    expect(src).toMatch(/TIMED_ONLY_EVENTS.*HANDPACK_BLISTER_COMPLETE/s);
+    expect(src).not.toMatch(/BlisterCompleteForm.*HANDPACK_BLISTER/s);
+  });
+
+  it("sealing counter UI unchanged — still uses Counter presses and counterPresses", () => {
+    const sealIdx = src.indexOf("function SealingCompleteForm");
+    const blisterIdx = src.indexOf("function BlisterCompleteForm");
+    const sealBlock = src.slice(sealIdx, blisterIdx);
+    expect(sealBlock).toMatch(/Counter presses/);
+    expect(sealBlock).toMatch(/counterPresses/);
+    expect(sealBlock).not.toMatch(/Machine counter/);
+  });
+
+  it("packaging close-out unchanged — no Machine counter field there", () => {
+    const pkgIdx = src.indexOf("function PackagingCompleteForm");
+    const numFieldIdx = src.indexOf("function NumField");
+    const pkgBlock = src.slice(pkgIdx, numFieldIdx);
+    expect(pkgBlock).not.toMatch(/Machine counter/);
+    expect(pkgBlock).toMatch(/Master cases/);
+  });
+
+  it("scan-card-form not touched", () => {
+    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
+    expect(scanSrc).not.toMatch(/Machine counter/);
+    expect(scanSrc).not.toMatch(/machineCounter/);
+  });
+
+  it("product selection at sealing unchanged — no product picker in blister form", () => {
+    expect(blisterFormBlock()).not.toMatch(/needsProductMapping/);
+    expect(blisterFormBlock()).not.toMatch(/selectedProductId/);
   });
 });

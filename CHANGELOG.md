@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.34] — 2026-05-28
+
+### Changed (BLISTER-MACHINE-COUNTER-1)
+- **Foil roll swap pause reason:** BLISTER and COMBINED stations now include "Foil roll swap" in the pause dropdown alongside "PVC roll swap." SEALING, HANDPACK_BLISTER, PACKAGING, and bottle/cap/sticker stations are unchanged.
+- **Blister close-out — machine counter only:** The BLISTER close-out form now shows a single "Machine counter" numeric field. "Blister count" and "Packs remaining" fields are removed. The machine counter value is submitted as `countTotal` (same server path as before). Derived production numbers (tablets used, cards made) are deferred to a future settings-driven derivation system.
+- **HANDPACK_BLISTER unchanged:** Remains timed-only; no counter field.
+- **SEALING counter unchanged:** Counter presses / cards-per-press logic unaffected.
+- **PACKAGING close-out unchanged:** All packaging fields and payload keys unaffected.
+
+### Follow-up (not in this branch)
+- Admin/workflow display: BLISTER stage still labelled "Blistered" in reporting. Count stored as `count_total` in the BLISTER_COMPLETE event payload. No admin reporting overhaul in this branch.
+- Derivation system: machine counter → tablets used / cards blistered is a future slice once product and machine settings are wired.
+
+### Tests added (BLISTER-MACHINE-COUNTER-1)
+- `station-pause-reasons.test.ts` — BLISTER/COMBINED include foil_swap; SEALING/HANDPACK_BLISTER/PACKAGING/BOTTLE_HANDPACK exclude it.
+- `stage-action-buttons.test.ts` — Machine counter renders; blister count and packs remaining absent; countTotal payload present; packsRemaining not submitted; HANDPACK_BLISTER timed-only; sealing/packaging unchanged.
+
 ## [0.4.33] — 2026-05-28
 
 ### Changed (PRODUCT-SELECTION-AT-SEALING-1)

@@ -2,6 +2,7 @@ import type { StationKind } from "@/lib/floor-command/types";
 
 export type PauseReasonValue =
   | "pvc_swap"
+  | "foil_swap"
   | "shift_end"
   | "machine_jam"
   | "qa_check"
@@ -13,6 +14,7 @@ export type PauseReason = {
 };
 
 const PVC_SWAP: PauseReason = { value: "pvc_swap", label: "PVC roll swap" };
+const FOIL_SWAP: PauseReason = { value: "foil_swap", label: "Foil roll swap" };
 const SHIFT_END: PauseReason = { value: "shift_end", label: "Shift ending" };
 const MACHINE_JAM: PauseReason = {
   value: "machine_jam",
@@ -24,6 +26,7 @@ const OTHER: PauseReason = { value: "other", label: "Other" };
 /** Machine stations with PVC/foil roll mount (blister press). */
 const MACHINE_BOUND_REASONS: readonly PauseReason[] = [
   PVC_SWAP,
+  FOIL_SWAP,
   SHIFT_END,
   MACHINE_JAM,
   QA_CHECK,

@@ -893,8 +893,7 @@ function BlisterCompleteForm({
   onError: (msg: string) => void;
 }) {
   const [pending, setPending] = React.useState(false);
-  const [blisterCount, setBlisterCount] = React.useState("");
-  const [packsRemaining, setPacksRemaining] = React.useState("");
+  const [machineCounter, setMachineCounter] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -903,18 +902,12 @@ function BlisterCompleteForm({
   return (
     <div ref={containerRef} className="rounded-lg border-2 border-violet-300 bg-violet-50/40 p-3 space-y-3">
       <p className="text-sm font-semibold text-violet-900">Blister close-out</p>
-      <div className="grid grid-cols-2 gap-2">
-        <NumField
-          label="Blister count"
-          value={blisterCount}
-          onChange={setBlisterCount}
-        />
-        <NumField
-          label="Packs remaining"
-          value={packsRemaining}
-          onChange={setPacksRemaining}
-        />
-      </div>
+      <NumField
+        label="Machine counter"
+        value={machineCounter}
+        onChange={setMachineCounter}
+        scrollSafe
+      />
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
@@ -935,8 +928,7 @@ function BlisterCompleteForm({
               fd.set("workflowBagId", workflowBagId);
               fd.set("stationId", stationId);
               fd.set("eventType", "BLISTER_COMPLETE");
-              fd.set("countTotal", blisterCount || "0");
-              fd.set("packsRemaining", packsRemaining || "0");
+              fd.set("countTotal", machineCounter || "0");
               if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
               fd.set("clientEventId", newClientEventId());
               const r = await fireStageEventAction(fd);

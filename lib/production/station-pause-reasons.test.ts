@@ -25,34 +25,38 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
     }
   });
 
-  it("blister roll-machine stations include pvc_swap and machine_jam", () => {
+  it("blister roll-machine stations include pvc_swap, foil_swap, and machine_jam", () => {
     for (const kind of BLISTER_ROLL_KINDS) {
       const values = getPauseReasonsForStation(kind).map((r) => r.value);
       expect(values, kind).toContain("pvc_swap");
+      expect(values, kind).toContain("foil_swap");
       expect(values, kind).toContain("machine_jam");
     }
   });
 
-  it("SEALING has machine_jam but not pvc_swap", () => {
+  it("SEALING has machine_jam but not pvc_swap or foil_swap", () => {
     const values = getPauseReasonsForStation("SEALING").map((r) => r.value);
     expect(values).not.toContain("pvc_swap");
+    expect(values).not.toContain("foil_swap");
     expect(values).toContain("machine_jam");
     expect(values).toEqual(["shift_end", "machine_jam", "qa_check", "other"]);
   });
 
-  it("hand-work stations do not include pvc_swap or machine_jam", () => {
+  it("hand-work stations do not include pvc_swap, foil_swap, or machine_jam", () => {
     for (const kind of HAND_KINDS) {
       const values = getPauseReasonsForStation(kind).map((r) => r.value);
       expect(values, kind).not.toContain("pvc_swap");
+      expect(values, kind).not.toContain("foil_swap");
       expect(values, kind).not.toContain("machine_jam");
     }
   });
 
-  it("HANDPACK_BLISTER has no pvc_swap and no machine_jam", () => {
+  it("HANDPACK_BLISTER has no pvc_swap, no foil_swap, and no machine_jam", () => {
     const values = getPauseReasonsForStation("HANDPACK_BLISTER").map(
       (r) => r.value,
     );
     expect(values).not.toContain("pvc_swap");
+    expect(values).not.toContain("foil_swap");
     expect(values).not.toContain("machine_jam");
     expect(values).toContain("shift_end");
     expect(values).toContain("qa_check");
@@ -127,5 +131,58 @@ describe("STATION-SEALING-TOOLS-1 · hard-stop scope", () => {
     const pauseSrc = readFileSync(join(__dirname, "station-pause-reasons.ts"), "utf8");
     expect(pauseSrc).not.toMatch(/scan-card-form/);
     expect(pauseSrc).not.toMatch(/from.*actions/);
+  });
+});
+
+describe("BLISTER-MACHINE-COUNTER-1 · foil roll swap pause reason", () => {
+  it("BLISTER pause options include pvc_swap (PVC roll swap)", () => {
+    const values = getPauseReasonsForStation("BLISTER").map((r) => r.value);
+    expect(values).toContain("pvc_swap");
+  });
+
+  it("BLISTER pause options include foil_swap (Foil roll swap)", () => {
+    const values = getPauseReasonsForStation("BLISTER").map((r) => r.value);
+    expect(values).toContain("foil_swap");
+  });
+
+  it("BLISTER foil_swap has correct label", () => {
+    const reason = getPauseReasonsForStation("BLISTER").find(
+      (r) => r.value === "foil_swap",
+    );
+    expect(reason?.label).toBe("Foil roll swap");
+  });
+
+  it("COMBINED pause options include pvc_swap and foil_swap", () => {
+    const values = getPauseReasonsForStation("COMBINED").map((r) => r.value);
+    expect(values).toContain("pvc_swap");
+    expect(values).toContain("foil_swap");
+  });
+
+  it("SEALING pause options do not include pvc_swap or foil_swap", () => {
+    const values = getPauseReasonsForStation("SEALING").map((r) => r.value);
+    expect(values).not.toContain("pvc_swap");
+    expect(values).not.toContain("foil_swap");
+  });
+
+  it("HANDPACK_BLISTER pause options do not include pvc_swap or foil_swap", () => {
+    const values = getPauseReasonsForStation("HANDPACK_BLISTER").map(
+      (r) => r.value,
+    );
+    expect(values).not.toContain("pvc_swap");
+    expect(values).not.toContain("foil_swap");
+  });
+
+  it("PACKAGING pause options do not include pvc_swap or foil_swap", () => {
+    const values = getPauseReasonsForStation("PACKAGING").map((r) => r.value);
+    expect(values).not.toContain("pvc_swap");
+    expect(values).not.toContain("foil_swap");
+  });
+
+  it("BOTTLE_HANDPACK pause options do not include pvc_swap or foil_swap", () => {
+    const values = getPauseReasonsForStation("BOTTLE_HANDPACK").map(
+      (r) => r.value,
+    );
+    expect(values).not.toContain("pvc_swap");
+    expect(values).not.toContain("foil_swap");
   });
 });
