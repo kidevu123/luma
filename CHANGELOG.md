@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.32] — 2026-05-28
+
+### Fixed (PACKAGING-BOM-FOOTER-1)
+- **Packaging close-out static material footer:** Footer now only appears after the operator enters at least one count > 0 (master cases, displays, loose cards, rework, or ripped). Previously showed unconditionally whenever BOM specs existed, which was confusing before the operator typed anything.
+
 ## [0.4.31] — 2026-05-28
 
 ### Fixed (DASHBOARD-FINALIZED-TABLETS-1)

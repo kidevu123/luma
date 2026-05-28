@@ -549,6 +549,9 @@ function PackagingCompleteForm({
   const totalCases = mc;
   const totalDisplays = mc * (displaysPerCase ?? 0) + dm;
   const totalUnits = totalDisplays * (unitsPerDisplay ?? 0) + lc;
+  const dp = parseInt(damagedPackaging) || 0;
+  const rc = parseInt(rippedCards) || 0;
+  const hasPackagingCounts = mc > 0 || dm > 0 || lc > 0 || dp > 0 || rc > 0;
   const hasBomPreview = packagingSpecs && packagingSpecs.length > 0;
   const bomLines =
     hasBomPreview && (mc > 0 || dm > 0 || lc > 0)
@@ -608,9 +611,9 @@ function PackagingCompleteForm({
         </div>
       )}
 
-      {packagingSpecs && packagingSpecs.length > 0 && (
+      {hasBomPreview && hasPackagingCounts && (
         <div className="text-[11px] text-text-subtle space-y-0.5 border-t border-border/40 pt-2 mt-1">
-          {packagingSpecs
+          {packagingSpecs!
             .filter(s => !["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(s.materialKind))
             .map(s => (
               <div key={`${s.materialName}|${s.perScope}`} className="flex items-center justify-between">
@@ -619,7 +622,7 @@ function PackagingCompleteForm({
               </div>
             ))
           }
-          {packagingSpecs.some(s => ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(s.materialKind)) && (
+          {packagingSpecs!.some(s => ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(s.materialKind)) && (
             <div className="text-text-subtle/50">PVC/foil tracked via roll counter</div>
           )}
         </div>

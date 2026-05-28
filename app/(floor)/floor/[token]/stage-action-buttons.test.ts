@@ -416,6 +416,54 @@ describe("PACKAGING-CLOSEOUT-UX-1 · scroll-safe inputs and clearer labels", () 
   });
 });
 
+describe("PACKAGING-BOM-FOOTER-1 · static material footer gated on counts", () => {
+  function packagingFormBlock(): string {
+    const formIdx = src.indexOf("function PackagingCompleteForm");
+    const numFieldIdx = src.indexOf("function NumField");
+    return src.slice(formIdx, numFieldIdx);
+  }
+
+  it("derives dp from damagedPackaging and rc from rippedCards", () => {
+    const block = packagingFormBlock();
+    expect(block).toMatch(/const dp = parseInt\(damagedPackaging\)/);
+    expect(block).toMatch(/const rc = parseInt\(rippedCards\)/);
+  });
+
+  it("hasPackagingCounts includes all five count fields", () => {
+    const block = packagingFormBlock();
+    expect(block).toMatch(/hasPackagingCounts/);
+    const countLine = block.match(/const hasPackagingCounts\s*=\s*[^\n]+/)?.[0] ?? "";
+    expect(countLine).toMatch(/mc > 0/);
+    expect(countLine).toMatch(/dm > 0/);
+    expect(countLine).toMatch(/lc > 0/);
+    expect(countLine).toMatch(/dp > 0/);
+    expect(countLine).toMatch(/rc > 0/);
+  });
+
+  it("static material footer is gated on hasBomPreview && hasPackagingCounts", () => {
+    const block = packagingFormBlock();
+    expect(block).toMatch(/hasBomPreview && hasPackagingCounts/);
+  });
+
+  it("static material footer no longer fires on packagingSpecs.length > 0 alone", () => {
+    const block = packagingFormBlock();
+    expect(block).not.toMatch(/packagingSpecs && packagingSpecs\.length > 0 &&/);
+  });
+
+  it("live BOM preview condition is unchanged — still gated on mc/dm/lc only", () => {
+    const block = packagingFormBlock();
+    expect(block).toMatch(/hasBomPreview && \(mc > 0 \|\| dm > 0 \|\| lc > 0\)/);
+  });
+
+  it("actions.ts packaging payload keys unchanged", () => {
+    expect(actionsSrc).toMatch(/damagedPackaging/);
+    expect(actionsSrc).toMatch(/rippedCards/);
+    expect(actionsSrc).toMatch(/masterCases/);
+    expect(actionsSrc).toMatch(/displaysMade/);
+    expect(actionsSrc).toMatch(/looseCards/);
+  });
+});
+
 describe("PACKAGING-AUTO-FINALIZE-1 · manual finalize fallback for legacy PACKAGED bags", () => {
   it("Finalize bag button still exists for legacy PACKAGED-not-finalized bags", () => {
     expect(src).toMatch(/Finalize bag/);
