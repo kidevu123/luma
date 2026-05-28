@@ -320,9 +320,8 @@ export function StageActionButtons({
       </div>
 
       {/* Per-stage complete buttons — large, primary action.
-       *  SEALING and BLISTER events open a rich close-out form instead
-       *  of firing immediately, so operators can record packs_remaining
-       *  and cards_reopened alongside the main count. */}
+       *  SEALING and BLISTER events open a close-out form instead of
+       *  firing immediately (counter presses vs blister count). */}
       {!isPaused &&
         stages.map((s) => (
           <button
@@ -714,8 +713,6 @@ function SealingCompleteForm({
 }) {
   const [pending, setPending] = React.useState(false);
   const [counterPresses, setCounterPresses] = React.useState("");
-  const [packsRemaining, setPacksRemaining] = React.useState("");
-  const [cardsReopened, setCardsReopened] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
   const configReady =
     sealingCardsPerPress != null && sealingCardsPerPress >= 1;
@@ -740,29 +737,18 @@ function SealingCompleteForm({
             Cards per press:{" "}
             <span className="font-semibold tabular-nums">{sealingCardsPerPress}</span>
           </p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-2">
             <NumField
               label="Counter presses"
               value={counterPresses}
               onChange={setCounterPresses}
-              className="col-span-2"
             />
             {previewCount != null && Number.isFinite(previewCount) ? (
-              <p className="col-span-2 text-xs text-sky-800">
+              <p className="text-xs text-sky-800">
                 Sealed cards = counter × {sealingCardsPerPress} ={" "}
                 <span className="font-semibold tabular-nums">{previewCount}</span>
               </p>
             ) : null}
-            <NumField
-              label="Packs remaining"
-              value={packsRemaining}
-              onChange={setPacksRemaining}
-            />
-            <NumField
-              label="Cards reopened (scrap)"
-              value={cardsReopened}
-              onChange={setCardsReopened}
-            />
           </div>
         </>
       )}
@@ -787,8 +773,6 @@ function SealingCompleteForm({
               fd.set("stationId", stationId);
               fd.set("eventType", "SEALING_COMPLETE");
               fd.set("counterPresses", counterPresses || "0");
-              fd.set("packsRemaining", packsRemaining || "0");
-              fd.set("cardsReopened", cardsReopened || "0");
               if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
               fd.set("clientEventId", newClientEventId());
               const r = await fireStageEventAction(fd);

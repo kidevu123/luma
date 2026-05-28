@@ -42,3 +42,16 @@ describe("SEALING-FLOW-CLARITY-2 · unified hand-pack sealing", () => {
     expect(actionsSrc).not.toMatch(/plasticBlisterCount/);
   });
 });
+
+describe("SEALING-COUNTER-UI-2 · server payload unchanged for material path", () => {
+  it("SEALING_COMPLETE still records counter_presses, cards_per_press, count_total", () => {
+    expect(actionsSrc).toMatch(/counter_presses/);
+    expect(actionsSrc).toMatch(/cards_per_press/);
+    expect(actionsSrc).toMatch(/count_total/);
+  });
+
+  it("hand-pack BLISTER_CARD issuance still keyed on count_total", () => {
+    expect(actionsSrc).toMatch(/issueHandpackBlisterCardMaterial/);
+    expect(actionsSrc).toMatch(/needsHandpackBlisterMaterial/);
+  });
+});

@@ -272,3 +272,38 @@ describe("SEALING-FLOW-CLARITY-2 · unified counter UI for all sealing bags", ()
     expect(src).not.toMatch(/filter\(s => s\.eventType !== "SEALING_COMPLETE"\)/);
   });
 });
+
+describe("SEALING-COUNTER-UI-2 · counter-only sealing close-out", () => {
+  function sealingFormBlock(): string {
+    const formIdx = src.indexOf("function SealingCompleteForm");
+    const blisterIdx = src.indexOf("function BlisterCompleteForm");
+    return src.slice(formIdx, blisterIdx);
+  }
+
+  it("renders counter presses and cards-per-press preview", () => {
+    const block = sealingFormBlock();
+    expect(block).toMatch(/Counter presses/);
+    expect(block).toMatch(/Cards per press:/);
+    expect(block).toMatch(/Sealed cards = counter ×/);
+  });
+
+  it("does not render packs remaining or cards reopened / scrap", () => {
+    const block = sealingFormBlock();
+    expect(block).not.toMatch(/Packs remaining/);
+    expect(block).not.toMatch(/Cards reopened/);
+    expect(block).not.toMatch(/scrap/i);
+  });
+
+  it("submits counterPresses only — not packsRemaining or cardsReopened", () => {
+    const block = sealingFormBlock();
+    expect(block).toMatch(/fd\.set\("counterPresses"/);
+    expect(block).not.toMatch(/fd\.set\("packsRemaining"/);
+    expect(block).not.toMatch(/fd\.set\("cardsReopened"/);
+  });
+
+  it("BlisterCompleteForm still has packs remaining — unchanged", () => {
+    const blisterIdx = src.indexOf("function BlisterCompleteForm");
+    const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
+    expect(blisterBlock).toMatch(/Packs remaining/);
+  });
+});

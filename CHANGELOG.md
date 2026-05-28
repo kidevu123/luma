@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.24] — 2026-05-28
+
+### Changed (SEALING-COUNTER-UI-2)
+- **Sealing close-out simplified:** SEALING station completion now asks only for machine counter presses. Removed "Packs remaining" and "Cards reopened (scrap)" from the floor form — those quantities are not part of the blister-card sealing process.
+- **Payload trimmed:** Floor SEALING UI no longer submits `packsRemaining` or `cardsReopened`. Server still records `counter_presses`, `cards_per_press`, and derived `count_total`.
+- **Hand-pack material issuance unchanged:** Bags with `HANDPACK_BLISTER_COMPLETE` still issue `BLISTER_CARD` material at sealing using `count_total`.
+
+### Tests added (SEALING-COUNTER-UI-2)
+- `stage-action-buttons.test.ts` — SEALING-COUNTER-UI-2 group: counter-only form, no packs/scrap fields, payload guards.
+
 ## [0.4.23] — 2026-05-28
 
 ### Changed (SEALING-FLOW-CLARITY-2)
