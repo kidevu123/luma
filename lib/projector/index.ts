@@ -545,6 +545,7 @@ async function projectMetricsForFinalizedBag(
   for (const e of events) {
     if (
       e.eventType === "BLISTER_COMPLETE" ||
+      e.eventType === "HANDPACK_BLISTER_COMPLETE" ||
       e.eventType === "SEALING_COMPLETE" ||
       e.eventType === "PACKAGING_SNAPSHOT" ||
       e.eventType === "PACKAGING_COMPLETE" ||
