@@ -260,35 +260,6 @@ describe("SEALING-COUNTER-1 · sealing completion uses machine counter", () => {
   });
 });
 
-describe("SEALING-HANDPACK-COUNTER-2 · hand-packed bags use machine counter at SEALING", () => {
-  it("StageActionButtons does not have bagIsHandpacked prop", () => {
-    expect(src).not.toMatch(/bagIsHandpacked/);
-  });
-
-  it("SEALING_COMPLETE button is not suppressed — no filter on bagIsHandpacked", () => {
-    expect(src).not.toMatch(/bagIsHandpacked && stationKind === "SEALING"/);
-    expect(src).not.toMatch(/filter.*SEALING_COMPLETE/s);
-  });
-
-  it("SealHandpackForm is not referenced in stage-action-buttons", () => {
-    expect(src).not.toMatch(/SealHandpackForm/);
-  });
-
-  it("SEALING still uses SealingCompleteForm with counter presses", () => {
-    expect(src).toMatch(/SealingCompleteForm/);
-    expect(src).toMatch(/Counter presses/);
-  });
-
-  it("scan-card-form not modified", () => {
-    const scanSrc = require("fs").readFileSync(
-      require("path").join(__dirname, "scan-card-form.tsx"),
-      "utf8",
-    );
-    expect(scanSrc).not.toMatch(/bagIsHandpacked/);
-    expect(scanSrc).not.toMatch(/SealHandpackForm/);
-  });
-});
-
 describe("SEALING-FLOW-CLARITY-2 · unified counter UI for all sealing bags", () => {
   it("SealingCompleteForm always available — no bagIsHandpacked gate", () => {
     expect(src).not.toMatch(/bagIsHandpacked/);
