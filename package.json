@@ -1,6 +1,6 @@
 {
   "name": "luma",
-  "version": "0.4.17",
+  "version": "0.4.18",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -20,6 +20,7 @@
     "staging:cleanup": "tsx scripts/cleanup-staging-validation-data.ts",
     "validation:snapshot": "tsx scripts/validation-snapshot.ts",
     "repair:qr-inventory": "tsx scripts/repair-qr-inventory.ts",
+    "repair:station-handpack-kind": "tsx scripts/fix-station-handpack-kind.ts",
     "verify:deploy": "tsx scripts/verify-deploy.ts",
     "audit:product-zoho-readiness": "tsx scripts/audit-product-zoho-readiness.ts"
   },

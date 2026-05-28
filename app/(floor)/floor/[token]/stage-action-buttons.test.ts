@@ -115,3 +115,48 @@ describe("PRODUCTION-OVERLAP-3 · completion gate at overlap stages", () => {
     expect(packReadyIdx).toBeGreaterThan(-1);
   });
 });
+
+describe("STATION-KIND-FIX-1 · behavior follows station kind, not station name", () => {
+  it("HANDPACK_BLISTER maps to Hand-pack complete — not Blister complete", () => {
+    const handpackIdx = src.indexOf("HANDPACK_BLISTER:");
+    expect(handpackIdx).toBeGreaterThan(-1);
+    const chunk = src.slice(handpackIdx, handpackIdx + 120);
+    expect(chunk).toMatch(/Hand-pack complete/);
+    expect(chunk).not.toMatch(/Blister complete/);
+  });
+
+  it("HANDPACK_BLISTER_COMPLETE is the event for hand-pack — BLISTER_COMPLETE is not", () => {
+    const handpackIdx = src.indexOf("HANDPACK_BLISTER:");
+    const chunk = src.slice(handpackIdx, handpackIdx + 120);
+    expect(chunk).toMatch(/HANDPACK_BLISTER_COMPLETE/);
+    expect(chunk).not.toMatch(/: "BLISTER_COMPLETE"/);
+  });
+
+  it("HANDPACK_BLISTER does not produce a count input (TIMED_ONLY = no generic stages)", () => {
+    // TIMED_ONLY_EVENTS causes hasGenericStages = false for HANDPACK_BLISTER.
+    // Count input is only rendered when hasGenericStages = true.
+    // Combining: no count field is shown for HANDPACK_BLISTER.
+    expect(src).toMatch(/TIMED_ONLY_EVENTS.*HANDPACK_BLISTER_COMPLETE/s);
+    expect(src).toMatch(/hasGenericStages.*TIMED_ONLY_EVENTS/s);
+    const countRenderIdx = src.indexOf("hasGenericStages");
+    expect(countRenderIdx).toBeGreaterThan(-1);
+  });
+
+  it("HANDPACK_BLISTER_COMPLETE is not in RICH_FORM_EVENTS — no blister close-out panel", () => {
+    const richStart = src.indexOf("RICH_FORM_EVENTS = new Set");
+    const richEnd = src.indexOf(");", richStart);
+    const richBlock = src.slice(richStart, richEnd);
+    expect(richBlock).not.toMatch(/HANDPACK_BLISTER_COMPLETE/);
+  });
+
+  it("BLISTER_COMPLETE is in RICH_FORM_EVENTS — blister close-out stays for machine stations", () => {
+    expect(src).toMatch(/RICH_FORM_EVENTS.*BLISTER_COMPLETE/s);
+  });
+
+  it("stationKind prop — not station label — determines which events fire", () => {
+    // The component receives stationKind: string as a prop.
+    // All event routing uses STAGE_BY_KIND[stationKind] — no name comparison.
+    expect(src).toMatch(/STAGE_BY_KIND\[stationKind\]/);
+    expect(src).not.toMatch(/station\.label|stationName|stationLabel/);
+  });
+});
