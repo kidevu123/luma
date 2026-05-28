@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.33] — 2026-05-28
+
+### Changed (PRODUCT-SELECTION-AT-SEALING-1)
+- **Card/blister start without SKU:** BLISTER and HANDPACK_BLISTER stations no longer require the finished product picker at bag start. Operators scan/start with product deferred; the bag shows the existing amber “No product set” state until sealing maps the SKU.
+- **Product at sealing:** SEALING (and COMBINED sealing close-out) requires choosing a finished product when `workflow_bags.product_id` is still null. Selection is filtered by the raw bag’s tablet type. Mapping writes `PRODUCT_MAPPED` with `source: SEALING_SELECTION` in the same transaction as `SEALING_COMPLETE`.
+- **Packaging gate:** Packaging close-out is hidden with a clear message when the bag has no mapped product. Server-side packaging prereqs unchanged.
+- **Bottle handpack unchanged:** BOTTLE_HANDPACK still requires product selection at start.
+
+### Tests added (PRODUCT-SELECTION-AT-SEALING-1)
+- `first-op-product.test.ts`, `sealing-product.test.ts`, `actions.test.ts`, `stage-action-buttons.test.ts`, `page.test.ts` — product-at-start split, sealing mapping order, handpack lot lookup after map, packaging gate, scan-card-form untouched.
+
 ## [0.4.32] — 2026-05-28
 
 ### Fixed (PACKAGING-BOM-FOOTER-1)

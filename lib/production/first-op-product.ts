@@ -9,9 +9,9 @@
 //              have no machine.
 //
 // Starting-point stations (FIRST_OP_STATION_KINDS below) create fresh
-// workflow_bags and must record the finished product. Downstream stations
-// (SEALING, PACKAGING, BOTTLE_CAP_SEAL, BOTTLE_STICKER) receive bags
-// already in-flight and only record throughput/completion events.
+// workflow_bags. Card/blister stations (BLISTER, HANDPACK_BLISTER,
+// COMBINED) defer finished-SKU selection to sealing; bottle handpack
+// still records product at start.
 //
 // Normal start flow: operator opens station URL → scans bag QR → system
 // picks product automatically if only one match → fires CARD_ASSIGNED.
@@ -21,15 +21,20 @@
 // integration setup. The action loads rows, this helper decides
 // allow/reject.
 
-/** Station kinds where the operator must pick a product when starting
- *  a fresh bag (IDLE card scan). Other station kinds either pick up
- *  an already-assigned bag or are not first-op for any route. Bottle
- *  Filling will join this set in PRD-3. */
+/** Station kinds that can scan an intake-reserved card and create a
+ *  new workflow_bag. */
 export const FIRST_OP_STATION_KINDS: ReadonlySet<string> = new Set([
   "BLISTER",
   "HANDPACK_BLISTER",
   "BOTTLE_HANDPACK",
   "COMBINED", // does the whole pipeline; first event is BLISTER_COMPLETE
+]);
+
+/** Subset of first-op stations where the operator must pick a finished
+ *  product before the bag starts. BLISTER / HANDPACK_BLISTER / COMBINED
+ *  defer mapping to sealing (PRODUCT-SELECTION-AT-SEALING-1). */
+export const PRODUCT_AT_START_STATION_KINDS: ReadonlySet<string> = new Set([
+  "BOTTLE_HANDPACK",
 ]);
 
 /** Map station kind -> product kinds eligible to start there. CARD
@@ -39,6 +44,7 @@ export const STATION_KIND_TO_PRODUCT_KINDS: Readonly<Record<string, ReadonlyArra
   BLISTER: ["CARD", "VARIETY"],
   HANDPACK_BLISTER: ["CARD", "VARIETY"],
   COMBINED: ["CARD", "VARIETY"],
+  SEALING: ["CARD", "VARIETY"],
   BOTTLE_HANDPACK: ["BOTTLE", "VARIETY"],
 };
 
@@ -65,7 +71,7 @@ export type FirstOpResult =
 
 /** Decide whether a fresh-card scan at this station can proceed.
  *  Returns the productId to set on the new workflow_bag (null when
- *  the station kind doesn't require first-op selection). */
+ *  the station kind defers product selection to sealing). */
 export function checkFirstOpProductSelection(
   input: FirstOpInput,
 ): FirstOpResult {
@@ -79,7 +85,11 @@ export function checkFirstOpProductSelection(
   if (!FIRST_OP_STATION_KINDS.has(input.stationKind)) {
     return { ok: true, productId: null };
   }
-  // First-op station + IDLE card: product is mandatory.
+  // Card/blister first-op: product is chosen at sealing, not here.
+  if (!PRODUCT_AT_START_STATION_KINDS.has(input.stationKind)) {
+    return { ok: true, productId: null };
+  }
+  // Bottle handpack (and any future product-at-start kinds): mandatory.
   if (!input.pickedProductId) {
     return {
       ok: false,

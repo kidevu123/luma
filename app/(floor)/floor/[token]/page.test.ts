@@ -279,3 +279,25 @@ describe('STATION-ACTIVE-UX-1 · Op label clarity', () => {
     expect(sab).toMatch(/aria-label="Operator code"/);
   });
 });
+
+describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
+  it("uses PRODUCT_AT_START for requireProductForFreshBag, not canStartFreshBag", () => {
+    expect(pageSrc).toMatch(/PRODUCT_AT_START_STATION_KINDS/);
+    expect(pageSrc).toMatch(/requireProductAtStart/);
+    expect(pageSrc).toMatch(/requireProductForFreshBag=\{requireProductAtStart\}/);
+    expect(pageSrc).not.toMatch(/requireProductForFreshBag=\{canStartFreshBag\}/);
+  });
+
+  it("loads sealing product options when bag has no product at sealing station", () => {
+    expect(pageSrc).toMatch(/sealingProductOptionsForForm/);
+    expect(pageSrc).toMatch(/filterSealingProductsByTabletType/);
+    expect(pageSrc).toMatch(/hasProductMapped/);
+    expect(pageSrc).toMatch(/sealingProductOptions=\{sealingProductOptionsForForm\}/);
+  });
+
+  it("does not import scan-card-form changes", () => {
+    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
+    expect(scanSrc).toMatch(/requireProductForFreshBag/);
+    expect(scanSrc).not.toMatch(/PRODUCT_AT_START/);
+  });
+});

@@ -15,6 +15,7 @@ import { projectEvent } from "@/lib/projector";
 import type { resolveStationAccountability } from "@/lib/production/station-operator-session";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
+type DbOrTx = typeof Db | Tx;
 type Accountability = Awaited<
   ReturnType<typeof resolveStationAccountability>
 >;
@@ -47,8 +48,9 @@ export async function workflowBagHasHandpackBlisterComplete(
 /** Oldest AVAILABLE lot for a BLISTER_CARD on the bag's product BOM only. */
 export async function lookupProductMatchedBlisterCardLot(
   workflowBagId: string,
+  dbOrTx: DbOrTx = Db,
 ): Promise<HandpackBlisterLotLookupResult> {
-  const [bag] = await Db
+  const [bag] = await dbOrTx
     .select({ productId: workflowBags.productId })
     .from(workflowBags)
     .where(eq(workflowBags.id, workflowBagId))
@@ -58,7 +60,7 @@ export async function lookupProductMatchedBlisterCardLot(
     return { status: "skipped", reason: "no_product_id" };
   }
 
-  const bomRows = await Db
+  const bomRows = await dbOrTx
     .select({
       packagingMaterialId: productPackagingSpecs.packagingMaterialId,
     })
@@ -80,7 +82,7 @@ export async function lookupProductMatchedBlisterCardLot(
     return { status: "skipped", reason: "no_bom_blister_card" };
   }
 
-  const [lot] = await Db
+  const [lot] = await dbOrTx
     .select({ id: packagingLots.id, qtyOnHand: packagingLots.qtyOnHand })
     .from(packagingLots)
     .where(

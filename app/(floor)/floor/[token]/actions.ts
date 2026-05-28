@@ -14,6 +14,7 @@ import {
   readBagState,
   readStationLive,
   products,
+  productAllowedTablets,
   rawBagAllocationSessions,
   workflowEvents,
 } from "@/lib/db/schema";
@@ -503,6 +504,9 @@ const eventSchema = z.object({
   /** Cards that were opened/damaged and returned to the prior stage
    *  or scrapped. Stored in the event payload for loss tracking. */
   cardsReopened: z.coerce.number().int().min(0).max(100000).optional(),
+  /** PRODUCT-SELECTION-AT-SEALING-1: required on SEALING_COMPLETE when
+   *  workflow_bags.product_id is still null. Ignored when product exists. */
+  productId: z.string().uuid().optional().nullable().or(z.literal("")),
   clientEventId: clientEventIdField,
   /** OP-1C per-form supervisor override. Resolved by the
    *  station-operator-session helper; falls back to the active
@@ -516,6 +520,10 @@ import {
   FIRST_OP_STATION_KINDS,
   checkFirstOpProductSelection,
 } from "@/lib/production/first-op-product";
+import {
+  SEALING_STATION_KINDS,
+  validateSealingProductPick,
+} from "@/lib/production/sealing-product";
 
 export async function fireStageEventAction(
   formData: FormData,
@@ -530,6 +538,7 @@ export async function fireStageEventAction(
     packsRemaining: formData.get("packsRemaining") || 0,
     cardsReopened: formData.get("cardsReopened") || 0,
     clientEventId: pickClientEventId(formData),
+    productId: formData.get("productId") || undefined,
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) return { error: "Invalid input." };
@@ -545,6 +554,10 @@ export async function fireStageEventAction(
     clientEventId,
     overrideEmployeeCode,
   } = parsed.data;
+  const pickedSealingProductId =
+    parsed.data.productId && parsed.data.productId !== ""
+      ? parsed.data.productId
+      : null;
 
   try {
     const station = await authStation(token, stationId);
@@ -616,25 +629,37 @@ export async function fireStageEventAction(
       sealingCardsPerPress = cardsPerPress;
     }
 
+    const [bagProductRow] = await db
+      .select({ productId: workflowBags.productId })
+      .from(workflowBags)
+      .where(eq(workflowBags.id, workflowBagId));
+
+    if (
+      eventType === "SEALING_COMPLETE" &&
+      SEALING_STATION_KINDS.has(station.kind)
+    ) {
+      if (bagProductRow?.productId) {
+        if (
+          pickedSealingProductId &&
+          pickedSealingProductId !== bagProductRow.productId
+        ) {
+          return {
+            error:
+              "Product is already set on this bag and cannot be changed here.",
+          };
+        }
+      } else if (!pickedSealingProductId) {
+        return {
+          error:
+            "Select the finished product before completing sealing.",
+        };
+      }
+    }
+
     const needsHandpackBlisterMaterial =
       eventType === "SEALING_COMPLETE" &&
       station.kind === "SEALING" &&
       (await workflowBagHasHandpackBlisterComplete(workflowBagId));
-
-    let handpackBlisterLot: { id: string; qtyOnHand: number } | null = null;
-    let handpackMaterialSkip: HandpackBlisterMaterialSkipReason | null = null;
-    if (
-      needsHandpackBlisterMaterial &&
-      (resolvedCountTotal ?? 0) > 0
-    ) {
-      const lotLookup =
-        await lookupProductMatchedBlisterCardLot(workflowBagId);
-      if (lotLookup.status === "found") {
-        handpackBlisterLot = lotLookup.lot;
-      } else {
-        handpackMaterialSkip = lotLookup.reason;
-      }
-    }
 
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
@@ -652,6 +677,93 @@ export async function fireStageEventAction(
           "No operator on shift. Open a shift on this station before submitting the first count.",
         );
       }
+
+      if (
+        eventType === "SEALING_COMPLETE" &&
+        SEALING_STATION_KINDS.has(station.kind) &&
+        !bagProductRow?.productId &&
+        pickedSealingProductId
+      ) {
+        const [productLookup] = await tx
+          .select({
+            id: products.id,
+            sku: products.sku,
+            name: products.name,
+            kind: products.kind,
+            isActive: products.isActive,
+          })
+          .from(products)
+          .where(eq(products.id, pickedSealingProductId));
+
+        const [rawContext] = await tx
+          .select({ tabletTypeId: inventoryBags.tabletTypeId })
+          .from(qrCards)
+          .leftJoin(
+            inventoryBags,
+            eq(inventoryBags.bagQrCode, qrCards.scanToken),
+          )
+          .where(eq(qrCards.assignedWorkflowBagId, workflowBagId))
+          .limit(1);
+
+        const tabletRows = await tx
+          .select({ tabletTypeId: productAllowedTablets.tabletTypeId })
+          .from(productAllowedTablets)
+          .where(eq(productAllowedTablets.productId, pickedSealingProductId));
+
+        const sealingPick = validateSealingProductPick({
+          stationKind: station.kind,
+          pickedProductId: pickedSealingProductId,
+          product: productLookup ?? null,
+          tabletTypeId: rawContext?.tabletTypeId ?? null,
+          allowedTabletTypeIds: tabletRows.map((r) => r.tabletTypeId),
+        });
+        if (!sealingPick.ok) {
+          throw new Error(sealingPick.reason);
+        }
+
+        await tx
+          .update(workflowBags)
+          .set({ productId: sealingPick.productId })
+          .where(eq(workflowBags.id, workflowBagId));
+
+        await projectEvent(tx, {
+          workflowBagId,
+          stationId,
+          eventType: "PRODUCT_MAPPED",
+          payload: {
+            product_id: sealingPick.productId,
+            product_sku: productLookup?.sku ?? null,
+            product_name: productLookup?.name ?? null,
+            product_kind: productLookup?.kind ?? null,
+            station_kind: station.kind,
+            source: "SEALING_SELECTION",
+          },
+          enteredByUserId: accountability.enteredByUserId,
+          accountableEmployeeId: accountability.accountableEmployeeId,
+          accountabilitySource: accountability.accountabilitySource,
+          accountableEmployeeNameSnapshot:
+            accountability.accountableEmployeeNameSnapshot,
+        });
+      }
+
+      let handpackBlisterLot: { id: string; qtyOnHand: number } | null = null;
+      let handpackMaterialSkip: HandpackBlisterMaterialSkipReason | null =
+        null;
+      if (
+        needsHandpackBlisterMaterial &&
+        (resolvedCountTotal ?? 0) > 0
+      ) {
+        const lotLookup = await lookupProductMatchedBlisterCardLot(
+          workflowBagId,
+          tx,
+        );
+        if (lotLookup.status === "found") {
+          handpackBlisterLot = lotLookup.lot;
+        } else {
+          handpackMaterialSkip = lotLookup.reason;
+        }
+      }
+
       await projectEvent(tx, {
         workflowBagId,
         stationId,

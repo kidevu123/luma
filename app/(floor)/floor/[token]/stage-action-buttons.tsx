@@ -75,6 +75,12 @@ type PackagingSpecLine = {
   perScope: string;
 };
 
+type SealingProductOption = {
+  id: string;
+  sku: string;
+  name: string;
+};
+
 export function StageActionButtons({
   token,
   stationId,
@@ -87,6 +93,8 @@ export function StageActionButtons({
   displaysPerCase = null,
   packagingSpecs = [],
   sealingCardsPerPress = null,
+  hasProductMapped = true,
+  sealingProductOptions = [],
 }: {
   token: string;
   stationId: string;
@@ -102,6 +110,10 @@ export function StageActionButtons({
   packagingSpecs?: PackagingSpecLine[];
   /** Bound machine cards-per-press for SEALING / COMBINED. Null = config missing. */
   sealingCardsPerPress?: number | null;
+  /** False when workflow_bags.product_id is still null. */
+  hasProductMapped?: boolean;
+  /** Finished SKU options for sealing close-out when product is missing. */
+  sealingProductOptions?: SealingProductOption[];
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -167,6 +179,9 @@ export function StageActionButtons({
   );
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
   const packagingReady = !currentStage || currentStage === "SEALED";
+  const needsSealingProductMapping = !hasProductMapped;
+  const packagingBlockedNoProduct =
+    isPackaging && packagingReady && !hasProductMapped;
 
   // Release button shows after this station's stage event has fired
   // and the bag is at the station's "ready to release" stage.
@@ -343,7 +358,7 @@ export function StageActionButtons({
         ))}
 
       {/* Packaging gets its own rich form */}
-      {!isPaused && isPackaging && packagingReady && (
+      {!isPaused && isPackaging && packagingReady && !packagingBlockedNoProduct && (
         <button
           type="button"
           disabled={pending !== null}
@@ -353,6 +368,12 @@ export function StageActionButtons({
           <PackageCheck className="h-5 w-5" />
           Packaging complete (close out)
         </button>
+      )}
+
+      {!isPaused && packagingBlockedNoProduct && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Select finished product at sealing before packaging close-out.
+        </div>
       )}
 
       {/* Release to next station — visible only after this station's
@@ -474,6 +495,8 @@ export function StageActionButtons({
           stationId={stationId}
           operatorCode={operatorCode}
           sealingCardsPerPress={sealingCardsPerPress}
+          needsProductMapping={needsSealingProductMapping}
+          sealingProductOptions={sealingProductOptions}
           onClose={(success) => {
             setSealingOpen(false);
             if (success && error) setError(null);
@@ -718,6 +741,8 @@ function SealingCompleteForm({
   stationId,
   operatorCode,
   sealingCardsPerPress,
+  needsProductMapping = false,
+  sealingProductOptions = [],
   onClose,
   onError,
 }: {
@@ -726,11 +751,14 @@ function SealingCompleteForm({
   stationId: string;
   operatorCode: string;
   sealingCardsPerPress: number | null;
+  needsProductMapping?: boolean;
+  sealingProductOptions?: SealingProductOption[];
   onClose: (success: boolean) => void;
   onError: (msg: string) => void;
 }) {
   const [pending, setPending] = React.useState(false);
   const [counterPresses, setCounterPresses] = React.useState("");
+  const [selectedProductId, setSelectedProductId] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
   const configReady =
     sealingCardsPerPress != null && sealingCardsPerPress >= 1;
@@ -738,6 +766,8 @@ function SealingCompleteForm({
     configReady && counterPresses !== ""
       ? Number(counterPresses) * sealingCardsPerPress
       : null;
+  const productReady =
+    !needsProductMapping || selectedProductId.trim().length > 0;
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, []);
@@ -745,6 +775,36 @@ function SealingCompleteForm({
   return (
     <div ref={containerRef} className="rounded-lg border-2 border-sky-300 bg-sky-50/40 p-3 space-y-3">
       <p className="text-sm font-semibold text-sky-900">Sealing close-out</p>
+      {needsProductMapping && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
+          <div className="font-semibold text-sm">What finished product is this?</div>
+          <div className="text-amber-900/80">
+            Pick the SKU that matches the packaging you are sealing into.
+          </div>
+          {sealingProductOptions.length === 0 ? (
+            <p className="text-sm text-red-800">
+              No active products are configured for this bag&apos;s tablet type.
+              Ask a supervisor to set up the product mapping.
+            </p>
+          ) : (
+            <select
+              required
+              value={selectedProductId}
+              onChange={(e) => setSelectedProductId(e.target.value)}
+              className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
+            >
+              <option value="" disabled>
+                — Select product —
+              </option>
+              {sealingProductOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
       {!configReady ? (
         <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {SEALING_COUNTER_CONFIG_ERROR}
@@ -782,7 +842,7 @@ function SealingCompleteForm({
         </button>
         <button
           type="button"
-          disabled={pending || !configReady}
+          disabled={pending || !configReady || !productReady}
           onClick={async () => {
             setPending(true);
             try {
@@ -792,6 +852,9 @@ function SealingCompleteForm({
               fd.set("stationId", stationId);
               fd.set("eventType", "SEALING_COMPLETE");
               fd.set("counterPresses", counterPresses || "0");
+              if (needsProductMapping && selectedProductId) {
+                fd.set("productId", selectedProductId);
+              }
               if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
               fd.set("clientEventId", newClientEventId());
               const r = await fireStageEventAction(fd);

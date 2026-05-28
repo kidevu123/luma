@@ -266,12 +266,12 @@ describe("SEALING-COUNTER-1 · sealing completion uses machine counter", () => {
 
   it("blocks completion when sealingCardsPerPress is missing", () => {
     expect(src).toMatch(/SEALING_COUNTER_CONFIG_ERROR/);
-    expect(src).toMatch(/disabled=\{pending \|\| !configReady\}/);
+    expect(src).toMatch(/disabled=\{pending \|\| !configReady \|\| !productReady\}/);
   });
 
   it("submits counterPresses — not countTotal — for SEALING_COMPLETE", () => {
     const formIdx = src.indexOf("function SealingCompleteForm");
-    const formBlock = src.slice(formIdx, formIdx + 3500);
+    const formBlock = src.slice(formIdx, formIdx + 5500);
     expect(formBlock).toMatch(/fd\.set\("counterPresses"/);
     expect(formBlock).not.toMatch(/fd\.set\("countTotal"/);
   });
@@ -489,5 +489,43 @@ describe("PACKAGING-AUTO-FINALIZE-1 · manual finalize fallback for legacy PACKA
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
     expect(blisterBlock).toMatch(/Packs remaining/);
     expect(blisterBlock).toMatch(/Blister count/);
+  });
+});
+
+describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging gate", () => {
+  it("SealingCompleteForm includes product picker when needsProductMapping", () => {
+    expect(src).toMatch(/needsProductMapping/);
+    expect(src).toMatch(/What finished product is this/);
+    expect(src).toMatch(/fd\.set\("productId", selectedProductId\)/);
+  });
+
+  it("Complete sealing disabled until product selected when mapping required", () => {
+    expect(src).toMatch(/productReady/);
+    expect(src).toMatch(/disabled=\{pending \|\| !configReady \|\| !productReady\}/);
+  });
+
+  it("sealing counter UI remains counter presses only", () => {
+    const sealIdx = src.indexOf("function SealingCompleteForm");
+    const sealBlock = src.slice(sealIdx, sealIdx + 3500);
+    expect(sealBlock).toMatch(/Counter presses/);
+    expect(sealBlock).toMatch(/counterPresses/);
+    expect(sealBlock).not.toMatch(/Master cases/);
+  });
+
+  it("packaging close-out blocked with message when product missing", () => {
+    expect(src).toMatch(/packagingBlockedNoProduct/);
+    expect(src).toMatch(
+      /Select finished product at sealing before packaging close-out/,
+    );
+  });
+
+  it("packaging payload keys unchanged in close-out form", () => {
+    const pkgIdx = src.indexOf("function PackagingCompleteForm");
+    const pkgBlock = src.slice(pkgIdx, pkgIdx + 8000);
+    expect(pkgBlock).toMatch(/fd\.set\("masterCases"/);
+    expect(pkgBlock).toMatch(/fd\.set\("displaysMade"/);
+    expect(pkgBlock).toMatch(/fd\.set\("looseCards"/);
+    expect(pkgBlock).toMatch(/fd\.set\("damagedPackaging"/);
+    expect(pkgBlock).toMatch(/fd\.set\("rippedCards"/);
   });
 });

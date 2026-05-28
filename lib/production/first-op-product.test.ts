@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   FIRST_OP_STATION_KINDS,
+  PRODUCT_AT_START_STATION_KINDS,
   STATION_KIND_TO_PRODUCT_KINDS,
   checkFirstOpProductSelection,
 } from "./first-op-product";
@@ -32,51 +33,18 @@ const ACTIVE_VARIETY = {
 };
 
 describe("first-op product selection — Blister station", () => {
-  it("requires productId for IDLE card at BLISTER", () => {
+  it("allows IDLE card at BLISTER without productId (deferred to sealing)", () => {
     const r = checkFirstOpProductSelection({
       stationKind: "BLISTER",
       cardStatus: "IDLE",
       pickedProductId: null,
       product: null,
     });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toMatch(/Pick a product/);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.productId).toBeNull();
   });
 
-  it("rejects when picked product not found", () => {
-    const r = checkFirstOpProductSelection({
-      stationKind: "BLISTER",
-      cardStatus: "IDLE",
-      pickedProductId: "ghost",
-      product: null,
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toMatch(/not found/);
-  });
-
-  it("rejects inactive products", () => {
-    const r = checkFirstOpProductSelection({
-      stationKind: "BLISTER",
-      cardStatus: "IDLE",
-      pickedProductId: ACTIVE_CARD.id,
-      product: { ...ACTIVE_CARD, isActive: false },
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toMatch(/inactive/);
-  });
-
-  it("rejects bottle products at the BLISTER station", () => {
-    const r = checkFirstOpProductSelection({
-      stationKind: "BLISTER",
-      cardStatus: "IDLE",
-      pickedProductId: ACTIVE_BOTTLE.id,
-      product: ACTIVE_BOTTLE,
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toMatch(/cannot start at a BLISTER station/);
-  });
-
-  it("accepts CARD products at BLISTER", () => {
+  it("ignores optional pickedProductId at BLISTER — product maps at sealing", () => {
     const r = checkFirstOpProductSelection({
       stationKind: "BLISTER",
       cardStatus: "IDLE",
@@ -84,18 +52,7 @@ describe("first-op product selection — Blister station", () => {
       product: ACTIVE_CARD,
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.productId).toBe(ACTIVE_CARD.id);
-  });
-
-  it("accepts VARIETY products at BLISTER (variety packs assemble through card route)", () => {
-    const r = checkFirstOpProductSelection({
-      stationKind: "BLISTER",
-      cardStatus: "IDLE",
-      pickedProductId: ACTIVE_VARIETY.id,
-      product: ACTIVE_VARIETY,
-    });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.productId).toBe(ACTIVE_VARIETY.id);
+    if (r.ok) expect(r.productId).toBeNull();
   });
 });
 
@@ -169,6 +126,16 @@ describe("first-op product selection — registry sanity", () => {
     expect(FIRST_OP_STATION_KINDS.has("BOTTLE_CAP_SEAL")).toBe(false);
     expect(FIRST_OP_STATION_KINDS.has("BOTTLE_STICKER")).toBe(false);
     expect(FIRST_OP_STATION_KINDS.has("PACKAGING")).toBe(false);
+  });
+
+  it("PRODUCT_AT_START excludes BLISTER and HANDPACK_BLISTER", () => {
+    expect(PRODUCT_AT_START_STATION_KINDS.has("BLISTER")).toBe(false);
+    expect(PRODUCT_AT_START_STATION_KINDS.has("HANDPACK_BLISTER")).toBe(false);
+    expect(PRODUCT_AT_START_STATION_KINDS.has("COMBINED")).toBe(false);
+  });
+
+  it("PRODUCT_AT_START includes BOTTLE_HANDPACK only", () => {
+    expect(PRODUCT_AT_START_STATION_KINDS.has("BOTTLE_HANDPACK")).toBe(true);
   });
 });
 
@@ -258,8 +225,10 @@ describe("STATION_KIND_TO_PRODUCT_KINDS — product kind mapping per station", (
     expect(STATION_KIND_TO_PRODUCT_KINDS["BOTTLE_HANDPACK"]).not.toContain("CARD");
   });
 
-  it("downstream stations (SEALING, PACKAGING) have no entry — empty array fallback", () => {
-    expect(STATION_KIND_TO_PRODUCT_KINDS["SEALING"] ?? []).toHaveLength(0);
+  it("SEALING allows CARD and VARIETY for sealing-time product mapping", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["SEALING"]).toEqual(
+      expect.arrayContaining(["CARD", "VARIETY"]),
+    );
     expect(STATION_KIND_TO_PRODUCT_KINDS["PACKAGING"] ?? []).toHaveLength(0);
   });
 });
@@ -267,26 +236,26 @@ describe("STATION_KIND_TO_PRODUCT_KINDS — product kind mapping per station", (
 // ── T5 guard audit tests ────────────────────────────────────────────────────
 
 describe("first-op guard — STATION-2 T5 guard audit", () => {
-  it("allows fresh start at BLISTER station with a CARD product", () => {
+  it("allows fresh start at BLISTER station without product (maps at sealing)", () => {
     const r = checkFirstOpProductSelection({
       stationKind: "BLISTER",
       cardStatus: "IDLE",
-      pickedProductId: ACTIVE_CARD.id,
-      product: ACTIVE_CARD,
+      pickedProductId: null,
+      product: null,
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.productId).toBe(ACTIVE_CARD.id);
+    if (r.ok) expect(r.productId).toBeNull();
   });
 
-  it("allows fresh start at HANDPACK_BLISTER station with a CARD product", () => {
+  it("allows fresh start at HANDPACK_BLISTER without product (maps at sealing)", () => {
     const r = checkFirstOpProductSelection({
       stationKind: "HANDPACK_BLISTER",
       cardStatus: "IDLE",
-      pickedProductId: ACTIVE_CARD.id,
-      product: ACTIVE_CARD,
+      pickedProductId: null,
+      product: null,
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.productId).toBe(ACTIVE_CARD.id);
+    if (r.ok) expect(r.productId).toBeNull();
   });
 
   it("blocks fresh start at SEALING station (not a first-op kind)", () => {

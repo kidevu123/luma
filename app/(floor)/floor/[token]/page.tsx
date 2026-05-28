@@ -37,8 +37,13 @@ import {
 } from "@/lib/production/sealing-counter";
 import {
   FIRST_OP_STATION_KINDS,
+  PRODUCT_AT_START_STATION_KINDS,
   STATION_KIND_TO_PRODUCT_KINDS,
 } from "@/lib/production/first-op-product";
+import {
+  filterSealingProductsByTabletType,
+  SEALING_STATION_KINDS,
+} from "@/lib/production/sealing-product";
 import { OperatorSessionPanel } from "./operator-session-form";
 import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
@@ -114,6 +119,9 @@ export default async function FloorStationPage({
   // WORKFLOW_TRAVELER cards must never appear here. Only shown at stations
   // that can start fresh bags; pickup-only stations see only eligiblePickups.
   const canStartFreshBag = FIRST_OP_STATION_KINDS.has(station.station.kind);
+  const requireProductAtStart = PRODUCT_AT_START_STATION_KINDS.has(
+    station.station.kind,
+  );
 
   // First-op product kinds for this station (empty at non-first-op stations).
   // Computed early so both the idle-card eligibility filter and the product
@@ -356,6 +364,71 @@ export default async function FloorStationPage({
           .orderBy(asc(productPackagingSpecs.perScope))
       : [];
 
+  const hasProductMapped = currentProductId != null;
+
+  let sealingProductOptionsForForm: {
+    id: string;
+    sku: string;
+    name: string;
+  }[] = [];
+  if (
+    currentAtStation &&
+    !hasProductMapped &&
+    SEALING_STATION_KINDS.has(station.station.kind)
+  ) {
+    const [rawBagContext] = await db
+      .select({ tabletTypeId: inventoryBags.tabletTypeId })
+      .from(qrCards)
+      .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
+      .where(eq(qrCards.assignedWorkflowBagId, currentAtStation.bag.id))
+      .limit(1);
+
+    const sealingProductsRaw = await db
+      .select({
+        id: products.id,
+        sku: products.sku,
+        name: products.name,
+        kind: products.kind,
+      })
+      .from(products)
+      .where(
+        and(
+          eq(products.isActive, true),
+          inArray(products.kind, ["CARD", "VARIETY"]),
+        ),
+      );
+
+    const sealingProductIds = sealingProductsRaw.map((p) => p.id);
+    const sealingTabletRows =
+      sealingProductIds.length > 0
+        ? await db
+            .select({
+              productId: productAllowedTablets.productId,
+              tabletTypeId: productAllowedTablets.tabletTypeId,
+            })
+            .from(productAllowedTablets)
+            .where(inArray(productAllowedTablets.productId, sealingProductIds))
+        : [];
+
+    const sealingTabletsByProduct = new Map<string, string[]>();
+    for (const r of sealingTabletRows) {
+      const list = sealingTabletsByProduct.get(r.productId) ?? [];
+      list.push(r.tabletTypeId);
+      sealingTabletsByProduct.set(r.productId, list);
+    }
+
+    sealingProductOptionsForForm = filterSealingProductsByTabletType(
+      sealingProductsRaw.map((p) => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        allowedTabletTypeIds:
+          sealingTabletsByProduct.get(p.id) ?? [],
+      })),
+      rawBagContext?.tabletTypeId ?? null,
+    ).map((p) => ({ id: p.id, sku: p.sku, name: p.name }));
+  }
+
   const sealingCardsPerPress = stationUsesSealingCounter(station.station.kind)
     ? resolveSealingCardsPerPress(
         station.machine,
@@ -429,7 +502,7 @@ export default async function FloorStationPage({
                 name: p.name,
                 allowedTabletTypeIds: p.allowedTabletTypeIds,
               }))}
-              requireProductForFreshBag={canStartFreshBag}
+              requireProductForFreshBag={requireProductAtStart}
             />
           </div>
         ) : (
@@ -518,6 +591,8 @@ export default async function FloorStationPage({
               displaysPerCase={currentAtStation.product?.displaysPerCase ?? null}
               packagingSpecs={packagingSpecsForForm}
               sealingCardsPerPress={sealingCardsPerPress}
+              hasProductMapped={hasProductMapped}
+              sealingProductOptions={sealingProductOptionsForForm}
             />
             {/* Help operator pick the next action when the bag has
              *  already advanced past this station's stage. The

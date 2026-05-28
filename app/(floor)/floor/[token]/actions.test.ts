@@ -141,3 +141,54 @@ describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () =
     expect(block).toMatch(/ripped_cards/);
   });
 });
+
+describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
+  it("imports sealing product helpers", () => {
+    expect(actionsSrc).toMatch(/from "@\/lib\/production\/sealing-product"/);
+    expect(actionsSrc).toMatch(/validateSealingProductPick/);
+    expect(actionsSrc).toMatch(/SEALING_STATION_KINDS/);
+  });
+
+  it("fireStageEventAction accepts optional productId for sealing mapping", () => {
+    expect(actionsSrc).toMatch(/productId: z\.string\(\)\.uuid\(\)/);
+    expect(actionsSrc).toMatch(/pickedSealingProductId/);
+  });
+
+  it("does not emit PRODUCT_MAPPED at scan when first-op returns null product", () => {
+    const scanIdx = actionsSrc.indexOf("export async function scanCardAction");
+    const stageIdx = actionsSrc.indexOf("// ── stage events");
+    const block = actionsSrc.slice(scanIdx, stageIdx);
+    expect(block).toMatch(/if \(productIdToSet && productLookup\)/);
+  });
+
+  it("SEALING_COMPLETE maps product before SEALING_COMPLETE event", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    expect(block).toMatch(/eventType: "PRODUCT_MAPPED"/);
+    expect(block).toMatch(/source: "SEALING_SELECTION"/);
+    const mapIdx = block.indexOf('eventType: "PRODUCT_MAPPED"');
+    const sealIdx = block.indexOf("await projectEvent(tx, {", mapIdx + 1);
+    expect(mapIdx).toBeGreaterThan(-1);
+    expect(sealIdx).toBeGreaterThan(mapIdx);
+  });
+
+  it("handpack lot lookup runs inside transaction after product map", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    expect(block).toMatch(/lookupProductMatchedBlisterCardLot\(\s*workflowBagId,\s*tx/);
+  });
+
+  it("rejects routine remapping when product already set", () => {
+    expect(actionsSrc).toMatch(
+      /Product is already set on this bag and cannot be changed here/,
+    );
+  });
+
+  it("requires product before SEALING_COMPLETE when bag has no product", () => {
+    expect(actionsSrc).toMatch(
+      /Select the finished product before completing sealing/,
+    );
+  });
+});
