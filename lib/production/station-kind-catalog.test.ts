@@ -104,3 +104,61 @@ describe("STATION-KIND-FIX-1 · HANDPACK_BLISTER floor expectations (regression)
     expect(richLine).not.toMatch(/HANDPACK_BLISTER_COMPLETE/);
   });
 });
+
+describe("STATION-KIND-FIX-1 · repair script structure", () => {
+  const scriptSrc = readFileSync(
+    join(__dirname, "../../scripts/fix-station-handpack-kind.ts"),
+    "utf8",
+  );
+
+  it("defaults to dry-run — mutations gated on --apply", () => {
+    expect(scriptSrc).toMatch(/const apply = process\.argv\.includes\("--apply"\)/);
+    expect(scriptSrc).toMatch(/if \(!apply\) \{/);
+    expect(scriptSrc).toMatch(/dry-run complete/);
+    expect(scriptSrc).toMatch(/await db\.transaction/);
+    const applyIdx = scriptSrc.indexOf('includes("--apply")');
+    const txnIdx = scriptSrc.indexOf("await db.transaction");
+    expect(txnIdx).toBeGreaterThan(applyIdx);
+  });
+
+  it("requires ALLOW_STATION_KIND_FIX=true on production apply", () => {
+    expect(scriptSrc).toMatch(/ALLOW_STATION_KIND_FIX/);
+    expect(scriptSrc).toMatch(/NODE_ENV === "production"/);
+    expect(scriptSrc).toMatch(/Refusing --apply/);
+  });
+
+  it("sources planned changes from station-kind-catalog only", () => {
+    expect(scriptSrc).toMatch(/plannedKindCorrections/);
+    expect(scriptSrc).toMatch(/plannedDeactivations/);
+    expect(scriptSrc).not.toMatch(/insert\(stations\)/);
+    expect(scriptSrc).not.toMatch(/\.insert\(/);
+  });
+
+  it("updates only catalog station labels — no broad station scan", () => {
+    expect(scriptSrc).toMatch(/inArray\(stations\.label, labels\)/);
+  });
+
+  it("deactivates smoke duplicate only via plannedDeactivations", () => {
+    expect(scriptSrc).toMatch(/kind: "deactivate"/);
+    expect(scriptSrc).toMatch(/set\(\{ isActive: false \}\)/);
+    expect(plannedDeactivations().map((d) => d.label)).toEqual([
+      "Hand Pack Blister Smoke",
+    ]);
+  });
+
+  it("Blister Room catalog keeps BLISTER — correction is noop when already correct", () => {
+    const blisterRoom = plannedKindCorrections().find(
+      (c) => c.label === "Blister Room",
+    );
+    expect(blisterRoom?.expectedKind).toBe("BLISTER");
+    expect(blisterRoom?.clearMachineId).toBe(false);
+  });
+
+  it("does not touch workflow bags, events, or qr cards", () => {
+    expect(scriptSrc).not.toMatch(/workflow_bags/);
+    expect(scriptSrc).not.toMatch(/workflow_events/);
+    expect(scriptSrc).not.toMatch(/qr_cards/);
+    expect(scriptSrc).not.toMatch(/read_bag_state/);
+    expect(scriptSrc).not.toMatch(/read_station_live/);
+  });
+});
