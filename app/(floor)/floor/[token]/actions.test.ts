@@ -192,3 +192,21 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
     );
   });
 });
+
+describe("BLISTER-MACHINE-COUNTER-1 · pause schema accepts foil_swap", () => {
+  it("pauseSchema reason enum includes foil_swap", () => {
+    expect(actionsSrc).toMatch(/z\.enum\(\[.*"foil_swap".*\]\)/s);
+  });
+
+  it("pauseSchema reason enum still includes pvc_swap", () => {
+    expect(actionsSrc).toMatch(/z\.enum\(\[.*"pvc_swap".*\]\)/s);
+  });
+
+  it("pauseSchema reason enum still includes shift_end, machine_jam, qa_check, other", () => {
+    const enumMatch = actionsSrc.match(/reason: z\.enum\(\[([^\]]+)\]\)/)?.[1] ?? "";
+    expect(enumMatch).toMatch(/shift_end/);
+    expect(enumMatch).toMatch(/machine_jam/);
+    expect(enumMatch).toMatch(/qa_check/);
+    expect(enumMatch).toMatch(/other/);
+  });
+});

@@ -837,7 +837,7 @@ const pauseSchema = z.object({
   token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
-  reason: z.enum(["pvc_swap", "shift_end", "machine_jam", "qa_check", "other"]),
+  reason: z.enum(["pvc_swap", "foil_swap", "shift_end", "machine_jam", "qa_check", "other"]),
   operatorCode: z.string().max(40).optional(),
   notes: z.string().max(400).optional(),
   clientEventId: clientEventIdField,

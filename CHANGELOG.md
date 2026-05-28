@@ -3,7 +3,7 @@
 ## [0.4.34] — 2026-05-28
 
 ### Changed (BLISTER-MACHINE-COUNTER-1)
-- **Foil roll swap pause reason:** BLISTER and COMBINED stations now include "Foil roll swap" in the pause dropdown alongside "PVC roll swap." SEALING, HANDPACK_BLISTER, PACKAGING, and bottle/cap/sticker stations are unchanged.
+- **Foil roll swap pause reason:** BLISTER and COMBINED stations now include "Foil roll swap" in the pause dropdown alongside "PVC roll swap." SEALING, HANDPACK_BLISTER, PACKAGING, and bottle/cap/sticker stations are unchanged. Server `pauseSchema` updated to accept `foil_swap` so the submit does not fail.
 - **Blister close-out — machine counter only:** The BLISTER close-out form now shows a single "Machine counter" numeric field. "Blister count" and "Packs remaining" fields are removed. The machine counter value is submitted as `countTotal` (same server path as before). Derived production numbers (tablets used, cards made) are deferred to a future settings-driven derivation system.
 - **HANDPACK_BLISTER unchanged:** Remains timed-only; no counter field.
 - **SEALING counter unchanged:** Counter presses / cards-per-press logic unaffected.
@@ -16,6 +16,7 @@
 ### Tests added (BLISTER-MACHINE-COUNTER-1)
 - `station-pause-reasons.test.ts` — BLISTER/COMBINED include foil_swap; SEALING/HANDPACK_BLISTER/PACKAGING/BOTTLE_HANDPACK exclude it.
 - `stage-action-buttons.test.ts` — Machine counter renders; blister count and packs remaining absent; countTotal payload present; packsRemaining not submitted; HANDPACK_BLISTER timed-only; sealing/packaging unchanged.
+- `actions.test.ts` — pauseSchema enum includes foil_swap and pvc_swap; other reasons preserved.
 
 ## [0.4.33] — 2026-05-28
 
