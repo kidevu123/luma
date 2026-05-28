@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.26] — 2026-05-28
+
+### Changed (SEALING-AUTO-RELEASE-1)
+- **Sealing auto-release:** SEALING stations now auto-release to the packaging queue in the same action as `SEALING_COMPLETE`. Operators no longer need a second "Release to packaging queue" tap after sealing.
+- **Shared helper:** Generalized hand-pack `maybeAutoReleaseAfterComplete` to also cover `SEALING` (reuses `projectBagReleasedEvent`; idempotent when station already unpinned).
+
+### Tests added (SEALING-AUTO-RELEASE-1)
+- `stage-action-buttons.test.ts`, `actions.test.ts` — sealing auto-release, BLISTER manual release unchanged, hand-pack path preserved.
+
 ## [0.4.25] — 2026-05-28
 
 ### Fixed (SEALING-MATERIAL-NONBLOCKING-1)

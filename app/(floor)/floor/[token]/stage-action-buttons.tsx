@@ -171,9 +171,10 @@ export function StageActionButtons({
   // Release button shows after this station's stage event has fired
   // and the bag is at the station's "ready to release" stage.
   const releaseAtStage = STATION_RELEASE_FROM_STAGE[stationKind];
-  // HANDPACK_BLISTER auto-releases on complete server-side — no manual step.
+  // HANDPACK_BLISTER + SEALING auto-release on complete server-side — no manual step.
   const releaseReady =
     stationKind !== "HANDPACK_BLISTER" &&
+    stationKind !== "SEALING" &&
     releaseAtStage != null &&
     currentStage === releaseAtStage;
   const releaseLabel =

@@ -72,3 +72,19 @@ describe("SEALING-MATERIAL-NONBLOCKING-1 · sealing never blocked by blister lot
     expect(actionsSrc).toMatch(/handpack_blister_material_skip_reason/);
   });
 });
+
+describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
+  it("chains maybeAutoReleaseAfterComplete after SEALING_COMPLETE on SEALING stations", () => {
+    expect(actionsSrc).toMatch(
+      /eventType === "SEALING_COMPLETE" && station\.kind === "SEALING"/,
+    );
+    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
+  });
+
+  it("does not auto-release on COMBINED SEALING_COMPLETE", () => {
+    const match = actionsSrc.match(
+      /SEALING_COMPLETE[\s\S]{0,80}maybeAutoReleaseAfterComplete/,
+    );
+    expect(match?.[0]).toMatch(/station\.kind === "SEALING"/);
+  });
+});

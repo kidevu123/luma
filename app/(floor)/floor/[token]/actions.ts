@@ -698,8 +698,11 @@ export async function fireStageEventAction(
           accountability,
         });
       }
-      if (eventType === "HANDPACK_BLISTER_COMPLETE") {
-        await maybeAutoReleaseHandpackAfterComplete(tx, {
+      if (
+        eventType === "HANDPACK_BLISTER_COMPLETE" ||
+        (eventType === "SEALING_COMPLETE" && station.kind === "SEALING")
+      ) {
+        await maybeAutoReleaseAfterComplete(tx, {
           workflowBagId,
           stationId,
           stationKind: station.kind,
@@ -1282,7 +1285,7 @@ type StationAccountability = Awaited<
   ReturnType<typeof resolveStationAccountability>
 >;
 
-/** Shared BAG_RELEASED projection — used by releaseBagAction and hand-pack auto-release. */
+/** Shared BAG_RELEASED projection — used by releaseBagAction and complete auto-release. */
 async function projectBagReleasedEvent(
   tx: DbTx,
   args: {
@@ -1311,8 +1314,14 @@ async function projectBagReleasedEvent(
   });
 }
 
-/** HANDPACK_BLISTER: timed complete also releases — no second operator tap. */
-async function maybeAutoReleaseHandpackAfterComplete(
+/** Stations that auto-release on complete — no second operator tap. */
+const AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS = new Set([
+  "HANDPACK_BLISTER",
+  "SEALING",
+]);
+
+/** HANDPACK_BLISTER + SEALING: complete also releases when still pinned. */
+async function maybeAutoReleaseAfterComplete(
   tx: DbTx,
   args: {
     workflowBagId: string;
@@ -1322,8 +1331,8 @@ async function maybeAutoReleaseHandpackAfterComplete(
     accountability: StationAccountability;
   },
 ): Promise<void> {
-  if (args.stationKind !== "HANDPACK_BLISTER") return;
-  const releaseAtStage = STATION_RELEASE_FROM_STAGE.HANDPACK_BLISTER;
+  if (!AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS.has(args.stationKind)) return;
+  const releaseAtStage = STATION_RELEASE_FROM_STAGE[args.stationKind];
   if (!releaseAtStage) return;
 
   const [afterComplete] = await tx

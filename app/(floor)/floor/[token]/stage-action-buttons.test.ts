@@ -165,9 +165,9 @@ describe("STATION-KIND-FIX-1 · behavior follows station kind, not station name"
 describe("STATION-HANDPACK-AUTO-RELEASE-1 · hand-pack complete auto-releases", () => {
   it("fireStageEventAction chains BAG_RELEASED after HANDPACK_BLISTER_COMPLETE", () => {
     expect(actionsSrc).toMatch(/eventType === "HANDPACK_BLISTER_COMPLETE"/);
-    expect(actionsSrc).toMatch(/maybeAutoReleaseHandpackAfterComplete/);
+    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
     const completeIdx = actionsSrc.indexOf('eventType === "HANDPACK_BLISTER_COMPLETE"');
-    const autoIdx = actionsSrc.indexOf("maybeAutoReleaseHandpackAfterComplete");
+    const autoIdx = actionsSrc.indexOf("maybeAutoReleaseAfterComplete");
     expect(autoIdx).toBeGreaterThan(completeIdx);
   });
 
@@ -175,13 +175,13 @@ describe("STATION-HANDPACK-AUTO-RELEASE-1 · hand-pack complete auto-releases", 
     expect(actionsSrc).toMatch(/async function projectBagReleasedEvent/);
     expect(actionsSrc).toMatch(/releaseBagAction[\s\S]*projectBagReleasedEvent/);
     expect(actionsSrc).toMatch(
-      /maybeAutoReleaseHandpackAfterComplete[\s\S]*projectBagReleasedEvent/,
+      /maybeAutoReleaseAfterComplete[\s\S]*projectBagReleasedEvent/,
     );
   });
 
-  it("auto-release is guarded to HANDPACK_BLISTER only and checks stage + station pin", () => {
-    expect(actionsSrc).toMatch(/stationKind !== "HANDPACK_BLISTER"/);
-    expect(actionsSrc).toMatch(/STATION_RELEASE_FROM_STAGE\.HANDPACK_BLISTER/);
+  it("auto-release is guarded by AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS and checks stage + station pin", () => {
+    expect(actionsSrc).toMatch(/AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS/);
+    expect(actionsSrc).toMatch(/HANDPACK_BLISTER/);
     expect(actionsSrc).toMatch(/readStationLive\.currentWorkflowBagId/);
   });
 
@@ -207,8 +207,47 @@ describe("STATION-HANDPACK-AUTO-RELEASE-1 · hand-pack complete auto-releases", 
 
   it("scan-card-form and stage-progression files not modified for auto-release", () => {
     const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
-    expect(scanSrc).not.toMatch(/maybeAutoReleaseHandpackAfterComplete/);
+    expect(scanSrc).not.toMatch(/maybeAutoReleaseAfterComplete/);
     expect(scanSrc).not.toMatch(/auto-release/);
+  });
+});
+
+describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
+  it("fireStageEventAction chains BAG_RELEASED after SEALING_COMPLETE on SEALING stations", () => {
+    expect(actionsSrc).toMatch(
+      /eventType === "SEALING_COMPLETE" && station\.kind === "SEALING"/,
+    );
+    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
+    const sealingIdx = actionsSrc.indexOf(
+      'eventType === "SEALING_COMPLETE" && station.kind === "SEALING"',
+    );
+    const autoIdx = actionsSrc.indexOf("await maybeAutoReleaseAfterComplete");
+    expect(autoIdx).toBeGreaterThan(sealingIdx);
+  });
+
+  it("SEALING hides manual Release button — BLISTER still shows release label", () => {
+    const releaseBlock = src.slice(
+      src.indexOf("const releaseReady"),
+      src.indexOf("const releaseLabel"),
+    );
+    expect(releaseBlock).toMatch(/stationKind !== "SEALING"/);
+    expect(src).toMatch(/Release to sealing queue/);
+    expect(src).toMatch(/Release to packaging queue/);
+  });
+
+  it("auto-release uses STATION_RELEASE_FROM_STAGE.SEALING (SEALED) and idempotent station pin check", () => {
+    expect(actionsSrc).toMatch(/AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*SEALING/);
+    const helperIdx = actionsSrc.indexOf("function maybeAutoReleaseAfterComplete");
+    const helperBlock = actionsSrc.slice(helperIdx, helperIdx + 1200);
+    expect(helperBlock).toMatch(/STATION_RELEASE_FROM_STAGE\[args\.stationKind\]/);
+    expect(helperBlock).toMatch(/currentWorkflowBagId !== args\.workflowBagId/);
+    expect(helperBlock).toMatch(/-auto-release/);
+  });
+
+  it("SEALING_COMPLETE counter payload unchanged", () => {
+    expect(actionsSrc).toMatch(/counter_presses/);
+    expect(actionsSrc).toMatch(/cards_per_press/);
+    expect(actionsSrc).toMatch(/count_total/);
   });
 });
 
