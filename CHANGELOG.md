@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.19] — 2026-05-28
+
+### Changed (STATION-HANDPACK-AUTO-RELEASE-1)
+- **Hand-pack auto-release:** `HANDPACK_BLISTER_COMPLETE` now chains `BAG_RELEASED` in the same server transaction via shared `projectBagReleasedEvent` helper — operators no longer tap a separate "Release to next station" button after timed hand-pack complete.
+- **UI:** Manual release button hidden for `HANDPACK_BLISTER` stations (machine blister/sealing release unchanged).
+
+### Tests added (STATION-HANDPACK-AUTO-RELEASE-1)
+- `stage-action-buttons.test.ts` — auto-release wiring, shared release helper, HANDPACK-only guard, release button hidden, sealing overlap pickup unchanged, scan-card-form untouched.
+
 ## [0.4.18] — 2026-05-28
 
 ### Fixed (STATION-KIND-FIX-1)

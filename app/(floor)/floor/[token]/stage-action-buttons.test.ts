@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const src = readFileSync(join(__dirname, "stage-action-buttons.tsx"), "utf8");
+const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
 
 describe("STATION-HANDPACK-1 · HANDPACK_BLISTER timed-only completion", () => {
   it("maps HANDPACK_BLISTER to HANDPACK_BLISTER_COMPLETE event", () => {
@@ -158,5 +159,55 @@ describe("STATION-KIND-FIX-1 · behavior follows station kind, not station name"
     // All event routing uses STAGE_BY_KIND[stationKind] — no name comparison.
     expect(src).toMatch(/STAGE_BY_KIND\[stationKind\]/);
     expect(src).not.toMatch(/station\.label|stationName|stationLabel/);
+  });
+});
+
+describe("STATION-HANDPACK-AUTO-RELEASE-1 · hand-pack complete auto-releases", () => {
+  it("fireStageEventAction chains BAG_RELEASED after HANDPACK_BLISTER_COMPLETE", () => {
+    expect(actionsSrc).toMatch(/eventType === "HANDPACK_BLISTER_COMPLETE"/);
+    expect(actionsSrc).toMatch(/maybeAutoReleaseHandpackAfterComplete/);
+    const completeIdx = actionsSrc.indexOf('eventType === "HANDPACK_BLISTER_COMPLETE"');
+    const autoIdx = actionsSrc.indexOf("maybeAutoReleaseHandpackAfterComplete");
+    expect(autoIdx).toBeGreaterThan(completeIdx);
+  });
+
+  it("auto-release reuses projectBagReleasedEvent shared with releaseBagAction", () => {
+    expect(actionsSrc).toMatch(/async function projectBagReleasedEvent/);
+    expect(actionsSrc).toMatch(/releaseBagAction[\s\S]*projectBagReleasedEvent/);
+    expect(actionsSrc).toMatch(
+      /maybeAutoReleaseHandpackAfterComplete[\s\S]*projectBagReleasedEvent/,
+    );
+  });
+
+  it("auto-release is guarded to HANDPACK_BLISTER only and checks stage + station pin", () => {
+    expect(actionsSrc).toMatch(/stationKind !== "HANDPACK_BLISTER"/);
+    expect(actionsSrc).toMatch(/STATION_RELEASE_FROM_STAGE\.HANDPACK_BLISTER/);
+    expect(actionsSrc).toMatch(/readStationLive\.currentWorkflowBagId/);
+  });
+
+  it("HANDPACK_BLISTER hides manual Release button — BLISTER still shows it", () => {
+    expect(src).toMatch(/stationKind !== "HANDPACK_BLISTER"/);
+    const releaseBlock = src.slice(
+      src.indexOf("const releaseReady"),
+      src.indexOf("const releaseLabel"),
+    );
+    expect(releaseBlock).toMatch(/HANDPACK_BLISTER/);
+    const blisterReleaseAt = src.indexOf('stationKind === "BLISTER"');
+    expect(blisterReleaseAt).toBeGreaterThan(-1);
+  });
+
+  it("sealing overlap pickup stages unchanged in stage-progression", () => {
+    const progressionSrc = readFileSync(
+      join(__dirname, "../../../../lib/production/stage-progression.ts"),
+      "utf8",
+    );
+    expect(progressionSrc).toMatch(/SEALING: \["STARTED", "BLISTERED"\]/);
+    expect(progressionSrc).toMatch(/HANDPACK_BLISTER: "BLISTERED"/);
+  });
+
+  it("scan-card-form and stage-progression files not modified for auto-release", () => {
+    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
+    expect(scanSrc).not.toMatch(/maybeAutoReleaseHandpackAfterComplete/);
+    expect(scanSrc).not.toMatch(/auto-release/);
   });
 });

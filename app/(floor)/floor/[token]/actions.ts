@@ -11,6 +11,7 @@ import {
   inventoryBags,
   batches,
   readBagState,
+  readStationLive,
   products,
   rawBagAllocationSessions,
   packagingLots,
@@ -596,6 +597,15 @@ export async function fireStageEventAction(
         accountableEmployeeNameSnapshot:
           accountability.accountableEmployeeNameSnapshot,
       });
+      if (eventType === "HANDPACK_BLISTER_COMPLETE") {
+        await maybeAutoReleaseHandpackAfterComplete(tx, {
+          workflowBagId,
+          stationId,
+          stationKind: station.kind,
+          clientEventId: clientEventId ?? null,
+          accountability,
+        });
+      }
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Event failed." };
@@ -1263,6 +1273,82 @@ export async function finalizeBagAction(
 
 // ── release to next station ─────────────────────────────────────────────────
 
+type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+type StationAccountability = Awaited<
+  ReturnType<typeof resolveStationAccountability>
+>;
+
+/** Shared BAG_RELEASED projection — used by releaseBagAction and hand-pack auto-release. */
+async function projectBagReleasedEvent(
+  tx: DbTx,
+  args: {
+    workflowBagId: string;
+    stationId: string;
+    stationKind: string;
+    releasedAtStage: string;
+    accountability: StationAccountability;
+    clientEventId?: string | null | undefined;
+  },
+): Promise<void> {
+  await projectEvent(tx, {
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    eventType: "BAG_RELEASED",
+    payload: {
+      station_kind: args.stationKind,
+      released_at_stage: args.releasedAtStage,
+    },
+    ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
+    enteredByUserId: args.accountability.enteredByUserId,
+    accountableEmployeeId: args.accountability.accountableEmployeeId,
+    accountabilitySource: args.accountability.accountabilitySource,
+    accountableEmployeeNameSnapshot:
+      args.accountability.accountableEmployeeNameSnapshot,
+  });
+}
+
+/** HANDPACK_BLISTER: timed complete also releases — no second operator tap. */
+async function maybeAutoReleaseHandpackAfterComplete(
+  tx: DbTx,
+  args: {
+    workflowBagId: string;
+    stationId: string;
+    stationKind: string;
+    clientEventId?: string | null | undefined;
+    accountability: StationAccountability;
+  },
+): Promise<void> {
+  if (args.stationKind !== "HANDPACK_BLISTER") return;
+  const releaseAtStage = STATION_RELEASE_FROM_STAGE.HANDPACK_BLISTER;
+  if (!releaseAtStage) return;
+
+  const [afterComplete] = await tx
+    .select({ stage: readBagState.stage })
+    .from(readBagState)
+    .where(eq(readBagState.workflowBagId, args.workflowBagId));
+  if (afterComplete?.stage !== releaseAtStage) return;
+
+  const [live] = await tx
+    .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+    .from(readStationLive)
+    .where(eq(readStationLive.stationId, args.stationId));
+  if (live?.currentWorkflowBagId !== args.workflowBagId) return;
+
+  const releaseClientEventId = args.clientEventId
+    ? `${args.clientEventId}-auto-release`
+    : undefined;
+
+  await projectBagReleasedEvent(tx, {
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    stationKind: args.stationKind,
+    releasedAtStage: releaseAtStage,
+    accountability: args.accountability,
+    ...(releaseClientEventId ? { clientEventId: releaseClientEventId } : {}),
+  });
+}
+
 const releaseSchema = z.object({
   token: z.string(),
   workflowBagId: z.string().uuid(),
@@ -1314,22 +1400,13 @@ export async function releaseBagAction(
       const accountability = await resolveStationAccountability(tx, {
         stationId: parsed.data.stationId,
       });
-      await projectEvent(tx, {
+      await projectBagReleasedEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
-        eventType: "BAG_RELEASED",
-        payload: {
-          station_kind: station.kind,
-          released_at_stage: state.stage,
-        },
-        ...(parsed.data.clientEventId
-          ? { clientEventId: parsed.data.clientEventId }
-          : {}),
-        enteredByUserId: accountability.enteredByUserId,
-        accountableEmployeeId: accountability.accountableEmployeeId,
-        accountabilitySource: accountability.accountabilitySource,
-        accountableEmployeeNameSnapshot:
-          accountability.accountableEmployeeNameSnapshot,
+        stationKind: station.kind,
+        releasedAtStage: state.stage ?? releaseAtStage,
+        accountability,
+        clientEventId: parsed.data.clientEventId ?? null,
       });
     });
   } catch (err) {
