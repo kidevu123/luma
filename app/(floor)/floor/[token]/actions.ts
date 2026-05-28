@@ -36,9 +36,10 @@ import {
   stationUsesSealingCounter,
 } from "@/lib/production/sealing-counter";
 import {
-  findOldestAvailableBlisterCardLot,
+  lookupProductMatchedBlisterCardLot,
   issueHandpackBlisterCardMaterial,
   workflowBagHasHandpackBlisterComplete,
+  type HandpackBlisterMaterialSkipReason,
 } from "@/lib/production/handpack-seal-material";
 
 // First-op count submissions where accountability is mandatory (the
@@ -621,15 +622,17 @@ export async function fireStageEventAction(
       (await workflowBagHasHandpackBlisterComplete(workflowBagId));
 
     let handpackBlisterLot: { id: string; qtyOnHand: number } | null = null;
+    let handpackMaterialSkip: HandpackBlisterMaterialSkipReason | null = null;
     if (
       needsHandpackBlisterMaterial &&
       (resolvedCountTotal ?? 0) > 0
     ) {
-      handpackBlisterLot = await findOldestAvailableBlisterCardLot();
-      if (!handpackBlisterLot) {
-        return {
-          error: "No available pre-made blister lot found. Receive stock first.",
-        };
+      const lotLookup =
+        await lookupProductMatchedBlisterCardLot(workflowBagId);
+      if (lotLookup.status === "found") {
+        handpackBlisterLot = lotLookup.lot;
+      } else {
+        handpackMaterialSkip = lotLookup.reason;
       }
     }
 
@@ -660,6 +663,13 @@ export async function fireStageEventAction(
                 count_total: resolvedCountTotal ?? 0,
                 counter_presses: sealingCounterPresses,
                 cards_per_press: sealingCardsPerPress,
+                ...(handpackMaterialSkip
+                  ? {
+                      handpack_blister_material_skipped: true,
+                      handpack_blister_material_skip_reason:
+                        handpackMaterialSkip,
+                    }
+                  : {}),
               }
             : resolvedCountTotal
               ? { count_total: resolvedCountTotal }

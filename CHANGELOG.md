@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.25] — 2026-05-28
+
+### Fixed (SEALING-MATERIAL-NONBLOCKING-1)
+- **Sealing completion never blocked by blister-card stock:** `SEALING_COMPLETE` no longer fails with "No available pre-made blister lot found." Missing or unmatched lots skip material issuance and still record the machine counter.
+- **Product-matched lot only:** Hand-pack seal material issuance now selects the oldest AVAILABLE lot from the bag product's BOM `BLISTER_CARD` spec only — never a global oldest lot that could decrement the wrong SKU.
+- **Skip audit on event:** When material is skipped, `SEALING_COMPLETE` payload records `handpack_blister_material_skipped` and `handpack_blister_material_skip_reason` for downstream review.
+- **Counter presses scroll-safe:** Counter presses input blurs on wheel/trackpad scroll so focused values are not accidentally changed.
+
+### Tests added (SEALING-MATERIAL-NONBLOCKING-1)
+- `handpack-seal-material.test.ts` — product BOM lookup, non-blocking skip, no global lot.
+- `actions.test.ts` — no blocking error, skip audit fields.
+- `stage-action-buttons.test.ts` (via handpack test) — scrollSafe on counter input.
+
 ## [0.4.24] — 2026-05-28
 
 ### Changed (SEALING-COUNTER-UI-2)

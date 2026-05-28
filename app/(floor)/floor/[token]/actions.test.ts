@@ -55,3 +55,20 @@ describe("SEALING-COUNTER-UI-2 · server payload unchanged for material path", (
     expect(actionsSrc).toMatch(/needsHandpackBlisterMaterial/);
   });
 });
+
+describe("SEALING-MATERIAL-NONBLOCKING-1 · sealing never blocked by blister lot", () => {
+  it("uses product-matched lot lookup — not global oldest", () => {
+    expect(actionsSrc).toMatch(/lookupProductMatchedBlisterCardLot/);
+    expect(actionsSrc).not.toMatch(/findOldestAvailableBlisterCardLot/);
+  });
+
+  it("does not return pre-made blister lot error to floor UI", () => {
+    expect(actionsSrc).not.toMatch(/No available pre-made blister lot found/);
+    expect(actionsSrc).not.toMatch(/Receive stock first/);
+  });
+
+  it("records skip audit fields when material lot unavailable", () => {
+    expect(actionsSrc).toMatch(/handpack_blister_material_skipped/);
+    expect(actionsSrc).toMatch(/handpack_blister_material_skip_reason/);
+  });
+});

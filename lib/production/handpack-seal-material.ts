@@ -1,11 +1,15 @@
-/** SEALING-FLOW-CLARITY-2 — BLISTER_CARD consumption when hand-pack bags seal. */
+/** SEALING-FLOW-CLARITY-2 / SEALING-MATERIAL-NONBLOCKING-1 — optional
+ *  BLISTER_CARD consumption when hand-pack bags seal. Never blocks
+ *  SEALING_COMPLETE; only product-BOM-matched lots may be decremented. */
 
-import { eq, and, asc, sql } from "drizzle-orm";
+import { eq, and, asc, sql, inArray, gt } from "drizzle-orm";
 import { db as Db } from "@/lib/db";
 import {
   packagingLots,
   packagingMaterials,
   workflowEvents,
+  workflowBags,
+  productPackagingSpecs,
 } from "@/lib/db/schema";
 import { projectEvent } from "@/lib/projector";
 import type { resolveStationAccountability } from "@/lib/production/station-operator-session";
@@ -14,6 +18,15 @@ type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 type Accountability = Awaited<
   ReturnType<typeof resolveStationAccountability>
 >;
+
+export type HandpackBlisterMaterialSkipReason =
+  | "no_product_id"
+  | "no_bom_blister_card"
+  | "no_available_lot";
+
+export type HandpackBlisterLotLookupResult =
+  | { status: "found"; lot: { id: string; qtyOnHand: number } }
+  | { status: "skipped"; reason: HandpackBlisterMaterialSkipReason };
 
 export async function workflowBagHasHandpackBlisterComplete(
   workflowBagId: string,
@@ -31,24 +44,60 @@ export async function workflowBagHasHandpackBlisterComplete(
   return row !== undefined;
 }
 
-export async function findOldestAvailableBlisterCardLot() {
-  const [lot] = await Db
-    .select({ id: packagingLots.id, qtyOnHand: packagingLots.qtyOnHand })
-    .from(packagingLots)
+/** Oldest AVAILABLE lot for a BLISTER_CARD on the bag's product BOM only. */
+export async function lookupProductMatchedBlisterCardLot(
+  workflowBagId: string,
+): Promise<HandpackBlisterLotLookupResult> {
+  const [bag] = await Db
+    .select({ productId: workflowBags.productId })
+    .from(workflowBags)
+    .where(eq(workflowBags.id, workflowBagId))
+    .limit(1);
+
+  if (!bag?.productId) {
+    return { status: "skipped", reason: "no_product_id" };
+  }
+
+  const bomRows = await Db
+    .select({
+      packagingMaterialId: productPackagingSpecs.packagingMaterialId,
+    })
+    .from(productPackagingSpecs)
     .innerJoin(
       packagingMaterials,
-      eq(packagingMaterials.id, packagingLots.packagingMaterialId),
+      eq(packagingMaterials.id, productPackagingSpecs.packagingMaterialId),
     )
     .where(
       and(
-        eq(packagingLots.status, "AVAILABLE"),
+        eq(productPackagingSpecs.productId, bag.productId),
         eq(packagingMaterials.kind, "BLISTER_CARD"),
         eq(packagingMaterials.category, "MATERIAL"),
+      ),
+    );
+
+  const materialIds = bomRows.map((r) => r.packagingMaterialId);
+  if (materialIds.length === 0) {
+    return { status: "skipped", reason: "no_bom_blister_card" };
+  }
+
+  const [lot] = await Db
+    .select({ id: packagingLots.id, qtyOnHand: packagingLots.qtyOnHand })
+    .from(packagingLots)
+    .where(
+      and(
+        eq(packagingLots.status, "AVAILABLE"),
+        inArray(packagingLots.packagingMaterialId, materialIds),
+        gt(packagingLots.qtyOnHand, 0),
       ),
     )
     .orderBy(asc(packagingLots.receivedAt))
     .limit(1);
-  return lot ?? null;
+
+  if (!lot) {
+    return { status: "skipped", reason: "no_available_lot" };
+  }
+
+  return { status: "found", lot };
 }
 
 /** Emit PACKAGING_MATERIAL_ISSUED and decrement lot for hand-pack seal path. */

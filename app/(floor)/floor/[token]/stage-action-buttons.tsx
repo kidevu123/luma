@@ -671,11 +671,14 @@ function NumField({
   value,
   onChange,
   className,
+  scrollSafe = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   className?: string;
+  /** Prevent trackpad/mouse wheel from changing value while focused. */
+  scrollSafe?: boolean;
 }) {
   return (
     <label className={`block ${className ?? ""}`}>
@@ -688,7 +691,14 @@ function NumField({
         min={0}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base"
+        onWheel={
+          scrollSafe
+            ? (e) => {
+                e.currentTarget.blur();
+              }
+            : undefined
+        }
+        className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
       />
     </label>
   );
@@ -742,6 +752,7 @@ function SealingCompleteForm({
               label="Counter presses"
               value={counterPresses}
               onChange={setCounterPresses}
+              scrollSafe
             />
             {previewCount != null && Number.isFinite(previewCount) ? (
               <p className="text-xs text-sky-800">

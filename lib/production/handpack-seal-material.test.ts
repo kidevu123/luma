@@ -32,6 +32,44 @@ describe("SEALING-FLOW-CLARITY-2 · hand-pack seal material helper", () => {
   });
 });
 
+describe("SEALING-MATERIAL-NONBLOCKING-1 · product-matched non-blocking lot lookup", () => {
+  it("uses product BOM to find BLISTER_CARD lots — not global oldest", () => {
+    expect(materialSrc).toMatch(/lookupProductMatchedBlisterCardLot/);
+    expect(materialSrc).toMatch(/productPackagingSpecs/);
+    expect(materialSrc).toMatch(/eq\(productPackagingSpecs\.productId, bag\.productId\)/);
+    expect(materialSrc).toMatch(/inArray\(packagingLots\.packagingMaterialId, materialIds\)/);
+    expect(materialSrc).not.toMatch(/findOldestAvailableBlisterCardLot/);
+  });
+
+  it("returns skipped status instead of throwing when no lot", () => {
+    expect(materialSrc).toMatch(/status: "skipped"/);
+    expect(materialSrc).toMatch(/no_product_id/);
+    expect(materialSrc).toMatch(/no_bom_blister_card/);
+    expect(materialSrc).toMatch(/no_available_lot/);
+  });
+
+  it("fireStageEventAction does not block SEALING_COMPLETE on missing lot", () => {
+    expect(actionsSrc).toMatch(/lookupProductMatchedBlisterCardLot/);
+    expect(actionsSrc).not.toMatch(
+      /No available pre-made blister lot found/,
+    );
+    expect(actionsSrc).not.toMatch(/Receive stock first/);
+  });
+
+  it("records skip reason on SEALING_COMPLETE payload when lot unavailable", () => {
+    expect(actionsSrc).toMatch(/handpack_blister_material_skipped/);
+    expect(actionsSrc).toMatch(/handpack_blister_material_skip_reason/);
+  });
+
+  it("still issues material only when product-matched lot is found", () => {
+    expect(actionsSrc).toMatch(/lotLookup\.status === "found"/);
+    expect(actionsSrc).toMatch(/issueHandpackBlisterCardMaterial/);
+    const issueIdx = actionsSrc.indexOf("await issueHandpackBlisterCardMaterial");
+    const issueBlock = actionsSrc.slice(issueIdx - 120, issueIdx + 40);
+    expect(issueBlock).toMatch(/handpackBlisterLot/);
+  });
+});
+
 describe("SEALING-FLOW-CLARITY-2 · unified sealing completion path", () => {
   it("fireStageEventAction uses hand-pack material helper on SEALING_COMPLETE", () => {
     expect(actionsSrc).toMatch(/from "@\/lib\/production\/handpack-seal-material"/);
@@ -72,5 +110,21 @@ describe("SEALING-FLOW-CLARITY-2 · unified sealing completion path", () => {
     );
     expect(progressionSrc).not.toMatch(/handpack-seal-material/);
     expect(progressionSrc).not.toMatch(/issueHandpackBlisterCardMaterial/);
+  });
+});
+
+describe("SEALING-MATERIAL-NONBLOCKING-1 · counter presses scroll-safe input", () => {
+  function sealingFormBlock(): string {
+    const formIdx = stageSrc.indexOf("function SealingCompleteForm");
+    const blisterIdx = stageSrc.indexOf("function BlisterCompleteForm");
+    return stageSrc.slice(formIdx, blisterIdx);
+  }
+
+  it("Counter presses NumField uses scrollSafe to prevent wheel changes", () => {
+    const block = sealingFormBlock();
+    expect(block).toMatch(/label="Counter presses"/);
+    expect(block).toMatch(/scrollSafe/);
+    const numFieldIdx = stageSrc.indexOf("function NumField");
+    expect(stageSrc.slice(numFieldIdx, numFieldIdx + 900)).toMatch(/onWheel/);
   });
 });
