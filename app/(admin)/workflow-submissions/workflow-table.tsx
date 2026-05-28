@@ -7,6 +7,11 @@ import { loadBagEventsAction } from "./load-events-action";
 import type { BagGenealogyResult } from "@/lib/production/types";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import {
+  formatWorkflowDatetime,
+  formatWorkflowTimestamp,
+  getPayloadRecord,
+} from "./workflow-table-helpers";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -14,8 +19,9 @@ export type WorkflowBagRow = {
   id: string;
   receiptNumber: string | null;
   bagNumber: number | null;
-  startedAt: Date;
-  finalizedAt: Date | null;
+  /** ISO string — serialized at the RSC boundary. */
+  startedAt: string;
+  finalizedAt: string | null;
   productName: string | null;
   productSku: string | null;
   productKind: string | null;
@@ -23,7 +29,7 @@ export type WorkflowBagRow = {
   isFinalized: boolean | null;
   isPaused: boolean | null;
   operatorCode: string | null;
-  lastEventAt: Date | null;
+  lastEventAt: string | null;
   masterCases: number | null;
   displaysMade: number | null;
   looseCards: number | null;
@@ -91,21 +97,6 @@ function fmtSeconds(s: number | null): string {
   return `${m}m`;
 }
 
-function fmtDatetime(d: Date): string {
-  return d.toISOString().replace("T", " ").slice(0, 16);
-}
-
-function fmtTs(d: Date): string {
-  return d.toISOString().replace("T", " ").slice(0, 19);
-}
-
-function getPayload(e: { payload: unknown }): Record<string, unknown> {
-  if (e.payload !== null && typeof e.payload === "object" && !Array.isArray(e.payload)) {
-    return e.payload as Record<string, unknown>;
-  }
-  return {};
-}
-
 function extractSubmissionLines(
   eventType: string,
   payload: Record<string, unknown>,
@@ -163,7 +154,7 @@ function ExpandedContent({
 
   let totalCountSum = 0;
   for (const e of submissionEvents) {
-    const p = getPayload(e);
+    const p = getPayloadRecord(e.payload);
     const ct = p["count_total"];
     if (typeof ct === "number") totalCountSum += ct;
   }
@@ -181,7 +172,7 @@ function ExpandedContent({
           <ol className="relative border-l border-border pl-4 space-y-2 max-h-[400px] overflow-y-auto">
             {genealogy.events.map((e) => {
               const badge = EVENT_BADGES[e.eventType];
-              const p = getPayload(e);
+              const p = getPayloadRecord(e.payload);
               return (
                 <li key={e.eventId} className="relative">
                   <span
@@ -190,7 +181,7 @@ function ExpandedContent({
                   />
                   <div className="flex flex-wrap items-baseline gap-1.5 text-[11px]">
                     <span className="font-mono text-text-subtle text-[10px]">
-                      {fmtTs(e.occurredAt)}
+                      {formatWorkflowTimestamp(e.occurredAt)}
                     </span>
                     {badge ? (
                       <span
@@ -243,7 +234,7 @@ function ExpandedContent({
         ) : (
           <div className="space-y-2">
             {submissionEvents.map((e) => {
-              const p = getPayload(e);
+              const p = getPayloadRecord(e.payload);
               const lines = extractSubmissionLines(e.eventType, p);
               const badge = EVENT_BADGES[e.eventType];
               return (
@@ -260,7 +251,7 @@ function ExpandedContent({
                       <span className="font-mono text-[9px] text-text-muted">{e.eventType}</span>
                     )}
                     <span className="font-mono text-[10px] text-text-subtle">
-                      {fmtTs(e.occurredAt)}
+                      {formatWorkflowTimestamp(e.occurredAt)}
                     </span>
                     {e.stationLabel && (
                       <span className="text-[10px] text-text-muted">{e.stationLabel}</span>
@@ -434,7 +425,7 @@ function BagRow({ bag }: { bag: WorkflowBagRow }) {
         </TD>
 
         <TD className="text-[11px] font-mono text-text-subtle tabular-nums whitespace-nowrap">
-          {fmtDatetime(bag.startedAt)}
+          {formatWorkflowDatetime(bag.startedAt)}
         </TD>
 
         <TD className="text-center">

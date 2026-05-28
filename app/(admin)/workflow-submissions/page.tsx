@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { WorkflowTable } from "./workflow-table";
 import type { WorkflowBagRow } from "./workflow-table";
+import { coerceEventCount } from "./workflow-table-helpers";
 import { ClipboardList } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -141,8 +142,8 @@ export default async function WorkflowSubmissionsPage({
     id: r.id,
     receiptNumber: r.receiptNumber ?? null,
     bagNumber: r.bagNumber ?? null,
-    startedAt: r.startedAt,
-    finalizedAt: r.finalizedAt ?? null,
+    startedAt: r.startedAt.toISOString(),
+    finalizedAt: r.finalizedAt?.toISOString() ?? null,
     productName: r.productName ?? null,
     productSku: r.productSku ?? null,
     productKind: r.productKind ?? null,
@@ -150,7 +151,7 @@ export default async function WorkflowSubmissionsPage({
     isFinalized: r.isFinalized ?? null,
     isPaused: r.isPaused ?? null,
     operatorCode: r.operatorCode ?? null,
-    lastEventAt: r.lastEventAt ?? null,
+    lastEventAt: r.lastEventAt?.toISOString() ?? null,
     masterCases: r.masterCases ?? null,
     displaysMade: r.displaysMade ?? null,
     looseCards: r.looseCards ?? null,
@@ -162,7 +163,7 @@ export default async function WorkflowSubmissionsPage({
     blisterSeconds: r.blisterSeconds ?? null,
     sealingSeconds: r.sealingSeconds ?? null,
     packagingSeconds: r.packagingSeconds ?? null,
-    eventCount: r.eventCount,
+    eventCount: coerceEventCount(r.eventCount),
   }));
 
   const qVal = typeof sp["q"] === "string" ? sp["q"] : "";

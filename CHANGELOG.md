@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.29] — 2026-05-27
+
+### Fixed (WORKFLOW-DATA-VISIBILITY-1)
+- **Workflows page crash:** `/workflow-submissions` no longer throws when rendering bags — dates are serialized to ISO strings at the RSC boundary and client formatters accept `Date | string`. Postgres `count()` coerced to number for event counts.
+
+### Tests added (WORKFLOW-DATA-VISIBILITY-1)
+- `workflow-table-helpers.test.ts`, `page.test.ts` — RSC date serialization, Bag 117-style finalized row, optional payload fields, empty timestamps, SQL count coercion.
+
 ## [0.4.28] — 2026-05-28
 
 ### Changed (PACKAGING-AUTO-FINALIZE-1)
