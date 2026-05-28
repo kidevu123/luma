@@ -537,7 +537,8 @@ function PackagingCompleteForm({
   // don't reach this station (they use BOTTLE_* station kinds).
   const isVariety = productKind === "VARIETY";
   const looseLabel = isVariety ? "Loose units" : "Loose cards";
-  const rippedLabel = isVariety ? "Damaged (scrap)" : "Ripped (scrap)";
+  const reworkLabel = "Needs rework / return to sealing";
+  const rippedLabel = "Ripped / unusable";
 
   // Live BOM consumption preview — computed from entered counts + product
   // structure. Updates as the operator types.
@@ -565,19 +566,21 @@ function PackagingCompleteForm({
         Packaging close-out
       </p>
       <div className="grid grid-cols-2 gap-2">
-        <NumField label="Master cases" value={masterCases} onChange={setMasterCases} />
-        <NumField label="Displays" value={displaysMade} onChange={setDisplaysMade} />
-        <NumField label={looseLabel} value={looseCards} onChange={setLooseCards} />
+        <NumField label="Master cases" value={masterCases} onChange={setMasterCases} scrollSafe />
+        <NumField label="Displays" value={displaysMade} onChange={setDisplaysMade} scrollSafe />
+        <NumField label={looseLabel} value={looseCards} onChange={setLooseCards} scrollSafe />
         <NumField
-          label="Damaged (return to sealing)"
+          label={reworkLabel}
           value={damagedPackaging}
           onChange={setDamagedPackaging}
+          scrollSafe
         />
         <NumField
           label={rippedLabel}
           value={rippedCards}
           onChange={setRippedCards}
           className="col-span-2"
+          scrollSafe
         />
       </div>
 

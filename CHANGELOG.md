@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.27] — 2026-05-28
+
+### Changed (PACKAGING-CLOSEOUT-UX-1)
+- **Packaging close-out scroll-safe:** All packaging close-out number inputs (master cases, displays, loose cards, rework, ripped) blur on wheel/trackpad scroll so focused values are not accidentally changed on tablets.
+- **Clearer rework/scrap labels:** "Damaged (return to sealing)" → "Needs rework / return to sealing"; "Ripped (scrap)" → "Ripped / unusable". Form payload field names unchanged.
+
+### Tests added (PACKAGING-CLOSEOUT-UX-1)
+- `stage-action-buttons.test.ts` — packaging scrollSafe on all NumFields, new labels, old labels absent, sealing counter and blister close-out unchanged.
+
 ## [0.4.26] — 2026-05-28
 
 ### Changed (SEALING-AUTO-RELEASE-1)

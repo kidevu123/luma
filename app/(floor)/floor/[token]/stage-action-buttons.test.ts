@@ -346,3 +346,72 @@ describe("SEALING-COUNTER-UI-2 · counter-only sealing close-out", () => {
     expect(blisterBlock).toMatch(/Packs remaining/);
   });
 });
+
+describe("PACKAGING-CLOSEOUT-UX-1 · scroll-safe inputs and clearer labels", () => {
+  function packagingFormBlock(): string {
+    const formIdx = src.indexOf("function PackagingCompleteForm");
+    const numFieldIdx = src.indexOf("function NumField");
+    return src.slice(formIdx, numFieldIdx);
+  }
+
+  it("all packaging close-out NumFields use scrollSafe", () => {
+    const block = packagingFormBlock();
+    const numFieldCalls = block.match(/<NumField[\s\S]*?\/>/g) ?? [];
+    expect(numFieldCalls.length).toBe(5);
+    for (const call of numFieldCalls) {
+      expect(call).toMatch(/scrollSafe/);
+    }
+  });
+
+  it("shows new rework and ripped labels", () => {
+    const block = packagingFormBlock();
+    expect(block).toMatch(/Needs rework \/ return to sealing/);
+    expect(block).toMatch(/Ripped \/ unusable/);
+  });
+
+  it("old damaged and ripped labels are gone from packaging close-out", () => {
+    const block = packagingFormBlock();
+    expect(block).not.toMatch(/Damaged \(return to sealing\)/);
+    expect(block).not.toMatch(/Ripped \(scrap\)/);
+    expect(block).not.toMatch(/Damaged \(scrap\)/);
+  });
+
+  it("packaging payload field names unchanged", () => {
+    const block = packagingFormBlock();
+    expect(block).toMatch(/fd\.set\("masterCases"/);
+    expect(block).toMatch(/fd\.set\("displaysMade"/);
+    expect(block).toMatch(/fd\.set\("looseCards"/);
+    expect(block).toMatch(/fd\.set\("damagedPackaging"/);
+    expect(block).toMatch(/fd\.set\("rippedCards"/);
+  });
+
+  it("SealingCompleteForm counter presses still scrollSafe only — unchanged", () => {
+    const formIdx = src.indexOf("function SealingCompleteForm");
+    const blisterIdx = src.indexOf("function BlisterCompleteForm");
+    const block = src.slice(formIdx, blisterIdx);
+    expect(block).toMatch(/Counter presses/);
+    expect(block).toMatch(/scrollSafe/);
+    expect(block).not.toMatch(/Packs remaining/);
+  });
+
+  it("BlisterCompleteForm still has blister count and packs remaining", () => {
+    const blisterIdx = src.indexOf("function BlisterCompleteForm");
+    const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
+    expect(blisterBlock).toMatch(/Blister count/);
+    expect(blisterBlock).toMatch(/Packs remaining/);
+  });
+
+  it("NumField scrollSafe blurs on wheel", () => {
+    const numFieldIdx = src.indexOf("function NumField");
+    const numFieldBlock = src.slice(numFieldIdx, numFieldIdx + 800);
+    expect(numFieldBlock).toMatch(/scrollSafe/);
+    expect(numFieldBlock).toMatch(/onWheel/);
+    expect(numFieldBlock).toMatch(/blur\(\)/);
+  });
+
+  it("scan-card-form not modified", () => {
+    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
+    expect(scanSrc).not.toMatch(/scrollSafe/);
+    expect(scanSrc).not.toMatch(/onWheel/);
+  });
+});
