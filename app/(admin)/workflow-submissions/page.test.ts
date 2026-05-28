@@ -5,6 +5,7 @@ import { join } from "path";
 const pageSrc = readFileSync(join(__dirname, "page.tsx"), "utf8");
 const tableSrc = readFileSync(join(__dirname, "workflow-table.tsx"), "utf8");
 const helpersSrc = readFileSync(join(__dirname, "workflow-table-helpers.ts"), "utf8");
+const inputSrc = readFileSync(join(__dirname, "../../../components/ui/input.tsx"), "utf8");
 
 describe("WORKFLOW-DATA-VISIBILITY-1 · workflow submissions page", () => {
   it("requires session before querying bags", () => {
@@ -28,5 +29,10 @@ describe("WORKFLOW-DATA-VISIBILITY-1 · workflow submissions page", () => {
     expect(tableSrc).toMatch(/formatWorkflowDatetime/);
     expect(tableSrc).toMatch(/formatWorkflowTimestamp/);
     expect(helpersSrc).toMatch(/Date \| string/);
+  });
+
+  it("filter form Input is a client component (onWheel handler)", () => {
+    expect(inputSrc).toMatch(/^"use client"/);
+    expect(pageSrc).toMatch(/<Input[^>]+type="search"/);
   });
 });

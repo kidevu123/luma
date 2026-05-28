@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.30] — 2026-05-28
+
+### Fixed (WORKFLOW-DATA-VISIBILITY-1)
+- **Workflows page filter crash:** Mark `Input` as a Client Component so its internal `onWheel` handler is valid when used from the server-rendered `/workflow-submissions` filter form (digest `1045651454`).
+
 ## [0.4.29] — 2026-05-27
 
 ### Fixed (WORKFLOW-DATA-VISIBILITY-1)
