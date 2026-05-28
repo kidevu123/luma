@@ -24,14 +24,21 @@ describe("SEALING-COUNTER-1 · fireStageEventAction sealing path", () => {
     expect(actionsSrc).toMatch(/SEALING_COUNTER_CONFIG_ERROR/);
   });
 
-  it("does not change sealHandpackBagAction hand-pack path", () => {
-    const handpackIdx = actionsSrc.indexOf("export async function sealHandpackBagAction");
-    const handpackBlock = actionsSrc.slice(handpackIdx, handpackIdx + 1200);
-    expect(handpackBlock).toMatch(/plasticBlisterCount/);
-    expect(handpackBlock).not.toMatch(/counterPresses/);
-  });
-
   it("does not import stage-progression changes", () => {
     expect(actionsSrc).not.toMatch(/EVENT_STAGE_PREREQ\s*=/);
+  });
+});
+
+describe("SEALING-FLOW-CLARITY-2 · unified hand-pack sealing", () => {
+  it("uses hand-pack material helper after SEALING_COMPLETE", () => {
+    expect(actionsSrc).toMatch(/from "@\/lib\/production\/handpack-seal-material"/);
+    expect(actionsSrc).toMatch(/workflowBagHasHandpackBlisterComplete/);
+    expect(actionsSrc).toMatch(/issueHandpackBlisterCardMaterial/);
+    expect(actionsSrc).toMatch(/needsHandpackBlisterMaterial/);
+  });
+
+  it("sealHandpackBagAction removed", () => {
+    expect(actionsSrc).not.toMatch(/export async function sealHandpackBagAction/);
+    expect(actionsSrc).not.toMatch(/plasticBlisterCount/);
   });
 });

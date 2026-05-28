@@ -50,7 +50,6 @@ import {
   formatStationPageSubtitle,
   type FloorSupervisorToolLink,
 } from "@/lib/production/floor-station-mobile-nav";
-import { SealHandpackForm } from "./seal-handpack-form";
 import { ElapsedTimer } from "./elapsed-timer";
 import { formatFloorTimeEastern } from "@/lib/floor-time";
 import { readFileSync } from "fs";
@@ -269,22 +268,6 @@ export default async function FloorStationPage({
   const autoLots = STATION_AUTO_MATERIAL_KINDS[station.station.kind]
     ? await loadAutoLots(station.station.kind)
     : [];
-
-  // Detect if the active bag at a SEALING station came from HANDPACK_BLISTER
-  let bagIsHandpacked = false;
-  if (station.station.kind === "SEALING" && currentAtStation?.bag.id) {
-    const [priorHandpackEvent] = await db
-      .select({ eventType: workflowEvents.eventType })
-      .from(workflowEvents)
-      .where(
-        and(
-          eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
-          sql`event_type = 'HANDPACK_BLISTER_COMPLETE'`,
-        )
-      )
-      .limit(1);
-    bagIsHandpacked = priorHandpackEvent !== undefined;
-  }
 
   // STATION-TIMER-2: For downstream stations, anchor the timer to when this
   // station picked up the bag (BAG_PICKED_UP) and recompute paused seconds
@@ -534,16 +517,8 @@ export default async function FloorStationPage({
               unitsPerDisplay={currentAtStation.product?.unitsPerDisplay ?? null}
               displaysPerCase={currentAtStation.product?.displaysPerCase ?? null}
               packagingSpecs={packagingSpecsForForm}
-              bagIsHandpacked={bagIsHandpacked}
               sealingCardsPerPress={sealingCardsPerPress}
             />
-            {bagIsHandpacked && station.station.kind === "SEALING" && (
-              <SealHandpackForm
-                token={token}
-                stationId={station.station.id}
-                workflowBagId={currentAtStation.bag.id}
-              />
-            )}
             {/* Help operator pick the next action when the bag has
              *  already advanced past this station's stage. The
              *  StageActionButtons hides its primary button in that

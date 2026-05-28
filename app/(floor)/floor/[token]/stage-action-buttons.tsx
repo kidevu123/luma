@@ -86,7 +86,6 @@ export function StageActionButtons({
   unitsPerDisplay = null,
   displaysPerCase = null,
   packagingSpecs = [],
-  bagIsHandpacked = false,
   sealingCardsPerPress = null,
 }: {
   token: string;
@@ -101,9 +100,6 @@ export function StageActionButtons({
   unitsPerDisplay?: number | null;
   displaysPerCase?: number | null;
   packagingSpecs?: PackagingSpecLine[];
-  /** When true and stationKind is SEALING, the sealing close-out
-   *  button is suppressed — the caller renders SealHandpackForm instead. */
-  bagIsHandpacked?: boolean;
   /** Bound machine cards-per-press for SEALING / COMBINED. Null = config missing. */
   sealingCardsPerPress?: number | null;
 }) {
@@ -147,12 +143,7 @@ export function StageActionButtons({
   }
 
   if (!workflowBagId) return null;
-  const allStagesRaw = STAGE_BY_KIND[stationKind] ?? [];
-  // When this is a SEALING station and the bag came from HANDPACK_BLISTER,
-  // suppress the standard sealing button — the caller renders SealHandpackForm.
-  const allStages = bagIsHandpacked && stationKind === "SEALING"
-    ? allStagesRaw.filter(s => s.eventType !== "SEALING_COMPLETE")
-    : allStagesRaw;
+  const allStages = STAGE_BY_KIND[stationKind] ?? [];
   // These events use their own rich close-out forms instead of the
   // shared single-count input + immediate-fire button.
   const RICH_FORM_EVENTS = new Set(["SEALING_COMPLETE", "BLISTER_COMPLETE"]);

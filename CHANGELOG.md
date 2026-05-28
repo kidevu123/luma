@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.23] — 2026-05-28
+
+### Changed (SEALING-FLOW-CLARITY-2)
+- **Unified sealing completion UI:** All SEALING stations now use the machine counter form (Counter presses × cards per press) regardless of upstream hand-pack vs machine blister source. Removed the separate `SealHandpackForm` / plastic blister count path.
+- **Hand-pack material issuance preserved:** Bags with `HANDPACK_BLISTER_COMPLETE` in history still emit `PACKAGING_MATERIAL_ISSUED` for `BLISTER_CARD` lots at sealing, using derived `count_total` as the quantity basis.
+
+### Removed (SEALING-FLOW-CLARITY-2)
+- `seal-handpack-form.tsx` and `sealHandpackBagAction` — replaced by unified `fireStageEventAction` path.
+
+### Tests added (SEALING-FLOW-CLARITY-2)
+- `handpack-seal-material.test.ts` — material helper and unified UI structural guards.
+- Updated `actions.test.ts`, `stage-action-buttons.test.ts`.
+
 ## [0.4.22] — 2026-05-28
 
 ### Fixed (STATION-TIMER-2)
