@@ -21,9 +21,17 @@ const MACHINE_JAM: PauseReason = {
 const QA_CHECK: PauseReason = { value: "qa_check", label: "QA check" };
 const OTHER: PauseReason = { value: "other", label: "Other" };
 
-/** Machine stations: PVC/foil roll swap and jams are real floor events. */
+/** Machine stations with PVC/foil roll mount (blister press). */
 const MACHINE_BOUND_REASONS: readonly PauseReason[] = [
   PVC_SWAP,
+  SHIFT_END,
+  MACHINE_JAM,
+  QA_CHECK,
+  OTHER,
+];
+
+/** Sealing machines: jams yes, PVC roll swap no. */
+const SEALING_MACHINE_REASONS: readonly PauseReason[] = [
   SHIFT_END,
   MACHINE_JAM,
   QA_CHECK,
@@ -40,10 +48,11 @@ const HAND_WORK_REASONS: readonly PauseReason[] = [
 /**
  * Station → pause options (UI filter only; server still accepts full enum).
  * STATION-PAUSE-2 matrix — conservative: no PVC/machine on hand-work kinds.
+ * STATION-SEALING-TOOLS-1 — SEALING excludes PVC roll swap (no foil/PVC rolls).
  */
 export const STATION_PAUSE_REASON_MATRIX: Record<StationKind, PauseReason[]> = {
   BLISTER: [...MACHINE_BOUND_REASONS],
-  SEALING: [...MACHINE_BOUND_REASONS],
+  SEALING: [...SEALING_MACHINE_REASONS],
   COMBINED: [...MACHINE_BOUND_REASONS],
   HANDPACK_BLISTER: [...HAND_WORK_REASONS],
   BOTTLE_HANDPACK: [...HAND_WORK_REASONS],

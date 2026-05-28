@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   getDefaultPauseReasonForStation,
   getPauseReasonsForStation,
   STATION_PAUSE_REASON_MATRIX,
 } from "./station-pause-reasons";
 
-const MACHINE_KINDS = ["BLISTER", "SEALING", "COMBINED"] as const;
+const BLISTER_ROLL_KINDS = ["BLISTER", "COMBINED"] as const;
 const HAND_KINDS = [
   "HANDPACK_BLISTER",
   "BOTTLE_HANDPACK",
@@ -13,7 +15,7 @@ const HAND_KINDS = [
   "BOTTLE_CAP_SEAL",
   "BOTTLE_STICKER",
 ] as const;
-const ALL_KINDS = [...MACHINE_KINDS, ...HAND_KINDS];
+const ALL_KINDS = [...BLISTER_ROLL_KINDS, "SEALING", ...HAND_KINDS] as const;
 
 describe("STATION-PAUSE-2 · pause reason matrix", () => {
   it("matrix covers every StationKind with non-empty options", () => {
@@ -23,12 +25,19 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
     }
   });
 
-  it("machine-bound stations include pvc_swap and machine_jam", () => {
-    for (const kind of MACHINE_KINDS) {
+  it("blister roll-machine stations include pvc_swap and machine_jam", () => {
+    for (const kind of BLISTER_ROLL_KINDS) {
       const values = getPauseReasonsForStation(kind).map((r) => r.value);
       expect(values, kind).toContain("pvc_swap");
       expect(values, kind).toContain("machine_jam");
     }
+  });
+
+  it("SEALING has machine_jam but not pvc_swap", () => {
+    const values = getPauseReasonsForStation("SEALING").map((r) => r.value);
+    expect(values).not.toContain("pvc_swap");
+    expect(values).toContain("machine_jam");
+    expect(values).toEqual(["shift_end", "machine_jam", "qa_check", "other"]);
   });
 
   it("hand-work stations do not include pvc_swap or machine_jam", () => {
@@ -59,10 +68,15 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
     }
   });
 
-  it("machine-bound default is pvc_swap via getDefaultPauseReasonForStation", () => {
-    for (const kind of MACHINE_KINDS) {
+  it("blister roll-machine default is pvc_swap", () => {
+    for (const kind of BLISTER_ROLL_KINDS) {
       expect(getDefaultPauseReasonForStation(kind), kind).toBe("pvc_swap");
     }
+  });
+
+  it("SEALING default is shift_end — not pvc_swap", () => {
+    expect(getDefaultPauseReasonForStation("SEALING")).toBe("shift_end");
+    expect(getDefaultPauseReasonForStation("SEALING")).not.toBe("pvc_swap");
   });
 
   it("hand-work default is shift_end via getDefaultPauseReasonForStation", () => {
@@ -105,5 +119,13 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
         expect(r.label.length, `${kind}:${r.value}`).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("STATION-SEALING-TOOLS-1 · hard-stop scope", () => {
+  it("pause reasons module does not import floor actions or scan form", () => {
+    const pauseSrc = readFileSync(join(__dirname, "station-pause-reasons.ts"), "utf8");
+    expect(pauseSrc).not.toMatch(/scan-card-form/);
+    expect(pauseSrc).not.toMatch(/from.*actions/);
   });
 });

@@ -55,10 +55,8 @@ describe("STATION-NAV-CLEANUP-2 · floorSupervisorToolsForStation", () => {
     );
   });
 
-  it("SEALING gets rolls only", () => {
-    expect(floorSupervisorToolsForStation(TOKEN, "SEALING").map((t) => t.id)).toEqual(
-      ["rolls"],
-    );
+  it("SEALING has no supervisor tools", () => {
+    expect(floorSupervisorToolsForStation(TOKEN, "SEALING")).toEqual([]);
   });
 
   it("COMBINED gets rolls only", () => {
@@ -82,6 +80,7 @@ describe("STATION-NAV-CLEANUP-2 · floorSupervisorToolsForStation", () => {
 
   it("non-roll stations never expose rolls", () => {
     for (const kind of [
+      "SEALING",
       "HANDPACK_BLISTER",
       "PACKAGING",
       "BOTTLE_HANDPACK",
@@ -159,8 +158,19 @@ describe("STATION-MOBILE-UX-2 · formatStationPageSubtitle", () => {
   });
 });
 
+describe("STATION-SEALING-TOOLS-1 · roll station kinds", () => {
+  it("roll kinds are blister press stations only — not sealing", () => {
+    expect(FLOOR_ROLL_STATION_KINDS.has("BLISTER")).toBe(true);
+    expect(FLOOR_ROLL_STATION_KINDS.has("COMBINED")).toBe(true);
+    expect(FLOOR_ROLL_STATION_KINDS.has("SEALING")).toBe(false);
+    expect(FLOOR_ROLL_STATION_KINDS.has("HANDPACK_BLISTER")).toBe(false);
+    expect(FLOOR_ROLL_STATION_KINDS.has("PACKAGING")).toBe(false);
+    expect(FLOOR_ROLL_STATION_KINDS.has("BOTTLE_HANDPACK")).toBe(false);
+  });
+});
+
 describe("STATION-NAV-CLEANUP-2 · station kind sets", () => {
-  it("roll kinds are PVC/foil machine stations only", () => {
+  it("roll kinds exclude hand-pack and packaging", () => {
     expect(FLOOR_ROLL_STATION_KINDS.has("BLISTER")).toBe(true);
     expect(FLOOR_ROLL_STATION_KINDS.has("HANDPACK_BLISTER")).toBe(false);
     expect(FLOOR_ROLL_STATION_KINDS.has("PACKAGING")).toBe(false);

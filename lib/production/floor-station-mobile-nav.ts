@@ -3,11 +3,10 @@
 
 import { STATION_AUTO_MATERIAL_KINDS } from "@/lib/production/auto-load-lots";
 
-/** PVC / foil roll mount, weigh, change-roll (machine-bound). */
+/** PVC / foil roll mount, weigh, change-roll (blister press only — not sealing). */
 export const FLOOR_ROLL_STATION_KINDS = new Set([
   "BLISTER",
   "COMBINED",
-  "SEALING",
 ]);
 
 export type FloorSupervisorToolId = "rolls";

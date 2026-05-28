@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.20] — 2026-05-28
+
+### Changed (STATION-SEALING-TOOLS-1)
+- **SEALING pause reasons:** Removed PVC roll swap from sealing stations; options are Shift ending, Machine jam, QA check, Other with default **Shift ending**. Blister and Combined keep PVC roll swap.
+- **SEALING supervisor tools:** Removed Rolls link from sealing stations. Rolls remains on BLISTER and COMBINED only.
+
+### Tests added (STATION-SEALING-TOOLS-1)
+- `station-pause-reasons.test.ts` — SEALING matrix, default shift_end, BLISTER/COMBINED unchanged.
+- `floor-station-mobile-nav.test.ts` — SEALING has no Rolls; roll kinds exclude sealing.
+
 ## [0.4.19] — 2026-05-28
 
 ### Changed (STATION-HANDPACK-AUTO-RELEASE-1)
