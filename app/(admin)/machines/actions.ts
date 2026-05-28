@@ -7,6 +7,7 @@ import {
   createMachine,
   createStation,
   rotateStationToken,
+  updateMachineCardsPerTurn,
 } from "@/lib/db/queries/machines";
 
 const machineSchema = z.object({
@@ -35,6 +36,35 @@ export async function createMachineAction(
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   try {
     await createMachine(parsed.data, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Save failed." };
+  }
+  revalidatePath("/machines");
+  return { ok: true };
+}
+
+const updateCardsPerTurnSchema = z.object({
+  machineId: z.string().uuid(),
+  cardsPerTurn: z.coerce.number().int().min(1).max(50),
+});
+
+export async function updateMachineCardsPerTurnAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const actor = await requireAdmin();
+  const parsed = updateCardsPerTurnSchema.safeParse({
+    machineId: formData.get("machineId"),
+    cardsPerTurn: formData.get("cardsPerTurn"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  try {
+    await updateMachineCardsPerTurn(
+      parsed.data.machineId,
+      parsed.data.cardsPerTurn,
+      actor,
+    );
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Save failed." };
   }

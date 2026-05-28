@@ -66,6 +66,7 @@ import {
   getPauseReasonsForStation,
   type PauseReasonValue,
 } from "@/lib/production/station-pause-reasons";
+import { SEALING_COUNTER_CONFIG_ERROR } from "@/lib/production/sealing-counter";
 
 type PackagingSpecLine = {
   materialName: string;
@@ -86,6 +87,7 @@ export function StageActionButtons({
   displaysPerCase = null,
   packagingSpecs = [],
   bagIsHandpacked = false,
+  sealingCardsPerPress = null,
 }: {
   token: string;
   stationId: string;
@@ -102,6 +104,8 @@ export function StageActionButtons({
   /** When true and stationKind is SEALING, the sealing close-out
    *  button is suppressed — the caller renders SealHandpackForm instead. */
   bagIsHandpacked?: boolean;
+  /** Bound machine cards-per-press for SEALING / COMBINED. Null = config missing. */
+  sealingCardsPerPress?: number | null;
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -477,6 +481,7 @@ export function StageActionButtons({
           workflowBagId={workflowBagId}
           stationId={stationId}
           operatorCode={operatorCode}
+          sealingCardsPerPress={sealingCardsPerPress}
           onClose={(success) => {
             setSealingOpen(false);
             if (success && error) setError(null);
@@ -704,6 +709,7 @@ function SealingCompleteForm({
   workflowBagId,
   stationId,
   operatorCode,
+  sealingCardsPerPress,
   onClose,
   onError,
 }: {
@@ -711,14 +717,21 @@ function SealingCompleteForm({
   workflowBagId: string;
   stationId: string;
   operatorCode: string;
+  sealingCardsPerPress: number | null;
   onClose: (success: boolean) => void;
   onError: (msg: string) => void;
 }) {
   const [pending, setPending] = React.useState(false);
-  const [sealedCount, setSealedCount] = React.useState("");
+  const [counterPresses, setCounterPresses] = React.useState("");
   const [packsRemaining, setPacksRemaining] = React.useState("");
   const [cardsReopened, setCardsReopened] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const configReady =
+    sealingCardsPerPress != null && sealingCardsPerPress >= 1;
+  const previewCount =
+    configReady && counterPresses !== ""
+      ? Number(counterPresses) * sealingCardsPerPress
+      : null;
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, []);
@@ -726,24 +739,42 @@ function SealingCompleteForm({
   return (
     <div ref={containerRef} className="rounded-lg border-2 border-sky-300 bg-sky-50/40 p-3 space-y-3">
       <p className="text-sm font-semibold text-sky-900">Sealing close-out</p>
-      <div className="grid grid-cols-2 gap-2">
-        <NumField
-          label="Sealed count"
-          value={sealedCount}
-          onChange={setSealedCount}
-          className="col-span-2"
-        />
-        <NumField
-          label="Packs remaining"
-          value={packsRemaining}
-          onChange={setPacksRemaining}
-        />
-        <NumField
-          label="Cards reopened (scrap)"
-          value={cardsReopened}
-          onChange={setCardsReopened}
-        />
-      </div>
+      {!configReady ? (
+        <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {SEALING_COUNTER_CONFIG_ERROR}
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-sky-900">
+            Cards per press:{" "}
+            <span className="font-semibold tabular-nums">{sealingCardsPerPress}</span>
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <NumField
+              label="Counter presses"
+              value={counterPresses}
+              onChange={setCounterPresses}
+              className="col-span-2"
+            />
+            {previewCount != null && Number.isFinite(previewCount) ? (
+              <p className="col-span-2 text-xs text-sky-800">
+                Sealed cards = counter × {sealingCardsPerPress} ={" "}
+                <span className="font-semibold tabular-nums">{previewCount}</span>
+              </p>
+            ) : null}
+            <NumField
+              label="Packs remaining"
+              value={packsRemaining}
+              onChange={setPacksRemaining}
+            />
+            <NumField
+              label="Cards reopened (scrap)"
+              value={cardsReopened}
+              onChange={setCardsReopened}
+            />
+          </div>
+        </>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
@@ -755,7 +786,7 @@ function SealingCompleteForm({
         </button>
         <button
           type="button"
-          disabled={pending}
+          disabled={pending || !configReady}
           onClick={async () => {
             setPending(true);
             try {
@@ -764,7 +795,7 @@ function SealingCompleteForm({
               fd.set("workflowBagId", workflowBagId);
               fd.set("stationId", stationId);
               fd.set("eventType", "SEALING_COMPLETE");
-              fd.set("countTotal", sealedCount || "0");
+              fd.set("counterPresses", counterPresses || "0");
               fd.set("packsRemaining", packsRemaining || "0");
               fd.set("cardsReopened", cardsReopened || "0");
               if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
@@ -782,7 +813,7 @@ function SealingCompleteForm({
           }}
           className="h-14 rounded-xl bg-sky-700 text-white text-base font-semibold disabled:opacity-60"
         >
-          {pending ? "Saving…" : "Save & close"}
+          {pending ? "Saving…" : "Complete sealing"}
         </button>
       </div>
     </div>
