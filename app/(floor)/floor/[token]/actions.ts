@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import {
   qrCards,
   stations,
+  machines,
   workflowBags,
   inventoryBags,
   batches,
@@ -29,6 +30,13 @@ import {
 } from "@/lib/production/stage-progression";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
+import {
+  computeSealedCountFromCounter,
+  resolveSealingCardsPerPress,
+  SEALING_COUNTER_CONFIG_ERROR,
+  SEALING_COUNTER_PRESS_ERROR,
+  stationUsesSealingCounter,
+} from "@/lib/production/sealing-counter";
 
 // First-op count submissions where accountability is mandatory (the
 // queue stop condition: refuse a fresh blister/handpack count when
@@ -482,6 +490,8 @@ const eventSchema = z.object({
     "BOTTLE_STICKER_COMPLETE",
   ]),
   countTotal: z.coerce.number().int().min(0).max(100000).optional(),
+  /** SEALING-COUNTER-1: machine counter presses for SEALING_COMPLETE. */
+  counterPresses: z.coerce.number().int().min(0).max(100000).optional(),
   /** Cards/packs that started the station run but weren't completed
    *  into a full unit — loose cards at sealing, partial blister sheets,
    *  etc. Stored in the event payload for reconciliation. */
@@ -512,6 +522,7 @@ export async function fireStageEventAction(
     stationId: formData.get("stationId"),
     eventType: formData.get("eventType"),
     countTotal: formData.get("countTotal") || 0,
+    counterPresses: formData.get("counterPresses") ?? undefined,
     packsRemaining: formData.get("packsRemaining") || 0,
     cardsReopened: formData.get("cardsReopened") || 0,
     clientEventId: pickClientEventId(formData),
@@ -524,6 +535,7 @@ export async function fireStageEventAction(
     stationId,
     eventType,
     countTotal,
+    counterPresses,
     packsRemaining,
     cardsReopened,
     clientEventId,
@@ -565,6 +577,41 @@ export async function fireStageEventAction(
       return { error: progression.reason };
     }
 
+    let resolvedCountTotal = countTotal;
+    let sealingCounterPresses: number | undefined;
+    let sealingCardsPerPress: number | undefined;
+
+    if (
+      eventType === "SEALING_COMPLETE" &&
+      stationUsesSealingCounter(station.kind)
+    ) {
+      if (counterPresses === undefined) {
+        return { error: SEALING_COUNTER_PRESS_ERROR };
+      }
+      let machineRow: { cardsPerTurn: number } | null = null;
+      if (station.machineId) {
+        const [row] = await db
+          .select({ cardsPerTurn: machines.cardsPerTurn })
+          .from(machines)
+          .where(eq(machines.id, station.machineId))
+          .limit(1);
+        machineRow = row ?? null;
+      }
+      const cardsPerPress = resolveSealingCardsPerPress(
+        machineRow,
+        station.machineId,
+      );
+      if (cardsPerPress === null) {
+        return { error: SEALING_COUNTER_CONFIG_ERROR };
+      }
+      resolvedCountTotal = computeSealedCountFromCounter(
+        counterPresses,
+        cardsPerPress,
+      );
+      sealingCounterPresses = counterPresses;
+      sealingCardsPerPress = cardsPerPress;
+    }
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId,
@@ -586,7 +633,16 @@ export async function fireStageEventAction(
         stationId,
         eventType,
         payload: {
-          ...(countTotal ? { count_total: countTotal } : {}),
+          ...(eventType === "SEALING_COMPLETE" &&
+          stationUsesSealingCounter(station.kind)
+            ? {
+                count_total: resolvedCountTotal ?? 0,
+                counter_presses: sealingCounterPresses,
+                cards_per_press: sealingCardsPerPress,
+              }
+            : resolvedCountTotal
+              ? { count_total: resolvedCountTotal }
+              : {}),
           ...(packsRemaining ? { packs_remaining: packsRemaining } : {}),
           ...(cardsReopened ? { cards_reopened: cardsReopened } : {}),
         },

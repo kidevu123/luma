@@ -9,6 +9,7 @@ import {
   createMachineAction,
   createStationAction,
   rotateTokenAction,
+  updateMachineCardsPerTurnAction,
 } from "./actions";
 
 const STATION_KINDS = [
@@ -76,8 +77,20 @@ export function CreateMachineForm() {
           </Select>
         </div>
         <div>
-          <Label htmlFor="m_cpt">Cards / turn</Label>
-          <Input id="m_cpt" name="cardsPerTurn" type="number" min={1} defaultValue={1} />
+          <Label htmlFor="m_cpt">Cards per press</Label>
+          <Input
+            id="m_cpt"
+            name="cardsPerTurn"
+            type="number"
+            min={1}
+            max={50}
+            defaultValue={1}
+            title="How many cards this machine seals per counter press"
+          />
+          <p className="text-[10px] text-text-subtle mt-0.5 leading-snug">
+            Required for sealing machines — used to compute sealed cards from the
+            physical counter.
+          </p>
         </div>
       </div>
       {error && (
@@ -88,6 +101,60 @@ export function CreateMachineForm() {
       <Button type="submit" size="sm" disabled={pending}>
         <Plus className="h-3.5 w-3.5" /> Add
       </Button>
+    </form>
+  );
+}
+
+export function EditCardsPerPressForm({
+  machineId,
+  currentValue,
+  machineKind,
+}: {
+  machineId: string;
+  currentValue: number;
+  machineKind: string;
+}) {
+  const [error, setError] = React.useState<string | null>(null);
+  const [pending, setPending] = React.useState(false);
+  const showHint = machineKind === "SEALING" || machineKind === "COMBINED";
+  return (
+    <form
+      action={async (form) => {
+        setPending(true);
+        setError(null);
+        try {
+          const r = await updateMachineCardsPerTurnAction(form);
+          if (r?.error) setError(r.error);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Save failed.");
+        } finally {
+          setPending(false);
+        }
+      }}
+      className="inline-flex items-center gap-1.5"
+    >
+      <input type="hidden" name="machineId" value={machineId} />
+      <Input
+        name="cardsPerTurn"
+        type="number"
+        min={1}
+        max={50}
+        defaultValue={currentValue}
+        className="h-8 w-16 text-right tabular-nums px-2"
+        title={
+          showHint
+            ? "How many cards this sealing machine can seal per press"
+            : "Cards per machine cycle"
+        }
+      />
+      <Button type="submit" variant="ghost" size="sm" disabled={pending}>
+        {pending ? "…" : "Save"}
+      </Button>
+      {error ? (
+        <span className="text-[10px] text-red-700 max-w-[8rem] truncate" title={error}>
+          {error}
+        </span>
+      ) : null}
     </form>
   );
 }

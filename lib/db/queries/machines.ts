@@ -39,6 +39,39 @@ export async function createMachine(
   });
 }
 
+export async function updateMachineCardsPerTurn(
+  machineId: string,
+  cardsPerTurn: number,
+  actor: CurrentUser,
+) {
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(machines)
+      .where(eq(machines.id, machineId));
+    if (!before) throw new Error("updateMachineCardsPerTurn: not found");
+    const [row] = await tx
+      .update(machines)
+      .set({ cardsPerTurn })
+      .where(eq(machines.id, machineId))
+      .returning();
+    if (!row) throw new Error("updateMachineCardsPerTurn: update empty");
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "machine.update_cards_per_turn",
+        targetType: "Machine",
+        targetId: machineId,
+        before: { cardsPerTurn: before.cardsPerTurn },
+        after: { cardsPerTurn: row.cardsPerTurn },
+      },
+      tx,
+    );
+    return row;
+  });
+}
+
 export async function rotateStationToken(id: string, actor: CurrentUser) {
   return db.transaction(async (tx) => {
     const [before] = await tx.select().from(stations).where(eq(stations.id, id));

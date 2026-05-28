@@ -211,3 +211,51 @@ describe("STATION-HANDPACK-AUTO-RELEASE-1 · hand-pack complete auto-releases", 
     expect(scanSrc).not.toMatch(/auto-release/);
   });
 });
+
+describe("SEALING-COUNTER-1 · sealing completion uses machine counter", () => {
+  it("SealingCompleteForm asks for counter presses — not blisters sealed or sealed count", () => {
+    expect(src).toMatch(/Counter presses/);
+    expect(src).not.toMatch(/label="Sealed count"/);
+    expect(src).not.toMatch(/blisters sealed/i);
+  });
+
+  it("shows cards-per-press multiplier when configured", () => {
+    expect(src).toMatch(/Cards per press:/);
+    expect(src).toMatch(/Sealed cards = counter ×/);
+    expect(src).toMatch(/sealingCardsPerPress/);
+  });
+
+  it("blocks completion when sealingCardsPerPress is missing", () => {
+    expect(src).toMatch(/SEALING_COUNTER_CONFIG_ERROR/);
+    expect(src).toMatch(/disabled=\{pending \|\| !configReady\}/);
+  });
+
+  it("submits counterPresses — not countTotal — for SEALING_COMPLETE", () => {
+    const formIdx = src.indexOf("function SealingCompleteForm");
+    const formBlock = src.slice(formIdx, formIdx + 3500);
+    expect(formBlock).toMatch(/fd\.set\("counterPresses"/);
+    expect(formBlock).not.toMatch(/fd\.set\("countTotal"/);
+  });
+
+  it("BlisterCompleteForm unchanged — still uses blister count", () => {
+    const blisterIdx = src.indexOf("function BlisterCompleteForm");
+    const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
+    expect(blisterBlock).toMatch(/Blister count/);
+    expect(blisterBlock).toMatch(/countTotal/);
+  });
+
+  it("scan-card-form not modified for sealing counter", () => {
+    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
+    expect(scanSrc).not.toMatch(/counterPresses/);
+    expect(scanSrc).not.toMatch(/sealingCardsPerPress/);
+  });
+
+  it("stage-progression not modified for sealing counter", () => {
+    const progressionSrc = readFileSync(
+      join(__dirname, "../../../../lib/production/stage-progression.ts"),
+      "utf8",
+    );
+    expect(progressionSrc).not.toMatch(/counterPresses/);
+    expect(progressionSrc).not.toMatch(/cards_per_press/);
+  });
+});

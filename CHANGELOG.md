@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.22] — 2026-05-28
+
+### Fixed (STATION-TIMER-2)
+- **Station-scoped elapsed timer:** Downstream stations (SEALING, PACKAGING) now anchor the elapsed timer to the `BAG_PICKED_UP` event for that station, not `workflow_bags.started_at`. Fixes total-bag-age showing instead of time-at-station for overlap pickups.
+- **Station-scoped pause math:** Paused seconds are recomputed from `BAG_PAUSED`/`BAG_RESUMED` events after the pickup timestamp. Prevents bag-global `pausedSecondsAccum` (which includes prior-station pauses) from producing negative elapsed at downstream stations.
+- **Picked up label:** Active bag header now shows "Picked up HH:MM AM/ET" instead of "Started …" for downstream stations that entered via overlap pickup.
+- **Projector: HANDPACK_BLISTER_COMPLETE stage boundary:** Added `HANDPACK_BLISTER_COMPLETE` to the `stageBoundaries` filter in `lib/projector/index.ts`. Previously omitted, which caused `sealingSeconds` for hand-packed bags to measure total bag age rather than time spent at the sealing stage.
+
+### Tests added (STATION-TIMER-2)
+- `page.test.ts` — STATION-TIMER-2 group: pickup query, FIRST_OP gate, station-scoped pause math, Picked up label, ElapsedTimer prop, first-op fallback.
+- `page.test.ts` — projector HANDPACK_BLISTER_COMPLETE boundary assertion.
+
+## [0.4.21] — 2026-05-28
+
+### Changed (SEALING-COUNTER-1)
+- **Sealing completion:** Floor sealing close-out now asks for **machine counter presses** instead of manual blisters sealed. Sealed card count is computed server-side as `counter presses × cards per press` from the bound machine's `cardsPerTurn` config.
+- **Config guard:** Sealing stations without a bound machine or valid cards-per-press show a clear error and block completion until configured in **Machines & stations**.
+- **Admin:** Machines page supports inline edit of cards per press; create form copy clarifies sealing machine requirement.
+
+### Tests added (SEALING-COUNTER-1)
+- `sealing-counter.test.ts` — multiplier math and config resolution.
+- `stage-action-buttons.test.ts` — counter UI, config block, no scan-form changes.
+- `actions.test.ts` — server-side counter path and hand-pack path preserved.
+- `machines/actions.test.ts` — admin validation.
+
 ## [0.4.20] — 2026-05-28
 
 ### Changed (STATION-SEALING-TOOLS-1)

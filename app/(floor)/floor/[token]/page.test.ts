@@ -213,6 +213,54 @@ describe("PRODUCTION-OVERLAP-2 · PACKAGING waiting banner", () => {
   });
 });
 
+describe('STATION-TIMER-2 · station-scoped elapsed timer', () => {
+  it('queries BAG_PICKED_UP event for downstream stations', () => {
+    expect(pageSrc).toMatch(/BAG_PICKED_UP/);
+    expect(pageSrc).toMatch(/stationTimerStartMs/);
+  });
+
+  it('gates pickup query on FIRST_OP_STATION_KINDS check', () => {
+    expect(pageSrc).toMatch(/FIRST_OP_STATION_KINDS\.has/);
+  });
+
+  it('declares stationPausedSecondsAccum for station-scoped pause math', () => {
+    expect(pageSrc).toMatch(/stationPausedSecondsAccum/);
+  });
+
+  it('queries BAG_PAUSED and BAG_RESUMED events after pickup timestamp', () => {
+    expect(pageSrc).toMatch(/BAG_PAUSED.*BAG_RESUMED|BAG_RESUMED.*BAG_PAUSED/s);
+  });
+
+  it('shows Picked up label for downstream stations instead of Started', () => {
+    expect(pageSrc).toMatch(/stationTimerPickedUpAt/);
+    expect(pageSrc).toMatch(/Picked up/);
+  });
+
+  it('passes stationPausedSecondsAccum to ElapsedTimer', () => {
+    const timerIdx = pageSrc.indexOf('<ElapsedTimer');
+    const timerChunk = pageSrc.slice(timerIdx, timerIdx + 500);
+    expect(timerChunk).toMatch(/stationPausedSecondsAccum/);
+  });
+
+  it('falls back to bag startedAt when no pickup event found (first-op stations)', () => {
+    expect(pageSrc).toMatch(/stationTimerStartMs\s*\?\?/);
+    expect(pageSrc).toMatch(/stationTimerStartMs !== null/);
+  });
+});
+
+describe('STATION-TIMER-2 · projector HANDPACK_BLISTER_COMPLETE boundary', () => {
+  it('includes HANDPACK_BLISTER_COMPLETE in stageBoundaries', () => {
+    const projSrc = require('fs').readFileSync(
+      require('path').join(__dirname, '../../../../lib/projector/index.ts'),
+      'utf8'
+    );
+    expect(projSrc).toMatch(/HANDPACK_BLISTER_COMPLETE/);
+    const boundaryIdx = projSrc.indexOf('stageBoundaries');
+    const chunk = projSrc.slice(boundaryIdx, boundaryIdx + 600);
+    expect(chunk).toMatch(/HANDPACK_BLISTER_COMPLETE/);
+  });
+});
+
 describe('STATION-ACTIVE-UX-1 · Op label clarity', () => {
   const sab = require('fs').readFileSync(
     require('path').join(__dirname, 'stage-action-buttons.tsx'),

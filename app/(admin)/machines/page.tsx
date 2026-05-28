@@ -4,7 +4,7 @@ import { listMachines, listStations } from "@/lib/db/queries/machines";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
-import { CreateMachineForm, CreateStationForm, RotateTokenButton } from "./forms";
+import { CreateMachineForm, CreateStationForm, RotateTokenButton, EditCardsPerPressForm } from "./forms";
 import { CopyFloorUrl } from "./copy-floor-url";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +50,7 @@ export default async function MachinesPage() {
                 <TR>
                   <TH>Name</TH>
                   <TH>Kind</TH>
-                  <TH className="text-right">Units / cycle</TH>
+                  <TH className="text-right">Cards / press</TH>
                   <TH>Status</TH>
                 </TR>
               </THead>
@@ -66,7 +66,13 @@ export default async function MachinesPage() {
                     <TR key={m.id}>
                       <TD className="font-medium">{m.name}</TD>
                       <TD className="text-xs text-text-muted">{m.kind}</TD>
-                      <TD className="text-right tabular-nums">{m.cardsPerTurn}</TD>
+                      <TD className="text-right">
+                        <EditCardsPerPressForm
+                          machineId={m.id}
+                          currentValue={m.cardsPerTurn}
+                          machineKind={m.kind}
+                        />
+                      </TD>
                       <TD>
                         <StatusPill kind={m.isActive ? "ok" : "neutral"}>
                           {m.isActive ? "Active" : "Inactive"}

@@ -32,6 +32,10 @@ import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
 import { STATION_PICKUP_FROM_STAGE } from "@/lib/production/stage-progression";
 import {
+  resolveSealingCardsPerPress,
+  stationUsesSealingCounter,
+} from "@/lib/production/sealing-counter";
+import {
   FIRST_OP_STATION_KINDS,
   STATION_KIND_TO_PRODUCT_KINDS,
 } from "@/lib/production/first-op-product";
@@ -282,6 +286,66 @@ export default async function FloorStationPage({
     bagIsHandpacked = priorHandpackEvent !== undefined;
   }
 
+  // STATION-TIMER-2: For downstream stations, anchor the timer to when this
+  // station picked up the bag (BAG_PICKED_UP) and recompute paused seconds
+  // from events after that pickup — bag-global pausedSecondsAccum includes
+  // pauses at prior stations and produces negative elapsed for overlap pickups.
+  let stationTimerStartMs: number | null = null;
+  let stationTimerPickedUpAt: Date | null = null;
+  let stationPausedSecondsAccum: number =
+    currentAtStation?.state?.pausedSecondsAccum ?? 0;
+
+  if (currentAtStation && !FIRST_OP_STATION_KINDS.has(station.station.kind)) {
+    const [pickupEvent] = await db
+      .select({ occurredAt: workflowEvents.occurredAt })
+      .from(workflowEvents)
+      .where(
+        and(
+          eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
+          eq(workflowEvents.stationId, station.station.id),
+          sql`event_type = 'BAG_PICKED_UP'`,
+        ),
+      )
+      .orderBy(desc(workflowEvents.occurredAt))
+      .limit(1);
+
+    if (pickupEvent) {
+      const pickedUpAt = new Date(
+        pickupEvent.occurredAt as unknown as string,
+      );
+      stationTimerPickedUpAt = pickedUpAt;
+      stationTimerStartMs = pickedUpAt.getTime();
+
+      const pauseEventsAfterPickup = await db
+        .select({
+          eventType: workflowEvents.eventType,
+          occurredAt: workflowEvents.occurredAt,
+        })
+        .from(workflowEvents)
+        .where(
+          and(
+            eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
+            sql`event_type IN ('BAG_PAUSED', 'BAG_RESUMED')`,
+            sql`${workflowEvents.occurredAt} > ${pickedUpAt.toISOString()}`,
+          ),
+        )
+        .orderBy(asc(workflowEvents.occurredAt));
+
+      let stationPauseSecs = 0;
+      let pauseStart: number | null = null;
+      for (const ev of pauseEventsAfterPickup) {
+        const t = new Date(ev.occurredAt as unknown as string).getTime();
+        if (ev.eventType === "BAG_PAUSED") {
+          pauseStart = t;
+        } else if (ev.eventType === "BAG_RESUMED" && pauseStart !== null) {
+          stationPauseSecs += Math.floor((t - pauseStart) / 1000);
+          pauseStart = null;
+        }
+      }
+      stationPausedSecondsAccum = stationPauseSecs;
+    }
+  }
+
   // Load the product's packaging BOM so the packaging close-out form
   // can preview expected material consumption as the operator types.
   const currentProductId = currentAtStation?.bag.productId ?? null;
@@ -308,6 +372,13 @@ export default async function FloorStationPage({
           .where(eq(productPackagingSpecs.productId, currentProductId))
           .orderBy(asc(productPackagingSpecs.perScope))
       : [];
+
+  const sealingCardsPerPress = stationUsesSealingCounter(station.station.kind)
+    ? resolveSealingCardsPerPress(
+        station.machine,
+        station.station.machineId,
+      )
+    : null;
 
   return (
     <main className="min-h-dvh bg-page px-4 pt-2 sm:px-6 sm:pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-3">
@@ -411,27 +482,37 @@ export default async function FloorStationPage({
                 </div>
               )}
               <p className="text-xs text-text-muted mt-2">
-                Started{" "}
-                {currentAtStation.bag.startedAt
-                  ? formatFloorTimeEastern(
-                      new Date(
-                        currentAtStation.bag.startedAt as unknown as string,
-                      ),
-                    )
-                  : "—"}
+                {stationTimerPickedUpAt ? (
+                  <>
+                    Picked up{" "}
+                    {formatFloorTimeEastern(stationTimerPickedUpAt)}
+                  </>
+                ) : (
+                  <>
+                    Started{" "}
+                    {currentAtStation.bag.startedAt
+                      ? formatFloorTimeEastern(
+                          new Date(
+                            currentAtStation.bag.startedAt as unknown as string,
+                          ),
+                        )
+                      : "—"}
+                  </>
+                )}
                 {currentAtStation.state?.currentOperatorCode
                   ? ` · operator ${currentAtStation.state.currentOperatorCode}`
                   : ""}
               </p>
             </div>
-            {currentAtStation.bag.startedAt && (
+            {(stationTimerStartMs !== null || currentAtStation.bag.startedAt) && (
               <ElapsedTimer
-                startedAtMs={new Date(
-                  currentAtStation.bag.startedAt as unknown as string,
-                ).getTime()}
-                pausedSecondsAccum={
-                  currentAtStation.state?.pausedSecondsAccum ?? 0
+                startedAtMs={
+                  stationTimerStartMs ??
+                  new Date(
+                    currentAtStation.bag.startedAt as unknown as string,
+                  ).getTime()
                 }
+                pausedSecondsAccum={stationPausedSecondsAccum}
                 isPaused={currentAtStation.state?.isPaused ?? false}
                 pausedAtMs={
                   currentAtStation.state?.pausedAt
@@ -454,6 +535,7 @@ export default async function FloorStationPage({
               displaysPerCase={currentAtStation.product?.displaysPerCase ?? null}
               packagingSpecs={packagingSpecsForForm}
               bagIsHandpacked={bagIsHandpacked}
+              sealingCardsPerPress={sealingCardsPerPress}
             />
             {bagIsHandpacked && station.station.kind === "SEALING" && (
               <SealHandpackForm
