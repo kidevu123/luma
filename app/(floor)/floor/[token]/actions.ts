@@ -1142,6 +1142,17 @@ export async function packagingCompleteAction(
         occurredAt: new Date(),
       });
       void consumption;
+      if (station.kind === "PACKAGING") {
+        await maybeAutoFinalizeAfterPackagingComplete(tx, {
+          workflowBagId: parsed.data.workflowBagId,
+          stationId: parsed.data.stationId,
+          stationKind: station.kind,
+          accountability,
+          ...(parsed.data.clientEventId
+            ? { clientEventId: parsed.data.clientEventId }
+            : {}),
+        });
+      }
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Failed." };
@@ -1255,18 +1266,13 @@ export async function finalizeBagAction(
       const accountability = await resolveStationAccountability(tx, {
         stationId: parsed.data.stationId,
       });
-      await projectEvent(tx, {
+      await projectBagFinalizedEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
-        eventType: "BAG_FINALIZED",
+        accountability,
         ...(parsed.data.clientEventId
           ? { clientEventId: parsed.data.clientEventId }
           : {}),
-        enteredByUserId: accountability.enteredByUserId,
-        accountableEmployeeId: accountability.accountableEmployeeId,
-        accountabilitySource: accountability.accountabilitySource,
-        accountableEmployeeNameSnapshot:
-          accountability.accountableEmployeeNameSnapshot,
       });
     });
   } catch (err) {
@@ -1284,6 +1290,29 @@ type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type StationAccountability = Awaited<
   ReturnType<typeof resolveStationAccountability>
 >;
+
+/** Shared BAG_FINALIZED projection — used by finalizeBagAction and packaging auto-finalize. */
+async function projectBagFinalizedEvent(
+  tx: DbTx,
+  args: {
+    workflowBagId: string;
+    stationId: string;
+    accountability: StationAccountability;
+    clientEventId?: string | null | undefined;
+  },
+): Promise<void> {
+  await projectEvent(tx, {
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    eventType: "BAG_FINALIZED",
+    ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
+    enteredByUserId: args.accountability.enteredByUserId,
+    accountableEmployeeId: args.accountability.accountableEmployeeId,
+    accountabilitySource: args.accountability.accountabilitySource,
+    accountableEmployeeNameSnapshot:
+      args.accountability.accountableEmployeeNameSnapshot,
+  });
+}
 
 /** Shared BAG_RELEASED projection — used by releaseBagAction and complete auto-release. */
 async function projectBagReleasedEvent(
@@ -1358,6 +1387,54 @@ async function maybeAutoReleaseAfterComplete(
     releasedAtStage: releaseAtStage,
     accountability: args.accountability,
     ...(releaseClientEventId ? { clientEventId: releaseClientEventId } : {}),
+  });
+}
+
+/** PACKAGING only — close-out also finalizes when still pinned at PACKAGED. */
+const AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS = new Set([
+  "PACKAGING",
+]);
+
+/** PACKAGING: PACKAGING_COMPLETE also finalizes when still pinned. */
+async function maybeAutoFinalizeAfterPackagingComplete(
+  tx: DbTx,
+  args: {
+    workflowBagId: string;
+    stationId: string;
+    stationKind: string;
+    clientEventId?: string | null | undefined;
+    accountability: StationAccountability;
+  },
+): Promise<void> {
+  if (!AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS.has(args.stationKind)) {
+    return;
+  }
+
+  const [afterComplete] = await tx
+    .select({
+      stage: readBagState.stage,
+      isFinalized: readBagState.isFinalized,
+    })
+    .from(readBagState)
+    .where(eq(readBagState.workflowBagId, args.workflowBagId));
+  if (afterComplete?.stage !== "PACKAGED") return;
+  if (afterComplete?.isFinalized) return;
+
+  const [live] = await tx
+    .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+    .from(readStationLive)
+    .where(eq(readStationLive.stationId, args.stationId));
+  if (live?.currentWorkflowBagId !== args.workflowBagId) return;
+
+  const finalizeClientEventId = args.clientEventId
+    ? `${args.clientEventId}-auto-finalize`
+    : undefined;
+
+  await projectBagFinalizedEvent(tx, {
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    accountability: args.accountability,
+    ...(finalizeClientEventId ? { clientEventId: finalizeClientEventId } : {}),
   });
 }
 

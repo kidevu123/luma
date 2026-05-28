@@ -186,8 +186,9 @@ export function StageActionButtons({
           ? "Release to finishing queue"
           : "Release to next station";
 
-  // Only stations that finalize show the Finalize button — and only
-  // when the bag is at PACKAGED. Everywhere else, finalize is hidden.
+  // Only stations that finalize show the Finalize button — legacy
+  // fallback when a bag is PACKAGED but not yet finalized (e.g. Bag
+  // Card 117 before auto-finalize shipped). New close-outs auto-finalize.
   const canFinalize =
     STATIONS_THAT_FINALIZE.has(stationKind) &&
     (currentStage == null || currentStage === "PACKAGED");

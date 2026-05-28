@@ -415,3 +415,31 @@ describe("PACKAGING-CLOSEOUT-UX-1 · scroll-safe inputs and clearer labels", () 
     expect(scanSrc).not.toMatch(/onWheel/);
   });
 });
+
+describe("PACKAGING-AUTO-FINALIZE-1 · manual finalize fallback for legacy PACKAGED bags", () => {
+  it("Finalize bag button still exists for legacy PACKAGED-not-finalized bags", () => {
+    expect(src).toMatch(/Finalize bag/);
+    expect(src).toMatch(/finalizeBagAction/);
+    expect(src).toMatch(/canFinalize/);
+  });
+
+  it("packaging close-out form still gated on packagingReady (SEALED only)", () => {
+    expect(src).toMatch(/packagingReady.*currentStage.*SEALED/s);
+  });
+
+  it("sealing auto-release path unchanged — packaging does not use release helper", () => {
+    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
+    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
+    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
+    const block = actionsSrc.slice(pkgIdx, lookupIdx);
+    expect(block).not.toMatch(/maybeAutoReleaseAfterComplete/);
+    expect(block).toMatch(/maybeAutoFinalizeAfterPackagingComplete/);
+  });
+
+  it("blister close-out unchanged", () => {
+    const blisterIdx = src.indexOf("function BlisterCompleteForm");
+    const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
+    expect(blisterBlock).toMatch(/Packs remaining/);
+    expect(blisterBlock).toMatch(/Blister count/);
+  });
+});

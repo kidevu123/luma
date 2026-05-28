@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.28] — 2026-05-28
+
+### Changed (PACKAGING-AUTO-FINALIZE-1)
+- **Packaging auto-finalize:** PACKAGING stations now auto-finalize in the same transaction as `PACKAGING_COMPLETE`. Operators no longer need a second "Finalize bag" tap after packaging close-out.
+- **Shared helper:** Extracted `projectBagFinalizedEvent` for manual finalize and auto-finalize (reuses existing `BAG_FINALIZED` projector path: metrics snapshot, QR release, station unpin).
+- **Legacy fallback:** Manual Finalize button remains for bags already at `PACKAGED` but not finalized (e.g. pre-deploy close-outs).
+
+### Tests added (PACKAGING-AUTO-FINALIZE-1)
+- `actions.test.ts`, `stage-action-buttons.test.ts` — auto-finalize on PACKAGING only, COMBINED excluded, idempotent clientEventId, manual finalize fallback, sealing/blister unchanged.
+
 ## [0.4.27] — 2026-05-28
 
 ### Changed (PACKAGING-CLOSEOUT-UX-1)

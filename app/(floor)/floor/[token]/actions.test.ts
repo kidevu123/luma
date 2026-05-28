@@ -88,3 +88,56 @@ describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
     expect(match?.[0]).toMatch(/station\.kind === "SEALING"/);
   });
 });
+
+describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () => {
+  it("chains maybeAutoFinalizeAfterPackagingComplete after PACKAGING_COMPLETE on PACKAGING stations", () => {
+    expect(actionsSrc).toMatch(/station\.kind === "PACKAGING"/);
+    expect(actionsSrc).toMatch(/maybeAutoFinalizeAfterPackagingComplete/);
+    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
+    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
+    const block = actionsSrc.slice(pkgIdx, lookupIdx);
+    expect(block).toMatch(/maybeAutoFinalizeAfterPackagingComplete/);
+    expect(block).toMatch(/emitCountBasedPackagingConsumption/);
+  });
+
+  it("uses shared projectBagFinalizedEvent for manual finalize and auto-finalize", () => {
+    expect(actionsSrc).toMatch(/function projectBagFinalizedEvent/);
+    expect(actionsSrc).toMatch(/projectBagFinalizedEvent[\s\S]*BAG_FINALIZED/);
+    const finalizeIdx = actionsSrc.indexOf("export async function finalizeBagAction");
+    const releaseIdx = actionsSrc.indexOf("// ── release to next station");
+    const finalizeBlock = actionsSrc.slice(finalizeIdx, releaseIdx);
+    expect(finalizeBlock).toMatch(/projectBagFinalizedEvent/);
+  });
+
+  it("auto-finalize is idempotent with -auto-finalize clientEventId suffix", () => {
+    expect(actionsSrc).toMatch(/-auto-finalize/);
+    expect(actionsSrc).toMatch(/AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS/);
+  });
+
+  it("does not auto-finalize on COMBINED PACKAGING_COMPLETE", () => {
+    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
+    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
+    const block = actionsSrc.slice(pkgIdx, lookupIdx);
+    expect(block).toMatch(/if \(station\.kind === "PACKAGING"\)/);
+    expect(block).not.toMatch(/COMBINED[\s\S]{0,40}maybeAutoFinalizeAfterPackagingComplete/);
+  });
+
+  it("auto-finalize guards on PACKAGED stage, not finalized, and station pin", () => {
+    const helperIdx = actionsSrc.indexOf("function maybeAutoFinalizeAfterPackagingComplete");
+    const helperBlock = actionsSrc.slice(helperIdx, helperIdx + 1200);
+    expect(helperBlock).toMatch(/stage !== "PACKAGED"/);
+    expect(helperBlock).toMatch(/isFinalized/);
+    expect(helperBlock).toMatch(/currentWorkflowBagId/);
+  });
+
+  it("packaging payload keys unchanged", () => {
+    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
+    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
+    const block = actionsSrc.slice(pkgIdx, lookupIdx);
+    expect(block).toMatch(/master_cases/);
+    expect(block).toMatch(/displays_made/);
+    expect(block).toMatch(/loose_cards/);
+    expect(block).toMatch(/damaged_packaging/);
+    expect(block).toMatch(/ripped_cards/);
+  });
+});
