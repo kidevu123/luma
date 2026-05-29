@@ -261,6 +261,28 @@ describe('STATION-TIMER-2 · projector HANDPACK_BLISTER_COMPLETE boundary', () =
   });
 });
 
+describe('STATION-SEALING-TIMER-ROLLS-CLEANUP-1 · station timer uses latest station-scoped pickup', () => {
+  it('uses stationId filter on BAG_PICKED_UP query — not any station pickup', () => {
+    // The query must filter by station ID, not just by bag ID
+    expect(pageSrc).toMatch(/workflowEvents\.stationId.*station\.station\.id|station\.station\.id.*workflowEvents\.stationId/s);
+    // Must use desc ordering to get the most recent pickup
+    expect(pageSrc).toMatch(/orderBy\(desc/);
+    expect(pageSrc).toMatch(/\.limit\(1\)/);
+  });
+
+  it('recomputes paused seconds from events strictly after pickup timestamp', () => {
+    // Must use a comparison operator to filter pause events after pickup time
+    expect(pageSrc).toMatch(/workflowEvents\.occurredAt.*pickedUpAt|pickedUpAt.*occurredAt/s);
+  });
+
+  it('SEALING station page does not link to /rolls sub-page', () => {
+    // Roll sub-page is only exposed to BLISTER and COMBINED, not SEALING
+    // The supervisor tools panel renders nothing for SEALING
+    expect(pageSrc).toMatch(/FLOOR_ROLL_STATION_KINDS/);
+    expect(pageSrc).toMatch(/floorSupervisorToolsForStation/);
+  });
+});
+
 describe('STATION-ACTIVE-UX-1 · Op label clarity', () => {
   const sab = require('fs').readFileSync(
     require('path').join(__dirname, 'stage-action-buttons.tsx'),

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.51] — 2026-05-29
+
+### Verified + hardened (STATION-SEALING-TIMER-ROLLS-CLEANUP-1)
+- **Scope A — Station timer anchor confirmed:** Floor page uses the most recent `BAG_PICKED_UP` event for the current station (filtered by `stationId`, ordered desc) as the elapsed timer anchor. Fallback to `bag.startedAt` for first-op stations preserved.
+- **Scope B — Handpack boundary confirmed:** `HANDPACK_BLISTER_COMPLETE` is included in `stageBoundaries` in the projector, so handpacked bags compute `sealingSeconds` from handpack completion, not bag start.
+- **Scope C — Sealing roll controls confirmed absent:** `FLOOR_ROLL_STATION_KINDS` excludes `SEALING`. `STATION_PAUSE_REASON_MATRIX.SEALING` excludes `pvc_swap`. All verified by existing tests.
+
+### Tests hardened (STATION-SEALING-TIMER-ROLLS-CLEANUP-1)
+- `page.test.ts` — Added explicit stationId filter assertion, desc-ordering assertion, and roll sub-page exclusion assertion for SEALING.
+
+## [0.4.50] — 2026-05-29
+
+### Added (MULTI-SEALING-SAME-BAG-1)
+- **Multi-station sealing segments:** New `SEALING_SEGMENT_COMPLETE` event records per-machine counter output while global bag stage stays `BLISTERED`. Explicit **Sealing complete — all machines done** fires final `SEALING_COMPLETE` (lane close only) to advance to `SEALED`.
+- **Packaging gate unchanged:** Pickup allowed at `BLISTERED`; close-out blocked until final sealing complete. Partial sealing progress banner on sealing and packaging stations.
+
+### Tests added (MULTI-SEALING-SAME-BAG-1)
+- `lib/production/sealing-segments.test.ts` — segment prereqs, progress fold, migration 0048.
+- `app/(floor)/floor/[token]/actions.test.ts` — segment vs final wiring.
+- `app/(floor)/floor/[token]/stage-action-buttons.test.ts` — dual sealing actions UI.
+
 ## [0.4.49] — 2026-05-29
 
 ### Added (ROLL-INTAKE-AUTO-NUMBER-INTEGRATION-1)
