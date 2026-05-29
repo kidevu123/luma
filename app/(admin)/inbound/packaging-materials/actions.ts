@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, ilike } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { compact } from "@/lib/db/compact";
 import { requireAdmin } from "@/lib/auth-guards";
@@ -18,7 +18,12 @@ import { kgToGrams } from "@/lib/inbound/roll-weight";
 import {
   parseRollReceiveRowsJson,
   validateRollReceiveBatch,
+  validateRollReceiveWeightBatch,
 } from "@/lib/inbound/roll-receive-batch";
+import {
+  assignRollNumbersForBatch,
+  rollNumberGroupPrefix,
+} from "@/lib/inbound/roll-number-generator";
 import {
   adminMountRollLot,
   assertNoConflictingMountedRoll,
@@ -464,8 +469,12 @@ export async function receiveRollsBatchAction(
 
   const rowParse = parseRollReceiveRowsJson(d.rollsJson);
   if ("error" in rowParse) return { error: rowParse.error };
-  const batchErr = validateRollReceiveBatch(rowParse.rows);
-  if (batchErr) return { error: batchErr };
+  const weightErr = validateRollReceiveWeightBatch(rowParse.rows);
+  if (weightErr) return { error: weightErr };
+
+  if (d.receiptType === "NORMAL" && !d.receiptNumber?.trim()) {
+    return { error: "PO / receipt reference is required for normal receipts." };
+  }
 
   const wantMount = d.alreadyMounted === "true";
   if (wantMount && rowParse.rows.length !== 1) {
@@ -479,7 +488,7 @@ export async function receiveRollsBatchAction(
   }
 
   const [mat] = await db
-    .select({ kind: packagingMaterials.kind })
+    .select({ kind: packagingMaterials.kind, name: packagingMaterials.name })
     .from(packagingMaterials)
     .where(eq(packagingMaterials.id, d.packagingMaterialId))
     .limit(1);
@@ -490,16 +499,14 @@ export async function receiveRollsBatchAction(
     };
   }
 
-  const rollNumbers = rowParse.rows.map((r) => r.rollNumber.trim());
-  const dupesInDb = await db
-    .select({ rollNumber: packagingLots.rollNumber })
-    .from(packagingLots)
-    .where(inArray(packagingLots.rollNumber, rollNumbers));
-  if (dupesInDb.length > 0) {
-    const hit = dupesInDb[0]!.rollNumber ?? rollNumbers[0];
-    return {
-      error: `Roll number "${hit}" already exists in inventory.`,
-    };
+  const formatInput = {
+    materialKind: mat.kind,
+    materialName: mat.name,
+    receiptType: d.receiptType,
+    receiptReference: d.receiptNumber ?? null,
+  };
+  if (!rollNumberGroupPrefix(formatInput)) {
+    return { error: "PO / receipt reference is required for normal receipts." };
   }
 
   let mountTarget: {
@@ -556,7 +563,43 @@ export async function receiveRollsBatchAction(
         if (conflict) throw new Error(conflict);
       }
 
-      for (const row of rowParse.rows) {
+      const groupPrefix = rollNumberGroupPrefix(formatInput);
+      if (!groupPrefix) {
+        throw new Error("PO / receipt reference is required for normal receipts.");
+      }
+
+      const existingRows = await tx
+        .select({ rollNumber: packagingLots.rollNumber })
+        .from(packagingLots)
+        .where(ilike(packagingLots.rollNumber, `${groupPrefix}%`));
+      const existingRollNumbers = existingRows
+        .map((r) => r.rollNumber)
+        .filter((v): v is string => v != null && v.trim().length > 0);
+
+      const assigned = assignRollNumbersForBatch({
+        ...formatInput,
+        count: rowParse.rows.length,
+        existingRollNumbers,
+      });
+      if ("error" in assigned) throw new Error(assigned.error);
+
+      const receiveRows = rowParse.rows.map((row, i) => ({
+        rollNumber: assigned.rollNumbers[i]!,
+        netWeightKg: row.netWeightKg,
+      }));
+      const batchErr = validateRollReceiveBatch(receiveRows);
+      if (batchErr) throw new Error(batchErr);
+
+      const dupesInDb = await tx
+        .select({ rollNumber: packagingLots.rollNumber })
+        .from(packagingLots)
+        .where(inArray(packagingLots.rollNumber, assigned.rollNumbers));
+      if (dupesInDb.length > 0) {
+        const hit = dupesInDb[0]!.rollNumber ?? assigned.rollNumbers[0];
+        throw new Error(`Roll number "${hit}" already exists in inventory.`);
+      }
+
+      for (const row of receiveRows) {
         const directNetGrams = kgToGrams(row.netWeightKg);
         const net = computeNetWeight({
           grossWeightGrams,

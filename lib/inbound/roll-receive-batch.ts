@@ -4,6 +4,12 @@ import { ROLL_COUNT_MAX } from "./roll-receive-input";
 
 export type ReceiptType = "NORMAL" | "LEGACY_OPENING_BALANCE";
 
+/** Client payload — weights only; roll numbers assigned server-side. */
+export type RollReceiveWeightRowInput = {
+  netWeightKg: number;
+};
+
+/** After server assigns roll numbers. */
 export type RollReceiveRowInput = {
   rollNumber: string;
   netWeightKg: number;
@@ -17,10 +23,10 @@ export function materialKindShortLabel(kind: string): string {
   return kind === "PVC_ROLL" ? "PVC" : "FOIL";
 }
 
-/** Parse rollsJson from the batch form. Returns error message or rows. */
+/** Parse rollsJson from the batch form. Returns error message or weight rows. */
 export function parseRollReceiveRowsJson(
   rollsJson: string,
-): { rows: RollReceiveRowInput[] } | { error: string } {
+): { rows: RollReceiveWeightRowInput[] } | { error: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rollsJson);
@@ -35,26 +41,36 @@ export function parseRollReceiveRowsJson(
       error: `Maximum ${ROLL_COUNT_MAX} rolls per receipt.`,
     };
   }
-  const rows: RollReceiveRowInput[] = [];
+  const rows: RollReceiveWeightRowInput[] = [];
   for (let i = 0; i < parsed.length; i++) {
     const item = parsed[i];
     if (item == null || typeof item !== "object") {
       return { error: `Roll row ${i + 1} is invalid.` };
     }
-    const rollNumber =
-      "rollNumber" in item && typeof item.rollNumber === "string"
-        ? item.rollNumber.trim()
-        : "";
     const netWeightKg =
       "netWeightKg" in item && typeof item.netWeightKg === "number"
         ? item.netWeightKg
         : Number.NaN;
-    rows.push({ rollNumber, netWeightKg });
+    rows.push({ netWeightKg });
   }
   return { rows };
 }
 
-/** Client-side + server-side batch validation. Returns first error or null. */
+/** Validate weight rows from the client (no roll numbers). */
+export function validateRollReceiveWeightBatch(
+  rows: readonly RollReceiveWeightRowInput[],
+): string | null {
+  if (rows.length === 0) return "Enter at least one roll.";
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    if (!(row.netWeightKg > 0)) {
+      return `Roll ${i + 1}: Net weight must be greater than 0 kg.`;
+    }
+  }
+  return null;
+}
+
+/** Validate assigned rows before insert (duplicate + weight). */
 export function validateRollReceiveBatch(
   rows: readonly RollReceiveRowInput[],
 ): string | null {

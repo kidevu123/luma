@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.49] — 2026-05-29
+
+### Added (ROLL-INTAKE-AUTO-NUMBER-INTEGRATION-1)
+- **Automatic roll numbering on receive:** Roll intake rows ask for net weight kg only. Roll numbers are assigned inside `receiveRollsBatchAction` from material kind, receipt type, and PO/reference (`FOIL-221-001`, `Legacy PVC-002`, etc.).
+- **Collision-safe sequencing:** New batches continue from the highest existing sequence in the same roll-number group (prefix + reference for normal receipts; `Legacy FOIL-` / `Legacy PVC-` for opening balance).
+
+### Tests added (ROLL-INTAKE-AUTO-NUMBER-INTEGRATION-1)
+- `lib/inbound/roll-number-generator.test.ts` — formats, 58-roll batch, collision continuation, legacy isolation.
+- `lib/inbound/roll-receive-batch.test.ts` — weight-only client payload validation.
+- `roll-kg-input.test.ts` — no per-row roll number inputs; server-side assignment wiring.
+
 ## [0.4.48] — 2026-05-27
 
 ### Fixed (ROLL-INTAKE-BULK-COUNT-LIMIT-1)

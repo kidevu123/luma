@@ -29,7 +29,6 @@ type MountTarget = {
 };
 
 type RollRow = {
-  rollNumber: string;
   netWeightKg: string;
 };
 
@@ -37,7 +36,7 @@ const inputClass =
   "mt-1 w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong placeholder:text-text-subtle focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors tabular-nums";
 
 function emptyRow(): RollRow {
-  return { rollNumber: "", netWeightKg: "" };
+  return { netWeightKg: "" };
 }
 
 function NumericTextInput({
@@ -136,22 +135,15 @@ export function RollReceiveForm({
     const syncedRows = resizeRollRows(rows, parsed.value, emptyRow);
     setRows(syncedRows);
 
-    const parsedRows: Array<{ rollNumber: string; netWeightKg: number }> = [];
+    const parsedRows: Array<{ netWeightKg: number }> = [];
     for (let i = 0; i < syncedRows.length; i++) {
       const row = syncedRows[i]!;
-      if (!row.rollNumber.trim()) {
-        setError(`Roll ${i + 1} needs a roll number.`);
-        return;
-      }
       const weight = parseDecimalKgInput(row.netWeightKg);
       if (!weight.ok) {
         setError(`Roll ${i + 1}: ${weight.error}`);
         return;
       }
-      parsedRows.push({
-        rollNumber: row.rollNumber.trim(),
-        netWeightKg: weight.value,
-      });
+      parsedRows.push({ netWeightKg: weight.value });
     }
 
     const fd = new FormData(e.currentTarget);
@@ -275,32 +267,20 @@ export function RollReceiveForm({
             Roll weights
           </p>
           <p className="text-[11px] text-text-subtle mt-0.5">
-            Enter each roll number and net weight in{" "}
-            <span className="font-semibold">kilograms</span>. Core / spent weight
-            is captured later when the roll is unmounted on the floor.
+            Luma assigns roll numbers automatically from material, receipt type,
+            and reference. Enter net weight in{" "}
+            <span className="font-semibold">kilograms</span> for each roll.
           </p>
         </div>
         <div className="divide-y divide-border/40">
           {rows.map((row, i) => (
             <div
               key={i}
-              className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-2 px-3 py-2.5 items-end"
+              className="px-3 py-2.5"
             >
-              <label className="block">
+              <label className="block max-w-xs">
                 <span className="text-[10px] text-text-subtle font-medium">
-                  Roll {i + 1} — number
-                </span>
-                <input
-                  type="text"
-                  value={row.rollNumber}
-                  onChange={(ev) => updateRow(i, { rollNumber: ev.target.value })}
-                  placeholder="e.g. FOIL-01"
-                  className={inputClass}
-                />
-              </label>
-              <label className="block">
-                <span className="text-[10px] text-text-subtle font-medium">
-                  Net weight (kg)
+                  Roll {i + 1} — net weight (kg)
                 </span>
                 <NumericTextInput
                   inputMode="decimal"
@@ -449,8 +429,8 @@ export function RollReceiveForm({
 
       <div className="flex items-center justify-between gap-3 pt-1">
         <p className="text-[11px] text-text-muted">
-          Weights are entered in kg; Luma stores grams internally. Duplicate roll
-          numbers are rejected.
+          Weights are entered in kg; Luma stores grams internally and assigns
+          roll numbers on save.
         </p>
         <button
           type="submit"

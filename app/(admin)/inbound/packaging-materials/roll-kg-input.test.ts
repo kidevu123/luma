@@ -27,7 +27,7 @@ describe("ROLL-INTAKE-UX-LEGACY-1 — simplified roll tab", () => {
   it("batch form exposes receipt type and roll count", () => {
     expect(formSrc).toMatch(/Legacy opening balance/);
     expect(formSrc).toMatch(/Number of rolls/);
-    expect(formSrc).toMatch(/Net weight \(kg\)/);
+    expect(formSrc).toMatch(/net weight \(kg\)/i);
     expect(formSrc).toMatch(/Advanced details/);
   });
 
@@ -51,7 +51,7 @@ describe("ROLL-INTAKE-NUMBER-INPUT-FIX-1 — text numeric fields (no wheel mutat
   });
 
   it("net weight rows use text decimal input, not type number", () => {
-    expect(formSrc).toMatch(/Net weight \(kg\)[\s\S]{0,300}inputMode="decimal"/);
+    expect(formSrc).toMatch(/net weight \(kg\)[\s\S]{0,300}inputMode="decimal"/i);
     expect(formSrc).not.toMatch(/netWeightKg[\s\S]{0,200}type="number"/);
   });
 
@@ -116,6 +116,31 @@ describe("ROLL-INTAKE-NUMBER-INPUT-POLISH-1 — scroll safety and editable roll 
 
   it("form defaults receiptType to NORMAL", () => {
     expect(formSrc).toMatch(/useState.*"NORMAL"/);
+  });
+});
+
+describe("ROLL-INTAKE-AUTO-NUMBER-INTEGRATION-1 — server-assigned roll numbers", () => {
+  it("form rows collect net weight only (no per-row roll number input)", () => {
+    expect(formSrc).not.toMatch(/Roll \$\{i \+ 1\} — number/);
+    expect(formSrc).not.toMatch(/row\.rollNumber/);
+    expect(formSrc).not.toMatch(/rollNumberSource/);
+    expect(formSrc).toMatch(/netWeightKg/);
+    expect(formSrc).toMatch(/Luma assigns roll numbers automatically/);
+  });
+
+  it("batch action assigns roll numbers inside the receive transaction", () => {
+    expect(actionsSrc).toMatch(/assignRollNumbersForBatch/);
+    expect(actionsSrc).toMatch(/validateRollReceiveWeightBatch/);
+  });
+
+  it("receive button still reflects the committed roll count", () => {
+    expect(formSrc).toMatch(/`Receive \$\{committedRollCount\} roll/);
+  });
+
+  it("roll count and weight fields remain text/inputMode (no type=number regression)", () => {
+    expect(formSrc).not.toMatch(/type="number"/);
+    expect(formSrc).toMatch(/inputMode="numeric"/);
+    expect(formSrc).toMatch(/inputMode="decimal"/);
   });
 });
 
