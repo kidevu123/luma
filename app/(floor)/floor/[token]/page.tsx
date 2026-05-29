@@ -711,6 +711,7 @@ export default async function FloorStationPage({
               sealingCardsPerPress={sealingCardsPerPress}
               hasProductMapped={hasProductMapped}
               sealingProductOptions={sealingProductOptionsForForm}
+              rollChangeRole={requiredRollChangeRole}
             />
             {/* Help operator pick the next action when the bag has
              *  already advanced past this station's stage. The
