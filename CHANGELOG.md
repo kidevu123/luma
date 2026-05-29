@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.39] — 2026-05-29
+
+### Fixed (DASHBOARD-PREDICTION-DATE-COPY-1)
+- **Owner dashboard prediction copy:** The blue prediction panel no longer says “tomorrow … by Friday” when today is already Friday (or when tomorrow is the weekly target). Copy is calendar-aware in Eastern time.
+- **Plain operational wording:** Replaced cute “push tomorrow morning’s first hour” phrasing with concise pace + weekly-window guidance.
+- **Weak-data honesty:** When the 7-day finalize average is zero, the card states that prediction is directional only instead of inventing bag counts.
+- **ET weekday alignment:** Weekly business-day remaining math now uses `America/New_York` (matching finalized-day SQL buckets), not server-local `Date.getDay()`.
+
+### Tests added (DASHBOARD-PREDICTION-DATE-COPY-1)
+- `prediction-copy.test.ts` — Friday, Tuesday, Thursday, weekend, no-data, and on-pace cases.
+- `loaders.test.ts` — ET weekday helpers; page no longer embeds broken copy.
+
 ## [0.4.38] — 2026-05-29
 
 ### Fixed (BLISTER-AUTO-RELEASE-1)

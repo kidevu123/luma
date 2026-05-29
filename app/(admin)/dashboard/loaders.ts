@@ -32,6 +32,32 @@ export function todayEtDateKey(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: DASHBOARD_TZ }).format(now);
 }
 
+const WEEKDAY_ET: Record<string, number> = {
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
+};
+
+/** ISO weekday 1=Mon … 7=Sun in company timezone. */
+export function weekdayEt(now = new Date()): number {
+  const short = new Intl.DateTimeFormat("en-US", {
+    timeZone: DASHBOARD_TZ,
+    weekday: "short",
+  }).format(now);
+  return WEEKDAY_ET[short] ?? 1;
+}
+
+/** Mon–Fri production days left in the current week (including today). */
+export function businessDaysRemainingInWeekEt(now = new Date()): number {
+  const wd = weekdayEt(now);
+  if (wd >= 6) return 0;
+  return Math.max(5 - wd, 0);
+}
+
 export async function getFinalizedToday() {
   const [todayRow] = await db
     .select({
@@ -164,17 +190,16 @@ export async function getPredictedShippableThisWeek() {
     );
 
   const now = new Date();
-  const dow = now.getDay();
-  const daysSinceMon = (dow + 6) % 7;
   const dailyAvg = (last7Row?.n ?? 0) / Math.max(last7Row?.days ?? 7, 1);
-  const businessDaysSoFar = Math.min(daysSinceMon + 1, 5);
-  const businessDaysRemaining = Math.max(5 - businessDaysSoFar, 0);
+  const businessDaysRemaining = businessDaysRemainingInWeekEt(now);
   const predictedExtra = Math.round(dailyAvg * businessDaysRemaining);
   return {
     thisWeekSoFar: thisWeek?.n ?? 0,
     predictedExtra,
     total: (thisWeek?.n ?? 0) + predictedExtra,
     dailyAvg7: Math.round(dailyAvg),
+    businessDaysRemaining,
+    weekdayEt: weekdayEt(now),
   };
 }
 

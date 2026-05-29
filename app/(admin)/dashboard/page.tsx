@@ -29,6 +29,7 @@ import {
   getActivityHeartbeat,
   getActiveQrCardCount,
 } from "./loaders";
+import { buildWeeklyPredictionDetail } from "./prediction-copy";
 
 export const dynamic = "force-dynamic";
 
@@ -304,7 +305,13 @@ function pickPrediction(args: {
   forgottenBags: number;
   agedUnfinalizedBags: number;
   agedUnfinalizedUnits: number;
-  predicted: { total: number; predictedExtra: number; dailyAvg7: number };
+  predicted: {
+    total: number;
+    predictedExtra: number;
+    dailyAvg7: number;
+    businessDaysRemaining: number;
+    weekdayEt: number;
+  };
   finalizedToday: number;
   avg7: number;
 }): Prediction {
@@ -345,8 +352,13 @@ function pickPrediction(args: {
     headline: `Floor's clean. Predicted ${args.predicted.total.toLocaleString()} bags shippable this week at current pace.`,
     detail:
       args.predicted.dailyAvg7 > 0
-        ? `Pace is ~${args.predicted.dailyAvg7}/day. Push tomorrow morning's first hour to add ${Math.max(Math.round(args.predicted.dailyAvg7 * 0.1), 1)} bags by Friday.`
-        : "Run the importer + Rebuild read models if you expected metrics here.",
+        ? buildWeeklyPredictionDetail({
+            dailyAvg7: args.predicted.dailyAvg7,
+            predictedExtra: args.predicted.predictedExtra,
+            businessDaysRemaining: args.predicted.businessDaysRemaining,
+            weekdayEt: args.predicted.weekdayEt,
+          })
+        : "Limited recent finalize data — run the importer and rebuild read models if you expected metrics here.",
     cta: { label: "See breakdown", href: "/metrics" },
     tone: "info",
   };
