@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.53] — 2026-05-29
+
+### Fixed (OPERATOR-PICKER-UUID-SUBMIT-FIX-1)
+- **UUID-shaped operator code no longer crashes packaging complete:** When a station operator session is opened via the employee picker (source `EMPLOYEE_PICKER`), the employee's UUID could reach `resolveAccountableEmployee` as the `employeeCode` argument. The postgres-js driver sends UUID-formatted strings with the `uuid` OID; comparing that against the `text` employee_code column raised "operator does not exist: text = uuid" in PostgreSQL. UUID-shaped values now route through `loadEmployeeById` (uuid = uuid) instead of `loadActiveEmployeeByCode` (text = uuid), eliminating the type mismatch. Non-UUID codes continue through the existing code-lookup path unchanged.
+
+### Tests added (OPERATOR-PICKER-UUID-SUBMIT-FIX-1)
+- `station-operator-session.test.ts` — 4 new tests: EMPLOYEE_PICKER session resolves correctly, typed 4-digit code resolves via code lookup, UUID override routes to ID lookup, UUID override gracefully falls through to session when no employee matches.
+
 ## [0.4.52] — 2026-05-27
 
 ### Added (MULTI-SEALING-SAME-BAG-1)

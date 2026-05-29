@@ -89,16 +89,34 @@ export async function resolveAccountableEmployee(
   }
 
   // 2) Active employee_code lookup (case-insensitive trim).
+  //    UUID-shaped values MUST go through the ID path (loadEmployeeById)
+  //    rather than the code path (loadActiveEmployeeByCode). The postgres
+  //    driver sends UUID-formatted strings with the uuid OID; comparing
+  //    that against the text employee_code column raises
+  //    "operator does not exist: text = uuid" in PostgreSQL.
   if (employeeCode) {
-    const row = await loadActiveEmployeeByCode(tx, employeeCode);
-    if (row) {
-      return {
-        accountableEmployeeId: row.id,
-        accountableEmployeeCode: row.employeeCode ?? null,
-        nameSnapshot: row.fullName,
-        source: input.sourceHint ?? "EMPLOYEE_CODE",
-        isStable: true,
-      };
+    if (isUuid(employeeCode)) {
+      const row = await loadEmployeeById(tx, employeeCode);
+      if (row) {
+        return {
+          accountableEmployeeId: row.id,
+          accountableEmployeeCode: row.employeeCode ?? null,
+          nameSnapshot: row.fullName,
+          source: input.sourceHint ?? "EMPLOYEE_CODE",
+          isStable: true,
+        };
+      }
+    } else {
+      const row = await loadActiveEmployeeByCode(tx, employeeCode);
+      if (row) {
+        return {
+          accountableEmployeeId: row.id,
+          accountableEmployeeCode: row.employeeCode ?? null,
+          nameSnapshot: row.fullName,
+          source: input.sourceHint ?? "EMPLOYEE_CODE",
+          isStable: true,
+        };
+      }
     }
   }
 
