@@ -199,6 +199,8 @@ export const workflowEventTypeEnum = pgEnum("workflow_event_type", [
   // Production stages
   "BLISTER_COMPLETE",
   "HANDPACK_BLISTER_COMPLETE",
+  // MULTI-SEALING-SAME-BAG-1 — per-station counter segment; does not advance stage.
+  "SEALING_SEGMENT_COMPLETE",
   "SEALING_COMPLETE",
   "PACKAGING_SNAPSHOT",
   "PACKAGING_COMPLETE",

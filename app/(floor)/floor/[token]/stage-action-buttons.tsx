@@ -50,7 +50,7 @@ function newClientEventId(): string {
 const STAGE_BY_KIND: Record<string, { label: string; eventType: string }[]> = {
   BLISTER: [{ label: "Blister complete", eventType: "BLISTER_COMPLETE" }],
   HANDPACK_BLISTER: [{ label: "Hand-pack complete", eventType: "HANDPACK_BLISTER_COMPLETE" }],
-  SEALING: [{ label: "Sealing complete", eventType: "SEALING_COMPLETE" }],
+  SEALING: [],
   PACKAGING: [], // PACKAGING uses the rich complete form below
   BOTTLE_HANDPACK: [{ label: "Hand-pack complete", eventType: "BOTTLE_HANDPACK_COMPLETE" }],
   BOTTLE_CAP_SEAL: [{ label: "Cap-seal complete", eventType: "BOTTLE_CAP_SEAL_COMPLETE" }],
@@ -67,7 +67,10 @@ import {
   getPauseReasonsForStation,
   type PauseReasonValue,
 } from "@/lib/production/station-pause-reasons";
-import { SEALING_COUNTER_CONFIG_ERROR } from "@/lib/production/sealing-counter";
+import {
+  SEALING_COUNTER_CONFIG_ERROR,
+  computeSealedCountFromCounter,
+} from "@/lib/production/sealing-counter";
 import { SEALING_STATION_KINDS } from "@/lib/production/sealing-product";
 
 type PackagingSpecLine = {
@@ -88,6 +91,12 @@ type TabletTypeOption = {
   name: string;
 };
 
+type SealingSegmentProgress = {
+  segmentCount: number;
+  stationCount: number;
+  cardsTotal: number;
+};
+
 export function StageActionButtons({
   token,
   stationId,
@@ -105,6 +114,7 @@ export function StageActionButtons({
   sealingProductFilterHint = null,
   rollChangeRole = null,
   handpackTabletTypeOptions = [],
+  sealingSegmentProgress = null,
 }: {
   token: string;
   stationId: string;
@@ -132,6 +142,8 @@ export function StageActionButtons({
    *  one before completing; stored in HANDPACK_BLISTER_COMPLETE payload so
    *  sealing can filter the product dropdown. Empty = no gate applied. */
   handpackTabletTypeOptions?: TabletTypeOption[];
+  /** Bag-level sealing segment totals (all stations). */
+  sealingSegmentProgress?: SealingSegmentProgress | null;
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -153,6 +165,7 @@ export function StageActionButtons({
   }, [stationKind]);
   const [packagingOpen, setPackagingOpen] = React.useState(false);
   const [sealingOpen, setSealingOpen] = React.useState(false);
+  const [sealingFinalOpen, setSealingFinalOpen] = React.useState(false);
   const [blisterOpen, setBlisterOpen] = React.useState(false);
   const [selectedSealingProductId, setSelectedSealingProductId] =
     React.useState("");
@@ -200,7 +213,13 @@ export function StageActionButtons({
     s => !RICH_FORM_EVENTS.has(s.eventType) && !TIMED_ONLY_EVENTS.has(s.eventType),
   );
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
+  const isSealingStation = stationKind === "SEALING";
+  const sealingStageReady =
+    !currentStage || currentStage === "BLISTERED";
+  const hasSealingSegments = (sealingSegmentProgress?.segmentCount ?? 0) > 0;
   const packagingReady = !currentStage || currentStage === "SEALED";
+  const packagingSealingInProgress =
+    isPackaging && currentStage === "BLISTERED" && hasSealingSegments;
   const needsSealingProductMapping = !hasProductMapped;
   const showSealingProductPicker =
     needsSealingProductMapping && SEALING_STATION_KINDS.has(stationKind);
@@ -442,6 +461,61 @@ export function StageActionButtons({
         </div>
       )}
 
+      {!isPaused && isSealingStation && sealingStageReady && (
+        <div className="space-y-2">
+          <p className="text-xs text-text-muted leading-relaxed">
+            Use <span className="font-medium">Record sealing segment</span> for
+            this machine&apos;s output. Use{" "}
+            <span className="font-medium">Sealing complete</span> only when all
+            sealing machines are done with this bag.
+          </p>
+          {hasSealingSegments && sealingSegmentProgress ? (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+              Sealing in progress —{" "}
+              <span className="font-semibold tabular-nums">
+                {sealingSegmentProgress.cardsTotal}
+              </span>{" "}
+              cards recorded across{" "}
+              <span className="font-semibold tabular-nums">
+                {sealingSegmentProgress.stationCount}
+              </span>{" "}
+              station
+              {sealingSegmentProgress.stationCount === 1 ? "" : "s"}. Packaging
+              close-out unlocks when sealing is marked complete.
+            </div>
+          ) : null}
+          <button
+            type="button"
+            disabled={pending !== null || !sealingProductReady}
+            onClick={() => setSealingOpen(true)}
+            className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-sky-700 text-white text-base font-semibold shadow-sm hover:bg-sky-800 disabled:opacity-60 transition-colors"
+          >
+            <CheckCircle2 className="h-5 w-5" />
+            {pending === "SEALING_SEGMENT_COMPLETE"
+              ? "Saving…"
+              : "Record sealing segment"}
+          </button>
+          <button
+            type="button"
+            disabled={pending !== null || !hasSealingSegments}
+            onClick={() => setSealingFinalOpen(true)}
+            className="w-full h-12 inline-flex items-center justify-center gap-2 rounded-xl border-2 border-sky-400 bg-surface text-sky-900 text-sm font-semibold disabled:opacity-60 transition-colors"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            {pending === "SEALING_COMPLETE"
+              ? "Saving…"
+              : "Sealing complete — all machines done"}
+          </button>
+        </div>
+      )}
+
+      {!isPaused && packagingSealingInProgress && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Sealing in progress — packaging unlocks when sealing is marked
+          complete.
+        </div>
+      )}
+
       {/* Per-stage complete buttons — large, primary action.
        *  SEALING and BLISTER events open a close-out form instead of
        *  firing immediately (counter presses vs blister count). */}
@@ -597,8 +671,44 @@ export function StageActionButtons({
         />
       )}
 
-      {/* Sealing close-out form */}
-      {!isPaused && sealingOpen && (
+      {/* Sealing segment close-out form (SEALING stations only) */}
+      {!isPaused && sealingOpen && isSealingStation && (
+        <SealingSegmentForm
+          token={token}
+          workflowBagId={workflowBagId}
+          stationId={stationId}
+          operatorCode={operatorCode}
+          sealingCardsPerPress={sealingCardsPerPress}
+          needsProductMapping={needsSealingProductMapping}
+          {...(selectedSealingProductId
+            ? { preselectedProductId: selectedSealingProductId }
+            : {})}
+          sealingProductOptions={sealingProductOptions}
+          onClose={(success) => {
+            setSealingOpen(false);
+            if (success && error) setError(null);
+          }}
+          onError={setError}
+        />
+      )}
+
+      {/* Sealing lane-close confirm */}
+      {!isPaused && sealingFinalOpen && (
+        <SealingFinalConfirmForm
+          token={token}
+          workflowBagId={workflowBagId}
+          stationId={stationId}
+          operatorCode={operatorCode}
+          onClose={(success) => {
+            setSealingFinalOpen(false);
+            if (success && error) setError(null);
+          }}
+          onError={setError}
+        />
+      )}
+
+      {/* Legacy COMBINED sealing close-out form */}
+      {!isPaused && sealingOpen && stationKind === "COMBINED" && (
         <SealingCompleteForm
           token={token}
           workflowBagId={workflowBagId}
@@ -845,6 +955,238 @@ function NumField({
         className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
       />
     </label>
+  );
+}
+
+function SealingSegmentForm({
+  token,
+  workflowBagId,
+  stationId,
+  operatorCode,
+  sealingCardsPerPress,
+  needsProductMapping = false,
+  preselectedProductId,
+  sealingProductOptions = [],
+  onClose,
+  onError,
+}: {
+  token: string;
+  workflowBagId: string;
+  stationId: string;
+  operatorCode: string;
+  sealingCardsPerPress: number | null;
+  needsProductMapping?: boolean;
+  preselectedProductId?: string;
+  sealingProductOptions?: SealingProductOption[];
+  onClose: (success: boolean) => void;
+  onError: (msg: string) => void;
+}) {
+  const [pending, setPending] = React.useState(false);
+  const [counterPresses, setCounterPresses] = React.useState("");
+  const [selectedProductId, setSelectedProductId] = React.useState(
+    preselectedProductId ?? "",
+  );
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, []);
+
+  const configReady =
+    sealingCardsPerPress != null && Number.isFinite(sealingCardsPerPress);
+  const previewCount =
+    configReady && counterPresses.trim() !== ""
+      ? computeSealedCountFromCounter(
+          Number(counterPresses),
+          sealingCardsPerPress,
+        )
+      : null;
+  const productIdForSubmit = needsProductMapping
+    ? selectedProductId.trim()
+    : undefined;
+  const productReady =
+    !needsProductMapping ||
+    (productIdForSubmit != null && productIdForSubmit.length > 0);
+
+  return (
+    <div
+      ref={containerRef}
+      className="rounded-lg border-2 border-sky-300 bg-sky-50/40 p-3 space-y-3"
+    >
+      <p className="text-sm font-semibold text-sky-900">Record sealing segment</p>
+      {needsProductMapping && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
+          <div className="font-semibold text-sm">What finished product is this?</div>
+          <div className="text-amber-900/80">
+            Pick the SKU that matches the packaging you are sealing into.
+          </div>
+          {sealingProductOptions.length === 0 ? (
+            <p className="text-sm text-red-800">
+              No active products are configured for this bag&apos;s tablet type.
+              Ask a supervisor to set up the product mapping.
+            </p>
+          ) : (
+            <select
+              required
+              value={selectedProductId}
+              onChange={(e) => setSelectedProductId(e.target.value)}
+              className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
+            >
+              <option value="" disabled>
+                — Select product —
+              </option>
+              {sealingProductOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+      {!configReady ? (
+        <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {SEALING_COUNTER_CONFIG_ERROR}
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-sky-900">
+            Cards per press:{" "}
+            <span className="font-semibold tabular-nums">{sealingCardsPerPress}</span>
+          </p>
+          <div className="space-y-2">
+            <NumField
+              label="Counter presses"
+              value={counterPresses}
+              onChange={setCounterPresses}
+              scrollSafe
+            />
+            {previewCount != null && Number.isFinite(previewCount) ? (
+              <p className="text-xs text-sky-800">
+                Sealed cards = counter × {sealingCardsPerPress} ={" "}
+                <span className="font-semibold tabular-nums">{previewCount}</span>
+              </p>
+            ) : null}
+          </div>
+        </>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => onClose(false)}
+          disabled={pending}
+          className="h-12 rounded-xl border border-border bg-surface text-sm font-medium"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={pending || !configReady || !productReady}
+          onClick={async () => {
+            setPending(true);
+            try {
+              const fd = new FormData();
+              fd.set("token", token);
+              fd.set("workflowBagId", workflowBagId);
+              fd.set("stationId", stationId);
+              fd.set("eventType", "SEALING_SEGMENT_COMPLETE");
+              fd.set("counterPresses", counterPresses || "0");
+              if (needsProductMapping && productIdForSubmit) {
+                fd.set("productId", productIdForSubmit);
+              }
+              if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
+              fd.set("clientEventId", newClientEventId());
+              const r = await fireStageEventAction(fd);
+              if (r?.error) {
+                onError(r.error);
+                onClose(false);
+              } else {
+                onClose(true);
+              }
+            } finally {
+              setPending(false);
+            }
+          }}
+          className="h-14 rounded-xl bg-sky-700 text-white text-base font-semibold disabled:opacity-60"
+        >
+          {pending ? "Saving…" : "Save segment"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SealingFinalConfirmForm({
+  token,
+  workflowBagId,
+  stationId,
+  operatorCode,
+  onClose,
+  onError,
+}: {
+  token: string;
+  workflowBagId: string;
+  stationId: string;
+  operatorCode: string;
+  onClose: (success: boolean) => void;
+  onError: (msg: string) => void;
+}) {
+  const [pending, setPending] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="rounded-lg border-2 border-sky-400 bg-sky-50/60 p-3 space-y-3"
+    >
+      <p className="text-sm font-semibold text-sky-900">
+        Mark sealing complete for this bag?
+      </p>
+      <p className="text-xs text-sky-900/90 leading-relaxed">
+        Confirm only when every sealing machine has recorded its segment.
+        Packaging close-out unlocks after this step.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => onClose(false)}
+          disabled={pending}
+          className="h-12 rounded-xl border border-border bg-surface text-sm font-medium"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={async () => {
+            setPending(true);
+            try {
+              const fd = new FormData();
+              fd.set("token", token);
+              fd.set("workflowBagId", workflowBagId);
+              fd.set("stationId", stationId);
+              fd.set("eventType", "SEALING_COMPLETE");
+              if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
+              fd.set("clientEventId", newClientEventId());
+              const r = await fireStageEventAction(fd);
+              if (r?.error) {
+                onError(r.error);
+                onClose(false);
+              } else {
+                onClose(true);
+              }
+            } finally {
+              setPending(false);
+            }
+          }}
+          className="h-14 rounded-xl bg-sky-800 text-white text-base font-semibold disabled:opacity-60"
+        >
+          {pending ? "Saving…" : "Confirm sealing complete"}
+        </button>
+      </div>
+    </div>
   );
 }
 

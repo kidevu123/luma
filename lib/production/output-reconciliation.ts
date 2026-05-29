@@ -104,14 +104,24 @@ export async function deriveStageOutputForBag(bagId: string): Promise<StageOutpu
     SELECT
       (SELECT SUM(NULLIF((payload->>'machine_count'),'')::int)::int
          FROM events WHERE event_type = 'BLISTER_COMPLETE') AS gross_blisters,
-      -- Sealed output = SEALING_COMPLETE for cards OR
-      --                 BOTTLE_CAP_SEAL_COMPLETE for bottles.
-      (SELECT SUM(
-                COALESCE(NULLIF((payload->>'machine_count'),'')::int,
-                         NULLIF((payload->>'units_count'),'')::int,
-                         NULLIF((payload->>'count'),'')::int))::int
-         FROM events
-         WHERE event_type IN ('SEALING_COMPLETE','BOTTLE_CAP_SEAL_COMPLETE')) AS sealed,
+      -- Sealed card output = SUM(SEALING_SEGMENT_COMPLETE) only for cards.
+      -- Final SEALING_COMPLETE is a lane-close marker with no count.
+      -- Bottles still use BOTTLE_CAP_SEAL_COMPLETE.
+      (
+        COALESCE(
+          (SELECT SUM(NULLIF((payload->>'count_total'),'')::int)::int
+             FROM events WHERE event_type = 'SEALING_SEGMENT_COMPLETE'),
+          0
+        )
+        + COALESCE(
+          (SELECT SUM(
+                    COALESCE(NULLIF((payload->>'machine_count'),'')::int,
+                             NULLIF((payload->>'units_count'),'')::int,
+                             NULLIF((payload->>'count'),'')::int))::int
+             FROM events WHERE event_type = 'BOTTLE_CAP_SEAL_COMPLETE'),
+          0
+        )
+      ) AS sealed,
       -- Packaged output = PACKAGING_COMPLETE counts. Multiple keys
       -- because legacy + new code both write here.
       (SELECT SUM(

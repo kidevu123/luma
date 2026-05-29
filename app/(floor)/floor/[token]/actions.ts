@@ -41,6 +41,7 @@ import {
   SEALING_COUNTER_PRESS_ERROR,
   stationUsesSealingCounter,
 } from "@/lib/production/sealing-counter";
+import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
 import {
   lookupProductMatchedBlisterCardLot,
   issueHandpackBlisterCardMaterial,
@@ -131,13 +132,14 @@ function pickClientEventId(formData: FormData): string | undefined {
 const ALLOWED_EVENTS_BY_KIND: Record<string, string[]> = {
   BLISTER: ["BLISTER_COMPLETE"],
   HANDPACK_BLISTER: ["HANDPACK_BLISTER_COMPLETE"],
-  SEALING: ["SEALING_COMPLETE"],
+  SEALING: ["SEALING_SEGMENT_COMPLETE", "SEALING_COMPLETE"],
   PACKAGING: ["PACKAGING_SNAPSHOT", "PACKAGING_COMPLETE"],
   BOTTLE_HANDPACK: ["BOTTLE_HANDPACK_COMPLETE"],
   BOTTLE_CAP_SEAL: ["BOTTLE_CAP_SEAL_COMPLETE"],
   BOTTLE_STICKER: ["BOTTLE_STICKER_COMPLETE"],
   COMBINED: [
     "BLISTER_COMPLETE",
+    "SEALING_SEGMENT_COMPLETE",
     "SEALING_COMPLETE",
     "PACKAGING_SNAPSHOT",
     "PACKAGING_COMPLETE",
@@ -534,6 +536,7 @@ const eventSchema = z.object({
   eventType: z.enum([
     "BLISTER_COMPLETE",
     "HANDPACK_BLISTER_COMPLETE",
+    "SEALING_SEGMENT_COMPLETE",
     "SEALING_COMPLETE",
     "PACKAGING_SNAPSHOT",
     "BOTTLE_HANDPACK_COMPLETE",
@@ -649,14 +652,38 @@ export async function fireStageEventAction(
       return { error: progression.reason };
     }
 
+    const isSealingSegment = eventType === SEALING_SEGMENT_EVENT;
+    const isSealingFinal = eventType === "SEALING_COMPLETE";
+    const isPureSealingStation = station.kind === "SEALING";
+
+    if (isSealingFinal && isPureSealingStation) {
+      const [segmentRow] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(workflowEvents)
+        .where(
+          and(
+            eq(workflowEvents.workflowBagId, workflowBagId),
+            eq(workflowEvents.eventType, SEALING_SEGMENT_EVENT),
+          ),
+        );
+      if ((segmentRow?.n ?? 0) < 1) {
+        return {
+          error:
+            "Record at least one sealing segment before marking sealing complete.",
+        };
+      }
+    }
+
     let resolvedCountTotal = countTotal;
     let sealingCounterPresses: number | undefined;
     let sealingCardsPerPress: number | undefined;
 
-    if (
-      eventType === "SEALING_COMPLETE" &&
-      stationUsesSealingCounter(station.kind)
-    ) {
+    const sealingUsesCounter =
+      (isSealingSegment || isSealingFinal) &&
+      stationUsesSealingCounter(station.kind);
+    const sealingFinalCloseOnly = isSealingFinal && isPureSealingStation;
+
+    if (sealingUsesCounter && !sealingFinalCloseOnly) {
       if (counterPresses === undefined) {
         return { error: SEALING_COUNTER_PRESS_ERROR };
       }
@@ -690,7 +717,7 @@ export async function fireStageEventAction(
       .where(eq(workflowBags.id, workflowBagId));
 
     if (
-      eventType === "SEALING_COMPLETE" &&
+      (isSealingSegment || isSealingFinal) &&
       SEALING_STATION_KINDS.has(station.kind)
     ) {
       if (bagProductRow?.productId) {
@@ -703,17 +730,18 @@ export async function fireStageEventAction(
               "Product is already set on this bag and cannot be changed here.",
           };
         }
-      } else if (!pickedSealingProductId) {
+      } else if (!pickedSealingProductId && !isSealingFinal) {
         return {
           error:
-            "Select the finished product before completing sealing.",
+            "Select the finished product before recording a sealing segment.",
         };
       }
     }
 
     const needsHandpackBlisterMaterial =
-      eventType === "SEALING_COMPLETE" &&
-      station.kind === "SEALING" &&
+      (isSealingSegment ||
+        (isSealingFinal && !isPureSealingStation)) &&
+      SEALING_STATION_KINDS.has(station.kind) &&
       (await workflowBagHasHandpackBlisterComplete(workflowBagId));
 
     await db.transaction(async (tx) => {
@@ -734,7 +762,7 @@ export async function fireStageEventAction(
       }
 
       if (
-        eventType === "SEALING_COMPLETE" &&
+        (isSealingSegment || isSealingFinal) &&
         SEALING_STATION_KINDS.has(station.kind) &&
         !bagProductRow?.productId &&
         pickedSealingProductId
@@ -822,8 +850,7 @@ export async function fireStageEventAction(
         stationId,
         eventType,
         payload: {
-          ...(eventType === "SEALING_COMPLETE" &&
-          stationUsesSealingCounter(station.kind)
+          ...(sealingUsesCounter && !sealingFinalCloseOnly
             ? {
                 count_total: resolvedCountTotal ?? 0,
                 counter_presses: sealingCounterPresses,
@@ -836,9 +863,11 @@ export async function fireStageEventAction(
                     }
                   : {}),
               }
-            : resolvedCountTotal
-              ? { count_total: resolvedCountTotal }
-              : {}),
+            : isSealingFinal && sealingFinalCloseOnly
+              ? { lane_close: true }
+              : resolvedCountTotal
+                ? { count_total: resolvedCountTotal }
+                : {}),
           ...(packsRemaining ? { packs_remaining: packsRemaining } : {}),
           ...(cardsReopened ? { cards_reopened: cardsReopened } : {}),
           ...(eventType === "HANDPACK_BLISTER_COMPLETE" && pickedHandpackTabletTypeId
@@ -853,7 +882,7 @@ export async function fireStageEventAction(
           accountability.accountableEmployeeNameSnapshot,
       });
       if (
-        eventType === "SEALING_COMPLETE" &&
+        (isSealingSegment || (isSealingFinal && !isPureSealingStation)) &&
         needsHandpackBlisterMaterial &&
         (resolvedCountTotal ?? 0) > 0
       ) {
@@ -891,10 +920,19 @@ export async function fireStageEventAction(
           }
         }
       }
+      if (isSealingSegment && isPureSealingStation) {
+        await maybeAutoReleaseAfterSegment(tx, {
+          workflowBagId,
+          stationId,
+          stationKind: station.kind,
+          clientEventId: clientEventId ?? null,
+          accountability,
+        });
+      }
       if (
         eventType === "HANDPACK_BLISTER_COMPLETE" ||
         (eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER") ||
-        (eventType === "SEALING_COMPLETE" && station.kind === "SEALING")
+        (isSealingFinal && station.kind === "SEALING")
       ) {
         await maybeAutoReleaseAfterComplete(tx, {
           workflowBagId,
@@ -1511,6 +1549,42 @@ async function projectBagFinalizedEvent(
     accountabilitySource: args.accountability.accountabilitySource,
     accountableEmployeeNameSnapshot:
       args.accountability.accountableEmployeeNameSnapshot,
+  });
+}
+
+/** SEALING segment submit — release this station without advancing bag stage. */
+async function maybeAutoReleaseAfterSegment(
+  tx: DbTx,
+  args: {
+    workflowBagId: string;
+    stationId: string;
+    stationKind: string;
+    clientEventId?: string | null | undefined;
+    accountability: StationAccountability;
+  },
+): Promise<void> {
+  const [live] = await tx
+    .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+    .from(readStationLive)
+    .where(eq(readStationLive.stationId, args.stationId));
+  if (live?.currentWorkflowBagId !== args.workflowBagId) return;
+
+  const [bagState] = await tx
+    .select({ stage: readBagState.stage })
+    .from(readBagState)
+    .where(eq(readBagState.workflowBagId, args.workflowBagId));
+
+  const releaseClientEventId = args.clientEventId
+    ? `${args.clientEventId}-segment-release`
+    : undefined;
+
+  await projectBagReleasedEvent(tx, {
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    stationKind: args.stationKind,
+    releasedAtStage: bagState?.stage ?? "BLISTERED",
+    accountability: args.accountability,
+    ...(releaseClientEventId ? { clientEventId: releaseClientEventId } : {}),
   });
 }
 

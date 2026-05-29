@@ -50,6 +50,7 @@ import {
   getSealingProductFilterHint,
   resolveWorkflowBagTabletTypeId,
 } from "@/lib/production/workflow-bag-tablet-context";
+import { deriveSealingSegmentProgress } from "@/lib/production/sealing-segments";
 import { OperatorSessionPanel } from "./operator-session-form";
 import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
@@ -450,6 +451,30 @@ export default async function FloorStationPage({
       )
     : null;
 
+  const sealingSegmentProgressForForm = currentAtStation
+    ? deriveSealingSegmentProgress(
+        (
+          await db
+            .select({
+              eventType: workflowEvents.eventType,
+              stationId: workflowEvents.stationId,
+              payload: workflowEvents.payload,
+            })
+            .from(workflowEvents)
+            .where(
+              and(
+                eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
+                eq(workflowEvents.eventType, "SEALING_SEGMENT_COMPLETE"),
+              ),
+            )
+        ).map((row) => ({
+          eventType: row.eventType,
+          stationId: row.stationId,
+          payload: (row.payload ?? null) as Record<string, unknown> | null,
+        })),
+      )
+    : null;
+
   // HANDPACK-TABLET-TYPE-SOURCE-1: load active tablet types for HANDPACK_BLISTER
   // stations so the operator can select which tablet type they hand-packed.
   // Selection is submitted with HANDPACK_BLISTER_COMPLETE and stored in the
@@ -731,6 +756,7 @@ export default async function FloorStationPage({
               sealingProductFilterHint={sealingProductFilterHint}
               rollChangeRole={requiredRollChangeRole}
               handpackTabletTypeOptions={handpackTabletTypeOptions}
+              sealingSegmentProgress={sealingSegmentProgressForForm}
             />
             {/* Help operator pick the next action when the bag has
              *  already advanced past this station's stage. The

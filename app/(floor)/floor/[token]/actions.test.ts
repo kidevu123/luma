@@ -119,18 +119,40 @@ describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
 });
 
 describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
-  it("chains maybeAutoReleaseAfterComplete after SEALING_COMPLETE on SEALING stations", () => {
-    expect(actionsSrc).toMatch(
-      /eventType === "SEALING_COMPLETE" && station\.kind === "SEALING"/,
-    );
+  it("chains maybeAutoReleaseAfterComplete after final SEALING on SEALING stations", () => {
+    expect(actionsSrc).toMatch(/isSealingFinal && station\.kind === "SEALING"/);
     expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
   });
 
   it("does not auto-release on COMBINED SEALING_COMPLETE", () => {
     const match = actionsSrc.match(
-      /SEALING_COMPLETE[\s\S]{0,80}maybeAutoReleaseAfterComplete/,
+      /isSealingFinal && station\.kind === "SEALING"[\s\S]{0,80}maybeAutoReleaseAfterComplete/,
     );
-    expect(match?.[0]).toMatch(/station\.kind === "SEALING"/);
+    expect(match?.[0]).toBeTruthy();
+  });
+});
+
+describe("MULTI-SEALING-SAME-BAG-1 · segment vs final sealing", () => {
+  it("allows SEALING_SEGMENT_COMPLETE on SEALING stations", () => {
+    expect(actionsSrc).toMatch(/SEALING: \["SEALING_SEGMENT_COMPLETE", "SEALING_COMPLETE"\]/);
+    expect(actionsSrc).toMatch(/"SEALING_SEGMENT_COMPLETE"/);
+  });
+
+  it("segment submit uses counter payload and auto-releases station pin", () => {
+    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterSegment/);
+    expect(actionsSrc).toMatch(/isSealingSegment && isPureSealingStation/);
+    expect(actionsSrc).toMatch(/SEALING_SEGMENT_EVENT/);
+  });
+
+  it("final SEALING_COMPLETE on pure sealing requires prior segment", () => {
+    expect(actionsSrc).toMatch(
+      /Record at least one sealing segment before marking sealing complete/,
+    );
+    expect(actionsSrc).toMatch(/lane_close: true/);
+  });
+
+  it("handpack material runs on segment not final close-only", () => {
+    expect(actionsSrc).toMatch(/isSealingSegment \|\|\s*\(isSealingFinal && !isPureSealingStation\)/);
   });
 });
 
@@ -241,9 +263,9 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
     );
   });
 
-  it("requires product before SEALING_COMPLETE when bag has no product", () => {
+  it("requires product before sealing segment when bag has no product", () => {
     expect(actionsSrc).toMatch(
-      /Select the finished product before completing sealing/,
+      /Select the finished product before recording a sealing segment/,
     );
   });
 

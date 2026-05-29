@@ -106,7 +106,12 @@ export function deriveLaneWipFromEvents(
       case "HANDPACK_BLISTER_COMPLETE":
         blisterOutputUnits += readCount(ev.payload ?? null);
         break;
+      case "SEALING_SEGMENT_COMPLETE":
+        sealedOutputUnits += readCount(ev.payload ?? null);
+        break;
       case "SEALING_COMPLETE":
+        // Legacy single-shot completes (e.g. COMBINED) may still carry count_total.
+        // Lane-close-only finals omit count_total and contribute 0 here.
         sealedOutputUnits += readCount(ev.payload ?? null);
         break;
       case "PACKAGING_COMPLETE":

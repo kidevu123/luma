@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.52] — 2026-05-27
+
+### Added (MULTI-SEALING-SAME-BAG-1)
+- **Per-machine sealing segments:** New `SEALING_SEGMENT_COMPLETE` event records each sealing station's counter output while the bag stays `BLISTERED`. Operators can pick up the same bag at multiple sealing machines before lane close.
+- **Lane-close final seal:** Pure `SEALING` stations require at least one segment, then a counter-free `SEALING_COMPLETE` with `{ lane_close: true }` advances the bag to `SEALED`. Packaging close-out remains blocked until that final event.
+- **Sealed card totals:** Card sealed output is derived from `SUM(SEALING_SEGMENT_COMPLETE.count_total)`; final `SEALING_COMPLETE` does not double-count cards. Daily `bags_sealed` throughput still increments only on final `SEALING_COMPLETE`.
+- **Product mapping once:** First segment may map product; later segments are counter-only and reject conflicting product picks.
+
+### Tests added (MULTI-SEALING-SAME-BAG-1)
+- `lib/production/sealing-segments.test.ts` — stage prereq, progress fold, migration SQL.
+- `actions.test.ts`, `stage-action-buttons.test.ts` — segment vs final wiring.
+
 ## [0.4.51] — 2026-05-29
 
 ### Verified + hardened (STATION-SEALING-TIMER-ROLLS-CLEANUP-1)

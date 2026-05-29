@@ -239,9 +239,7 @@ describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
 
   it("SEALING and HANDPACK_BLISTER auto-release unchanged", () => {
     expect(actionsSrc).toMatch(/"HANDPACK_BLISTER"/);
-    expect(actionsSrc).toMatch(
-      /eventType === "SEALING_COMPLETE" && station\.kind === "SEALING"/,
-    );
+    expect(actionsSrc).toMatch(/isSealingFinal && station\.kind === "SEALING"/);
     expect(actionsSrc).toMatch(/AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*"BLISTER"/);
   });
 
@@ -257,13 +255,11 @@ describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
 });
 
 describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
-  it("fireStageEventAction chains BAG_RELEASED after SEALING_COMPLETE on SEALING stations", () => {
-    expect(actionsSrc).toMatch(
-      /eventType === "SEALING_COMPLETE" && station\.kind === "SEALING"/,
-    );
+  it("fireStageEventAction chains BAG_RELEASED after final SEALING on SEALING stations", () => {
+    expect(actionsSrc).toMatch(/isSealingFinal && station\.kind === "SEALING"/);
     expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
     const sealingIdx = actionsSrc.indexOf(
-      'eventType === "SEALING_COMPLETE" && station.kind === "SEALING"',
+      'isSealingFinal && station.kind === "SEALING"',
     );
     const autoIdx = actionsSrc.indexOf("await maybeAutoReleaseAfterComplete");
     expect(autoIdx).toBeGreaterThan(sealingIdx);
@@ -313,10 +309,11 @@ describe("SEALING-COUNTER-1 · sealing completion uses machine counter", () => {
     expect(src).toMatch(/disabled=\{pending \|\| !configReady \|\| !productReady\}/);
   });
 
-  it("submits counterPresses — not countTotal — for SEALING_COMPLETE", () => {
-    const formIdx = src.indexOf("function SealingCompleteForm");
+  it("submits counterPresses for SEALING_SEGMENT_COMPLETE in SealingSegmentForm", () => {
+    const formIdx = src.indexOf("function SealingSegmentForm");
     const formBlock = src.slice(formIdx, formIdx + 5500);
     expect(formBlock).toMatch(/fd\.set\("counterPresses"/);
+    expect(formBlock).toMatch(/SEALING_SEGMENT_COMPLETE/);
     expect(formBlock).not.toMatch(/fd\.set\("countTotal"/);
   });
 
@@ -761,5 +758,28 @@ describe("HANDPACK-TABLET-TYPE-SOURCE-1 · tablet type selector in stage-action-
   it("no changes to scan-card-form.tsx for this feature", () => {
     const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
     expect(scanSrc).not.toMatch(/handpackTabletType/);
+  });
+});
+
+describe("MULTI-SEALING-SAME-BAG-1 · dual sealing actions", () => {
+  it("SEALING stations use custom segment + final buttons", () => {
+    expect(src).toMatch(/Record sealing segment/);
+    expect(src).toMatch(/Sealing complete — all machines done/);
+    expect(src).toMatch(/function SealingSegmentForm/);
+    expect(src).toMatch(/function SealingFinalConfirmForm/);
+  });
+
+  it("STAGE_BY_KIND SEALING is empty — no legacy single complete button", () => {
+    expect(src).toMatch(/SEALING: \[\]/);
+  });
+
+  it("shows partial sealing progress banner when segments exist", () => {
+    expect(src).toMatch(/Sealing in progress/);
+    expect(src).toMatch(/sealingSegmentProgress/);
+  });
+
+  it("packaging shows waiting copy while sealing in progress", () => {
+    expect(src).toMatch(/packagingSealingInProgress/);
+    expect(src).toMatch(/packaging unlocks when sealing is marked[\s\S]*complete/);
   });
 });

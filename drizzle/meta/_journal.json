@@ -330,6 +330,13 @@
       "when": 1782600000000,
       "tag": "0046_concerned_squirrel_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1782700000000,
+      "tag": "0048_sealing_segment_complete_event",
+      "breakpoints": true
     }
   ]
 }
