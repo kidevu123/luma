@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.49] — 2026-05-29
+
+### Added (ROLL-INTAKE-AUTO-NUMBER-1)
+- **Automatic roll numbering for bulk receive:** Roll intake generates PVC/foil roll labels from material kind, receipt type, receipt reference, and row index (e.g. `FOIL-221-001`, `PVC-221-058`). Legacy opening balance uses `Legacy FOIL-001` / `Legacy PVC-002` without the reference token.
+- **Manual override preserved:** Editing a roll number marks that row manual; auto rows refresh when material, receipt type, reference, or count changes without overwriting manual rows.
+
+### Tests added (ROLL-INTAKE-AUTO-NUMBER-1)
+- `lib/inbound/roll-number-generator.test.ts` — normal/legacy formats, material-kind prefixing, 58-roll batch, manual override preservation.
+- `roll-kg-input.test.ts` — form wiring for generated roll labels and count-button behavior.
+
 ## [0.4.48] — 2026-05-27
 
 ### Fixed (ROLL-INTAKE-BULK-COUNT-LIMIT-1)

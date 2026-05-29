@@ -119,6 +119,31 @@ describe("ROLL-INTAKE-NUMBER-INPUT-POLISH-1 — scroll safety and editable roll 
   });
 });
 
+describe("ROLL-INTAKE-AUTO-NUMBER-1 — generated roll numbers", () => {
+  it("form tracks material and receipt reference for automatic roll labels", () => {
+    expect(formSrc).toMatch(/selectedMaterialId/);
+    expect(formSrc).toMatch(/receiptNumber/);
+    expect(formSrc).toMatch(/applyGeneratedRollNumbers/);
+    expect(formSrc).toMatch(/materialKind:\s*selectedMaterial\.kind/);
+    expect(formSrc).toMatch(/receiptReference:\s*receiptNumber/);
+  });
+
+  it("manual roll number edits are marked manual so generation will not overwrite them", () => {
+    expect(formSrc).toMatch(/rollNumberSource:\s*"manual"/);
+    expect(formSrc).toMatch(/rollNumber:\s*ev\.target\.value/);
+  });
+
+  it("receive button still reflects the committed roll count, including 58", () => {
+    expect(formSrc).toMatch(/`Receive \$\{committedRollCount\} roll/);
+  });
+
+  it("roll count and weight fields remain text/inputMode (no type=number regression)", () => {
+    expect(formSrc).not.toMatch(/type="number"/);
+    expect(formSrc).toMatch(/inputMode="numeric"/);
+    expect(formSrc).toMatch(/inputMode="decimal"/);
+  });
+});
+
 describe("ROLL-INTAKE-UX-LEGACY-1 — spent roll / core weight in kg", () => {
   it("unmount form labels spent roll weight in kg", () => {
     expect(rollsFormsSrc).toMatch(/Spent roll \/ core weight \(kg/);

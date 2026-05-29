@@ -2,6 +2,7 @@
 
 // ROLL-INTAKE-UX-LEGACY-1 — simplified multi-roll receive for PVC / foil.
 // ROLL-INTAKE-NUMBER-INPUT-FIX-1 — text numeric fields (no wheel mutation).
+// ROLL-INTAKE-AUTO-NUMBER-1 — auto-generated roll numbers with manual override.
 
 import { useEffect, useState, useTransition } from "react";
 import { receiveRollsBatchAction } from "./actions";
@@ -12,6 +13,7 @@ import {
   resizeRollRows,
   sanitizeRollCountTyping,
 } from "@/lib/inbound/roll-receive-input";
+import { applyGeneratedRollNumbers } from "@/lib/inbound/roll-number-generator";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,13 +33,14 @@ type MountTarget = {
 type RollRow = {
   rollNumber: string;
   netWeightKg: string;
+  rollNumberSource: "auto" | "manual";
 };
 
 const inputClass =
   "mt-1 w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong placeholder:text-text-subtle focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors tabular-nums";
 
 function emptyRow(): RollRow {
-  return { rollNumber: "", netWeightKg: "" };
+  return { rollNumber: "", netWeightKg: "", rollNumberSource: "auto" };
 }
 
 function NumericTextInput({
@@ -83,6 +86,8 @@ export function RollReceiveForm({
   mountTargets: MountTarget[];
 }) {
   const [receiptType, setReceiptType] = useState<"NORMAL" | "LEGACY_OPENING_BALANCE">("NORMAL");
+  const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [receiptNumber, setReceiptNumber] = useState("");
   const [rollCountText, setRollCountText] = useState("1");
   const [committedRollCount, setCommittedRollCount] = useState(1);
   const [rollCountError, setRollCountError] = useState<string | null>(null);
@@ -94,10 +99,28 @@ export function RollReceiveForm({
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  const selectedMaterial = materials.find((m) => m.id === selectedMaterialId);
+
+  function withAutoRollNumbers(nextRows: RollRow[]): RollRow[] {
+    if (!selectedMaterial) return nextRows;
+    return applyGeneratedRollNumbers(nextRows, {
+      materialKind: selectedMaterial.kind,
+      materialName: selectedMaterial.name,
+      receiptType,
+      receiptReference: receiptNumber,
+    });
+  }
+
   useEffect(() => {
-    setRows((prev) => resizeRollRows(prev, committedRollCount, emptyRow));
+    setRows((prev) =>
+      withAutoRollNumbers(resizeRollRows(prev, committedRollCount, emptyRow)),
+    );
     if (committedRollCount !== 1) setAlreadyMounted(false);
   }, [committedRollCount]);
+
+  useEffect(() => {
+    setRows((prev) => withAutoRollNumbers(prev));
+  }, [selectedMaterialId, receiptType, receiptNumber]);
 
   function commitRollCountFromText(text: string): boolean {
     const parsed = parseRollCountInput(text);
@@ -133,7 +156,7 @@ export function RollReceiveForm({
     const parsed = parseRollCountInput(rollCountText);
     if (!parsed.ok) return;
 
-    const syncedRows = resizeRollRows(rows, parsed.value, emptyRow);
+    const syncedRows = withAutoRollNumbers(resizeRollRows(rows, parsed.value, emptyRow));
     setRows(syncedRows);
 
     const parsedRows: Array<{ rollNumber: string; netWeightKg: number }> = [];
@@ -175,6 +198,8 @@ export function RollReceiveForm({
       setSuccess(msg);
       setRollCountText("1");
       setCommittedRollCount(1);
+      setSelectedMaterialId("");
+      setReceiptNumber("");
       setRows([emptyRow()]);
     });
   }
@@ -189,7 +214,8 @@ export function RollReceiveForm({
           <select
             name="packagingMaterialId"
             required
-            defaultValue=""
+            value={selectedMaterialId}
+            onChange={(ev) => setSelectedMaterialId(ev.target.value)}
             className={inputClass}
           >
             <option value="" disabled>
@@ -233,7 +259,9 @@ export function RollReceiveForm({
             name="receiptNumber"
             type="text"
             required
-            placeholder="e.g. PO-2024-001 or LEGACY-FOIL-01"
+            value={receiptNumber}
+            onChange={(ev) => setReceiptNumber(ev.target.value)}
+            placeholder="e.g. 221 or PO-2024-001"
             className={inputClass}
           />
         </label>
@@ -275,9 +303,9 @@ export function RollReceiveForm({
             Roll weights
           </p>
           <p className="text-[11px] text-text-subtle mt-0.5">
-            Enter each roll number and net weight in{" "}
-            <span className="font-semibold">kilograms</span>. Core / spent weight
-            is captured later when the roll is unmounted on the floor.
+            Roll numbers auto-generate from material, receipt type, and reference.
+            Edit a number to override that row. Enter net weight in{" "}
+            <span className="font-semibold">kilograms</span> for each roll.
           </p>
         </div>
         <div className="divide-y divide-border/40">
@@ -289,12 +317,24 @@ export function RollReceiveForm({
               <label className="block">
                 <span className="text-[10px] text-text-subtle font-medium">
                   Roll {i + 1} — number
+                  {row.rollNumberSource === "manual" ? (
+                    <span className="ml-1 text-text-muted">(manual)</span>
+                  ) : null}
                 </span>
                 <input
                   type="text"
                   value={row.rollNumber}
-                  onChange={(ev) => updateRow(i, { rollNumber: ev.target.value })}
-                  placeholder="e.g. FOIL-01"
+                  onChange={(ev) =>
+                    updateRow(i, {
+                      rollNumber: ev.target.value,
+                      rollNumberSource: "manual",
+                    })
+                  }
+                  placeholder={
+                    receiptType === "LEGACY_OPENING_BALANCE"
+                      ? "Legacy FOIL-001"
+                      : "FOIL-221-001"
+                  }
                   className={inputClass}
                 />
               </label>
