@@ -261,3 +261,64 @@ describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · first-op session helpers", () => {
     expect(r.isStable).toBe(false);
   });
 });
+
+describe("OPERATOR-PICKER-UUID-SUBMIT-FIX-1 · UUID-shaped override routing", () => {
+  const PICKER_SESSION: SessionRow = {
+    id: "55555555-5555-4555-8555-555555555555",
+    stationId: STATION_ID,
+    employeeId: ALICE.id,
+    employeeNameSnapshot: ALICE.fullName,
+    accountabilitySource: "EMPLOYEE_PICKER",
+    openedAt: new Date("2026-05-29T14:00:00Z"),
+  };
+
+  it("packaging complete succeeds with EMPLOYEE_PICKER session — returns session employee", async () => {
+    // No overrideEmployeeCode: falls through to the session that was opened
+    // via the employee picker (UUID stored as employeeId on the session row).
+    const tx = buildTxStub({ results: [PICKER_SESSION] });
+    const r = await resolveStationAccountability(tx, { stationId: STATION_ID });
+    expect(r.accountableEmployeeId).toBe(ALICE.id);
+    expect(r.accountabilitySource).toBe("STATION_OPERATOR_SESSION");
+    expect(r.isStable).toBe(true);
+  });
+
+  it("typed operator code resolves via code lookup and returns correct employee", async () => {
+    // 4-digit code → loadActiveEmployeeByCode path (text = text, no type error)
+    const tx = buildTxStub({ results: [ALICE] });
+    const r = await resolveStationAccountability(tx, {
+      stationId: STATION_ID,
+      overrideEmployeeCode: "1042",
+    });
+    expect(r.accountableEmployeeId).toBe(ALICE.id);
+    expect(r.accountabilitySource).toBe("SUPERVISOR_OVERRIDE");
+    expect(r.isStable).toBe(true);
+  });
+
+  it("UUID override routes to employee-ID lookup to prevent text=uuid Postgres type error", async () => {
+    // When overrideEmployeeCode is UUID-shaped, the fix routes through
+    // loadEmployeeById (uuid = uuid) instead of loadActiveEmployeeByCode
+    // (text = uuid → "operator does not exist: text = uuid").
+    const tx = buildTxStub({ results: [ALICE] });
+    const r = await resolveStationAccountability(tx, {
+      stationId: STATION_ID,
+      overrideEmployeeCode: ALICE.id,
+    });
+    expect(r.accountableEmployeeId).toBe(ALICE.id);
+    expect(r.accountabilitySource).toBe("SUPERVISOR_OVERRIDE");
+    expect(r.isStable).toBe(true);
+  });
+
+  it("UUID override that matches no employee falls through to session gracefully", async () => {
+    // UUID doesn't match any employee row; falls through to session.
+    // No throw — resolution degrades to session accountability.
+    const unknownUuid = "99999999-9999-4999-8999-999999999999";
+    const tx = buildTxStub({ results: [null, PICKER_SESSION] });
+    const r = await resolveStationAccountability(tx, {
+      stationId: STATION_ID,
+      overrideEmployeeCode: unknownUuid,
+    });
+    expect(r.accountableEmployeeId).toBe(ALICE.id);
+    expect(r.accountabilitySource).toBe("STATION_OPERATOR_SESSION");
+    expect(r.isStable).toBe(true);
+  });
+});
