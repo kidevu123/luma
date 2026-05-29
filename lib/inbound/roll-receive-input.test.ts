@@ -4,6 +4,7 @@ import {
   parseDecimalKgInput,
   sanitizeRollCountTyping,
   resizeRollRows,
+  ROLL_COUNT_MAX,
 } from "./roll-receive-input";
 
 describe("ROLL-INTAKE-NUMBER-INPUT-FIX-1 — roll count parsing", () => {
@@ -20,7 +21,7 @@ describe("ROLL-INTAKE-NUMBER-INPUT-FIX-1 — roll count parsing", () => {
   it("rejects non-integer and out-of-range counts", () => {
     expect(parseRollCountInput("8.5").ok).toBe(false);
     expect(parseRollCountInput("0").ok).toBe(false);
-    expect(parseRollCountInput("51").ok).toBe(false);
+    expect(parseRollCountInput(String(ROLL_COUNT_MAX + 1)).ok).toBe(false);
   });
 
   it("sanitizeRollCountTyping strips non-digits and allows empty", () => {
@@ -32,6 +33,34 @@ describe("ROLL-INTAKE-NUMBER-INPUT-FIX-1 — roll count parsing", () => {
     const rows = resizeRollRows([{ id: 1 }], 8, () => ({ id: 0 }));
     expect(rows).toHaveLength(8);
     expect(rows[0]).toEqual({ id: 1 });
+  });
+});
+
+describe("ROLL-INTAKE-BULK-COUNT-LIMIT-1 — roll count ceiling", () => {
+  it("accepts 50, 58, and 250 rolls", () => {
+    expect(parseRollCountInput("50")).toEqual({ ok: true, value: 50 });
+    expect(parseRollCountInput("58")).toEqual({ ok: true, value: 58 });
+    expect(parseRollCountInput("250")).toEqual({ ok: true, value: 250 });
+  });
+
+  it("rejects 251 with aligned error copy", () => {
+    const result = parseRollCountInput("251");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("Roll count must be between 1 and 250.");
+    }
+  });
+
+  it("resizeRollRows creates up to ROLL_COUNT_MAX rows", () => {
+    const rows = resizeRollRows([], 58, () => ({ netWeightKg: "" }));
+    expect(rows).toHaveLength(58);
+    const capped = resizeRollRows([], ROLL_COUNT_MAX + 10, () => ({ netWeightKg: "" }));
+    expect(capped).toHaveLength(ROLL_COUNT_MAX);
+  });
+
+  it("sanitizeRollCountTyping still allows empty while editing", () => {
+    expect(sanitizeRollCountTyping("58")).toBe("58");
+    expect(sanitizeRollCountTyping("")).toBe("");
   });
 });
 

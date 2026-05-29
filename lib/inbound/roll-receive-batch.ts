@@ -1,5 +1,7 @@
 // ROLL-INTAKE-UX-LEGACY-1 — validation helpers for multi-roll receive.
 
+import { ROLL_COUNT_MAX } from "./roll-receive-input";
+
 export type ReceiptType = "NORMAL" | "LEGACY_OPENING_BALANCE";
 
 export type RollReceiveRowInput = {
@@ -28,8 +30,10 @@ export function parseRollReceiveRowsJson(
   if (!Array.isArray(parsed) || parsed.length === 0) {
     return { error: "Enter at least one roll." };
   }
-  if (parsed.length > 50) {
-    return { error: "Maximum 50 rolls per receipt." };
+  if (parsed.length > ROLL_COUNT_MAX) {
+    return {
+      error: `Maximum ${ROLL_COUNT_MAX} rolls per receipt.`,
+    };
   }
   const rows: RollReceiveRowInput[] = [];
   for (let i = 0; i < parsed.length; i++) {

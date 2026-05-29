@@ -2,7 +2,7 @@
 // Avoids type="number" wheel mutation and forced coercion while typing.
 
 export const ROLL_COUNT_MIN = 1;
-export const ROLL_COUNT_MAX = 50;
+export const ROLL_COUNT_MAX = 250;
 
 export type ParseOk<T> = { ok: true; value: T };
 export type ParseErr = { ok: false; error: string };
@@ -10,10 +10,16 @@ export type ParseErr = { ok: false; error: string };
 export function parseRollCountInput(text: string): ParseOk<number> | ParseErr {
   const trimmed = text.trim();
   if (trimmed === "") {
-    return { ok: false, error: "Enter the number of rolls (1–50)." };
+    return {
+      ok: false,
+      error: `Enter the number of rolls (${ROLL_COUNT_MIN}–${ROLL_COUNT_MAX}).`,
+    };
   }
   if (!/^\d+$/.test(trimmed)) {
-    return { ok: false, error: "Roll count must be a whole number (1–50)." };
+    return {
+      ok: false,
+      error: `Roll count must be a whole number (${ROLL_COUNT_MIN}–${ROLL_COUNT_MAX}).`,
+    };
   }
   const n = Number.parseInt(trimmed, 10);
   if (n < ROLL_COUNT_MIN || n > ROLL_COUNT_MAX) {

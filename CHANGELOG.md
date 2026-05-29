@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.48] — 2026-05-27
+
+### Fixed (ROLL-INTAKE-BULK-COUNT-LIMIT-1)
+- **Larger roll receipt batches:** Raised per-receipt roll count cap from 50 to 250 so normal PVC/foil shipments (e.g. 58 rolls) are not blocked. Client parser, row resize, and server `rollsJson` validation share `ROLL_COUNT_MAX`.
+
+### Tests added (ROLL-INTAKE-BULK-COUNT-LIMIT-1)
+- `lib/inbound/roll-receive-input.test.ts` — 50/58/250 valid, 251 rejected, row resize cap.
+- `lib/inbound/roll-receive-batch.test.ts` — server rejects >250 rolls in batch JSON.
+
 ## [0.4.47] — 2026-05-27
 
 ### Changed (PACKAGING-PENDING-CONSUMPTION-HONESTY-1)
