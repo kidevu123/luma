@@ -321,6 +321,30 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
   });
 });
 
+describe("HANDPACK-TABLET-TYPE-SOURCE-1 · page wiring", () => {
+  it("loads active tablet types for HANDPACK_BLISTER stations with current bag", () => {
+    expect(pageSrc).toMatch(/handpackTabletTypeOptions/);
+    expect(pageSrc).toMatch(/HANDPACK_BLISTER.*currentAtStation/s);
+  });
+
+  it("passes handpackTabletTypeOptions to StageActionButtons", () => {
+    expect(pageSrc).toMatch(/handpackTabletTypeOptions=\{handpackTabletTypeOptions\}/);
+  });
+
+  it("handpackTabletTypeOptions is empty for non-HANDPACK_BLISTER stations", () => {
+    const hpIdx = pageSrc.indexOf("const handpackTabletTypeOptions");
+    const block = pageSrc.slice(hpIdx, hpIdx + 500);
+    expect(block).toMatch(/HANDPACK_BLISTER/);
+    expect(block).toMatch(/: \[\]/);
+  });
+
+  it("scan-card-form.tsx is not modified for this feature", () => {
+    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
+    expect(scanSrc).not.toMatch(/handpackTabletType/);
+    expect(scanSrc).not.toMatch(/tabletTypeId.*FormData/);
+  });
+});
+
 describe("MATERIAL-ROLL-CHANGE-1 · station roll panel on main page", () => {
   it("imports StationRollPanel and active roll helper", () => {
     expect(pageSrc).toMatch(/StationRollPanel/);

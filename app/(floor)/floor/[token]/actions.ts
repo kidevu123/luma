@@ -547,6 +547,10 @@ const eventSchema = z.object({
   /** PRODUCT-SELECTION-AT-SEALING-1: required on SEALING_COMPLETE when
    *  workflow_bags.product_id is still null. Ignored when product exists. */
   productId: z.string().uuid().optional().nullable().or(z.literal("")),
+  /** HANDPACK-TABLET-TYPE-SOURCE-1: operator-selected tablet type at
+   *  HANDPACK_BLISTER_COMPLETE. Stored in event payload so sealing resolver
+   *  can read it. Optional — legacy bags omit it; sealing shows all products. */
+  tabletTypeId: z.string().uuid().optional().nullable().or(z.literal("")),
   clientEventId: clientEventIdField,
   /** OP-1C per-form supervisor override. Resolved by the
    *  station-operator-session helper; falls back to the active
@@ -579,6 +583,7 @@ export async function fireStageEventAction(
     cardsReopened: formData.get("cardsReopened") || 0,
     clientEventId: pickClientEventId(formData),
     productId: formData.get("productId") || undefined,
+    tabletTypeId: formData.get("tabletTypeId") || undefined,
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) return { error: "Invalid input." };
@@ -594,6 +599,10 @@ export async function fireStageEventAction(
     clientEventId,
     overrideEmployeeCode,
   } = parsed.data;
+  const pickedHandpackTabletTypeId =
+    parsed.data.tabletTypeId && parsed.data.tabletTypeId !== ""
+      ? parsed.data.tabletTypeId
+      : null;
   const pickedSealingProductId =
     parsed.data.productId && parsed.data.productId !== ""
       ? parsed.data.productId
@@ -823,6 +832,9 @@ export async function fireStageEventAction(
               : {}),
           ...(packsRemaining ? { packs_remaining: packsRemaining } : {}),
           ...(cardsReopened ? { cards_reopened: cardsReopened } : {}),
+          ...(eventType === "HANDPACK_BLISTER_COMPLETE" && pickedHandpackTabletTypeId
+            ? { tablet_type_id: pickedHandpackTabletTypeId }
+            : {}),
         },
         ...(clientEventId ? { clientEventId } : {}),
         enteredByUserId: accountability.enteredByUserId,

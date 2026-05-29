@@ -1,11 +1,14 @@
-// HANDPACK-TABLET-TYPE-LINKAGE-1 — resolve tablet type for a workflow bag.
+// HANDPACK-TABLET-TYPE-SOURCE-1 — resolve tablet type for a workflow bag.
 //
 // Authoritative order:
 //   1. workflow_bags.inventory_bag_id → inventory_bags.tablet_type_id
-//   2. CARD_ASSIGNED qr_card_id → qr_cards.scan_token → inventory_bags.bag_qr_code
+//   2. CARD_ASSIGNED payload qr_card_id → qr_cards.scan_token → inventory_bags.bag_qr_code
+//   3. HANDPACK_BLISTER_COMPLETE payload tablet_type_id  (operator-selected at completion)
 //
-// Floor scanCardAction should set inventory_bag_id at first-op start when the
-// received inventory bag is linked to the bag QR (same join admin start uses).
+// Path 3 is the primary mechanism for HANDPACK_BLISTER bags, which never link
+// to a single received inventory bag (hand-packing pulls from multiple sources).
+// The operator selects tablet type before submitting HANDPACK_BLISTER_COMPLETE;
+// it lands in the event payload and is read here at sealing product-filter time.
 
 import { asc, eq, sql } from "drizzle-orm";
 import type { db as Db } from "@/lib/db";
@@ -71,11 +74,27 @@ export async function resolveWorkflowBagTabletTypeId(
     .orderBy(asc(workflowEvents.occurredAt), asc(workflowEvents.id))
     .limit(1);
 
-  return fromCard?.tabletTypeId ?? null;
+  if (fromCard?.tabletTypeId) return fromCard.tabletTypeId;
+
+  // Path 3: HANDPACK_BLISTER_COMPLETE event payload.tablet_type_id
+  // Operator selects tablet type at hand-pack completion; stored in the payload.
+  const [fromHandpack] = await dbOrTx
+    .select({
+      tabletTypeId: sql<string | null>`(${workflowEvents.payload}->>'tablet_type_id')`,
+    })
+    .from(workflowEvents)
+    .where(
+      sql`${workflowEvents.workflowBagId} = ${workflowBagId}::uuid
+          AND ${workflowEvents.eventType} = 'HANDPACK_BLISTER_COMPLETE'
+          AND ${workflowEvents.payload}->>'tablet_type_id' IS NOT NULL`,
+    )
+    .limit(1);
+
+  return fromHandpack?.tabletTypeId ?? null;
 }
 
 /** UI copy when sealing product list cannot be narrowed by tablet type. */
 export function getSealingProductFilterHint(tabletTypeId: string | null): string | null {
   if (tabletTypeId) return null;
-  return "Tablet type is unknown — showing all active card products. Link this bag QR to a received inventory bag to narrow the list.";
+  return "Tablet type is unknown — showing all active card products. Select tablet type at hand-pack completion to narrow this list.";
 }

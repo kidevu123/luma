@@ -83,6 +83,11 @@ type SealingProductOption = {
   name: string;
 };
 
+type TabletTypeOption = {
+  id: string;
+  name: string;
+};
+
 export function StageActionButtons({
   token,
   stationId,
@@ -99,6 +104,7 @@ export function StageActionButtons({
   sealingProductOptions = [],
   sealingProductFilterHint = null,
   rollChangeRole = null,
+  handpackTabletTypeOptions = [],
 }: {
   token: string;
   stationId: string;
@@ -122,6 +128,10 @@ export function StageActionButtons({
   sealingProductFilterHint?: string | null;
   /** When the bag was paused for a roll swap, drives the inline RollChangeCard. */
   rollChangeRole?: "PVC" | "FOIL" | null;
+  /** Active tablet types for HANDPACK_BLISTER stations. Operator selects
+   *  one before completing; stored in HANDPACK_BLISTER_COMPLETE payload so
+   *  sealing can filter the product dropdown. Empty = no gate applied. */
+  handpackTabletTypeOptions?: TabletTypeOption[];
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -145,6 +155,8 @@ export function StageActionButtons({
   const [sealingOpen, setSealingOpen] = React.useState(false);
   const [blisterOpen, setBlisterOpen] = React.useState(false);
   const [selectedSealingProductId, setSelectedSealingProductId] =
+    React.useState("");
+  const [selectedHandpackTabletTypeId, setSelectedHandpackTabletTypeId] =
     React.useState("");
 
   // Operator code persists per-station for the browser session so an
@@ -194,6 +206,14 @@ export function StageActionButtons({
     needsSealingProductMapping && SEALING_STATION_KINDS.has(stationKind);
   const sealingProductReady =
     !showSealingProductPicker || selectedSealingProductId.trim().length > 0;
+  // Handpack tablet type selector: shown at HANDPACK_BLISTER stations when
+  // tablet type options are available. Gate only applies when options exist —
+  // legacy bags with no options still allow completion without selection.
+  const showHandpackTabletTypePicker =
+    stationKind === "HANDPACK_BLISTER" && handpackTabletTypeOptions.length > 0;
+  const handpackTabletTypeReady =
+    !showHandpackTabletTypePicker ||
+    selectedHandpackTabletTypeId.trim().length > 0;
   const packagingBlockedNoProduct =
     isPackaging && packagingReady && !hasProductMapped;
 
@@ -245,6 +265,9 @@ export function StageActionButtons({
       const fd = baseFd();
       fd.set("eventType", eventType);
       if (count) fd.set("countTotal", count);
+      if (eventType === "HANDPACK_BLISTER_COMPLETE" && selectedHandpackTabletTypeId) {
+        fd.set("tabletTypeId", selectedHandpackTabletTypeId);
+      }
       if (operatorCode) {
         // OPERATOR_CHANGE doesn't get an idempotency key — re-firing
         // it with the same code is a no-op already.
@@ -396,6 +419,29 @@ export function StageActionButtons({
         </div>
       )}
 
+      {!isPaused && showHandpackTabletTypePicker && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
+          <div className="font-semibold text-sm">
+            Select tablet type before completing hand-pack.
+          </div>
+          <select
+            required
+            value={selectedHandpackTabletTypeId}
+            onChange={(e) => setSelectedHandpackTabletTypeId(e.target.value)}
+            className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
+          >
+            <option value="" disabled>
+              — Select tablet type —
+            </option>
+            {handpackTabletTypeOptions.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Per-stage complete buttons — large, primary action.
        *  SEALING and BLISTER events open a close-out form instead of
        *  firing immediately (counter presses vs blister count). */}
@@ -406,7 +452,8 @@ export function StageActionButtons({
             type="button"
             disabled={
               pending !== null ||
-              (s.eventType === "SEALING_COMPLETE" && !sealingProductReady)
+              (s.eventType === "SEALING_COMPLETE" && !sealingProductReady) ||
+              (s.eventType === "HANDPACK_BLISTER_COMPLETE" && !handpackTabletTypeReady)
             }
             onClick={() => {
               if (s.eventType === "SEALING_COMPLETE") setSealingOpen(true);

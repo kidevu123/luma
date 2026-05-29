@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.44] — 2026-05-29
+
+### Fixed (HANDPACK-TABLET-TYPE-SOURCE-1)
+- **HANDPACK_BLISTER tablet type selection at completion:** Before submitting "Hand-pack complete", the operator now selects which tablet type they packed from a required dropdown. Selection is stored in the `HANDPACK_BLISTER_COMPLETE` event payload (`tablet_type_id`). No schema migration needed — `workflow_events.payload` is jsonb.
+- **Sealing product filter resolves tablet type from hand-pack event:** `resolveWorkflowBagTabletTypeId` now has a third fallback path: `HANDPACK_BLISTER_COMPLETE` payload → `tablet_type_id`. This means the sealing dropdown automatically filters to compatible products for HANDPACK_BLISTER bags when the operator provided a type.
+- **Unknown tablet type still shows warning:** Legacy bags and any HANDPACK_BLISTER bags where operator did not select type continue to show all products with the existing "Tablet type is unknown" hint.
+- **Product selection unchanged:** `PRODUCT_MAPPED` with `source: SEALING_SELECTION` still fires at `SEALING_COMPLETE`. Hand-pack completion sets only tablet type, never the finished SKU.
+- **scan-card-form.tsx not modified:** Tablet type capture happens at `HANDPACK_BLISTER_COMPLETE`, not at QR scan start — no changes to the scan form or stage progression.
+
+### Tests added (HANDPACK-TABLET-TYPE-SOURCE-1)
+- `workflow-bag-tablet-context.test.ts` — Path 3 fallback via HANDPACK_BLISTER_COMPLETE, hint text update.
+- `actions.test.ts` — `tabletTypeId` in `eventSchema`, `fireStageEventAction` reads and writes tablet type in payload, product selection stays at sealing.
+- `page.test.ts` — tablet types loaded for HANDPACK_BLISTER stations, passed to StageActionButtons, empty for other station kinds.
+- `stage-action-buttons.test.ts` — `handpackTabletTypeOptions` prop, tablet type selector shown, completion gate, `fire()` includes `tabletTypeId` for HANDPACK_BLISTER_COMPLETE.
+
 ## [0.4.43] — 2026-05-27
 
 ### Fixed (HANDPACK-TABLET-TYPE-LINKAGE-1)

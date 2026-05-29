@@ -726,3 +726,40 @@ describe("ROLL-CHANGE-WORKFLOW-1 · inline roll-change card on pause", () => {
     expect(src).not.toMatch(/scan-card-form/);
   });
 });
+
+describe("HANDPACK-TABLET-TYPE-SOURCE-1 · tablet type selector in stage-action-buttons", () => {
+  it("accepts handpackTabletTypeOptions prop defaulting to empty array", () => {
+    expect(src).toMatch(/handpackTabletTypeOptions.*TabletTypeOption\[\]/s);
+    expect(src).toMatch(/handpackTabletTypeOptions = \[\]/);
+  });
+
+  it("shows tablet type selector for HANDPACK_BLISTER when options present", () => {
+    expect(src).toMatch(/showHandpackTabletTypePicker/);
+    expect(src).toMatch(/stationKind === "HANDPACK_BLISTER" && handpackTabletTypeOptions\.length > 0/);
+  });
+
+  it("gate blocks hand-pack complete until tablet type is selected", () => {
+    expect(src).toMatch(/handpackTabletTypeReady/);
+    expect(src).toMatch(/HANDPACK_BLISTER_COMPLETE.*handpackTabletTypeReady/s);
+  });
+
+  it("tablet type ID is included in fire() FormData for HANDPACK_BLISTER_COMPLETE", () => {
+    const fireIdx = src.indexOf("async function fire(eventType");
+    const fireBlock = src.slice(fireIdx, fireIdx + 600);
+    expect(fireBlock).toMatch(/HANDPACK_BLISTER_COMPLETE.*tabletTypeId/s);
+    expect(fireBlock).toMatch(/fd\.set\("tabletTypeId"/);
+  });
+
+  it("tablet type selector is separate from product selection — fire() sets tabletTypeId not productId", () => {
+    // fire() for HANDPACK_BLISTER_COMPLETE sets tabletTypeId, not productId
+    const fireIdx = src.indexOf("async function fire(eventType");
+    const fireBlock = src.slice(fireIdx, fireIdx + 600);
+    expect(fireBlock).toMatch(/tabletTypeId/);
+    expect(fireBlock).not.toMatch(/fd\.set\("productId"/);
+  });
+
+  it("no changes to scan-card-form.tsx for this feature", () => {
+    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
+    expect(scanSrc).not.toMatch(/handpackTabletType/);
+  });
+});

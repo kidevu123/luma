@@ -257,6 +257,38 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
   });
 });
 
+describe("HANDPACK-TABLET-TYPE-SOURCE-1 · floor actions", () => {
+  it("eventSchema accepts optional tabletTypeId", () => {
+    expect(actionsSrc).toMatch(/tabletTypeId: z\.string\(\)\.uuid\(\)/);
+  });
+
+  it("fireStageEventAction reads tabletTypeId from FormData", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    expect(block).toMatch(/formData\.get\("tabletTypeId"\)/);
+    expect(block).toMatch(/pickedHandpackTabletTypeId/);
+  });
+
+  it("HANDPACK_BLISTER_COMPLETE payload includes tablet_type_id when provided", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    expect(block).toMatch(/HANDPACK_BLISTER_COMPLETE.*tablet_type_id/s);
+    expect(block).toMatch(/pickedHandpackTabletTypeId/);
+  });
+
+  it("product selection still happens at sealing, not hand-pack", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    // PRODUCT_MAPPED is only emitted for SEALING_COMPLETE, not HANDPACK_BLISTER_COMPLETE
+    expect(block).toMatch(/eventType === "SEALING_COMPLETE".*pickedSealingProductId/s);
+    // No product_id in HANDPACK_BLISTER payload
+    expect(block).not.toMatch(/HANDPACK_BLISTER_COMPLETE.*product_id/s);
+  });
+});
+
 describe("BLISTER-MACHINE-COUNTER-1 · pause schema accepts foil_swap", () => {
   it("pauseSchema reason enum includes foil_swap", () => {
     expect(actionsSrc).toMatch(/z\.enum\(\[.*"foil_swap".*\]\)/s);

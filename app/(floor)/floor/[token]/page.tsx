@@ -449,6 +449,19 @@ export default async function FloorStationPage({
       )
     : null;
 
+  // HANDPACK-TABLET-TYPE-SOURCE-1: load active tablet types for HANDPACK_BLISTER
+  // stations so the operator can select which tablet type they hand-packed.
+  // Selection is submitted with HANDPACK_BLISTER_COMPLETE and stored in the
+  // event payload so sealing can filter the product dropdown.
+  const handpackTabletTypeOptions =
+    station.station.kind === "HANDPACK_BLISTER" && currentAtStation
+      ? await db
+          .select({ id: tabletTypes.id, name: tabletTypes.name })
+          .from(tabletTypes)
+          .where(eq(tabletTypes.isActive, true))
+          .orderBy(tabletTypes.name)
+      : [];
+
   const ROLL_MATERIAL_KINDS = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"] as const;
   const showRollPanel = FLOOR_ROLL_STATION_KINDS.has(station.station.kind);
   type RollChangeRole = "PVC" | "FOIL";
@@ -720,6 +733,7 @@ export default async function FloorStationPage({
               sealingProductOptions={sealingProductOptionsForForm}
               sealingProductFilterHint={sealingProductFilterHint}
               rollChangeRole={requiredRollChangeRole}
+              handpackTabletTypeOptions={handpackTabletTypeOptions}
             />
             {/* Help operator pick the next action when the bag has
              *  already advanced past this station's stage. The
