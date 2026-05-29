@@ -27,11 +27,11 @@
 ## [0.4.35] — 2026-05-27
 
 ### Changed (MATERIAL-ROLL-CHANGE-1)
-- **Roll change on main station page:** BLISTER and COMBINED stations now show a **Machine rolls** panel with PVC/Foil mounted status and primary **Change PVC roll** / **Change Foil roll** actions. Mid-bag changes reuse existing `changeRollAction` via `ChangeRollForm` (same backend as `/floor/{token}/rolls`).
-- **Pause reason cleanup:** PVC roll swap and Foil roll swap removed from the BLISTER/COMBINED pause dropdown. Roll changes are no longer pause reasons. Pause options for BLISTER/COMBINED are now: Shift ending, Machine jam, QA check, Other. Server `pauseSchema` still accepts legacy `pvc_swap` / `foil_swap` for backward compatibility.
+- **Roll change on main station page:** BLISTER and COMBINED stations now show a **Machine rolls** panel with PVC/Foil mounted status and primary **Change PVC roll** / **Change Foil roll** actions. Mid-bag changes reuse existing `changeRollAction` via `ChangeRollForm` (same backend as `/floor/{token}/rolls`). This path does not require pausing and works whenever a roll is mounted and replacement inventory is available.
+- **PVC/Foil pause reasons retained as a trigger path:** Pausing with "PVC roll swap" or "Foil roll swap" remains available on BLISTER and COMBINED stations. These pause reasons serve as the entry point for the inline `RollChangeCard` workflow added in v0.4.36 — removing them at this stage would break that path. Pause options for BLISTER/COMBINED: Shift ending, PVC roll swap, Foil roll swap, Machine jam, QA check, Other. SEALING, HANDPACK_BLISTER, and hand-work stations have no roll-swap options.
 
 ### Tests added (MATERIAL-ROLL-CHANGE-1)
-- `station-pause-reasons.test.ts` — BLISTER/COMBINED exclude pvc_swap/foil_swap; default pause is shift_end.
+- `station-pause-reasons.test.ts` — BLISTER/COMBINED include pvc_swap/foil_swap; SEALING/HANDPACK_BLISTER/PACKAGING/bottle stations exclude them; default pause is shift_end.
 - `page.test.ts` — StationRollPanel wiring, active roll props, Change PVC/Foil buttons.
 
 ## [0.4.34] — 2026-05-28
