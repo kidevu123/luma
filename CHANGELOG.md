@@ -27,6 +27,18 @@
 - `station-operator-session.test.ts` — UUID override boundary documents `employeeId` routing.
 - `actions.test.ts` — packaging complete wires `resolveStationAccountability` and does not embed code lookup.
 - `stage-action-buttons.test.ts` — `operatorBadgeCodeForSubmit` guard and sessionStorage purge.
+## [0.4.54] — 2026-05-30
+
+### Added (ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1)
+- **Finished-lot Zoho production-output preview:** Owner/Admin users can run a preview-only production-output request from a finished lot detail page using explicit Zoho PO, PO line, and warehouse inputs. The flow calls only the Zoho Integration Service preview endpoint and performs no live Zoho write.
+- **Preview request/response summary:** The card shows the generated request summary, preflight/steps/warnings response details, HTTP status, request ID, and idempotency replay state without rendering bearer secrets.
+- **Mapping blockers:** Missing PO, PO line, warehouse, or product composite item IDs return clear admin-facing blockers before any HTTP request when possible.
+
+### Tests added (ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1)
+- `lib/zoho/production-output-preview.test.ts` — payload mapping, idempotency key, bearer headers, preview endpoint, no commit path, and 400/422 feedback handling.
+- `zoho-production-output-preview-actions.test.ts` — missing warehouse blocks before HTTP.
+- `zoho-production-output-preview-wiring.test.ts` — finished-lot page wiring, preview-only copy, request summary, no page-load call, and no rendered secrets.
+
 
 ## [0.4.53] — 2026-05-29
 

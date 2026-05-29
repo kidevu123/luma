@@ -1,0 +1,356 @@
+import { createHash } from "node:crypto";
+
+export const PRODUCTION_OUTPUT_PREVIEW_PATH =
+  "/zoho/luma/production-output/preview";
+
+export type ProductionOutputPreviewPayload = {
+  purchaseorder_id: string;
+  purchaseorder_line_item_id: string;
+  quantity_good: number;
+  receive_date: string;
+  warehouse_id: string;
+  unit_composite_item_id: string;
+  unit_assembly_quantity: number;
+  luma_operation_id: string;
+  quantity_damaged: number;
+  quantity_ripped: number;
+  quantity_loose: number;
+  display_assembly_quantity: number;
+  case_assembly_quantity: number;
+  display_composite_item_id?: string;
+  case_composite_item_id?: string;
+  luma_bag_id?: string;
+  luma_workflow_session_id?: string;
+  notes?: string;
+};
+
+export type ProductionOutputPreviewBuildInput = {
+  finishedLotId: string;
+  workflowBagId: string | null;
+  producedOn: string;
+  unitsProduced: number;
+  displaysProduced: number | null;
+  casesProduced: number | null;
+  product: {
+    zohoItemIdUnit: string | null;
+    zohoItemIdDisplay: string | null;
+    zohoItemIdCase: string | null;
+  } | null;
+  metrics?: {
+    damagedPackaging: number | null;
+    rippedCards: number | null;
+    looseCards: number | null;
+  } | null;
+  mapping: {
+    purchaseorderId: string;
+    purchaseorderLineItemId: string;
+    warehouseId: string;
+    notes?: string | null;
+  };
+};
+
+export type ProductionOutputPreviewBlocker = {
+  field: string;
+  message: string;
+};
+
+export type ProductionOutputPreviewBuildResult =
+  | { ok: true; payload: ProductionOutputPreviewPayload }
+  | { ok: false; blockers: ProductionOutputPreviewBlocker[] };
+
+function present(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+export function buildProductionOutputOperationId(finishedLotId: string): string {
+  return `luma-production-output-preview:${finishedLotId}`;
+}
+
+export function buildProductionOutputPreviewPayload(
+  input: ProductionOutputPreviewBuildInput,
+): ProductionOutputPreviewBuildResult {
+  const blockers: ProductionOutputPreviewBlocker[] = [];
+  const purchaseorderId = present(input.mapping.purchaseorderId);
+  const purchaseorderLineItemId = present(input.mapping.purchaseorderLineItemId);
+  const warehouseId = present(input.mapping.warehouseId);
+  const unitCompositeItemId = present(input.product?.zohoItemIdUnit);
+  const displayCompositeItemId = present(input.product?.zohoItemIdDisplay);
+  const caseCompositeItemId = present(input.product?.zohoItemIdCase);
+  const displayAssemblyQuantity = input.displaysProduced ?? 0;
+  const caseAssemblyQuantity = input.casesProduced ?? 0;
+  const notes = present(input.mapping.notes);
+
+  if (!purchaseorderId) {
+    blockers.push({
+      field: "purchaseorder_id",
+      message: "Enter the Zoho purchase order ID for the finished output.",
+    });
+  }
+  if (!purchaseorderLineItemId) {
+    blockers.push({
+      field: "purchaseorder_line_item_id",
+      message: "Enter the Zoho PO line item ID for the finished output.",
+    });
+  }
+  if (!warehouseId) {
+    blockers.push({
+      field: "warehouse_id",
+      message: "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
+    });
+  }
+  if (!unitCompositeItemId) {
+    blockers.push({
+      field: "unit_composite_item_id",
+      message: "Product is missing Zoho unit composite item ID.",
+    });
+  }
+  if (displayAssemblyQuantity > 0 && !displayCompositeItemId) {
+    blockers.push({
+      field: "display_composite_item_id",
+      message: "Product is missing Zoho display composite item ID.",
+    });
+  }
+  if (caseAssemblyQuantity > 0 && !caseCompositeItemId) {
+    blockers.push({
+      field: "case_composite_item_id",
+      message: "Product is missing Zoho case composite item ID.",
+    });
+  }
+  if (notes && notes.length > 1000) {
+    blockers.push({
+      field: "notes",
+      message: "Notes must be 1000 characters or fewer.",
+    });
+  }
+
+  if (blockers.length > 0) return { ok: false, blockers };
+
+  const payload: ProductionOutputPreviewPayload = {
+    purchaseorder_id: purchaseorderId as string,
+    purchaseorder_line_item_id: purchaseorderLineItemId as string,
+    quantity_good: input.unitsProduced,
+    receive_date: input.producedOn,
+    warehouse_id: warehouseId as string,
+    unit_composite_item_id: unitCompositeItemId as string,
+    unit_assembly_quantity: input.unitsProduced,
+    luma_operation_id: buildProductionOutputOperationId(input.finishedLotId),
+    quantity_damaged: input.metrics?.damagedPackaging ?? 0,
+    quantity_ripped: input.metrics?.rippedCards ?? 0,
+    quantity_loose: input.metrics?.looseCards ?? 0,
+    display_assembly_quantity: displayAssemblyQuantity,
+    case_assembly_quantity: caseAssemblyQuantity,
+  };
+
+  if (displayAssemblyQuantity > 0 && displayCompositeItemId) {
+    payload.display_composite_item_id = displayCompositeItemId;
+  }
+  if (caseAssemblyQuantity > 0 && caseCompositeItemId) {
+    payload.case_composite_item_id = caseCompositeItemId;
+  }
+  if (input.workflowBagId) {
+    payload.luma_bag_id = input.workflowBagId;
+    payload.luma_workflow_session_id = input.workflowBagId;
+  }
+  if (notes) payload.notes = notes;
+
+  return { ok: true, payload };
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
+    .join(",")}}`;
+}
+
+export function buildProductionOutputPreviewIdempotencyKey(
+  finishedLotId: string,
+  payload: ProductionOutputPreviewPayload,
+): string {
+  const hash = createHash("sha256")
+    .update(stableStringify(payload))
+    .digest("hex")
+    .slice(0, 16);
+  return `luma-production-output-preview-${finishedLotId}-${hash}`;
+}
+
+export type ProductionOutputPreviewConfig =
+  | {
+      ok: true;
+      baseUrl: string;
+      bearerSecret: string;
+      brand: string;
+      defaultWarehouseId: string | null;
+    }
+  | { ok: false; reason: string };
+
+export function validateProductionOutputPreviewConfig(
+  env: Record<string, string | undefined> = process.env,
+): ProductionOutputPreviewConfig {
+  const rawUrl = env["ZOHO_SERVICE_BASE_URL"] ?? env["ZOHO_INTEGRATION_URL"];
+  const rawBearer = env["ZOHO_SERVICE_BEARER_SECRET"];
+  const rawBrand = env["ZOHO_BRAND"];
+  const rawWarehouseId = env["ZOHO_WAREHOUSE_ID"];
+
+  if (!rawUrl || rawUrl.trim().length === 0) {
+    return {
+      ok: false,
+      reason: "ZOHO_SERVICE_BASE_URL (or ZOHO_INTEGRATION_URL) is not configured.",
+    };
+  }
+  const baseUrl = rawUrl.trim().replace(/\/+$/, "");
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return {
+        ok: false,
+        reason: `ZOHO_SERVICE_BASE_URL must use http: or https: (got ${parsed.protocol}).`,
+      };
+    }
+  } catch {
+    return { ok: false, reason: "ZOHO_SERVICE_BASE_URL is not a valid URL." };
+  }
+
+  if (!rawBearer || rawBearer.trim().length === 0) {
+    return { ok: false, reason: "ZOHO_SERVICE_BEARER_SECRET is not configured." };
+  }
+
+  return {
+    ok: true,
+    baseUrl,
+    bearerSecret: rawBearer.trim(),
+    brand: present(rawBrand) ?? "haute_brands",
+    defaultWarehouseId: present(rawWarehouseId),
+  };
+}
+
+export function buildProductionOutputPreviewHeaders(opts: {
+  bearerSecret: string;
+  brand: string;
+  idempotencyKey: string;
+}): Record<string, string> {
+  return {
+    Authorization: `Bearer ${opts.bearerSecret}`,
+    "X-Brand": opts.brand,
+    "Idempotency-Key": opts.idempotencyKey,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+}
+
+type FetchLike = typeof fetch;
+
+export type ProductionOutputPreviewCallResult =
+  | { ok: true; httpStatus: number; body: unknown; idempotencyReplay: boolean | null }
+  | {
+      ok: false;
+      httpStatus: number | null;
+      body: unknown;
+      message: string;
+      idempotencyReplay: boolean | null;
+    };
+
+export async function callProductionOutputPreview(opts: {
+  payload: ProductionOutputPreviewPayload;
+  idempotencyKey: string;
+  env?: Record<string, string | undefined>;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
+}): Promise<ProductionOutputPreviewCallResult> {
+  const config = validateProductionOutputPreviewConfig(opts.env ?? process.env);
+  if (!config.ok) {
+    return {
+      ok: false,
+      httpStatus: null,
+      body: null,
+      message: config.reason,
+      idempotencyReplay: null,
+    };
+  }
+
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 10_000);
+  let response: Response;
+
+  try {
+    response = await (opts.fetchImpl ?? fetch)(`${config.baseUrl}${PRODUCTION_OUTPUT_PREVIEW_PATH}`, {
+      method: "POST",
+      headers: buildProductionOutputPreviewHeaders({
+        bearerSecret: config.bearerSecret,
+        brand: config.brand,
+        idempotencyKey: opts.idempotencyKey,
+      }),
+      body: JSON.stringify(opts.payload),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timeout);
+  } catch (err) {
+    clearTimeout(timeout);
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      httpStatus: null,
+      body: null,
+      message: `Network error: ${message.replace(config.bearerSecret, "[REDACTED]")}`,
+      idempotencyReplay: null,
+    };
+  }
+
+  const idempotencyReplay = parseReplayHeader(response.headers);
+  const body = await parseResponseBody(response);
+
+  if (response.status >= 200 && response.status < 300) {
+    return { ok: true, httpStatus: response.status, body, idempotencyReplay };
+  }
+
+  return {
+    ok: false,
+    httpStatus: response.status,
+    body,
+    message: productionOutputPreviewStatusMessage(response.status),
+    idempotencyReplay,
+  };
+}
+
+async function parseResponseBody(response: Response): Promise<unknown> {
+  let text = "";
+  try {
+    text = await response.text();
+  } catch {
+    return null;
+  }
+  if (text.length === 0) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+function parseReplayHeader(headers: Headers): boolean | null {
+  const value =
+    headers.get("Idempotency-Replayed") ??
+    headers.get("X-Idempotency-Replayed") ??
+    headers.get("Idempotency-Replay");
+  if (value == null) return null;
+  return ["1", "true", "yes", "replayed"].includes(value.toLowerCase());
+}
+
+export function productionOutputPreviewStatusMessage(status: number): string {
+  if (status === 400 || status === 422) {
+    return `Zoho preview validation returned HTTP ${status}. Check the PO, PO line, warehouse, item mappings, or remaining PO quantity.`;
+  }
+  if (status === 401 || status === 403) {
+    return `Zoho preview auth/capability issue: HTTP ${status}.`;
+  }
+  if (status === 409) {
+    return "Zoho preview idempotency conflict: the same key was already used with a different payload.";
+  }
+  return `Zoho Integration Service returned HTTP ${status}.`;
+}

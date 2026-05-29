@@ -11,6 +11,7 @@ import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { StatusActions } from "./status-actions";
 import { ZohoDryRunCard } from "./zoho-dry-run";
 import { ZohoQueueCard } from "./zoho-queue-card";
+import { ZohoProductionOutputPreviewCard } from "./zoho-production-output-preview-card";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export default async function FinishedLotDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireSession();
+  const user = await requireSession();
   const { id } = await params;
   const [lot, zohoplan, existingZohoOps] = await Promise.all([
     getFinishedLot(id),
@@ -149,6 +150,13 @@ export default async function FinishedLotDetailPage({
                 : false
             }
           />
+
+          {(user.role === "OWNER" || user.role === "ADMIN") && (
+            <ZohoProductionOutputPreviewCard
+              finishedLotId={id}
+              defaultWarehouseId={process.env.ZOHO_WAREHOUSE_ID?.trim() ?? ""}
+            />
+          )}
 
           {lot.lot.notes && (
             <Card>
