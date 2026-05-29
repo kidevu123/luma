@@ -812,6 +812,7 @@ export async function fireStageEventAction(
       }
       if (
         eventType === "HANDPACK_BLISTER_COMPLETE" ||
+        (eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER") ||
         (eventType === "SEALING_COMPLETE" && station.kind === "SEALING")
       ) {
         await maybeAutoReleaseAfterComplete(tx, {
@@ -1457,11 +1458,12 @@ async function projectBagReleasedEvent(
 
 /** Stations that auto-release on complete — no second operator tap. */
 const AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS = new Set([
+  "BLISTER",
   "HANDPACK_BLISTER",
   "SEALING",
 ]);
 
-/** HANDPACK_BLISTER + SEALING: complete also releases when still pinned. */
+/** BLISTER + HANDPACK_BLISTER + SEALING: complete also releases when still pinned. */
 async function maybeAutoReleaseAfterComplete(
   tx: DbTx,
   args: {

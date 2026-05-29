@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.38] — 2026-05-29
+
+### Fixed (BLISTER-AUTO-RELEASE-1)
+- **Blister close-out auto-releases:** `BLISTER_COMPLETE` on `BLISTER` stations now appends `BAG_RELEASED` in the same transaction when the bag reaches `BLISTERED` and is still pinned — matching HANDPACK_BLISTER and SEALING. Operators no longer need a second **Release to sealing queue** tap after machine-counter close-out.
+- **COMBINED unchanged:** Auto-release only fires when `station.kind === "BLISTER"`, not on COMBINED stations.
+- **Legacy fallback preserved:** Manual release remains available on BLISTER for bags already at `BLISTERED` from before this change.
+
+### Tests added (BLISTER-AUTO-RELEASE-1)
+- `actions.test.ts` — BLISTER auto-release chain, COMBINED exclusion, idempotent guards, `count_total` payload.
+- `stage-action-buttons.test.ts` — manual release fallback for legacy BLISTERED bags; HANDPACK/SEALING unchanged.
+
 ## [0.4.37] — 2026-05-29
 
 ### Fixed (OPERATOR-SHIFT-SUBMIT-BLOCK-1)

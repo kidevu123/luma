@@ -73,6 +73,51 @@ describe("SEALING-MATERIAL-NONBLOCKING-1 · sealing never blocked by blister lot
   });
 });
 
+describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
+  it("chains maybeAutoReleaseAfterComplete after BLISTER_COMPLETE on BLISTER stations", () => {
+    expect(actionsSrc).toMatch(
+      /eventType === "BLISTER_COMPLETE" && station\.kind === "BLISTER"/,
+    );
+    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
+    const blisterIdx = actionsSrc.indexOf(
+      'eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER"',
+    );
+    const autoIdx = actionsSrc.indexOf("await maybeAutoReleaseAfterComplete");
+    expect(autoIdx).toBeGreaterThan(blisterIdx);
+  });
+
+  it("does not auto-release on COMBINED BLISTER_COMPLETE", () => {
+    expect(actionsSrc).toMatch(
+      /eventType === "BLISTER_COMPLETE" && station\.kind === "BLISTER"/,
+    );
+    expect(actionsSrc).not.toMatch(
+      /eventType === "BLISTER_COMPLETE" && station\.kind === "COMBINED"/,
+    );
+  });
+
+  it("BLISTER is in AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS with BLISTERED release stage", () => {
+    expect(actionsSrc).toMatch(/AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*"BLISTER"/);
+    const helperIdx = actionsSrc.indexOf("function maybeAutoReleaseAfterComplete");
+    const helperBlock = actionsSrc.slice(helperIdx, helperIdx + 1200);
+    expect(helperBlock).toMatch(/STATION_RELEASE_FROM_STAGE\[args\.stationKind\]/);
+    expect(helperBlock).toMatch(/-auto-release/);
+  });
+
+  it("BLISTER_COMPLETE payload still records count_total", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    expect(block).toMatch(/count_total/);
+    expect(block).not.toMatch(/BLISTER_COMPLETE[\s\S]{0,200}packs_remaining/s);
+  });
+
+  it("first-op count guard unchanged for BLISTER_COMPLETE", () => {
+    expect(actionsSrc).toMatch(
+      /FIRST_OP_COUNT_EVENTS\.has\(eventType\) &&\s*!accountability\.accountableEmployeeId/,
+    );
+  });
+});
+
 describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
   it("chains maybeAutoReleaseAfterComplete after SEALING_COMPLETE on SEALING stations", () => {
     expect(actionsSrc).toMatch(

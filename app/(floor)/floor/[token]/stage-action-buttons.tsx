@@ -191,6 +191,7 @@ export function StageActionButtons({
   // and the bag is at the station's "ready to release" stage.
   const releaseAtStage = STATION_RELEASE_FROM_STAGE[stationKind];
   // HANDPACK_BLISTER + SEALING auto-release on complete server-side — no manual step.
+  // BLISTER keeps manual release for legacy bags already BLISTERED but not yet released.
   const releaseReady =
     stationKind !== "HANDPACK_BLISTER" &&
     stationKind !== "SEALING" &&

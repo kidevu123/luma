@@ -192,6 +192,7 @@ describe("STATION-HANDPACK-AUTO-RELEASE-1 · hand-pack complete auto-releases", 
       src.indexOf("const releaseLabel"),
     );
     expect(releaseBlock).toMatch(/HANDPACK_BLISTER/);
+    expect(releaseBlock).not.toMatch(/stationKind !== "BLISTER"/);
     const blisterReleaseAt = src.indexOf('stationKind === "BLISTER"');
     expect(blisterReleaseAt).toBeGreaterThan(-1);
   });
@@ -209,6 +210,49 @@ describe("STATION-HANDPACK-AUTO-RELEASE-1 · hand-pack complete auto-releases", 
     const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
     expect(scanSrc).not.toMatch(/maybeAutoReleaseAfterComplete/);
     expect(scanSrc).not.toMatch(/auto-release/);
+  });
+});
+
+describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
+  it("fireStageEventAction chains BAG_RELEASED after BLISTER_COMPLETE on BLISTER stations", () => {
+    expect(actionsSrc).toMatch(
+      /eventType === "BLISTER_COMPLETE" && station\.kind === "BLISTER"/,
+    );
+    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
+    const blisterIdx = actionsSrc.indexOf(
+      'eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER"',
+    );
+    const autoIdx = actionsSrc.indexOf("await maybeAutoReleaseAfterComplete");
+    expect(autoIdx).toBeGreaterThan(blisterIdx);
+  });
+
+  it("BLISTER keeps manual Release button for legacy already-BLISTERED bags", () => {
+    const releaseBlock = src.slice(
+      src.indexOf("const releaseReady"),
+      src.indexOf("const releaseLabel"),
+    );
+    expect(releaseBlock).not.toMatch(/stationKind !== "BLISTER"/);
+    expect(releaseBlock).toMatch(/stationKind !== "HANDPACK_BLISTER"/);
+    expect(releaseBlock).toMatch(/stationKind !== "SEALING"/);
+    expect(src).toMatch(/Release to sealing queue/);
+  });
+
+  it("SEALING and HANDPACK_BLISTER auto-release unchanged", () => {
+    expect(actionsSrc).toMatch(/"HANDPACK_BLISTER"/);
+    expect(actionsSrc).toMatch(
+      /eventType === "SEALING_COMPLETE" && station\.kind === "SEALING"/,
+    );
+    expect(actionsSrc).toMatch(/AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*"BLISTER"/);
+  });
+
+  it("BlisterCompleteForm still uses Machine counter only", () => {
+    const blisterBlock = src.slice(
+      src.indexOf("function BlisterCompleteForm"),
+      src.indexOf("function RollChangeCard"),
+    );
+    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).not.toMatch(/Blister count/);
+    expect(blisterBlock).not.toMatch(/Packs remaining/);
   });
 });
 
