@@ -5,6 +5,7 @@
 // ChangeRollForm from rolls-forms.tsx (same path as /floor/{token}/rolls).
 
 import * as React from "react";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import { ChangeRollForm } from "./rolls-forms";
 
 export type StationRollStatus = {
@@ -196,7 +197,7 @@ function RollChangeRequiredCard({
           </div>
           <div className="text-amber-900/70">
             {activeRoll.currentWeightEstimateGrams != null
-              ? `${activeRoll.currentWeightEstimateGrams} g estimated`
+              ? `${formatGramsAsKg(activeRoll.currentWeightEstimateGrams)} estimated`
               : "Weight estimate missing"}{" "}
             · conf {activeRoll.confidence} · mounted{" "}
             {new Date(activeRoll.mountedAt).toLocaleString()}

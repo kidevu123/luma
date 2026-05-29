@@ -17,6 +17,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import {
   mountRollAction,
   unmountRollAction,
@@ -201,7 +202,9 @@ export function MountRollForm({
           {idleRollLots.map((lot) => (
             <option key={lot.id} value={lot.id}>
               {lot.rollNumber ?? lot.id.slice(0, 8)} · {lot.materialName} ·{" "}
-              {lot.netWeightGrams != null ? `${lot.netWeightGrams} g` : "weight ?"}
+              {lot.netWeightGrams != null
+                ? formatGramsAsKg(lot.netWeightGrams)
+                : "weight ?"}
             </option>
           ))}
         </select>
@@ -496,7 +499,9 @@ export function ChangeRollForm({
             {idleRollLots.map((lot) => (
               <option key={lot.id} value={lot.id}>
                 {lot.rollNumber ?? lot.id.slice(0, 8)} · {lot.materialName} ·{" "}
-                {lot.netWeightGrams != null ? `${lot.netWeightGrams} g` : "weight ?"}
+                {lot.netWeightGrams != null
+                ? formatGramsAsKg(lot.netWeightGrams)
+                : "weight ?"}
               </option>
             ))}
           </select>

@@ -1,6 +1,7 @@
 // Phase H.x7 — Roll usage variance panel.
 
 import { requireAdmin } from "@/lib/auth-guards";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import { loadRollVariancePanel } from "@/lib/production/material-panels";
 import { VARIANCE_LABELS } from "@/lib/production/reconciliation-v2-loader";
 import { PageHeader } from "@/components/ui/page-header";
@@ -30,7 +31,11 @@ export default async function RollVariancePage() {
           <Stat label="With actual usage" value={`${s.withWeighback} / ${s.totalRolls}`} />
           <Stat
             label="Total variance"
-            value={s.totalVarianceGrams != null ? `${s.totalVarianceGrams} g` : "Missing"}
+            value={
+              s.totalVarianceGrams != null
+                ? formatGramsAsKg(s.totalVarianceGrams)
+                : "Missing"
+            }
           />
           <Stat label="Rolls > 5% variance" value={String(s.rollsOver5Pct)} />
         </CardContent>
@@ -70,13 +75,19 @@ export default async function RollVariancePage() {
                       <td className="p-2">{r.materialRole ?? "Missing"}</td>
                       <td className="p-2">{r.machineName ?? "Unassigned"}</td>
                       <td className="p-2 text-right tabular-nums">
-                        {r.expectedUsedGrams != null ? `${r.expectedUsedGrams} g` : "Roll standard missing"}
+                        {r.expectedUsedGrams != null
+                          ? formatGramsAsKg(r.expectedUsedGrams)
+                          : "Roll standard missing"}
                       </td>
                       <td className="p-2 text-right tabular-nums">
-                        {r.actualUsedGrams != null ? `${r.actualUsedGrams} g` : "Not weighed back"}
+                        {r.actualUsedGrams != null
+                          ? formatGramsAsKg(r.actualUsedGrams)
+                          : "Not weighed back"}
                       </td>
                       <td className="p-2 text-right tabular-nums">
-                        {r.varianceGrams != null ? `${r.varianceGrams} g` : "Missing"}
+                        {r.varianceGrams != null
+                          ? formatGramsAsKg(r.varianceGrams)
+                          : "Missing"}
                       </td>
                       <td className="p-2"><SeverityBadge severity={r.varianceSeverity} /></td>
                       <td className="p-2 text-[11px] text-text-muted">{r.estimateActualLabel}</td>

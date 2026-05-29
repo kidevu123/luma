@@ -45,6 +45,11 @@ describe("formatGramsAsKg", () => {
     expect(formatGramsAsKg(350)).toBe("0.35 kg");
   });
 
+  it("formats common roll lot weights for operator display", () => {
+    expect(formatGramsAsKg(6120)).toBe("6.12 kg");
+    expect(formatGramsAsKg(9280)).toBe("9.28 kg");
+  });
+
   it("preserves up to 3 decimal places", () => {
     // 1001 g = 1.001 kg
     expect(formatGramsAsKg(1001)).toBe("1.001 kg");

@@ -19,6 +19,7 @@ import {
   qrCards,
 } from "@/lib/db/schema";
 import { getActiveRollsForMachine } from "@/lib/production/active-rolls";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import { filterSelectableIdleRollLots } from "@/lib/production/idle-roll-lots";
 import {
   MountRollForm,
@@ -137,7 +138,7 @@ export default async function FloorRollsPage({
                   <div className="text-xs text-right tabular-nums">
                     <div>
                       {r.currentWeightEstimateGrams != null
-                        ? `${r.currentWeightEstimateGrams} g est.`
+                        ? `${formatGramsAsKg(r.currentWeightEstimateGrams)} est.`
                         : "—"}
                     </div>
                     <div className="text-text-muted">

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.49] — 2026-05-29
+
+### Changed (ROLL-WEIGHT-DISPLAY-KG-1)
+- **Roll weights shown in kg across management UI:** Floor mount/change roll dropdowns, active roll lists, station roll panel estimates, and admin Active rolls / Roll variance panels now display stored gram values as kg (e.g. 6120 g → 6.12 kg). DB and events remain integer grams.
+
+### Tests added (ROLL-WEIGHT-DISPLAY-KG-1)
+- `lib/inbound/roll-weight-display.test.ts` — acceptance examples + source checks for kg display wiring.
+- `lib/inbound/roll-weight.test.ts` — legacy roll lot weight formatting examples.
+
 ## [0.4.48] — 2026-05-27
 
 ### Fixed (ROLL-INTAKE-BULK-COUNT-LIMIT-1)
