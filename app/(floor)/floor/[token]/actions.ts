@@ -42,6 +42,10 @@ import {
   workflowBagHasHandpackBlisterComplete,
   type HandpackBlisterMaterialSkipReason,
 } from "@/lib/production/handpack-seal-material";
+import {
+  lookupInventoryBagByQrScanToken,
+  resolveWorkflowBagTabletTypeId,
+} from "@/lib/production/workflow-bag-tablet-context";
 
 // First-op count submissions where accountability is mandatory (the
 // queue stop condition: refuse a fresh blister/handpack count when
@@ -230,9 +234,18 @@ export async function scanCardAction(
         if (!firstOp.ok) throw new Error(firstOp.reason);
 
         const productIdToSet = firstOp.productId; // null when not first-op
+        const inventoryLink = await lookupInventoryBagByQrScanToken(
+          tx,
+          card.scanToken,
+        );
         const [bag] = await tx
           .insert(workflowBags)
-          .values(productIdToSet ? { productId: productIdToSet } : {})
+          .values({
+            ...(productIdToSet ? { productId: productIdToSet } : {}),
+            ...(inventoryLink
+              ? { inventoryBagId: inventoryLink.inventoryBagId }
+              : {}),
+          })
           .returning();
         if (!bag) throw new Error("Could not create workflow bag.");
         await tx
@@ -243,7 +256,16 @@ export async function scanCardAction(
           workflowBagId: bag.id,
           stationId: station.id,
           eventType: "CARD_ASSIGNED",
-          payload: { qr_card_id: cardId, station_kind: station.kind },
+          payload: {
+            qr_card_id: cardId,
+            station_kind: station.kind,
+            ...(inventoryLink
+              ? {
+                  inventory_bag_id: inventoryLink.inventoryBagId,
+                  tablet_type_id: inventoryLink.tabletTypeId,
+                }
+              : {}),
+          },
           enteredByUserId: accountability.enteredByUserId,
           accountableEmployeeId: accountability.accountableEmployeeId,
           accountabilitySource: accountability.accountabilitySource,
@@ -361,9 +383,18 @@ export async function scanCardAction(
           if (!firstOp.ok) throw new Error(firstOp.reason);
 
           const productIdToSet = firstOp.productId;
+          const inventoryLink = await lookupInventoryBagByQrScanToken(
+            tx,
+            card.scanToken,
+          );
           const [resumeBag] = await tx
             .insert(workflowBags)
-            .values(productIdToSet ? { productId: productIdToSet } : {})
+            .values({
+              ...(productIdToSet ? { productId: productIdToSet } : {}),
+              ...(inventoryLink
+                ? { inventoryBagId: inventoryLink.inventoryBagId }
+                : {}),
+            })
             .returning();
           if (!resumeBag) throw new Error("Could not create workflow bag for partial-bag resume.");
 
@@ -376,7 +407,16 @@ export async function scanCardAction(
             workflowBagId: resumeBag.id,
             stationId: station.id,
             eventType: "CARD_ASSIGNED",
-            payload: { qr_card_id: cardId, station_kind: station.kind },
+            payload: {
+              qr_card_id: cardId,
+              station_kind: station.kind,
+              ...(inventoryLink
+                ? {
+                    inventory_bag_id: inventoryLink.inventoryBagId,
+                    tablet_type_id: inventoryLink.tabletTypeId,
+                  }
+                : {}),
+            },
             enteredByUserId: accountability.enteredByUserId,
             accountableEmployeeId: accountability.accountableEmployeeId,
             accountabilitySource: accountability.accountabilitySource,
@@ -695,15 +735,10 @@ export async function fireStageEventAction(
           .from(products)
           .where(eq(products.id, pickedSealingProductId));
 
-        const [rawContext] = await tx
-          .select({ tabletTypeId: inventoryBags.tabletTypeId })
-          .from(workflowBags)
-          .leftJoin(
-            inventoryBags,
-            eq(inventoryBags.id, workflowBags.inventoryBagId),
-          )
-          .where(eq(workflowBags.id, workflowBagId))
-          .limit(1);
+        const tabletTypeId = await resolveWorkflowBagTabletTypeId(
+          tx,
+          workflowBagId,
+        );
 
         const tabletRows = await tx
           .select({ tabletTypeId: productAllowedTablets.tabletTypeId })
@@ -714,7 +749,7 @@ export async function fireStageEventAction(
           stationKind: station.kind,
           pickedProductId: pickedSealingProductId,
           product: productLookup ?? null,
-          tabletTypeId: rawContext?.tabletTypeId ?? null,
+          tabletTypeId,
           allowedTabletTypeIds: tabletRows.map((r) => r.tabletTypeId),
         });
         if (!sealingPick.ok) {

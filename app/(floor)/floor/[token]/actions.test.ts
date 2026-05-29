@@ -199,6 +199,16 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
     expect(actionsSrc).toMatch(/pickedSealingProductId/);
   });
 
+  it("scanCardAction links inventory bag from QR scan token at first-op start", () => {
+    const scanIdx = actionsSrc.indexOf("export async function scanCardAction");
+    const stageIdx = actionsSrc.indexOf("// ── stage events");
+    const block = actionsSrc.slice(scanIdx, stageIdx);
+    expect(block).toMatch(/lookupInventoryBagByQrScanToken/);
+    expect(block).toMatch(/inventoryBagId: inventoryLink\.inventoryBagId/);
+    expect(block).toMatch(/inventory_bag_id: inventoryLink\.inventoryBagId/);
+    expect(block).toMatch(/tablet_type_id: inventoryLink\.tabletTypeId/);
+  });
+
   it("does not emit PRODUCT_MAPPED at scan when first-op returns null product", () => {
     const scanIdx = actionsSrc.indexOf("export async function scanCardAction");
     const stageIdx = actionsSrc.indexOf("// ── stage events");
@@ -237,13 +247,11 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
     );
   });
 
-  it("resolves tablet type via workflow_bags.inventory_bag_id for sealing pick", () => {
+  it("resolves tablet type via shared workflow bag resolver for sealing pick", () => {
     const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
     const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
     const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).toMatch(
-      /eq\(inventoryBags\.id, workflowBags\.inventoryBagId\)/,
-    );
+    expect(block).toMatch(/resolveWorkflowBagTabletTypeId/);
     const mapBlock = block.slice(block.indexOf('eventType: "PRODUCT_MAPPED"') - 400);
     expect(mapBlock).not.toMatch(/bagQrCode/);
   });

@@ -46,6 +46,10 @@ import {
   getUnmappedProductBanner,
   SEALING_STATION_KINDS,
 } from "@/lib/production/sealing-product";
+import {
+  getSealingProductFilterHint,
+  resolveWorkflowBagTabletTypeId,
+} from "@/lib/production/workflow-bag-tablet-context";
 import { OperatorSessionPanel } from "./operator-session-form";
 import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
@@ -380,17 +384,17 @@ export default async function FloorStationPage({
     sku: string;
     name: string;
   }[] = [];
+  let sealingProductFilterHint: string | null = null;
   if (
     currentAtStation &&
     !hasProductMapped &&
     SEALING_STATION_KINDS.has(station.station.kind)
   ) {
-    const [rawBagContext] = await db
-      .select({ tabletTypeId: inventoryBags.tabletTypeId })
-      .from(workflowBags)
-      .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
-      .where(eq(workflowBags.id, currentAtStation.bag.id))
-      .limit(1);
+    const sealingTabletTypeId = await resolveWorkflowBagTabletTypeId(
+      db,
+      currentAtStation.bag.id,
+    );
+    sealingProductFilterHint = getSealingProductFilterHint(sealingTabletTypeId);
 
     const sealingProductsRaw = await db
       .select({
@@ -434,7 +438,7 @@ export default async function FloorStationPage({
         allowedTabletTypeIds:
           sealingTabletsByProduct.get(p.id) ?? [],
       })),
-      rawBagContext?.tabletTypeId ?? null,
+      sealingTabletTypeId,
     ).map((p) => ({ id: p.id, sku: p.sku, name: p.name }));
   }
 
@@ -714,6 +718,7 @@ export default async function FloorStationPage({
               sealingCardsPerPress={sealingCardsPerPress}
               hasProductMapped={hasProductMapped}
               sealingProductOptions={sealingProductOptionsForForm}
+              sealingProductFilterHint={sealingProductFilterHint}
               rollChangeRole={requiredRollChangeRole}
             />
             {/* Help operator pick the next action when the bag has

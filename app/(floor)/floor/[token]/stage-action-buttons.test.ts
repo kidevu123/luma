@@ -556,6 +556,8 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging g
     expect(src).toMatch(
       /Select finished product before sealing close-out/,
     );
+    expect(src).toMatch(/sealingProductFilterHint/);
+    expect(src).toMatch(/\{sealingProductFilterHint\}/);
     expect(src).toMatch(/sealingProductReady/);
     expect(src).toMatch(
       /s\.eventType === "SEALING_COMPLETE" && !sealingProductReady/,

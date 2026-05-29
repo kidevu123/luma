@@ -97,6 +97,7 @@ export function StageActionButtons({
   sealingCardsPerPress = null,
   hasProductMapped = true,
   sealingProductOptions = [],
+  sealingProductFilterHint = null,
   rollChangeRole = null,
 }: {
   token: string;
@@ -117,6 +118,8 @@ export function StageActionButtons({
   hasProductMapped?: boolean;
   /** Finished SKU options for sealing close-out when product is missing. */
   sealingProductOptions?: SealingProductOption[];
+  /** Shown when tablet type is unknown and the product list is unfiltered. */
+  sealingProductFilterHint?: string | null;
   /** When the bag was paused for a roll swap, drives the inline RollChangeCard. */
   rollChangeRole?: "PVC" | "FOIL" | null;
 }) {
@@ -365,6 +368,9 @@ export function StageActionButtons({
           <div className="font-semibold text-sm">
             Select finished product before sealing close-out.
           </div>
+          {sealingProductFilterHint ? (
+            <p className="text-sm text-amber-800">{sealingProductFilterHint}</p>
+          ) : null}
           {sealingProductOptions.length === 0 ? (
             <p className="text-sm text-red-800">
               No active products are configured for this bag&apos;s tablet type.

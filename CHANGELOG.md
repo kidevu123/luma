@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.43] — 2026-05-27
+
+### Fixed (HANDPACK-TABLET-TYPE-LINKAGE-1)
+- **Floor handpack start links inventory bag:** `scanCardAction` now sets `workflow_bags.inventory_bag_id` from the received inventory bag linked to the bag QR (`inventory_bags.bag_qr_code = qr_cards.scan_token`), matching admin start production.
+- **Sealing tablet type fallback:** When `inventory_bag_id` is null on legacy bags, sealing product filter and `PRODUCT_MAPPED` validation resolve tablet type via `CARD_ASSIGNED` → QR card → inventory bag join.
+- **Unknown tablet type UX:** Sealing inline product picker shows an explicit message when the list is unfiltered because tablet type could not be resolved.
+
+### Tests added (HANDPACK-TABLET-TYPE-LINKAGE-1)
+- `workflow-bag-tablet-context.test.ts` — unfiltered hint copy.
+- `actions.test.ts` — scan start inventory linkage + shared tablet resolver at sealing.
+- `page.test.ts` — sealing options use `resolveWorkflowBagTabletTypeId`.
+- `stage-action-buttons.test.ts` — filter hint prop wiring.
+
 ## [0.4.42] — 2026-05-29
 
 ### Changed (ROLL-WEIGHT-KG-INPUT-1)

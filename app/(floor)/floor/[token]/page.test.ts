@@ -303,10 +303,10 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
     );
   });
 
-  it("resolves tablet type via workflow_bags.inventory_bag_id for sealing options", () => {
-    expect(pageSrc).toMatch(
-      /eq\(inventoryBags\.id, workflowBags\.inventoryBagId\)/,
-    );
+  it("resolves tablet type via shared workflow bag resolver for sealing options", () => {
+    expect(pageSrc).toMatch(/resolveWorkflowBagTabletTypeId/);
+    expect(pageSrc).toMatch(/getSealingProductFilterHint/);
+    expect(pageSrc).toMatch(/sealingProductFilterHint=\{sealingProductFilterHint\}/);
     const optionsBlock = pageSrc.slice(
       pageSrc.indexOf("sealingProductOptionsForForm"),
       pageSrc.indexOf("sealingProductOptionsForForm") + 1200,
