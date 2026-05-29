@@ -1,14 +1,5 @@
 # Changelog
 
-## [0.4.50] — 2026-05-29
-
-### Fixed (ROLL-INTAKE-BULK-COUNT-LIMIT-1)
-- **Roll count cap raised to 500:** `ROLL_COUNT_MAX` corrected from 250 to 500. Client validator, row resize, and server `rollsJson` check all share the constant.
-
-### Tests updated (ROLL-INTAKE-BULK-COUNT-LIMIT-1)
-- `roll-receive-input.test.ts` — added 500 as valid, changed rejection boundary to 501.
-- `roll-receive-batch.test.ts` — added 500-row acceptance, changed server cap rejection to 501.
-
 ## [0.4.49] — 2026-05-29
 
 ### Added (ROLL-INTAKE-AUTO-NUMBER-INTEGRATION-1)

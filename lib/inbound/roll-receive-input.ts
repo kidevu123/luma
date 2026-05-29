@@ -2,7 +2,7 @@
 // Avoids type="number" wheel mutation and forced coercion while typing.
 
 export const ROLL_COUNT_MIN = 1;
-export const ROLL_COUNT_MAX = 500;
+export const ROLL_COUNT_MAX = 250;
 
 export type ParseOk<T> = { ok: true; value: T };
 export type ParseErr = { ok: false; error: string };
