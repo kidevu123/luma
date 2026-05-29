@@ -10,6 +10,8 @@
 // Source resolution — two paths:
 //
 //   LEDGER:   raw_bag_allocation_sessions (preferred, allocation_status IN ('CLOSED','DEPLETED'))
+//     Match finished_lot_id first; when unset on sessions, fall back to
+//     finished_lots.workflow_bag_id → raw_bag_allocation_sessions.workflow_bag_id.
 //     inventory_bag → small_box → receive → po_line → zoho_line_item_id
 //     allocation_session.po_id → purchase_order → zoho_po_id
 //
@@ -415,6 +417,66 @@ export function computeZohoAssemblyPlan(
 
 // ─── DB entry point ───────────────────────────────────────────────────────────
 
+const CLOSED_ALLOCATION_STATUSES = ["CLOSED", "DEPLETED"] as const;
+
+type AllocationLedgerRow = {
+  inventoryBagId: string;
+  consumedQty: number | null;
+  tabletTypeId: string | null;
+  tabletZohoItemId: string | null;
+  tabletName: string | null;
+  receivePoLineId: string | null;
+  zohoLineItemId: string | null;
+  zohoPoId: string | null;
+  componentRole: string | null;
+};
+
+/** Load closed allocation sessions for Zoho TABLET_RECEIVE planning.
+ *  Prefers sessions linked by finished_lot_id; falls back to
+ *  finished_lots.workflow_bag_id when lot-scoped rows are absent. */
+export async function fetchAllocationLedgerRows(
+  finishedLotId: string,
+  workflowBagId: string | null,
+): Promise<AllocationLedgerRow[]> {
+  const baseQuery = () =>
+    db
+      .select({
+        inventoryBagId: rawBagAllocationSessions.inventoryBagId,
+        consumedQty: rawBagAllocationSessions.consumedQty,
+        tabletTypeId: inventoryBags.tabletTypeId,
+        tabletZohoItemId: tabletTypes.zohoItemId,
+        tabletName: tabletTypes.name,
+        receivePoLineId: receives.poLineId,
+        zohoLineItemId: poLines.zohoLineItemId,
+        zohoPoId: purchaseOrders.zohoPoId,
+        componentRole: rawBagAllocationSessions.componentRole,
+      })
+      .from(rawBagAllocationSessions)
+      .innerJoin(inventoryBags, eq(rawBagAllocationSessions.inventoryBagId, inventoryBags.id))
+      .innerJoin(tabletTypes, eq(inventoryBags.tabletTypeId, tabletTypes.id))
+      .innerJoin(smallBoxes, eq(inventoryBags.smallBoxId, smallBoxes.id))
+      .innerJoin(receives, eq(smallBoxes.receiveId, receives.id))
+      .leftJoin(poLines, eq(receives.poLineId, poLines.id))
+      .leftJoin(purchaseOrders, eq(rawBagAllocationSessions.poId, purchaseOrders.id));
+
+  const byLotId = await baseQuery().where(
+    and(
+      eq(rawBagAllocationSessions.finishedLotId, finishedLotId),
+      inArray(rawBagAllocationSessions.allocationStatus, [...CLOSED_ALLOCATION_STATUSES]),
+    ),
+  );
+  if (byLotId.length > 0 || !workflowBagId) {
+    return byLotId;
+  }
+
+  return baseQuery().where(
+    and(
+      eq(rawBagAllocationSessions.workflowBagId, workflowBagId),
+      inArray(rawBagAllocationSessions.allocationStatus, [...CLOSED_ALLOCATION_STATUSES]),
+    ),
+  );
+}
+
 export async function planZohoAssemblyForFinishedLot(
   finishedLotId: string,
 ): Promise<ZohoAssemblyPlanResult | null> {
@@ -429,31 +491,7 @@ export async function planZohoAssemblyForFinishedLot(
   const { lot, product } = lotRow;
 
   // 2. LEDGER path — raw_bag_allocation_sessions
-  const ledgerRows = await db
-    .select({
-      inventoryBagId:  rawBagAllocationSessions.inventoryBagId,
-      consumedQty:     rawBagAllocationSessions.consumedQty,
-      tabletTypeId:    inventoryBags.tabletTypeId,
-      tabletZohoItemId: tabletTypes.zohoItemId,
-      tabletName:      tabletTypes.name,
-      receivePoLineId: receives.poLineId,
-      zohoLineItemId:  poLines.zohoLineItemId,
-      zohoPoId:        purchaseOrders.zohoPoId,
-      componentRole:   rawBagAllocationSessions.componentRole,
-    })
-    .from(rawBagAllocationSessions)
-    .innerJoin(inventoryBags,  eq(rawBagAllocationSessions.inventoryBagId, inventoryBags.id))
-    .innerJoin(tabletTypes,    eq(inventoryBags.tabletTypeId, tabletTypes.id))
-    .innerJoin(smallBoxes,     eq(inventoryBags.smallBoxId, smallBoxes.id))
-    .innerJoin(receives,       eq(smallBoxes.receiveId, receives.id))
-    .leftJoin(poLines,         eq(receives.poLineId, poLines.id))
-    .leftJoin(purchaseOrders,  eq(rawBagAllocationSessions.poId, purchaseOrders.id))
-    .where(
-      and(
-        eq(rawBagAllocationSessions.finishedLotId, finishedLotId),
-        inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
-      ),
-    );
+  const ledgerRows = await fetchAllocationLedgerRows(finishedLotId, lot.workflowBagId);
 
   // 3. FALLBACK path — only fetched when LEDGER is empty
   const fallbackRows = ledgerRows.length > 0
@@ -511,8 +549,11 @@ export async function planZohoAssemblyForFinishedLot(
           zohoItemIdCase:    product.zohoItemIdCase    ?? null,
         }
       : null,
-    ledgerRows:  ledgerRows.map((r) => ({
-      ...r,
+    ledgerRows: ledgerRows.map((r) => ({
+      inventoryBagId:   r.inventoryBagId,
+      consumedQty:      r.consumedQty,
+      tabletTypeId:     r.tabletTypeId!,
+      tabletName:       r.tabletName ?? "",
       tabletZohoItemId: r.tabletZohoItemId ?? null,
       receivePoLineId:  r.receivePoLineId  ?? null,
       zohoLineItemId:   r.zohoLineItemId   ?? null,

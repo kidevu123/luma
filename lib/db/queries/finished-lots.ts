@@ -17,6 +17,7 @@ import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
 import { projectEvent } from "@/lib/projector";
 import { projectFinishedLotPassportForLot } from "@/lib/projector/finished-lot-passport";
+import { runZohoAssemblyEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-after-lot-create";
 
 export async function listFinishedLots() {
   return db
@@ -122,7 +123,7 @@ export async function createFinishedLot(
   input: CreateFinishedLotInput,
   actor: CurrentUser,
 ) {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [lot] = await tx
       .insert(finishedLots)
       .values({
@@ -290,8 +291,36 @@ export async function createFinishedLot(
     // Idempotent; safe to re-run via the rebuilder later.
     await projectFinishedLotPassportForLot(tx, lot.id);
 
+    // ZOHO-FINISHED-GOODS-OUTBOX-1 — link closed allocation sessions to
+    // this lot so the assembly planner can resolve PO receive details.
+    if (input.workflowBagId) {
+      await tx
+        .update(rawBagAllocationSessions)
+        .set({ finishedLotId: lot.id })
+        .where(
+          and(
+            eq(rawBagAllocationSessions.workflowBagId, input.workflowBagId),
+            inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+            isNull(rawBagAllocationSessions.finishedLotId),
+          ),
+        );
+    }
+
     return { lot, inputs: inputRows };
   });
+
+  // ZOHO-FINISHED-GOODS-OUTBOX-1 — persist planned ops (DB only; no Zoho HTTP).
+  // Lot creation already committed; enqueue failure must not roll back the lot.
+  try {
+    await runZohoAssemblyEnqueueAfterLotCreate({
+      finishedLotId: result.lot.id,
+      actor,
+    });
+  } catch (err) {
+    console.error("[zoho.assembly.enqueue] post-create error:", err);
+  }
+
+  return result;
 }
 
 export type FinishedLotStatus =

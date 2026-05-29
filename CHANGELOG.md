@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.40] — 2026-05-29
+
+### Added (ZOHO-FINISHED-GOODS-OUTBOX-1)
+- **Auto-enqueue on lot issue:** `createFinishedLot` now persists planned `zoho_assembly_ops` rows after the lot transaction commits, using the existing planner + enqueue service. No Zoho HTTP calls; lot creation still succeeds if enqueue fails.
+- **Allocation session backfill:** Closed/depleted `raw_bag_allocation_sessions` for the workflow bag get `finished_lot_id` set at lot creation when still null.
+- **Planner ledger fallback:** Assembly planner resolves allocation sessions via `finished_lots.workflow_bag_id` when no rows are linked by `finished_lot_id`.
+
+### Tests added (ZOHO-FINISHED-GOODS-OUTBOX-1)
+- `enqueue-after-lot-create.test.ts` — success, idempotent re-enqueue, skipped plan, failure audit, no HTTP.
+- `assembly-planner-ledger.test.ts` — workflow_bag_id fallback when lot-scoped ledger is empty.
+- `finished-lots-zoho-outbox.test.ts` — createFinishedLot calls enqueue post-commit and does not fail the lot on enqueue errors.
+
 ## [0.4.39] — 2026-05-29
 
 ### Fixed (DASHBOARD-PREDICTION-DATE-COPY-1)

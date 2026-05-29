@@ -39,6 +39,8 @@ export async function createFinishedLotAction(payload: unknown) {
     const { lot } = await createFinishedLot(compact(parsed.data), actor);
     revalidatePath("/finished-lots");
     revalidatePath("/floor-board");
+    revalidatePath("/packaging-output");
+    revalidatePath("/zoho-operations");
     return { ok: true as const, id: lot.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Save failed." };

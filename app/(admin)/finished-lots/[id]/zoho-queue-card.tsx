@@ -163,15 +163,19 @@ export function ZohoQueueCard({
             </tbody>
           </DataTable>
         ) : (
-          <p className="text-sm text-text-muted">No operations queued yet.</p>
+          <p className="text-sm text-text-muted">
+            {existingOps.length === 0
+              ? "No operations queued yet. New lots enqueue automatically on issue."
+              : "No additional rows to show."}
+          </p>
         )}
 
         <div className="space-y-2">
           <div className="flex items-start gap-2 rounded-md border border-warn-300/60 bg-warn-50 px-3 py-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-warn-700" />
             <p className="text-[11px] text-warn-800 leading-snug">
-              This creates internal Luma operation rows only. It does not send anything to Zoho.
-              {existingOps.length > 0 && " Re-running is safe — existing rows are not duplicated."}
+              Issuing a lot creates internal Zoho operation rows automatically. Nothing is sent to Zoho until a worker runs.
+              {existingOps.length > 0 && " Re-run queue creation is safe — existing rows are not duplicated."}
             </p>
           </div>
 
