@@ -559,6 +559,7 @@ export default async function FloorStationPage({
       <OperatorSessionPanel
         token={token}
         stationId={station.station.id}
+        stationKind={station.station.kind}
         activeSession={activeSession}
         employeeOptions={employeeOptions}
       />

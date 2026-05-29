@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.37] — 2026-05-29
+
+### Fixed (OPERATOR-SHIFT-SUBMIT-BLOCK-1)
+- **Employee picker opens stable sessions:** Selecting an employee from the floor shift dropdown now sends `employeeId` to `openOperatorSessionAction`, storing a non-null `station_operator_sessions.employee_id` even when `employee_code` is empty.
+- **UI honesty for low-confidence sessions:** Active sessions with null `employee_id` show an amber **Low-confidence shift** banner explaining that blister/bottle hand-pack first counts stay blocked until a real employee is selected.
+- **First-op stations block free-text-only shift open:** BLISTER, COMBINED, and BOTTLE_HANDPACK refuse opening a shift with free-text name alone. Pick from the list or enter a valid operator code.
+- **Accountability policy unchanged:** `BLISTER_COMPLETE` / `BOTTLE_HANDPACK_COMPLETE` still require stable `accountableEmployeeId`; LEGACY_TEXT sessions do not satisfy the guard.
+
+### Tests added (OPERATOR-SHIFT-SUBMIT-BLOCK-1)
+- `operator-session-actions.test.ts` — picker `employeeId` insert; free-text blocked on BLISTER.
+- `operator-session-form.test.ts` (inline) — UI wiring and warning copy.
+- `station-operator-session.test.ts` — `sessionSatisfiesFirstOpCount`, legacy session null id.
+- `actions.test.ts` — first-op guard unchanged.
+
 ## [0.4.36] — 2026-05-29
 
 ### Added (ROLL-CHANGE-WORKFLOW-1)

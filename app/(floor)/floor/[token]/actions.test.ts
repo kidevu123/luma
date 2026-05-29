@@ -210,3 +210,29 @@ describe("BLISTER-MACHINE-COUNTER-1 · pause schema accepts foil_swap", () => {
     expect(enumMatch).toMatch(/other/);
   });
 });
+
+describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · first-op count guard", () => {
+  it("FIRST_OP_COUNT_EVENTS includes BLISTER_COMPLETE and BOTTLE_HANDPACK_COMPLETE only", () => {
+    const setMatch =
+      actionsSrc.match(
+        /const FIRST_OP_COUNT_EVENTS[^=]*=\s*new Set\(\[([\s\S]*?)\]\)/,
+      )?.[1] ?? "";
+    expect(setMatch).toMatch(/"BLISTER_COMPLETE"/);
+    expect(setMatch).toMatch(/"BOTTLE_HANDPACK_COMPLETE"/);
+    expect(setMatch).not.toMatch(/"SEALING_COMPLETE"/);
+    expect(setMatch).not.toMatch(/"HANDPACK_BLISTER_COMPLETE"/);
+  });
+
+  it("refuses first-op count when accountableEmployeeId is null", () => {
+    expect(actionsSrc).toMatch(
+      /FIRST_OP_COUNT_EVENTS\.has\(eventType\) &&\s*!accountability\.accountableEmployeeId/,
+    );
+    expect(actionsSrc).toMatch(
+      /No operator on shift\. Open a shift on this station before submitting the first count/,
+    );
+  });
+
+  it("does not weaken guard for LEGACY_TEXT sessions", () => {
+    expect(actionsSrc).not.toMatch(/LEGACY_TEXT.*accountableEmployeeId/s);
+  });
+});

@@ -34,6 +34,17 @@ export type ActiveStationSession = Pick<
   | "openedAt"
 >;
 
+/** Station kinds where first-op count events require stable employee_id. */
+export const FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS: ReadonlySet<string> =
+  new Set(["BLISTER", "COMBINED", "BOTTLE_HANDPACK"]);
+
+/** True when an open session row satisfies first-op count accountability. */
+export function sessionSatisfiesFirstOpCount(session: {
+  employeeId: string | null;
+}): boolean {
+  return session.employeeId != null;
+}
+
 /** Read the currently-open operator session for a station, or null if
  *  none. Pure read; safe to call from any context. */
 export async function getActiveStationSession(

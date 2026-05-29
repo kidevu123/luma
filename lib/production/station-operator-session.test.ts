@@ -17,6 +17,8 @@ import {
   resolveStationAccountability,
   withAccountabilityPayload,
   resolveAdminAccountability,
+  sessionSatisfiesFirstOpCount,
+  FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS,
 } from "./station-operator-session";
 
 type EmployeeRow = {
@@ -224,6 +226,38 @@ describe("resolveAdminAccountability — defaults from currentUser", () => {
     expect(r.enteredByUserId).toBe("user-1");
     expect(r.accountableEmployeeId).toBeNull();
     expect(r.accountabilitySource).toBe("LOGGED_IN_USER");
+    expect(r.isStable).toBe(false);
+  });
+});
+
+describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · first-op session helpers", () => {
+  it("FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS includes BLISTER and BOTTLE_HANDPACK", () => {
+    expect(FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS.has("BLISTER")).toBe(true);
+    expect(FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS.has("COMBINED")).toBe(true);
+    expect(FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS.has("BOTTLE_HANDPACK")).toBe(
+      true,
+    );
+    expect(FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS.has("SEALING")).toBe(false);
+  });
+
+  it("sessionSatisfiesFirstOpCount requires employeeId", () => {
+    expect(sessionSatisfiesFirstOpCount({ employeeId: ALICE.id })).toBe(true);
+    expect(sessionSatisfiesFirstOpCount({ employeeId: null })).toBe(false);
+  });
+
+  it("active LEGACY_TEXT session resolves with null accountableEmployeeId", async () => {
+    const legacySession: SessionRow = {
+      id: "44444444-4444-4444-8444-444444444444",
+      stationId: STATION_ID,
+      employeeId: null,
+      employeeNameSnapshot: "Sahil",
+      accountabilitySource: "LEGACY_TEXT",
+      openedAt: new Date("2026-05-29T14:29:30Z"),
+    };
+    const tx = buildTxStub({ results: [legacySession] });
+    const r = await resolveStationAccountability(tx, { stationId: STATION_ID });
+    expect(r.accountableEmployeeId).toBeNull();
+    expect(r.accountableEmployeeNameSnapshot).toBe("Sahil");
     expect(r.isStable).toBe(false);
   });
 });
