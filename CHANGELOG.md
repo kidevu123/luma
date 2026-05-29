@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.47] — 2026-05-27
+
+### Changed (PACKAGING-PENDING-CONSUMPTION-HONESTY-1)
+- **Honest pending/negative packaging inventory:** Count-based lot balances in `read_material_lot_state` no longer clamp to zero — production consumption before receipt shows as negative net balance.
+- **Split consumption on insufficient on-hand:** `PACKAGING_COMPLETE` writes `MATERIAL_CONSUMED_ACTUAL` up to available lot qty and `MATERIAL_CONSUMED_ESTIMATED` for the remainder (payload flags `insufficient_on_hand`, `observed_qty_on_hand`).
+- **Read-model refresh on close-out:** Packaging close-out rebuilds `read_material_lot_state` and `read_material_consumption_daily`; consumption summary persisted additively on `PACKAGING_COMPLETE` payload (`packaging_consumption_summary`).
+- **Hand-pack seal pending ledger:** When no blister-card lot is available, `SEALING_COMPLETE` still succeeds and emits `MATERIAL_CONSUMED_ESTIMATED` (existing skip audit flags preserved).
+- **Admin visibility:** `/packaging-inventory` shows on-hand, pending consumption, and net balance per material; `/packaging-output` labels estimated-only burn as “Estimated · Needs receipt”.
+
+### Tests added (PACKAGING-PENDING-CONSUMPTION-HONESTY-1)
+- `lib/projector/packaging-consumption-hook.test.ts` — split logic + wiring.
+- `lib/production/pending-consumption.test.ts` — label + query source.
+- `lib/production/packaging-consumption-summary.test.ts` — payload summary + lot-state honesty.
+- `app/(admin)/packaging-inventory/pending-consumption-ui.test.ts` — admin UI + action wiring.
+
 ## [0.4.46] — 2026-05-29
 
 ### Fixed (ROLL-INTAKE-NUMBER-INPUT-FIX-1)

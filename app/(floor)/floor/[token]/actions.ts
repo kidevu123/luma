@@ -28,6 +28,11 @@ import {
   STATIONS_THAT_FINALIZE,
 } from "@/lib/production/stage-progression";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
+import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
+import {
+  buildPackagingConsumptionPayloadSummary,
+  patchPackagingCompleteConsumptionSummary,
+} from "@/lib/production/packaging-consumption-summary";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
 import {
   computeSealedCountFromCounter,
@@ -39,6 +44,7 @@ import {
 import {
   lookupProductMatchedBlisterCardLot,
   issueHandpackBlisterCardMaterial,
+  emitHandpackBlisterEstimatedMaterial,
   workflowBagHasHandpackBlisterComplete,
   type HandpackBlisterMaterialSkipReason,
 } from "@/lib/production/handpack-seal-material";
@@ -793,18 +799,21 @@ export async function fireStageEventAction(
       let handpackBlisterLot: { id: string; qtyOnHand: number } | null = null;
       let handpackMaterialSkip: HandpackBlisterMaterialSkipReason | null =
         null;
+      let handpackLotLookup: Awaited<
+        ReturnType<typeof lookupProductMatchedBlisterCardLot>
+      > | null = null;
       if (
         needsHandpackBlisterMaterial &&
         (resolvedCountTotal ?? 0) > 0
       ) {
-        const lotLookup = await lookupProductMatchedBlisterCardLot(
+        handpackLotLookup = await lookupProductMatchedBlisterCardLot(
           workflowBagId,
           tx,
         );
-        if (lotLookup.status === "found") {
-          handpackBlisterLot = lotLookup.lot;
+        if (handpackLotLookup.status === "found") {
+          handpackBlisterLot = handpackLotLookup.lot;
         } else {
-          handpackMaterialSkip = lotLookup.reason;
+          handpackMaterialSkip = handpackLotLookup.reason;
         }
       }
 
@@ -846,16 +855,41 @@ export async function fireStageEventAction(
       if (
         eventType === "SEALING_COMPLETE" &&
         needsHandpackBlisterMaterial &&
-        handpackBlisterLot &&
         (resolvedCountTotal ?? 0) > 0
       ) {
-        await issueHandpackBlisterCardMaterial(tx, {
-          workflowBagId,
-          stationId,
-          sealedCardCount: resolvedCountTotal ?? 0,
-          blisterLot: handpackBlisterLot,
-          accountability,
-        });
+        const sealedCardCount = resolvedCountTotal ?? 0;
+        if (handpackBlisterLot) {
+          await issueHandpackBlisterCardMaterial(tx, {
+            workflowBagId,
+            stationId,
+            sealedCardCount,
+            blisterLot: handpackBlisterLot,
+            accountability,
+          });
+        } else if (
+          handpackMaterialSkip === "no_available_lot" &&
+          handpackLotLookup?.status === "skipped" &&
+          handpackLotLookup.packagingMaterialId &&
+          handpackLotLookup.unitOfMeasure
+        ) {
+          const [bagProduct] = await tx
+            .select({ productId: workflowBags.productId })
+            .from(workflowBags)
+            .where(eq(workflowBags.id, workflowBagId));
+          if (bagProduct?.productId) {
+            await emitHandpackBlisterEstimatedMaterial(tx, {
+              workflowBagId,
+              stationId,
+              productId: bagProduct.productId,
+              packagingMaterialId: handpackLotLookup.packagingMaterialId,
+              sealedCardCount,
+              unitOfMeasure: handpackLotLookup.unitOfMeasure,
+              skipReason: handpackMaterialSkip,
+              occurredAt: new Date(),
+            });
+            await refreshMaterialReadModelsAfterConsumption(tx);
+          }
+        }
       }
       if (
         eventType === "HANDPACK_BLISTER_COMPLETE" ||
@@ -1266,6 +1300,7 @@ export async function packagingCompleteAction(
         stationId: parsed.data.stationId,
         overrideEmployeeCode: parsed.data.operatorCode ?? null,
       });
+      const occurredAt = new Date();
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
@@ -1299,9 +1334,14 @@ export async function packagingCompleteAction(
           damaged_packaging: parsed.data.damagedPackaging,
           ripped_cards: parsed.data.rippedCards,
         },
-        occurredAt: new Date(),
+        occurredAt,
       });
-      void consumption;
+      await patchPackagingCompleteConsumptionSummary(tx, {
+        workflowBagId: parsed.data.workflowBagId,
+        summary: buildPackagingConsumptionPayloadSummary(consumption),
+        clientEventId: parsed.data.clientEventId ?? null,
+      });
+      await refreshMaterialReadModelsAfterConsumption(tx);
       if (station.kind === "PACKAGING") {
         await maybeAutoFinalizeAfterPackagingComplete(tx, {
           workflowBagId: parsed.data.workflowBagId,

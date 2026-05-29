@@ -48,6 +48,11 @@ describe("SEALING-MATERIAL-NONBLOCKING-1 · product-matched non-blocking lot loo
     expect(materialSrc).toMatch(/no_available_lot/);
   });
 
+  it("emits MATERIAL_CONSUMED_ESTIMATED when sealing without blister lot", () => {
+    expect(materialSrc).toMatch(/emitHandpackBlisterEstimatedMaterial/);
+    expect(materialSrc).toMatch(/MATERIAL_CONSUMED_ESTIMATED/);
+  });
+
   it("fireStageEventAction does not block SEALING_COMPLETE on missing lot", () => {
     expect(actionsSrc).toMatch(/lookupProductMatchedBlisterCardLot/);
     expect(actionsSrc).not.toMatch(
@@ -62,10 +67,10 @@ describe("SEALING-MATERIAL-NONBLOCKING-1 · product-matched non-blocking lot loo
   });
 
   it("still issues material only when product-matched lot is found", () => {
-    expect(actionsSrc).toMatch(/lotLookup\.status === "found"/);
+    expect(actionsSrc).toMatch(/lotLookup\.status === "found"|handpackLotLookup\.status === "found"/);
     expect(actionsSrc).toMatch(/issueHandpackBlisterCardMaterial/);
     const issueIdx = actionsSrc.indexOf("await issueHandpackBlisterCardMaterial");
-    const issueBlock = actionsSrc.slice(issueIdx - 120, issueIdx + 40);
+    const issueBlock = actionsSrc.slice(issueIdx - 200, issueIdx + 40);
     expect(issueBlock).toMatch(/handpackBlisterLot/);
   });
 });

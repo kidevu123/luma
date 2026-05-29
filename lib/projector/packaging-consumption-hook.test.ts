@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   calculatePackagingConsumption,
   calculateSpecQty,
+  resolvePackagingConsumptionSplit,
 } from "./packaging-consumption-hook";
 
 describe("calculatePackagingConsumption", () => {
@@ -52,7 +55,6 @@ describe("calculatePackagingConsumption", () => {
       unitsPerDisplay: 20,
       displaysPerCase: null,
     });
-    // displaysPerCase null → (3 * 0) + 2 = 2 displays
     expect(result.totalCases).toBe(3);
     expect(result.totalDisplays).toBe(2);
     expect(result.totalUnits).toBe(40);
@@ -84,6 +86,50 @@ describe("calculateSpecQty", () => {
   });
 });
 
+describe("resolvePackagingConsumptionSplit — PACKAGING-PENDING-CONSUMPTION-HONESTY-1", () => {
+  it("no lot path: full qty is estimated when observed on-hand is 0", () => {
+    expect(resolvePackagingConsumptionSplit(100, 0)).toEqual({
+      actualQty: 0,
+      estimatedQty: 100,
+    });
+  });
+
+  it("sufficient lot: full qty is actual", () => {
+    expect(resolvePackagingConsumptionSplit(50, 200)).toEqual({
+      actualQty: 50,
+      estimatedQty: 0,
+    });
+  });
+
+  it("insufficient lot: splits ACTUAL + ESTIMATED", () => {
+    expect(resolvePackagingConsumptionSplit(100, 30)).toEqual({
+      actualQty: 30,
+      estimatedQty: 70,
+    });
+  });
+
+  it("exact on-hand match: all actual", () => {
+    expect(resolvePackagingConsumptionSplit(25, 25)).toEqual({
+      actualQty: 25,
+      estimatedQty: 0,
+    });
+  });
+
+  it("zero consumption yields zeros", () => {
+    expect(resolvePackagingConsumptionSplit(0, 50)).toEqual({
+      actualQty: 0,
+      estimatedQty: 0,
+    });
+  });
+
+  it("negative observed on-hand treated as zero available", () => {
+    expect(resolvePackagingConsumptionSplit(10, -5)).toEqual({
+      actualQty: 0,
+      estimatedQty: 10,
+    });
+  });
+});
+
 describe("roll material kind detection", () => {
   const ROLL_KINDS = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"];
 
@@ -105,5 +151,25 @@ describe("roll material kind detection", () => {
 
   it("LABEL material kind is NOT in roll kinds", () => {
     expect(ROLL_KINDS.includes("LABEL")).toBe(false);
+  });
+});
+
+describe("packaging-consumption-hook source wiring", () => {
+  const hookSrc = readFileSync(join(import.meta.dirname, "packaging-consumption-hook.ts"), "utf8");
+
+  it("writes MATERIAL_CONSUMED_ESTIMATED when no lot", () => {
+    expect(hookSrc).toMatch(/no_lot_reason: "no_available_lot"/);
+    expect(hookSrc).toMatch(/MATERIAL_CONSUMED_ESTIMATED/);
+  });
+
+  it("splits insufficient on-hand into ACTUAL + ESTIMATED", () => {
+    expect(hookSrc).toMatch(/resolvePackagingConsumptionSplit/);
+    expect(hookSrc).toMatch(/insufficient_on_hand: true/);
+    expect(hookSrc).toMatch(/observed_qty_on_hand/);
+    expect(hookSrc).toMatch(/status = "PARTIAL"/);
+  });
+
+  it("selects qty_on_hand from best lot for split decision", () => {
+    expect(hookSrc).toMatch(/qty_on_hand::int/);
   });
 });

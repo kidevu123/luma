@@ -65,12 +65,14 @@ export async function rebuildMaterialLotState(tx: Tx): Promise<void> {
       pl.qty_received AS initial_quantity,
       -- Roll lots: current qty meaningless for a single roll (qty=1).
       -- Count lots: qty_on_hand minus event-based consumption.
+      -- PACKAGING-PENDING-CONSUMPTION-HONESTY-1: do not clamp negative —
+      -- production may consume before receipt is entered.
       CASE
         WHEN pm.kind::text IN ('PVC_ROLL','FOIL_ROLL','BLISTER_FOIL') THEN NULL
-        ELSE GREATEST(0, pl.qty_on_hand
-                        - COALESCE(es.units_estimated, 0)
-                        - COALESCE(es.units_actual, 0)
-                        + COALESCE(es.units_adjusted, 0))
+        ELSE pl.qty_on_hand
+               - COALESCE(es.units_estimated, 0)
+               - COALESCE(es.units_actual, 0)
+               + COALESCE(es.units_adjusted, 0)
       END AS current_qty,
       pl.net_weight_grams,
       -- Roll lots: current weight = net_weight - consumed grams.

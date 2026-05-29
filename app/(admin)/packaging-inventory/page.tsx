@@ -1,7 +1,13 @@
 // Phase H.x7 — Packaging inventory panel.
 
 import { requireAdmin } from "@/lib/auth-guards";
+import { db } from "@/lib/db";
 import { loadPackagingInventoryPanel } from "@/lib/production/material-panels";
+import {
+  loadMaterialBalanceSummary,
+  loadPendingConsumptionRows,
+  pendingConsumptionLabel,
+} from "@/lib/production/pending-consumption";
 import { PageHeader } from "@/components/ui/page-header";
 import { MaterialsTabs } from "@/components/ui/materials-tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -21,6 +27,10 @@ export default async function PackagingInventoryPage({
   const showScrapped = sp.showScrapped === "1";
   const actionError = sp.err ? decodeURIComponent(sp.err) : null;
   const panel = await loadPackagingInventoryPanel(undefined, sp);
+  const [materialBalances, pendingRows] = await Promise.all([
+    loadMaterialBalanceSummary(),
+    loadPendingConsumptionRows(db, { limit: 50 }),
+  ]);
   const visibleLots = showScrapped
     ? panel.lots
     : panel.lots.filter((l) => l.status !== "SCRAPPED");
@@ -104,6 +114,127 @@ export default async function PackagingInventoryPage({
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Material balance (count-based)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {materialBalances.length === 0 ? (
+            <p className="text-sm text-text-muted">
+              No active count-based materials with on-hand or pending consumption.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-text-muted uppercase">
+                  <tr>
+                    <th className="text-left p-2">Material</th>
+                    <th className="text-right p-2">On hand</th>
+                    <th className="text-right p-2">Pending consumption</th>
+                    <th className="text-right p-2">Net balance</th>
+                    <th className="text-left p-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {materialBalances.map((row) => {
+                    const statusLabel = pendingConsumptionLabel(row);
+                    return (
+                      <tr key={row.packagingMaterialId} className="border-t border-border/40">
+                        <td className="p-2">
+                          <div>{row.materialName}</div>
+                          <div className="font-mono text-[10px] text-text-muted">{row.materialSku}</div>
+                        </td>
+                        <td className="p-2 text-right tabular-nums">
+                          {row.onHandQty.toLocaleString()} {row.unitOfMeasure}
+                        </td>
+                        <td className="p-2 text-right tabular-nums text-amber-800">
+                          {row.pendingQty > 0
+                            ? `${row.pendingQty.toLocaleString()} ${row.unitOfMeasure}`
+                            : "—"}
+                        </td>
+                        <td
+                          className={`p-2 text-right tabular-nums font-medium ${
+                            row.netBalance < 0 ? "text-red-700" : "text-text-strong"
+                          }`}
+                        >
+                          {row.netBalance.toLocaleString()} {row.unitOfMeasure}
+                        </td>
+                        <td className="p-2 text-[11px]">
+                          {statusLabel ? (
+                            <span
+                              className={`inline-flex rounded-full border px-2 py-0.5 font-medium ${
+                                statusLabel === "Negative balance"
+                                  ? "border-red-300 bg-red-50 text-red-800"
+                                  : "border-amber-300 bg-amber-50 text-amber-900"
+                              }`}
+                            >
+                              {statusLabel === "Needs receipt"
+                                ? "Estimated · Needs receipt"
+                                : statusLabel}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted">Actual</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {pendingRows.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Pending consumption detail</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-text-muted mb-3">
+              Estimated consumption with no lot assigned yet. Receipt and allocation are handled in a later slice.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-text-muted uppercase">
+                  <tr>
+                    <th className="text-left p-2">Material</th>
+                    <th className="text-right p-2">Qty</th>
+                    <th className="text-left p-2">Bag</th>
+                    <th className="text-left p-2">When</th>
+                    <th className="text-left p-2">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingRows.map((row) => (
+                    <tr key={row.eventId} className="border-t border-border/40">
+                      <td className="p-2">{row.materialName}</td>
+                      <td className="p-2 text-right tabular-nums">
+                        {row.quantityUnits} {row.unitOfMeasure ?? "each"}
+                      </td>
+                      <td className="p-2 font-mono text-[10px]">
+                        {row.workflowBagId?.slice(0, 8) ?? "Missing"}
+                      </td>
+                      <td className="p-2 text-text-muted">
+                        {new Date(row.occurredAt).toLocaleString()}
+                      </td>
+                      <td className="p-2 text-[11px] text-text-muted">
+                        {row.insufficientOnHand
+                          ? `Insufficient on-hand (observed ${row.observedQtyOnHand ?? 0})`
+                          : row.noLotReason === "no_available_lot"
+                            ? "Needs receipt"
+                            : row.noLotReason ?? "Estimated"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

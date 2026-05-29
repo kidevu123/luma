@@ -448,11 +448,20 @@ export default async function PackagingOutputPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {materialBurn.map((row) => (
+                  {materialBurn.map((row) => {
+                    const needsReceipt =
+                      row.estimated_qty > 0 &&
+                      (row.actual_qty === 0 || row.estimated_qty > row.actual_qty);
+                    return (
                     <tr key={row.packaging_material_id} className="border-b border-border/30 last:border-0">
                       <td className="py-2 pr-4">
                         <div className="text-text-strong">{row.material_name}</div>
                         <div className="font-mono text-[10.5px] text-text-muted">{row.material_kind}</div>
+                        {needsReceipt && (
+                          <span className="mt-1 inline-flex rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900">
+                            Estimated · Needs receipt
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums text-text-strong">
                         {row.actual_qty > 0 ? row.actual_qty.toLocaleString() : <span className="text-text-subtle">—</span>}
@@ -475,7 +484,8 @@ export default async function PackagingOutputPage() {
                           : "—"}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

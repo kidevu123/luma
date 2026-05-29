@@ -1,6 +1,9 @@
 /** SEALING-FLOW-CLARITY-2 / SEALING-MATERIAL-NONBLOCKING-1 — optional
  *  BLISTER_CARD consumption when hand-pack bags seal. Never blocks
- *  SEALING_COMPLETE; only product-BOM-matched lots may be decremented. */
+ *  SEALING_COMPLETE; only product-BOM-matched lots may be decremented.
+ *
+ *  PACKAGING-PENDING-CONSUMPTION-HONESTY-1: when no lot is available,
+ *  emit MATERIAL_CONSUMED_ESTIMATED so pending consumption is visible. */
 
 import { eq, and, asc, sql, inArray, gt } from "drizzle-orm";
 import { db as Db } from "@/lib/db";
@@ -10,6 +13,7 @@ import {
   workflowEvents,
   workflowBags,
   productPackagingSpecs,
+  materialInventoryEvents,
 } from "@/lib/db/schema";
 import { projectEvent } from "@/lib/projector";
 import type { resolveStationAccountability } from "@/lib/production/station-operator-session";
@@ -26,8 +30,18 @@ export type HandpackBlisterMaterialSkipReason =
   | "no_available_lot";
 
 export type HandpackBlisterLotLookupResult =
-  | { status: "found"; lot: { id: string; qtyOnHand: number } }
-  | { status: "skipped"; reason: HandpackBlisterMaterialSkipReason };
+  | {
+      status: "found";
+      lot: { id: string; qtyOnHand: number };
+      packagingMaterialId: string;
+      unitOfMeasure: string;
+    }
+  | {
+      status: "skipped";
+      reason: HandpackBlisterMaterialSkipReason;
+      packagingMaterialId?: string;
+      unitOfMeasure?: string;
+    };
 
 export async function workflowBagHasHandpackBlisterComplete(
   workflowBagId: string,
@@ -63,6 +77,7 @@ export async function lookupProductMatchedBlisterCardLot(
   const bomRows = await dbOrTx
     .select({
       packagingMaterialId: productPackagingSpecs.packagingMaterialId,
+      unitOfMeasure: packagingMaterials.uom,
     })
     .from(productPackagingSpecs)
     .innerJoin(
@@ -77,8 +92,13 @@ export async function lookupProductMatchedBlisterCardLot(
       ),
     );
 
+  if (bomRows.length === 0) {
+    return { status: "skipped", reason: "no_bom_blister_card" };
+  }
+
   const materialIds = bomRows.map((r) => r.packagingMaterialId);
-  if (materialIds.length === 0) {
+  const primaryMaterial = bomRows[0];
+  if (!primaryMaterial) {
     return { status: "skipped", reason: "no_bom_blister_card" };
   }
 
@@ -96,10 +116,57 @@ export async function lookupProductMatchedBlisterCardLot(
     .limit(1);
 
   if (!lot) {
-    return { status: "skipped", reason: "no_available_lot" };
+    return {
+      status: "skipped",
+      reason: "no_available_lot",
+      packagingMaterialId: primaryMaterial.packagingMaterialId,
+      unitOfMeasure: primaryMaterial.unitOfMeasure,
+    };
   }
 
-  return { status: "found", lot };
+  return {
+    status: "found",
+    lot,
+    packagingMaterialId: primaryMaterial.packagingMaterialId,
+    unitOfMeasure: primaryMaterial.unitOfMeasure,
+  };
+}
+
+/** Record pending blister-card consumption when sealing without stock. */
+export async function emitHandpackBlisterEstimatedMaterial(
+  tx: Tx,
+  args: {
+    workflowBagId: string;
+    stationId: string;
+    productId: string;
+    packagingMaterialId: string;
+    sealedCardCount: number;
+    unitOfMeasure: string;
+    skipReason: HandpackBlisterMaterialSkipReason;
+    occurredAt: Date;
+  },
+): Promise<void> {
+  if (args.sealedCardCount <= 0) return;
+
+  await tx.insert(materialInventoryEvents).values({
+    eventType: "MATERIAL_CONSUMED_ESTIMATED",
+    packagingMaterialId: args.packagingMaterialId,
+    packagingLotId: null,
+    productId: args.productId,
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    quantityUnits: args.sealedCardCount,
+    unitOfMeasure: args.unitOfMeasure,
+    occurredAt: args.occurredAt,
+    payload: {
+      deduction_basis: "SEALING_COMPLETE",
+      reason: "handpack_seal",
+      no_lot_reason: args.skipReason,
+      handpack_blister_material_skipped: true,
+      handpack_blister_material_skip_reason: args.skipReason,
+    },
+    source: "production.handpack_seal_material",
+  });
 }
 
 /** Emit PACKAGING_MATERIAL_ISSUED and decrement lot for hand-pack seal path. */

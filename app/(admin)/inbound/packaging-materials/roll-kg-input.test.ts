@@ -106,11 +106,11 @@ describe("ROLL-INTAKE-NUMBER-INPUT-POLISH-1 — scroll safety and editable roll 
     expect(formSrc).toMatch(/noValidate/);
   });
 
-  it("action schema requires receiptNumber min(1)", () => {
-    expect(actionsSrc).toMatch(/receiptNumber.*z\.string\(\)\.min\(1/);
+  it("action schema allows optional receiptNumber at receive", () => {
+    expect(actionsSrc).toMatch(/receiptNumber: z\.string\(\)\.max\(60\)\.optional\(\)\.nullable\(\)/);
   });
 
-  it("form marks receiptNumber as required", () => {
+  it("form marks receiptNumber as required in UI", () => {
     expect(formSrc).toMatch(/name="receiptNumber"[\s\S]{0,200}required/);
   });
 

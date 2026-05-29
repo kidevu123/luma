@@ -10,11 +10,8 @@
 //   7. Write MATERIAL_CONSUMED_ACTUAL (lot found) or MATERIAL_CONSUMED_ESTIMATED (no lot)
 //   8. Return per-material status for UI display
 //
-// What this hook does NOT do:
-//   - Emit for roll materials (PVC_ROLL, FOIL_ROLL, BLISTER_FOIL) — those go through
-//     emitMaterialConsumedFromBlister via the blister counter segment
-//   - Decrement lot.accepted_quantity — that is derived from the event ledger
-//   - Block if BOM is incomplete — record ESTIMATED and move on; supervisor reviews
+// PACKAGING-PENDING-CONSUMPTION-HONESTY-1: when lot on-hand is insufficient,
+// split into ACTUAL (up to available) + ESTIMATED remainder (null lot).
 
 import { sql, eq } from "drizzle-orm";
 import type { db as Db } from "@/lib/db";
@@ -31,6 +28,7 @@ type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 export type PackagingConsumptionMaterialStatus =
   | "DEDUCTED"
   | "ESTIMATED"
+  | "PARTIAL"
   | "SKIPPED_ROLL"
   | "ZERO_CONSUMPTION";
 
@@ -46,6 +44,8 @@ export type PackagingConsumptionResult = {
     materialKind: string;
     perScope: string;
     qtyConsumed: number;
+    qtyActual?: number;
+    qtyEstimated?: number;
     status: PackagingConsumptionMaterialStatus;
     lotId: string | null;
   }[];
@@ -56,6 +56,7 @@ const ROLL_KINDS = new Set(["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"]);
 type BestLotRow = {
   id: string;
   source_system: string | null;
+  qty_on_hand: number;
 };
 
 type SpecRow = {
@@ -66,6 +67,35 @@ type SpecRow = {
   materialKind: string;
   materialUom: string;
 };
+
+type ConsumptionTotals = {
+  totalCases: number;
+  totalDisplays: number;
+  totalUnits: number;
+};
+
+type ConsumptionContextPayload = {
+  per_scope: string;
+  qty_per_unit: number;
+  total_units: number;
+  total_displays: number;
+  total_cases: number;
+  deduction_basis: "PACKAGING_COMPLETE";
+};
+
+/** Split qty into ACTUAL (lot-attributed) and ESTIMATED (pending) portions. */
+export function resolvePackagingConsumptionSplit(
+  qtyConsumed: number,
+  observedQtyOnHand: number,
+): { actualQty: number; estimatedQty: number } {
+  if (qtyConsumed <= 0) return { actualQty: 0, estimatedQty: 0 };
+  const available = Math.max(0, observedQtyOnHand);
+  const actualQty = Math.min(qtyConsumed, available);
+  return {
+    actualQty,
+    estimatedQty: qtyConsumed - actualQty,
+  };
+}
 
 export function calculatePackagingConsumption(opts: {
   masterCases: number;
@@ -89,6 +119,86 @@ export function calculateSpecQty(
   if (spec.perScope === "CASE") return totals.totalCases * spec.qtyPerUnit;
   if (spec.perScope === "DISPLAY") return totals.totalDisplays * spec.qtyPerUnit;
   return totals.totalUnits * spec.qtyPerUnit;
+}
+
+function baseContextPayload(
+  spec: SpecRow,
+  totals: ConsumptionTotals,
+): ConsumptionContextPayload {
+  return {
+    per_scope: spec.perScope,
+    qty_per_unit: spec.qtyPerUnit,
+    total_units: totals.totalUnits,
+    total_displays: totals.totalDisplays,
+    total_cases: totals.totalCases,
+    deduction_basis: "PACKAGING_COMPLETE",
+  };
+}
+
+async function emitEstimatedConsumption(
+  tx: Tx,
+  args: {
+    spec: SpecRow;
+    productId: string;
+    workflowBagId: string;
+    stationId: string;
+    quantityUnits: number;
+    occurredAt: Date;
+    totals: ConsumptionTotals;
+    extraPayload: Record<string, unknown>;
+  },
+): Promise<void> {
+  if (args.quantityUnits <= 0) return;
+  await tx.insert(materialInventoryEvents).values({
+    eventType: "MATERIAL_CONSUMED_ESTIMATED",
+    packagingMaterialId: args.spec.packagingMaterialId,
+    packagingLotId: null,
+    productId: args.productId,
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    quantityUnits: args.quantityUnits,
+    unitOfMeasure: args.spec.materialUom,
+    occurredAt: args.occurredAt,
+    payload: {
+      ...baseContextPayload(args.spec, args.totals),
+      lot_source_system: null,
+      ...args.extraPayload,
+    },
+    source: "projector.packaging_complete_hook",
+  });
+}
+
+async function emitActualConsumption(
+  tx: Tx,
+  args: {
+    spec: SpecRow;
+    productId: string;
+    workflowBagId: string;
+    stationId: string;
+    lotId: string;
+    lotSourceSystem: string | null;
+    quantityUnits: number;
+    occurredAt: Date;
+    totals: ConsumptionTotals;
+  },
+): Promise<void> {
+  if (args.quantityUnits <= 0) return;
+  await tx.insert(materialInventoryEvents).values({
+    eventType: "MATERIAL_CONSUMED_ACTUAL",
+    packagingMaterialId: args.spec.packagingMaterialId,
+    packagingLotId: args.lotId,
+    productId: args.productId,
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    quantityUnits: args.quantityUnits,
+    unitOfMeasure: args.spec.materialUom,
+    occurredAt: args.occurredAt,
+    payload: {
+      ...baseContextPayload(args.spec, args.totals),
+      lot_source_system: args.lotSourceSystem,
+    },
+    source: "projector.packaging_complete_hook",
+  });
 }
 
 export async function emitCountBasedPackagingConsumption(
@@ -159,7 +269,7 @@ export async function emitCountBasedPackagingConsumption(
     };
   }
 
-  const { totalCases, totalDisplays, totalUnits } = calculatePackagingConsumption({
+  const totals = calculatePackagingConsumption({
     masterCases: args.payload.master_cases,
     displaysMade: args.payload.displays_made,
     looseUnits: args.payload.loose_cards,
@@ -187,7 +297,7 @@ export async function emitCountBasedPackagingConsumption(
       continue;
     }
 
-    const qtyConsumed = calculateSpecQty(spec, { totalCases, totalDisplays, totalUnits });
+    const qtyConsumed = calculateSpecQty(spec, totals);
 
     if (qtyConsumed === 0) {
       materialResults.push({
@@ -204,7 +314,7 @@ export async function emitCountBasedPackagingConsumption(
     }
 
     const bestLots = await tx.execute<BestLotRow>(sql`
-      SELECT id::text, source_system::text
+      SELECT id::text, source_system::text, qty_on_hand::int
       FROM packaging_lots
       WHERE packaging_material_id = ${spec.packagingMaterialId}::uuid
         AND status IN ('AVAILABLE', 'IN_USE')
@@ -215,27 +325,16 @@ export async function emitCountBasedPackagingConsumption(
     `);
     const bestLot = (bestLots as unknown as BestLotRow[])[0] ?? null;
 
-    if (bestLot) {
-      await tx.insert(materialInventoryEvents).values({
-        eventType: "MATERIAL_CONSUMED_ACTUAL",
-        packagingMaterialId: spec.packagingMaterialId,
-        packagingLotId: bestLot.id,
+    if (!bestLot) {
+      await emitEstimatedConsumption(tx, {
+        spec,
         productId,
         workflowBagId: args.workflowBagId,
         stationId: args.stationId,
         quantityUnits: qtyConsumed,
-        unitOfMeasure: spec.materialUom,
         occurredAt: args.occurredAt,
-        payload: {
-          per_scope: spec.perScope,
-          qty_per_unit: spec.qtyPerUnit,
-          total_units: totalUnits,
-          total_displays: totalDisplays,
-          total_cases: totalCases,
-          lot_source_system: bestLot.source_system,
-          deduction_basis: "PACKAGING_COMPLETE",
-        },
-        source: "projector.packaging_complete_hook",
+        totals,
+        extraPayload: { no_lot_reason: "no_available_lot" },
       });
       materialResults.push({
         packagingMaterialId: spec.packagingMaterialId,
@@ -243,44 +342,70 @@ export async function emitCountBasedPackagingConsumption(
         materialKind: spec.materialKind,
         perScope: spec.perScope,
         qtyConsumed,
-        status: "DEDUCTED",
-        lotId: bestLot.id,
-      });
-      hasActualConsumption = true;
-    } else {
-      await tx.insert(materialInventoryEvents).values({
-        eventType: "MATERIAL_CONSUMED_ESTIMATED",
-        packagingMaterialId: spec.packagingMaterialId,
-        packagingLotId: null,
-        productId,
-        workflowBagId: args.workflowBagId,
-        stationId: args.stationId,
-        quantityUnits: qtyConsumed,
-        unitOfMeasure: spec.materialUom,
-        occurredAt: args.occurredAt,
-        payload: {
-          per_scope: spec.perScope,
-          qty_per_unit: spec.qtyPerUnit,
-          total_units: totalUnits,
-          total_displays: totalDisplays,
-          total_cases: totalCases,
-          lot_source_system: null,
-          deduction_basis: "PACKAGING_COMPLETE",
-          no_lot_reason: "no_available_lot",
-        },
-        source: "projector.packaging_complete_hook",
-      });
-      materialResults.push({
-        packagingMaterialId: spec.packagingMaterialId,
-        materialName: spec.materialName,
-        materialKind: spec.materialKind,
-        perScope: spec.perScope,
-        qtyConsumed,
+        qtyEstimated: qtyConsumed,
         status: "ESTIMATED",
         lotId: null,
       });
       hasZeroOrSkipped = true;
+      continue;
     }
+
+    const { actualQty, estimatedQty } = resolvePackagingConsumptionSplit(
+      qtyConsumed,
+      bestLot.qty_on_hand,
+    );
+
+    if (actualQty > 0) {
+      await emitActualConsumption(tx, {
+        spec,
+        productId,
+        workflowBagId: args.workflowBagId,
+        stationId: args.stationId,
+        lotId: bestLot.id,
+        lotSourceSystem: bestLot.source_system,
+        quantityUnits: actualQty,
+        occurredAt: args.occurredAt,
+        totals,
+      });
+      hasActualConsumption = true;
+    }
+
+    if (estimatedQty > 0) {
+      await emitEstimatedConsumption(tx, {
+        spec,
+        productId,
+        workflowBagId: args.workflowBagId,
+        stationId: args.stationId,
+        quantityUnits: estimatedQty,
+        occurredAt: args.occurredAt,
+        totals,
+        extraPayload: {
+          insufficient_on_hand: true,
+          observed_qty_on_hand: bestLot.qty_on_hand,
+          partial_lot_id: bestLot.id,
+        },
+      });
+      hasZeroOrSkipped = true;
+    }
+
+    let status: PackagingConsumptionMaterialStatus;
+    if (actualQty > 0 && estimatedQty > 0) status = "PARTIAL";
+    else if (actualQty > 0) status = "DEDUCTED";
+    else status = "ESTIMATED";
+
+    materialResults.push({
+      packagingMaterialId: spec.packagingMaterialId,
+      materialName: spec.materialName,
+      materialKind: spec.materialKind,
+      perScope: spec.perScope,
+      qtyConsumed,
+      ...(actualQty > 0 ? { qtyActual: actualQty } : {}),
+      ...(estimatedQty > 0 ? { qtyEstimated: estimatedQty } : {}),
+      status,
+      lotId: actualQty > 0 ? bestLot.id : null,
+    });
+
+    if (estimatedQty > 0) hasZeroOrSkipped = true;
   }
 
   const nonSkipped = materialResults.filter(
@@ -291,7 +416,10 @@ export async function emitCountBasedPackagingConsumption(
     bomStatus = "MISSING";
   } else if (hasActualConsumption && !hasZeroOrSkipped) {
     bomStatus = "COMPLETE";
-  } else if (!hasActualConsumption && nonSkipped.every((m) => m.status === "ZERO_CONSUMPTION")) {
+  } else if (
+    !hasActualConsumption &&
+    nonSkipped.every((m) => m.status === "ZERO_CONSUMPTION")
+  ) {
     bomStatus = "PARTIAL";
   } else {
     bomStatus = hasActualConsumption ? "PARTIAL" : "PARTIAL";
@@ -300,9 +428,9 @@ export async function emitCountBasedPackagingConsumption(
   return {
     productId,
     bomStatus,
-    totalUnits,
-    totalDisplays,
-    totalCases,
+    totalUnits: totals.totalUnits,
+    totalDisplays: totals.totalDisplays,
+    totalCases: totals.totalCases,
     materials: materialResults,
   };
 }
