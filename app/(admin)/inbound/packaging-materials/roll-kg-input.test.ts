@@ -44,6 +44,81 @@ describe("ROLL-INTAKE-UX-LEGACY-1 — simplified roll tab", () => {
   });
 });
 
+describe("ROLL-INTAKE-NUMBER-INPUT-FIX-1 — text numeric fields (no wheel mutation)", () => {
+  it("roll count uses text input with inputMode numeric, not type number", () => {
+    expect(formSrc).toMatch(/Number of rolls[\s\S]{0,400}inputMode="numeric"/);
+    expect(formSrc).not.toMatch(/Number of rolls[\s\S]{0,200}type="number"/);
+  });
+
+  it("net weight rows use text decimal input, not type number", () => {
+    expect(formSrc).toMatch(/Net weight \(kg\)[\s\S]{0,300}inputMode="decimal"/);
+    expect(formSrc).not.toMatch(/netWeightKg[\s\S]{0,200}type="number"/);
+  });
+
+  it("advanced numeric fields use text inputMode not type number", () => {
+    expect(formSrc).not.toMatch(/type="number"/);
+    expect(formSrc).toMatch(/name="widthMm"/);
+    expect(formSrc).toMatch(/name="grossWeightKg"/);
+    expect(formSrc).toMatch(/inputMode="numeric"/);
+    expect(formSrc).toMatch(/inputMode="decimal"/);
+  });
+
+  it("roll count defaults to string 1 and parses without || 1 coercion", () => {
+    expect(formSrc).toMatch(/useState\("1"\)/);
+    expect(formSrc).not.toMatch(/Number\(e\.target\.value\) \|\| 1/);
+    expect(formSrc).toMatch(/parseRollCountInput/);
+    expect(formSrc).toMatch(/rollCountError/);
+  });
+
+  it("uses shared roll-receive-input helpers", () => {
+    const helpers = readFileSync(
+      join(BASE, "../../../../lib/inbound/roll-receive-input.ts"),
+      "utf8",
+    );
+    expect(helpers).toMatch(/parseRollCountInput/);
+    expect(helpers).toMatch(/parseDecimalKgInput/);
+    expect(formSrc).toMatch(/sanitizeRollCountTyping/);
+    expect(formSrc).toMatch(/resizeRollRows/);
+  });
+});
+
+describe("ROLL-INTAKE-NUMBER-INPUT-POLISH-1 — scroll safety and editable roll count", () => {
+  it("roll count input uses type=text not type=number (no wheel mutation)", () => {
+    // NumericTextInput always renders type="text"
+    expect(formSrc).toMatch(/type="text"/);
+    expect(formSrc).not.toMatch(/type="number"/);
+  });
+
+  it("roll count state is a string (allows temporary empty while editing)", () => {
+    expect(formSrc).toMatch(/rollCountText/);
+    expect(formSrc).toMatch(/useState.*"1"/);
+  });
+
+  it("sanitizeRollCountTyping allows empty string (backspace works)", () => {
+    expect(formSrc).toMatch(/sanitizeRollCountTyping/);
+  });
+
+  it("roll count commits on blur, not on every keystroke", () => {
+    expect(formSrc).toMatch(/onBlur.*handleRollCountBlur|handleRollCountBlur.*onBlur/);
+  });
+
+  it("form is noValidate (browser validation suppressed, JS handles it)", () => {
+    expect(formSrc).toMatch(/noValidate/);
+  });
+
+  it("action schema requires receiptNumber min(1)", () => {
+    expect(actionsSrc).toMatch(/receiptNumber.*z\.string\(\)\.min\(1/);
+  });
+
+  it("form marks receiptNumber as required", () => {
+    expect(formSrc).toMatch(/name="receiptNumber"[\s\S]{0,200}required/);
+  });
+
+  it("form defaults receiptType to NORMAL", () => {
+    expect(formSrc).toMatch(/useState.*"NORMAL"/);
+  });
+});
+
 describe("ROLL-INTAKE-UX-LEGACY-1 — spent roll / core weight in kg", () => {
   it("unmount form labels spent roll weight in kg", () => {
     expect(rollsFormsSrc).toMatch(/Spent roll \/ core weight \(kg/);

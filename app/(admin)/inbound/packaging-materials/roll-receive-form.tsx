@@ -1,10 +1,17 @@
 "use client";
 
 // ROLL-INTAKE-UX-LEGACY-1 — simplified multi-roll receive for PVC / foil.
+// ROLL-INTAKE-NUMBER-INPUT-FIX-1 — text numeric fields (no wheel mutation).
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { receiveRollsBatchAction } from "./actions";
 import { materialKindShortLabel } from "@/lib/inbound/roll-receive-batch";
+import {
+  parseRollCountInput,
+  parseDecimalKgInput,
+  resizeRollRows,
+  sanitizeRollCountTyping,
+} from "@/lib/inbound/roll-receive-input";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,10 +34,45 @@ type RollRow = {
 };
 
 const inputClass =
-  "mt-1 w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong placeholder:text-text-subtle focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors";
+  "mt-1 w-full h-9 px-2.5 rounded-lg border border-border bg-surface-2/60 text-[12.5px] text-text-strong placeholder:text-text-subtle focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition-colors tabular-nums";
 
 function emptyRow(): RollRow {
   return { rollNumber: "", netWeightKg: "" };
+}
+
+function NumericTextInput({
+  inputMode,
+  name,
+  value,
+  onChange,
+  onBlur,
+  placeholder,
+  required,
+  className,
+}: {
+  inputMode: "numeric" | "decimal";
+  name?: string;
+  value?: string;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+  required?: boolean;
+  className?: string;
+}) {
+  return (
+    <input
+      type="text"
+      inputMode={inputMode}
+      autoComplete="off"
+      {...(name ? { name } : {})}
+      {...(value !== undefined ? { value } : {})}
+      {...(onChange ? { onChange } : {})}
+      {...(onBlur ? { onBlur } : {})}
+      {...(placeholder ? { placeholder } : {})}
+      {...(required ? { required } : {})}
+      className={className ?? inputClass}
+    />
+  );
 }
 
 export function RollReceiveForm({
@@ -40,13 +82,11 @@ export function RollReceiveForm({
   materials: Material[];
   mountTargets: MountTarget[];
 }) {
-  const [receiptType, setReceiptType] = useState<
-    "NORMAL" | "LEGACY_OPENING_BALANCE"
-  >("LEGACY_OPENING_BALANCE");
-  const [rollCount, setRollCount] = useState(8);
-  const [rows, setRows] = useState<RollRow[]>(() =>
-    Array.from({ length: 8 }, emptyRow),
-  );
+  const [receiptType, setReceiptType] = useState<"NORMAL" | "LEGACY_OPENING_BALANCE">("NORMAL");
+  const [rollCountText, setRollCountText] = useState("1");
+  const [committedRollCount, setCommittedRollCount] = useState(1);
+  const [rollCountError, setRollCountError] = useState<string | null>(null);
+  const [rows, setRows] = useState<RollRow[]>(() => [emptyRow()]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [alreadyMounted, setAlreadyMounted] = useState(false);
   const [mountStationId, setMountStationId] = useState("");
@@ -55,27 +95,25 @@ export function RollReceiveForm({
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
-    setRows((prev) => {
-      const n = Math.min(Math.max(1, rollCount), 50);
-      if (prev.length === n) return prev;
-      if (prev.length < n) {
-        return [...prev, ...Array.from({ length: n - prev.length }, emptyRow)];
-      }
-      return prev.slice(0, n);
-    });
-    if (rollCount !== 1) setAlreadyMounted(false);
-  }, [rollCount]);
+    setRows((prev) => resizeRollRows(prev, committedRollCount, emptyRow));
+    if (committedRollCount !== 1) setAlreadyMounted(false);
+  }, [committedRollCount]);
 
-  const rollsJson = useMemo(
-    () =>
-      JSON.stringify(
-        rows.map((r) => ({
-          rollNumber: r.rollNumber,
-          netWeightKg: r.netWeightKg === "" ? Number.NaN : Number(r.netWeightKg),
-        })),
-      ),
-    [rows],
-  );
+  function commitRollCountFromText(text: string): boolean {
+    const parsed = parseRollCountInput(text);
+    if (!parsed.ok) {
+      setRollCountError(parsed.error);
+      return false;
+    }
+    setRollCountError(null);
+    setRollCountText(String(parsed.value));
+    setCommittedRollCount(parsed.value);
+    return true;
+  }
+
+  function handleRollCountBlur() {
+    commitRollCountFromText(rollCountText);
+  }
 
   function updateRow(index: number, patch: Partial<RollRow>) {
     setRows((prev) =>
@@ -87,8 +125,37 @@ export function RollReceiveForm({
     e.preventDefault();
     setError(null);
     setSuccess(null);
+
+    if (!commitRollCountFromText(rollCountText)) {
+      return;
+    }
+
+    const parsed = parseRollCountInput(rollCountText);
+    if (!parsed.ok) return;
+
+    const syncedRows = resizeRollRows(rows, parsed.value, emptyRow);
+    setRows(syncedRows);
+
+    const parsedRows: Array<{ rollNumber: string; netWeightKg: number }> = [];
+    for (let i = 0; i < syncedRows.length; i++) {
+      const row = syncedRows[i]!;
+      if (!row.rollNumber.trim()) {
+        setError(`Roll ${i + 1} needs a roll number.`);
+        return;
+      }
+      const weight = parseDecimalKgInput(row.netWeightKg);
+      if (!weight.ok) {
+        setError(`Roll ${i + 1}: ${weight.error}`);
+        return;
+      }
+      parsedRows.push({
+        rollNumber: row.rollNumber.trim(),
+        netWeightKg: weight.value,
+      });
+    }
+
     const fd = new FormData(e.currentTarget);
-    fd.set("rollsJson", rollsJson);
+    fd.set("rollsJson", JSON.stringify(parsedRows));
     fd.set("alreadyMounted", alreadyMounted ? "true" : "false");
     if (!alreadyMounted) fd.delete("mountStationId");
 
@@ -98,7 +165,7 @@ export function RollReceiveForm({
         setError(res.error);
         return;
       }
-      const count = rows.length;
+      const count = parsedRows.length;
       let msg = `Received ${count} roll${count === 1 ? "" : "s"}.`;
       if (res?.mountMessage) msg += ` ${res.mountMessage}`;
       else if (alreadyMounted && count === 1) {
@@ -106,12 +173,14 @@ export function RollReceiveForm({
           " Receive complete. Mount this roll from the floor station Rolls panel if it is not already mounted.";
       }
       setSuccess(msg);
-      setRows(Array.from({ length: rollCount }, emptyRow));
+      setRollCountText("1");
+      setCommittedRollCount(1);
+      setRows([emptyRow()]);
     });
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" noValidate>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="block">
           <span className="text-[11px] text-text-muted font-medium">
@@ -142,9 +211,9 @@ export function RollReceiveForm({
             name="receiptType"
             required
             value={receiptType}
-            onChange={(e) =>
+            onChange={(ev) =>
               setReceiptType(
-                e.target.value as "NORMAL" | "LEGACY_OPENING_BALANCE",
+                ev.target.value as "NORMAL" | "LEGACY_OPENING_BALANCE",
               )
             }
             className={inputClass}
@@ -163,7 +232,8 @@ export function RollReceiveForm({
           <input
             name="receiptNumber"
             type="text"
-            placeholder="Optional"
+            required
+            placeholder="e.g. PO-2024-001 or LEGACY-FOIL-01"
             className={inputClass}
           />
         </label>
@@ -172,15 +242,23 @@ export function RollReceiveForm({
           <span className="text-[11px] text-text-muted font-medium">
             Number of rolls
           </span>
-          <input
-            type="number"
-            min={1}
-            max={50}
-            required
-            value={rollCount}
-            onChange={(e) => setRollCount(Number(e.target.value) || 1)}
-            className={inputClass}
+          <NumericTextInput
+            inputMode="numeric"
+            value={rollCountText}
+            onChange={(ev) => {
+              setRollCountText(sanitizeRollCountTyping(ev.target.value));
+              setRollCountError(null);
+            }}
+            onBlur={handleRollCountBlur}
+            placeholder="1"
+            className={cn(
+              inputClass,
+              rollCountError ? "border-red-400 focus:border-red-500 focus:ring-red-500/20" : "",
+            )}
           />
+          {rollCountError ? (
+            <p className="mt-1 text-[11px] text-red-700">{rollCountError}</p>
+          ) : null}
         </label>
 
         <label className="block sm:col-span-2">
@@ -214,9 +292,8 @@ export function RollReceiveForm({
                 </span>
                 <input
                   type="text"
-                  required
                   value={row.rollNumber}
-                  onChange={(e) => updateRow(i, { rollNumber: e.target.value })}
+                  onChange={(ev) => updateRow(i, { rollNumber: ev.target.value })}
                   placeholder="e.g. FOIL-01"
                   className={inputClass}
                 />
@@ -225,15 +302,11 @@ export function RollReceiveForm({
                 <span className="text-[10px] text-text-subtle font-medium">
                   Net weight (kg)
                 </span>
-                <input
-                  type="number"
-                  required
-                  min={0.001}
-                  step="0.001"
+                <NumericTextInput
+                  inputMode="decimal"
                   value={row.netWeightKg}
-                  onChange={(e) => updateRow(i, { netWeightKg: e.target.value })}
+                  onChange={(ev) => updateRow(i, { netWeightKg: ev.target.value })}
                   placeholder="e.g. 5.2"
-                  className={inputClass}
                 />
               </label>
             </div>
@@ -241,13 +314,13 @@ export function RollReceiveForm({
         </div>
       </div>
 
-      {rollCount === 1 && mountTargets.length > 0 ? (
+      {committedRollCount === 1 && mountTargets.length > 0 ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50/50 px-4 py-3 space-y-2">
           <label className="flex items-start gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={alreadyMounted}
-              onChange={(e) => setAlreadyMounted(e.target.checked)}
+              onChange={(ev) => setAlreadyMounted(ev.target.checked)}
               className="mt-0.5"
             />
             <span className="text-[12px] text-amber-950">
@@ -268,7 +341,7 @@ export function RollReceiveForm({
                 name="mountStationId"
                 required
                 value={mountStationId}
-                onChange={(e) => setMountStationId(e.target.value)}
+                onChange={(ev) => setMountStationId(ev.target.value)}
                 className={inputClass}
               >
                 <option value="" disabled>
@@ -283,7 +356,7 @@ export function RollReceiveForm({
             </label>
           ) : null}
         </div>
-      ) : rollCount === 1 && mountTargets.length === 0 ? (
+      ) : committedRollCount === 1 && mountTargets.length === 0 ? (
         <p className="text-[11px] text-text-muted rounded-lg border border-border px-3 py-2">
           After receiving a single roll, mount it from the floor station{" "}
           <span className="font-semibold">Rolls</span> panel (Supervisor tools).
@@ -333,59 +406,31 @@ export function RollReceiveForm({
               <span className="text-[11px] text-text-muted font-medium">
                 Width (mm)
               </span>
-              <input
-                name="widthMm"
-                type="number"
-                min={0}
-                className={inputClass}
-              />
+              <NumericTextInput inputMode="numeric" name="widthMm" />
             </label>
             <label className="block">
               <span className="text-[11px] text-text-muted font-medium">
                 Thickness (μm)
               </span>
-              <input
-                name="thicknessMicrons"
-                type="number"
-                min={0}
-                className={inputClass}
-              />
+              <NumericTextInput inputMode="numeric" name="thicknessMicrons" />
             </label>
             <label className="block">
               <span className="text-[11px] text-text-muted font-medium">
                 Gross weight (kg) — all rolls
               </span>
-              <input
-                name="grossWeightKg"
-                type="number"
-                min={0}
-                step="0.001"
-                className={inputClass}
-              />
+              <NumericTextInput inputMode="decimal" name="grossWeightKg" />
             </label>
             <label className="block">
               <span className="text-[11px] text-text-muted font-medium">
                 Tare weight (kg) — all rolls
               </span>
-              <input
-                name="tareWeightKg"
-                type="number"
-                min={0}
-                step="0.001"
-                className={inputClass}
-              />
+              <NumericTextInput inputMode="decimal" name="tareWeightKg" />
             </label>
             <label className="block">
               <span className="text-[11px] text-text-muted font-medium">
                 Core weight at receipt (kg)
               </span>
-              <input
-                name="coreWeightKg"
-                type="number"
-                min={0}
-                step="0.001"
-                className={inputClass}
-              />
+              <NumericTextInput inputMode="decimal" name="coreWeightKg" />
             </label>
           </div>
         ) : null}
@@ -416,7 +461,7 @@ export function RollReceiveForm({
         >
           {pending
             ? "Saving…"
-            : `Receive ${rows.length} roll${rows.length === 1 ? "" : "s"}`}
+            : `Receive ${committedRollCount} roll${committedRollCount === 1 ? "" : "s"}`}
         </button>
       </div>
     </form>

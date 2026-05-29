@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.46] — 2026-05-29
+
+### Fixed (ROLL-INTAKE-NUMBER-INPUT-FIX-1)
+- **Roll intake numeric fields no longer mutate on scroll:** Replaced `type="number"` with text inputs using `inputMode="numeric"` / `inputMode="decimal"` for roll count, net kg rows, and advanced weight/dimension fields — eliminates browser wheel increment/decrement while focused.
+- **Roll count editable normally:** Count is held as string text defaulting to `"1"`; users can clear/backspace and type `8` without forced `|| 1` coercion or “18 then delete 1” behavior. Rows sync on blur/submit after validation.
+- **Inline validation:** Empty/invalid roll count shows a clear message and blocks submit; decimal kg values like 5.2, 8.75, 0.35 parse on submit before server action.
+
+### Tests added (ROLL-INTAKE-NUMBER-INPUT-FIX-1)
+- `lib/inbound/roll-receive-input.test.ts` — roll count and decimal kg parsing, row resize.
+- `roll-kg-input.test.ts` — form uses text numeric inputs, no `type="number"`.
+
+### Fixed (ROLL-INTAKE-NUMBER-INPUT-POLISH-1)
+- Scroll-safe numeric inputs: all number fields on the roll form use `type="text"` + `inputMode` — wheel-scroll no longer mutates values.
+- Editable roll count: field is a controlled text input; operators can select-all and type directly. Row grid updates on blur or submit only.
+- PO / reference is now required (schema `min(1)`); UI field marked required.
+- Default receipt type changed to "Normal receipt".
+
 ## [0.4.45] — 2026-05-27
 
 ### Changed (ROLL-INTAKE-UX-LEGACY-1)
