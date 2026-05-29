@@ -594,3 +594,73 @@ describe("BLISTER-MACHINE-COUNTER-1 · blister close-out uses machine counter", 
     expect(blisterFormBlock()).not.toMatch(/selectedProductId/);
   });
 });
+
+describe("ROLL-CHANGE-WORKFLOW-1 · inline roll-change card on pause", () => {
+  const rollCardIdx = src.indexOf("function RollChangeCard");
+  const rollCardBlock = rollCardIdx >= 0 ? src.slice(rollCardIdx, rollCardIdx + 3000) : "";
+
+  it("changeRollAction is imported from ./roll-actions", () => {
+    expect(src).toMatch(/import.*changeRollAction.*from.*\.\/roll-actions/);
+  });
+
+  it("RollChangeCard function exists in source", () => {
+    expect(rollCardIdx).toBeGreaterThan(0);
+  });
+
+  it("rollChangeRole prop is declared in StageActionButtons type", () => {
+    expect(src).toMatch(/rollChangeRole\?\s*:\s*"PVC"\s*\|\s*"FOIL"\s*\|\s*null/);
+  });
+
+  it("RollChangeCard is rendered only when isPaused and rollChangeRole is non-null", () => {
+    expect(src).toMatch(/isPaused[\s\S]{1,200}rollChangeRole\s*!=\s*null[\s\S]{1,200}RollChangeCard/);
+  });
+
+  it("RollChangeCard render is gated to BLISTER and COMBINED station kinds only", () => {
+    const renderBlock = (() => {
+      const startIdx = src.indexOf("rollChangeRole != null");
+      return startIdx >= 0 ? src.slice(startIdx, startIdx + 400) : "";
+    })();
+    expect(renderBlock).toMatch(/BLISTER/);
+    expect(renderBlock).toMatch(/COMBINED/);
+    expect(renderBlock).not.toMatch(/SEALING/);
+    expect(renderBlock).not.toMatch(/HANDPACK/);
+  });
+
+  it("counterSegmentCount is submitted in RollChangeCard form data", () => {
+    expect(rollCardBlock).toMatch(/fd\.set\(["']counterSegmentCount["']/);
+  });
+
+  it("newRollNumber is submitted in RollChangeCard form data", () => {
+    expect(rollCardBlock).toMatch(/fd\.set\(["']newRollNumber["']/);
+  });
+
+  it("role is submitted in RollChangeCard form data", () => {
+    expect(rollCardBlock).toMatch(/fd\.set\(["']role["']/);
+  });
+
+  it("RollChangeCard submit button is disabled when counterSegment or newRollNumber is empty", () => {
+    expect(rollCardBlock).toMatch(/disabled.*pending.*counterSegment.*newRollNumber/s);
+  });
+
+  it("RollChangeCard shows done confirmation after success, not an error", () => {
+    expect(rollCardBlock).toMatch(/roll change recorded/);
+    expect(rollCardBlock).toMatch(/Resume the bag/);
+  });
+
+  it("Resume bag button is NOT gated by rollChangeRole — resume is always available", () => {
+    const resumeBlockStart = src.indexOf("Resume bag");
+    const resumeBlock = resumeBlockStart >= 0 ? src.slice(Math.max(0, resumeBlockStart - 200), resumeBlockStart + 50) : "";
+    expect(resumeBlock).not.toMatch(/rollChangeRole/);
+  });
+
+  it("BlisterCompleteForm still fires BLISTER_COMPLETE — not changed by this task", () => {
+    const formIdx = src.indexOf("function BlisterCompleteForm");
+    const blisterBlock = src.slice(formIdx, formIdx + 2500);
+    expect(blisterBlock).toMatch(/BLISTER_COMPLETE/);
+    expect(blisterBlock).not.toMatch(/rollChangeRole/);
+  });
+
+  it("scan-card-form not imported or referenced in stage-action-buttons", () => {
+    expect(src).not.toMatch(/scan-card-form/);
+  });
+});

@@ -18,6 +18,7 @@ import {
   setOperatorAction,
   packagingCompleteAction,
 } from "./actions";
+import { changeRollAction } from "./roll-actions";
 import {
   STATION_RELEASE_FROM_STAGE,
   STATIONS_THAT_FINALIZE,
@@ -95,6 +96,7 @@ export function StageActionButtons({
   sealingCardsPerPress = null,
   hasProductMapped = true,
   sealingProductOptions = [],
+  rollChangeRole = null,
 }: {
   token: string;
   stationId: string;
@@ -114,6 +116,8 @@ export function StageActionButtons({
   hasProductMapped?: boolean;
   /** Finished SKU options for sealing close-out when product is missing. */
   sealingProductOptions?: SealingProductOption[];
+  /** When the bag was paused for a roll swap, drives the inline RollChangeCard. */
+  rollChangeRole?: "PVC" | "FOIL" | null;
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -309,6 +313,18 @@ export function StageActionButtons({
           <p className="text-xs">Resume to continue the cycle timer.</p>
         </div>
       )}
+
+      {isPaused &&
+        rollChangeRole != null &&
+        (stationKind === "BLISTER" || stationKind === "COMBINED") && (
+          <RollChangeCard
+            token={token}
+            stationId={stationId}
+            workflowBagId={workflowBagId}
+            operatorCode={operatorCode}
+            role={rollChangeRole}
+          />
+        )}
 
       <div className={`grid ${hasGenericStages ? "grid-cols-2" : "grid-cols-1"} gap-2`}>
         <input
@@ -947,6 +963,123 @@ function BlisterCompleteForm({
           {pending ? "Saving…" : "Save & close"}
         </button>
       </div>
+    </div>
+  );
+}
+
+function RollChangeCard({
+  token,
+  stationId,
+  workflowBagId,
+  operatorCode,
+  role,
+}: {
+  token: string;
+  stationId: string;
+  workflowBagId: string;
+  operatorCode: string;
+  role: "PVC" | "FOIL";
+}) {
+  const [counterSegment, setCounterSegment] = React.useState("");
+  const [newRollNumber, setNewRollNumber] = React.useState("");
+  const [newStartingWeight, setNewStartingWeight] = React.useState("");
+  const [done, setDone] = React.useState(false);
+  const [localError, setLocalError] = React.useState<string | null>(null);
+  const [pending, setPending] = React.useState(false);
+
+  const label = role === "PVC" ? "PVC" : "Foil";
+
+  if (done) {
+    return (
+      <div className="rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3 text-emerald-900 text-sm">
+        <p className="font-semibold">{label} roll change recorded</p>
+        <p className="text-xs">Resume the bag to continue.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-3 space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-orange-900">
+          {label} roll change required
+        </p>
+        <p className="text-xs text-orange-800/80">
+          Enter the machine counter reading when the old roll stopped, then
+          scan or type the new roll number.
+        </p>
+      </div>
+
+      <NumField
+        label="Machine counter when roll stopped"
+        value={counterSegment}
+        onChange={setCounterSegment}
+        scrollSafe
+      />
+
+      <label className="block text-sm">
+        <span className="block text-xs font-medium text-text-muted mb-1">
+          New {label} roll number
+        </span>
+        <input
+          type="text"
+          value={newRollNumber}
+          onChange={(e) => setNewRollNumber(e.target.value)}
+          placeholder="Roll number or scan token"
+          className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base"
+        />
+      </label>
+
+      <NumField
+        label="New roll starting weight (g, optional)"
+        value={newStartingWeight}
+        onChange={setNewStartingWeight}
+        scrollSafe
+      />
+
+      {localError && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <p className="font-semibold">Roll change failed</p>
+          <p className="text-xs">{localError}</p>
+        </div>
+      )}
+
+      <button
+        type="button"
+        disabled={pending || !counterSegment || !newRollNumber}
+        onClick={async () => {
+          setPending(true);
+          setLocalError(null);
+          try {
+            const fd = new FormData();
+            fd.set("token", token);
+            fd.set("stationId", stationId);
+            fd.set("workflowBagId", workflowBagId);
+            fd.set("role", role);
+            fd.set("counterSegmentCount", counterSegment);
+            fd.set("newRollNumber", newRollNumber);
+            if (newStartingWeight)
+              fd.set("newStartingWeightGrams", newStartingWeight);
+            if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
+            fd.set("clientEventId", newClientEventId());
+            const r = await changeRollAction(fd);
+            if (r && "error" in r && r.error) {
+              setLocalError(r.error);
+            } else {
+              setDone(true);
+            }
+          } catch (err) {
+            setLocalError(
+              err instanceof Error ? err.message : "Unexpected error.",
+            );
+          } finally {
+            setPending(false);
+          }
+        }}
+        className="w-full rounded-lg bg-orange-600 hover:bg-orange-700 active:bg-orange-800 text-white text-sm font-semibold px-4 py-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {pending ? "Recording…" : `Record ${label} roll change`}
+      </button>
     </div>
   );
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.36] — 2026-05-29
+
+### Added (ROLL-CHANGE-WORKFLOW-1)
+- **Inline roll-change card on pause:** When a BLISTER or COMBINED bag is paused with the **PVC roll swap** or **Foil roll swap** reason, the floor action area now shows a contextual `RollChangeCard` prompting the operator to record the roll change immediately. Fields: machine counter when roll stopped (required), new roll number (required), new starting weight (optional). Calls the existing `changeRollAction` unchanged. On success, shows a green confirmation; Resume bag is never blocked.
+- Station-kind guard: card only renders for `BLISTER` and `COMBINED`. SEALING, HANDPACK_BLISTER, and all other station kinds are unaffected.
+- `rollChangeRole?: "PVC" | "FOIL" | null` prop added to `StageActionButtons`. Page.tsx passes `requiredRollChangeRole` (derived from the last `BAG_PAUSED` event payload).
+
+### Tests added (ROLL-CHANGE-WORKFLOW-1)
+- `stage-action-buttons.test.ts` — `ROLL-CHANGE-WORKFLOW-1` describe block: import of `changeRollAction`, prop type, render gate (isPaused + non-null role + BLISTER/COMBINED), form field submission (counterSegmentCount, newRollNumber, role), done state, resume not gated, blister form unchanged, scan-card-form not touched.
+
 ## [0.4.35] — 2026-05-27
 
 ### Changed (MATERIAL-ROLL-CHANGE-1)
