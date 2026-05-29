@@ -280,18 +280,19 @@ export function UnmountRollForm({
           ))}
         </select>
       </Field>
-      <Field label="Final weight (g, optional)">
+      <Field label="Spent roll / core weight (kg, optional)">
         <input
           type="number"
-          inputMode="numeric"
+          inputMode="decimal"
           min="0"
-          step="1"
-          name="endingWeightGrams"
+          step="0.001"
+          name="endingWeightKg"
           className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm tabular-nums"
         />
         <p className="text-[11px] text-text-muted mt-1">
-          Leave blank if not weighed back. Lot stays AVAILABLE; confidence
-          will be MEDIUM until a weigh-back lands.
+          Weigh the spent roll (cardboard / core only) after material is used.
+          Leave blank if not weighed — lot stays AVAILABLE with MEDIUM
+          confidence until a weigh-back lands.
         </p>
       </Field>
       <Field label="Notes (optional)">
@@ -502,13 +503,13 @@ export function ChangeRollForm({
         </Field>
       )}
       {showEndingWeight ? (
-        <Field label="Ending weight of old roll (g, optional)">
+        <Field label="Spent roll / core weight (kg, optional)">
           <input
             type="number"
-            inputMode="numeric"
+            inputMode="decimal"
             min="0"
-            step="1"
-            name="endingWeightGrams"
+            step="0.001"
+            name="endingWeightKg"
             className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm tabular-nums"
           />
         </Field>

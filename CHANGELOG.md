@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.45] — 2026-05-27
+
+### Changed (ROLL-INTAKE-UX-LEGACY-1)
+- **Simplified roll receive tab:** `/inbound/packaging-materials?tab=roll` now focuses on material, receipt type (normal vs legacy opening balance), PO/reference, roll count, and per-roll number + net kg. Width, thickness, supplier, gross/tare/core, and similar fields moved to a collapsed “Advanced details” section.
+- **Multi-roll batch receive:** One submit creates N `packaging_lots` (e.g. 8 legacy foil rolls). Duplicate roll numbers within the batch or in inventory are rejected with clear errors.
+- **Already-mounted legacy roll:** When receiving exactly one roll, admin can mark it already mounted on a blister station; Luma records `ROLL_MOUNTED` and sets status `IN_USE` using existing material inventory events (no schema migration).
+- **Spent roll / core weight UX:** Floor unmount form now accepts spent roll / core weight in kg (`endingWeightKg` → grams server-side) with clearer operator copy.
+- **Idle roll dropdown filter:** Shared `filterSelectableIdleRollLots` helper — only `AVAILABLE` PVC/foil lots appear in mount / change-roll pickers; `DEPLETED`, `SCRAPPED`, and `IN_USE` are excluded.
+
+### Tests added (ROLL-INTAKE-UX-LEGACY-1)
+- `lib/inbound/roll-receive-batch.test.ts` — batch validation, JSON parse, role mapping.
+- `lib/production/idle-roll-lots.test.ts` — AVAILABLE vs DEPLETED/SCRAPPED/IN_USE filtering.
+- `roll-kg-input.test.ts` — updated for new form, batch action, spent-weight kg labels.
+
 ## [0.4.44] — 2026-05-29
 
 ### Fixed (HANDPACK-TABLET-TYPE-SOURCE-1)

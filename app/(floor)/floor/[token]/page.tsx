@@ -63,6 +63,7 @@ import {
   type FloorSupervisorToolLink,
 } from "@/lib/production/floor-station-mobile-nav";
 import { getActiveRollsForMachine } from "@/lib/production/active-rolls";
+import { filterSelectableIdleRollLots } from "@/lib/production/idle-roll-lots";
 import { StationRollPanel } from "./station-roll-panel";
 import { ElapsedTimer } from "./elapsed-timer";
 import { formatFloorTimeEastern } from "@/lib/floor-time";
@@ -462,7 +463,6 @@ export default async function FloorStationPage({
           .orderBy(tabletTypes.name)
       : [];
 
-  const ROLL_MATERIAL_KINDS = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"] as const;
   const showRollPanel = FLOOR_ROLL_STATION_KINDS.has(station.station.kind);
   type RollChangeRole = "PVC" | "FOIL";
   let requiredRollChangeRole: RollChangeRole | null = null;
@@ -515,6 +515,7 @@ export default async function FloorStationPage({
         ? db
             .select({
               id: packagingLots.id,
+              status: packagingLots.status,
               rollNumber: packagingLots.rollNumber,
               netWeightGrams: packagingLots.netWeightGrams,
               currentEstimateGrams: packagingLots.currentWeightGramsEstimate,
@@ -529,11 +530,7 @@ export default async function FloorStationPage({
             .where(and(eq(packagingLots.status, "AVAILABLE")))
         : Promise.resolve([]),
     ]);
-    const idleRollLots = availableLots.filter((l) =>
-      ROLL_MATERIAL_KINDS.includes(
-        l.materialKind as (typeof ROLL_MATERIAL_KINDS)[number],
-      ),
-    );
+    const idleRollLots = filterSelectableIdleRollLots(availableLots);
     const activeBagForRolls =
       currentAtStation && !currentAtStation.state?.isFinalized
         ? {

@@ -5,14 +5,14 @@
 
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { eq, asc, desc, sql, ne } from "drizzle-orm";
-import { packagingMaterials, packagingLots } from "@/lib/db/schema";
+import { eq, asc, desc, sql, ne, and, inArray } from "drizzle-orm";
+import { packagingMaterials, packagingLots, machines, stations } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
 import {
   receivePackagingMaterialAction,
-  receiveRollAction,
   voidPackagingLotAction,
 } from "./actions";
+import { RollReceiveForm } from "./roll-receive-form";
 import { isQaTestMaterial } from "@/lib/production/material-filters";
 import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import {
@@ -47,7 +47,8 @@ export default async function ReceivePackagingPage({
   const tab = sp.tab === "roll" ? "roll" : "count";
   const showQa = sp.show_qa === "true";
 
-  const [countMaterialsRaw, rollMaterialsRaw, recentLots] = await Promise.all([
+  const [countMaterialsRaw, rollMaterialsRaw, recentLots, mountTargetsRaw] =
+    await Promise.all([
     db
       .select({
         id: packagingMaterials.id,
@@ -94,7 +95,32 @@ export default async function ReceivePackagingPage({
       .where(ne(packagingLots.status, "SCRAPPED"))
       .orderBy(desc(packagingLots.receivedAt))
       .limit(20),
+    db
+      .select({
+        stationId: stations.id,
+        machineId: stations.machineId,
+        stationLabel: stations.label,
+        machineName: machines.name,
+      })
+      .from(stations)
+      .innerJoin(machines, eq(machines.id, stations.machineId))
+      .where(
+        and(
+          eq(stations.isActive, true),
+          eq(machines.isActive, true),
+          inArray(stations.kind, ["BLISTER", "COMBINED", "HANDPACK_BLISTER"]),
+        ),
+      )
+      .orderBy(asc(machines.name), asc(stations.label)),
   ]);
+
+  const mountTargets = mountTargetsRaw
+    .filter((t) => t.machineId != null)
+    .map((t) => ({
+      stationId: t.stationId,
+      machineId: t.machineId!,
+      label: `${t.machineName} — ${t.stationLabel}`,
+    }));
 
   const countMaterials = showQa
     ? countMaterialsRaw
@@ -290,103 +316,22 @@ export default async function ReceivePackagingPage({
           ) : (
             <>
               <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-[12px] text-sky-800 leading-relaxed">
-                Rolls are not packaging boxes. Each roll has a roll number, a
-                gross/net weight, optional width and thickness, and is consumed
-                gradually through roll-usage events at the blister machine.
+                Receive PVC or foil rolls in bulk — like tablet receiving. Pick
+                the material, how many rolls, then enter each roll number and net
+                weight in kg. Legacy opening balance is for rolls already on
+                hand before Luma go-live.
               </div>
-              {rollMaterialsRaw.length === 0 ? (
+              {rollMaterials.length === 0 ? (
                 <div className="px-4 py-8 text-center">
                   <Layers className="h-8 w-8 mx-auto mb-2 text-text-subtle" />
                   <p className="text-sm font-medium text-text-muted">No PVC/foil materials configured</p>
                   <p className="text-[11px] text-text-subtle mt-1">Add roll materials at Settings → Materials.</p>
                 </div>
               ) : (
-                <form
-                  action={async (fd) => {
-                    "use server";
-                    await receiveRollAction(fd);
-                  }}
-                  className="grid grid-cols-1 sm:grid-cols-2 gap-3"
-                >
-                  <FormField
-                    name="packagingMaterialId"
-                    label="Roll material"
-                    required
-                    type="select"
-                    options={rollMaterialsRaw.map((m) => ({
-                      value: m.id,
-                      label: `${m.sku} — ${m.name} (${m.kind})`,
-                    }))}
-                  />
-                  <FormField
-                    name="rollNumber"
-                    label="Roll number"
-                    required
-                    placeholder="e.g. PVC-23-A-04"
-                  />
-                  <FormField
-                    name="grossWeightKg"
-                    label="Gross weight (kg)"
-                    type="number"
-                    min={0}
-                    step="0.001"
-                  />
-                  <FormField
-                    name="tareWeightKg"
-                    label="Tare weight (kg)"
-                    type="number"
-                    min={0}
-                    step="0.001"
-                  />
-                  <FormField
-                    name="netWeightKg"
-                    label="Net weight (kg — only if no tare)"
-                    type="number"
-                    min={0}
-                    step="0.001"
-                  />
-                  <FormField
-                    name="widthMm"
-                    label="Width (mm)"
-                    type="number"
-                    min={0}
-                  />
-                  <FormField
-                    name="thicknessMicrons"
-                    label="Thickness (μm)"
-                    type="number"
-                    min={0}
-                  />
-                  <FormField
-                    name="materialSpec"
-                    label="Material spec"
-                    placeholder="PVC clear 250μ"
-                  />
-                  <FormField
-                    name="coreWeightKg"
-                    label="Core weight (kg)"
-                    type="number"
-                    min={0}
-                    step="0.001"
-                  />
-                  <FormField name="supplier" label="Supplier" />
-                  <FormField
-                    name="receiptNumber"
-                    label="PO / receipt reference"
-                  />
-                  <FormField name="lotNumber" label="Supplier lot number" />
-                  <FormField name="location" label="Storage location" />
-                  <FormField name="notes" label="Notes" />
-                  <div className="sm:col-span-2 flex items-center justify-between pt-1">
-                    <p className="text-[11px] text-text-muted">
-                      Enter all weights in <span className="font-semibold">kilograms</span> (e.g. 12.4, 8.75, 0.35).
-                      Net = gross − tare. If you enter only the net weight directly, the lot is tagged{" "}
-                      <span className="font-semibold">confidence MEDIUM</span>.
-                      Luma records weights in grams internally.
-                    </p>
-                    <FormSubmit label="Receive roll" />
-                  </div>
-                </form>
+                <RollReceiveForm
+                  materials={rollMaterials}
+                  mountTargets={mountTargets}
+                />
               )}
             </>
           )}

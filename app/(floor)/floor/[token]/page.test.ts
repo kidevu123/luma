@@ -434,7 +434,7 @@ describe("MATERIAL-ROLL-CHANGE-1 · station roll panel component", () => {
     expect(formSrc).toMatch(/fd\.set\("newPackagingLotId", newRollToken\)/);
     expect(formSrc).toMatch(/fd\.set\("newRollNumber", newRollToken\)/);
     expect(formSrc).toMatch(/name="counterSegmentCount"/);
-    expect(formSrc).toMatch(/name="endingWeightGrams"/);
+    expect(formSrc).toMatch(/name="endingWeightKg"/);
     expect(formSrc).toMatch(/changeRollAction/);
   });
 });

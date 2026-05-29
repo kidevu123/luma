@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { compact } from "@/lib/db/compact";
 import { requireAdmin } from "@/lib/auth-guards";
@@ -10,9 +10,19 @@ import {
   packagingLots,
   packagingMaterials,
   materialInventoryEvents,
+  machines,
+  stations,
 } from "@/lib/db/schema";
 import { computeNetWeight } from "@/lib/production/material";
 import { kgToGrams } from "@/lib/inbound/roll-weight";
+import {
+  parseRollReceiveRowsJson,
+  validateRollReceiveBatch,
+} from "@/lib/inbound/roll-receive-batch";
+import {
+  adminMountRollLot,
+  assertNoConflictingMountedRoll,
+} from "@/lib/inbound/admin-roll-mount";
 import {
   computeAcceptance,
   classifyVarianceSeverity,
@@ -392,6 +402,257 @@ export async function receiveRollAction(
     });
     revalidatePath("/inbound/packaging-materials");
     return { ok: true, ...(lotId ? { lotId } : {}) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Receive failed." };
+  }
+}
+
+// ─── Mode 2b — batch PVC / foil roll receive (legacy-friendly) ──
+
+const rollBatchSchema = z.object({
+  packagingMaterialId: z.string().uuid(),
+  receiptType: z.enum(["NORMAL", "LEGACY_OPENING_BALANCE"]),
+  receiptNumber: z.string().max(60).optional().nullable(),
+  notes: z.string().max(500).optional().nullable(),
+  rollsJson: z.string().min(2, "Roll list is required."),
+  alreadyMounted: z.enum(["true", "false"]).optional(),
+  mountStationId: z.string().uuid().optional().nullable(),
+  // Advanced — optional, collapsed in UI
+  supplier: z.string().max(120).optional().nullable(),
+  lotNumber: z.string().max(60).optional().nullable(),
+  grossWeightKg: z.coerce.number().min(0).optional().nullable(),
+  tareWeightKg: z.coerce.number().min(0).optional().nullable(),
+  widthMm: z.coerce.number().int().min(0).optional().nullable(),
+  thicknessMicrons: z.coerce.number().int().min(0).optional().nullable(),
+  materialSpec: z.string().max(120).optional().nullable(),
+  coreWeightKg: z.coerce.number().min(0).optional().nullable(),
+  location: z.string().max(120).optional().nullable(),
+});
+
+export async function receiveRollsBatchAction(
+  formData: FormData,
+): Promise<{
+  error?: string;
+  ok?: true;
+  lotIds?: string[];
+  mounted?: boolean;
+  mountMessage?: string;
+}> {
+  const actor = await requireAdmin();
+  const parsed = rollBatchSchema.safeParse({
+    packagingMaterialId: formData.get("packagingMaterialId"),
+    receiptType: formData.get("receiptType") ?? "NORMAL",
+    receiptNumber: formData.get("receiptNumber") || null,
+    notes: formData.get("notes") || null,
+    rollsJson: formData.get("rollsJson"),
+    alreadyMounted: formData.get("alreadyMounted") || undefined,
+    mountStationId: formData.get("mountStationId") || null,
+    supplier: formData.get("supplier") || null,
+    lotNumber: formData.get("lotNumber") || null,
+    grossWeightKg: formData.get("grossWeightKg") || null,
+    tareWeightKg: formData.get("tareWeightKg") || null,
+    widthMm: formData.get("widthMm") || null,
+    thicknessMicrons: formData.get("thicknessMicrons") || null,
+    materialSpec: formData.get("materialSpec") || null,
+    coreWeightKg: formData.get("coreWeightKg") || null,
+    location: formData.get("location") || null,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  const rowParse = parseRollReceiveRowsJson(d.rollsJson);
+  if ("error" in rowParse) return { error: rowParse.error };
+  const batchErr = validateRollReceiveBatch(rowParse.rows);
+  if (batchErr) return { error: batchErr };
+
+  const wantMount = d.alreadyMounted === "true";
+  if (wantMount && rowParse.rows.length !== 1) {
+    return {
+      error:
+        "“Already mounted on machine” applies to exactly one roll. Set count to 1 or uncheck the option.",
+    };
+  }
+  if (wantMount && !d.mountStationId) {
+    return { error: "Select a machine / station to mount this roll." };
+  }
+
+  const [mat] = await db
+    .select({ kind: packagingMaterials.kind })
+    .from(packagingMaterials)
+    .where(eq(packagingMaterials.id, d.packagingMaterialId))
+    .limit(1);
+  if (!mat) return { error: "Material not found." };
+  if (!["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"].includes(mat.kind)) {
+    return {
+      error: `Material must be a roll kind — picked ${mat.kind}.`,
+    };
+  }
+
+  const rollNumbers = rowParse.rows.map((r) => r.rollNumber.trim());
+  const dupesInDb = await db
+    .select({ rollNumber: packagingLots.rollNumber })
+    .from(packagingLots)
+    .where(inArray(packagingLots.rollNumber, rollNumbers));
+  if (dupesInDb.length > 0) {
+    const hit = dupesInDb[0]!.rollNumber ?? rollNumbers[0];
+    return {
+      error: `Roll number "${hit}" already exists in inventory.`,
+    };
+  }
+
+  let mountTarget: {
+    stationId: string;
+    machineId: string;
+    label: string;
+  } | null = null;
+  if (wantMount && d.mountStationId) {
+    const [target] = await db
+      .select({
+        stationId: stations.id,
+        machineId: stations.machineId,
+        stationLabel: stations.label,
+        machineName: machines.name,
+      })
+      .from(stations)
+      .innerJoin(machines, eq(machines.id, stations.machineId))
+      .where(
+        and(
+          eq(stations.id, d.mountStationId),
+          eq(stations.isActive, true),
+          eq(machines.isActive, true),
+        ),
+      )
+      .limit(1);
+    if (!target?.machineId) {
+      return { error: "Selected station is not bound to an active machine." };
+    }
+    mountTarget = {
+      stationId: target.stationId,
+      machineId: target.machineId,
+      label: `${target.machineName} — ${target.stationLabel}`,
+    };
+  }
+
+  const grossWeightGrams = kgToGrams(d.grossWeightKg ?? null);
+  const tareWeightGrams = kgToGrams(d.tareWeightKg ?? null);
+  const coreWeightGrams = kgToGrams(d.coreWeightKg ?? null);
+
+  try {
+    const lotIds: string[] = [];
+    let mounted = false;
+    let mountMessage: string | undefined;
+
+    await db.transaction(async (tx) => {
+      const accountability = await resolveAdminAccountability(tx, { actor });
+
+      if (mountTarget) {
+        const conflict = await assertNoConflictingMountedRoll(
+          tx,
+          mountTarget.machineId,
+          mat.kind,
+        );
+        if (conflict) throw new Error(conflict);
+      }
+
+      for (const row of rowParse.rows) {
+        const directNetGrams = kgToGrams(row.netWeightKg);
+        const net = computeNetWeight({
+          grossWeightGrams,
+          tareWeightGrams,
+          directNetGrams,
+        });
+        if (net.netGrams == null || net.netGrams <= 0) {
+          throw new Error(
+            `Could not compute net weight for roll "${row.rollNumber}".`,
+          );
+        }
+
+        const [lot] = await tx
+          .insert(packagingLots)
+          .values(
+            compact({
+              packagingMaterialId: d.packagingMaterialId,
+              qtyReceived: 1,
+              qtyOnHand: 1,
+              supplier: d.supplier,
+              rollNumber: row.rollNumber.trim(),
+              grossWeightGrams,
+              tareWeightGrams,
+              netWeightGrams: net.netGrams,
+              currentWeightGramsEstimate: net.netGrams,
+              weightUnit: "kg" as const,
+              widthMm: d.widthMm ?? null,
+              thicknessMicrons: d.thicknessMicrons ?? null,
+              materialSpec: d.materialSpec ?? null,
+              coreWeightGrams,
+              location: d.location ?? null,
+              notes: d.notes ?? null,
+              status: "AVAILABLE" as const,
+              confidence: net.confidence,
+              supplierLotNumber: d.lotNumber,
+              sourceSystem: "MANUAL_LUMA" as const,
+              receivedByUserId: actor.id,
+            }),
+          )
+          .returning({ id: packagingLots.id });
+        if (!lot) throw new Error("Insert returned no lot id.");
+        lotIds.push(lot.id);
+
+        await tx.insert(materialInventoryEvents).values({
+          eventType: "MATERIAL_RECEIVED",
+          packagingMaterialId: d.packagingMaterialId,
+          packagingLotId: lot.id,
+          actorUserId: actor.id,
+          quantityGrams: net.netGrams,
+          unitOfMeasure: "g",
+          payload: withAccountabilityPayload(
+            {
+              receipt_type: d.receiptType,
+              supplier: d.supplier ?? null,
+              receipt_number: d.receiptNumber ?? null,
+              lot_number: d.lotNumber ?? null,
+              roll_number: row.rollNumber.trim(),
+              net_weight_kg: row.netWeightKg,
+              net_weight_grams: net.netGrams,
+              weight_unit: "kg",
+              confidence: net.confidence,
+              missing_inputs: net.missingInputs,
+              source_system: "MANUAL_LUMA",
+            },
+            accountability,
+          ),
+          source: "admin.receive_roll_batch",
+        });
+
+        if (mountTarget && lotIds.length === 1) {
+          await adminMountRollLot(tx, {
+            lotId: lot.id,
+            packagingMaterialId: d.packagingMaterialId,
+            materialKind: mat.kind,
+            netWeightGrams: net.netGrams,
+            previousStatus: "AVAILABLE",
+            machineId: mountTarget.machineId,
+            stationId: mountTarget.stationId,
+            actorUserId: actor.id,
+            accountability,
+            notes: d.notes ?? null,
+          });
+          mounted = true;
+          mountMessage = `Roll mounted at ${mountTarget.label}.`;
+        }
+      }
+    });
+
+    revalidatePath("/inbound/packaging-materials");
+    return {
+      ok: true as const,
+      lotIds,
+      ...(mounted && mountMessage
+        ? { mounted: true as const, mountMessage }
+        : {}),
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Receive failed." };
   }

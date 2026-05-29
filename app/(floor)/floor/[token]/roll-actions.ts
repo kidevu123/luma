@@ -33,6 +33,7 @@ import { writeAudit } from "@/lib/db/audit";
 import { rebuildRollUsage } from "@/lib/projector/roll-usage";
 import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
 import { nextLotStatusForUnmount } from "@/lib/production/active-rolls";
+import { kgToGrams } from "@/lib/inbound/roll-weight";
 import {
   resolveStationAccountability,
   withAccountabilityPayload,
@@ -283,6 +284,7 @@ const unmountSchema = z
     packagingLotId: z.string().uuid().optional(),
     rollNumber: z.string().min(1).max(80).optional(),
     endingWeightGrams: z.coerce.number().int().min(0).optional().nullable(),
+    endingWeightKg: z.coerce.number().min(0).optional().nullable(),
     notes: z.string().max(500).optional().nullable(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
     overrideEmployeeCode: z.string().max(40).optional().nullable(),
@@ -301,6 +303,7 @@ export async function unmountRollAction(
     packagingLotId: formData.get("packagingLotId") || undefined,
     rollNumber: formData.get("rollNumber") || undefined,
     endingWeightGrams: formData.get("endingWeightGrams") || undefined,
+    endingWeightKg: formData.get("endingWeightKg") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: formData.get("clientEventId") || undefined,
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
@@ -309,6 +312,9 @@ export async function unmountRollAction(
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+  const endingWeightGrams =
+    d.endingWeightGrams ??
+    (d.endingWeightKg != null ? kgToGrams(d.endingWeightKg) : null);
   try {
     const station = await authStation(d.token, d.stationId);
     if (!station.machineId) return { error: "Station is not bound to a machine." };
@@ -342,7 +348,7 @@ export async function unmountRollAction(
     }
 
     const nextStatus = nextLotStatusForUnmount({
-      endingWeightGrams: d.endingWeightGrams ?? null,
+      endingWeightGrams,
     });
 
     await db.transaction(async (tx) => {
@@ -351,19 +357,19 @@ export async function unmountRollAction(
         overrideEmployeeCode: d.overrideEmployeeCode ?? null,
       });
       // Optional weigh-back first so deriveRollUsage etc. see it.
-      if (d.endingWeightGrams != null) {
+      if (endingWeightGrams != null) {
         await tx.insert(materialInventoryEvents).values({
           eventType: "ROLL_WEIGHED",
           packagingMaterialId: lot.packaging_material_id,
           packagingLotId: lot.id,
           machineId: station.machineId,
           stationId: station.id,
-          quantityGrams: d.endingWeightGrams,
+          quantityGrams: endingWeightGrams,
           unitOfMeasure: "g",
           payload: withAccountabilityPayload(
             {
               previous_weight_estimate: lot.current_weight_grams_estimate,
-              current_weight: d.endingWeightGrams,
+              current_weight: endingWeightGrams,
               weight_unit: "g",
               confidence: "HIGH",
               source: "unmount.weigh_back",
@@ -384,13 +390,16 @@ export async function unmountRollAction(
         packagingLotId: lot.id,
         machineId: station.machineId,
         stationId: station.id,
-        ...(d.endingWeightGrams != null ? { quantityGrams: d.endingWeightGrams } : {}),
+        ...(endingWeightGrams != null ? { quantityGrams: endingWeightGrams } : {}),
         unitOfMeasure: "g",
         payload: withAccountabilityPayload(
           {
-            ending_weight_grams: d.endingWeightGrams ?? null,
-            weight_unit: "g",
-            confidence: d.endingWeightGrams != null ? "HIGH" : "MEDIUM",
+            ending_weight_grams: endingWeightGrams,
+            ending_weight_kg:
+              d.endingWeightKg ??
+              (endingWeightGrams != null ? endingWeightGrams / 1000 : null),
+            weight_unit: "kg",
+            confidence: endingWeightGrams != null ? "HIGH" : "MEDIUM",
             notes: d.notes ?? null,
           },
           accountability,
@@ -401,8 +410,8 @@ export async function unmountRollAction(
       await tx
         .update(packagingLots)
         .set(
-          d.endingWeightGrams != null
-            ? { status: nextStatus, currentWeightGramsEstimate: d.endingWeightGrams }
+          endingWeightGrams != null
+            ? { status: nextStatus, currentWeightGramsEstimate: endingWeightGrams }
             : { status: nextStatus },
         )
         .where(eq(packagingLots.id, lot.id));
@@ -417,7 +426,7 @@ export async function unmountRollAction(
             targetType: "packaging_lot",
             targetId: lot.id,
             after: {
-              ending_weight_grams: d.endingWeightGrams ?? null,
+              ending_weight_grams: endingWeightGrams,
               new_status: nextStatus,
             },
           },

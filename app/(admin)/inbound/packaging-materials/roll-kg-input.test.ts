@@ -1,105 +1,57 @@
-// ROLL-WEIGHT-KG-INPUT-1 — verifies kg input plumbing across the
-// receive-roll form, action schema, and recent-receipts display.
+// ROLL-INTAKE-UX-LEGACY-1 — verifies simplified roll receive UX plumbing.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-const BASE = join(
-  import.meta.dirname,
-);
+const BASE = join(import.meta.dirname);
 const actionsSrc = readFileSync(join(BASE, "actions.ts"), "utf8");
 const pageSrc = readFileSync(join(BASE, "page.tsx"), "utf8");
+const formSrc = readFileSync(join(BASE, "roll-receive-form.tsx"), "utf8");
+const rollsFormsSrc = readFileSync(
+  join(BASE, "../../../(floor)/floor/[token]/rolls-forms.tsx"),
+  "utf8",
+);
+const rollActionsSrc = readFileSync(
+  join(BASE, "../../../(floor)/floor/[token]/roll-actions.ts"),
+  "utf8",
+);
 
-describe("ROLL-WEIGHT-KG-INPUT-1 — form labels no longer say (g)", () => {
-  it("grossWeightGrams label is gone from form", () => {
-    expect(pageSrc).not.toMatch(/Gross weight \(g\)/);
+describe("ROLL-INTAKE-UX-LEGACY-1 — simplified roll tab", () => {
+  it("page uses RollReceiveForm instead of inline verbose form", () => {
+    expect(pageSrc).toMatch(/RollReceiveForm/);
+    expect(pageSrc).not.toMatch(/name="grossWeightKg"/);
+    expect(pageSrc).not.toMatch(/name="widthMm"/);
   });
 
-  it("tareWeightGrams label is gone from form", () => {
-    expect(pageSrc).not.toMatch(/Tare weight \(g\)/);
+  it("batch form exposes receipt type and roll count", () => {
+    expect(formSrc).toMatch(/Legacy opening balance/);
+    expect(formSrc).toMatch(/Number of rolls/);
+    expect(formSrc).toMatch(/Net weight \(kg\)/);
+    expect(formSrc).toMatch(/Advanced details/);
   });
 
-  it("netWeightGrams label is gone from form", () => {
-    expect(pageSrc).not.toMatch(/Net weight \(g/);
-  });
-
-  it("coreWeightGrams label is gone from form", () => {
-    expect(pageSrc).not.toMatch(/Core weight \(g\)/);
-  });
-
-  it("form uses kg labels for all weight fields", () => {
-    expect(pageSrc).toMatch(/Gross weight \(kg\)/);
-    expect(pageSrc).toMatch(/Tare weight \(kg\)/);
-    expect(pageSrc).toMatch(/Net weight \(kg/);
-    expect(pageSrc).toMatch(/Core weight \(kg\)/);
-  });
-});
-
-describe("ROLL-WEIGHT-KG-INPUT-1 — form field names are Kg not Grams", () => {
-  it("form submits grossWeightKg", () => {
-    expect(pageSrc).toMatch(/name="grossWeightKg"/);
-  });
-
-  it("form submits tareWeightKg", () => {
-    expect(pageSrc).toMatch(/name="tareWeightKg"/);
-  });
-
-  it("form submits netWeightKg", () => {
-    expect(pageSrc).toMatch(/name="netWeightKg"/);
-  });
-
-  it("form submits coreWeightKg", () => {
-    expect(pageSrc).toMatch(/name="coreWeightKg"/);
-  });
-
-  it("old grams field names are absent from form", () => {
-    expect(pageSrc).not.toMatch(/name="grossWeightGrams"/);
-    expect(pageSrc).not.toMatch(/name="tareWeightGrams"/);
-    expect(pageSrc).not.toMatch(/name="netWeightGrams"/);
-    expect(pageSrc).not.toMatch(/name="coreWeightGrams"/);
-  });
-});
-
-describe("ROLL-WEIGHT-KG-INPUT-1 — weight unit selector removed", () => {
-  it("weightUnit select field is gone from form", () => {
-    expect(pageSrc).not.toMatch(/name="weightUnit"/);
-  });
-});
-
-describe("ROLL-WEIGHT-KG-INPUT-1 — action reads Kg fields and converts", () => {
-  it("action reads grossWeightKg from FormData", () => {
-    expect(actionsSrc).toMatch(/formData\.get\("grossWeightKg"\)/);
-  });
-
-  it("action reads tareWeightKg from FormData", () => {
-    expect(actionsSrc).toMatch(/formData\.get\("tareWeightKg"\)/);
-  });
-
-  it("action reads netWeightKg from FormData", () => {
-    expect(actionsSrc).toMatch(/formData\.get\("netWeightKg"\)/);
-  });
-
-  it("action reads coreWeightKg from FormData", () => {
-    expect(actionsSrc).toMatch(/formData\.get\("coreWeightKg"\)/);
-  });
-
-  it("action calls kgToGrams for conversion", () => {
+  it("batch action reads rollsJson and converts kg", () => {
+    expect(actionsSrc).toMatch(/receiveRollsBatchAction/);
+    expect(actionsSrc).toMatch(/rollsJson/);
     expect(actionsSrc).toMatch(/kgToGrams/);
+    expect(actionsSrc).toMatch(/adminMountRollLot/);
   });
 
-  it("action stores weightUnit as kg", () => {
-    expect(actionsSrc).toMatch(/weightUnit: "kg"/);
+  it("recent receipts still display net weight in kg", () => {
+    expect(pageSrc).toMatch(/Net \(kg\)/);
+    expect(pageSrc).toMatch(/formatGramsAsKg/);
   });
 });
 
-describe("ROLL-WEIGHT-KG-INPUT-1 — recent receipts display uses kg", () => {
-  it("column header says Net (kg) not Net g", () => {
-    expect(pageSrc).toMatch(/Net \(kg\)/);
-    expect(pageSrc).not.toMatch(/Net g\b/);
+describe("ROLL-INTAKE-UX-LEGACY-1 — spent roll / core weight in kg", () => {
+  it("unmount form labels spent roll weight in kg", () => {
+    expect(rollsFormsSrc).toMatch(/Spent roll \/ core weight \(kg/);
+    expect(rollsFormsSrc).toMatch(/name="endingWeightKg"/);
   });
 
-  it("display calls formatGramsAsKg", () => {
-    expect(pageSrc).toMatch(/formatGramsAsKg/);
+  it("unmount action accepts endingWeightKg", () => {
+    expect(rollActionsSrc).toMatch(/endingWeightKg/);
+    expect(rollActionsSrc).toMatch(/kgToGrams/);
   });
 });

@@ -19,6 +19,7 @@ import {
   qrCards,
 } from "@/lib/db/schema";
 import { getActiveRollsForMachine } from "@/lib/production/active-rolls";
+import { filterSelectableIdleRollLots } from "@/lib/production/idle-roll-lots";
 import {
   MountRollForm,
   UnmountRollForm,
@@ -27,8 +28,6 @@ import {
 } from "../rolls-forms";
 
 export const dynamic = "force-dynamic";
-
-const ROLL_KINDS = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"] as const;
 
 export default async function FloorRollsPage({
   params,
@@ -51,6 +50,7 @@ export default async function FloorRollsPage({
     db
       .select({
         id: packagingLots.id,
+        status: packagingLots.status,
         rollNumber: packagingLots.rollNumber,
         netWeightGrams: packagingLots.netWeightGrams,
         currentEstimateGrams: packagingLots.currentWeightGramsEstimate,
@@ -64,9 +64,7 @@ export default async function FloorRollsPage({
       )
       .where(and(eq(packagingLots.status, "AVAILABLE"))),
   ]);
-  const idleRollLots = availableLots.filter((l) =>
-    ROLL_KINDS.includes(l.materialKind as (typeof ROLL_KINDS)[number]),
-  );
+  const idleRollLots = filterSelectableIdleRollLots(availableLots);
   const idleLotsForForm = idleRollLots.map((l) => ({
     id: l.id,
     rollNumber: l.rollNumber,
