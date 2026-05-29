@@ -10,17 +10,6 @@
 ### Tests hardened (STATION-SEALING-TIMER-ROLLS-CLEANUP-1)
 - `page.test.ts` — Added explicit stationId filter assertion, desc-ordering assertion, and roll sub-page exclusion assertion for SEALING.
 
-## [0.4.50] — 2026-05-29
-
-### Added (MULTI-SEALING-SAME-BAG-1)
-- **Multi-station sealing segments:** New `SEALING_SEGMENT_COMPLETE` event records per-machine counter output while global bag stage stays `BLISTERED`. Explicit **Sealing complete — all machines done** fires final `SEALING_COMPLETE` (lane close only) to advance to `SEALED`.
-- **Packaging gate unchanged:** Pickup allowed at `BLISTERED`; close-out blocked until final sealing complete. Partial sealing progress banner on sealing and packaging stations.
-
-### Tests added (MULTI-SEALING-SAME-BAG-1)
-- `lib/production/sealing-segments.test.ts` — segment prereqs, progress fold, migration 0048.
-- `app/(floor)/floor/[token]/actions.test.ts` — segment vs final wiring.
-- `app/(floor)/floor/[token]/stage-action-buttons.test.ts` — dual sealing actions UI.
-
 ## [0.4.49] — 2026-05-29
 
 ### Added (ROLL-INTAKE-AUTO-NUMBER-INTEGRATION-1)
