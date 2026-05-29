@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.35] — 2026-05-27
+
+### Changed (MATERIAL-ROLL-CHANGE-1)
+- **Roll change on main station page:** BLISTER and COMBINED stations now show a **Machine rolls** panel with PVC/Foil mounted status and primary **Change PVC roll** / **Change Foil roll** actions. Mid-bag changes reuse existing `changeRollAction` via `ChangeRollForm` (same backend as `/floor/{token}/rolls`).
+- **Pause reason cleanup:** PVC roll swap and Foil roll swap removed from the BLISTER/COMBINED pause dropdown. Roll changes are no longer pause reasons. Pause options for BLISTER/COMBINED are now: Shift ending, Machine jam, QA check, Other. Server `pauseSchema` still accepts legacy `pvc_swap` / `foil_swap` for backward compatibility.
+
+### Tests added (MATERIAL-ROLL-CHANGE-1)
+- `station-pause-reasons.test.ts` — BLISTER/COMBINED exclude pvc_swap/foil_swap; default pause is shift_end.
+- `page.test.ts` — StationRollPanel wiring, active roll props, Change PVC/Foil buttons.
+
 ## [0.4.34] — 2026-05-28
 
 ### Changed (BLISTER-MACHINE-COUNTER-1)

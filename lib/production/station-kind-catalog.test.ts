@@ -87,8 +87,8 @@ describe("STATION-KIND-FIX-1 · HANDPACK_BLISTER floor expectations (regression)
     );
   });
 
-  it("BLISTER default pause remains pvc_swap", () => {
-    expect(getDefaultPauseReasonForStation("BLISTER")).toBe("pvc_swap");
+  it("BLISTER default pause is shift_end (roll swap uses roll-change UI)", () => {
+    expect(getDefaultPauseReasonForStation("BLISTER")).toBe("shift_end");
   });
 
   it("HANDPACK_BLISTER uses timed-only complete, not blister count form", () => {

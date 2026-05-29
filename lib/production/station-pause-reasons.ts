@@ -23,11 +23,11 @@ const MACHINE_JAM: PauseReason = {
 const QA_CHECK: PauseReason = { value: "qa_check", label: "QA check" };
 const OTHER: PauseReason = { value: "other", label: "Other" };
 
-/** Machine stations with PVC/foil roll mount (blister press). */
-const MACHINE_BOUND_REASONS: readonly PauseReason[] = [
+/** Blister press stations — roll swap pauses surface a roll-change card. */
+const BLISTER_MACHINE_REASONS: readonly PauseReason[] = [
+  SHIFT_END,
   PVC_SWAP,
   FOIL_SWAP,
-  SHIFT_END,
   MACHINE_JAM,
   QA_CHECK,
   OTHER,
@@ -54,9 +54,9 @@ const HAND_WORK_REASONS: readonly PauseReason[] = [
  * STATION-SEALING-TOOLS-1 — SEALING excludes PVC roll swap (no foil/PVC rolls).
  */
 export const STATION_PAUSE_REASON_MATRIX: Record<StationKind, PauseReason[]> = {
-  BLISTER: [...MACHINE_BOUND_REASONS],
+  BLISTER: [...BLISTER_MACHINE_REASONS],
   SEALING: [...SEALING_MACHINE_REASONS],
-  COMBINED: [...MACHINE_BOUND_REASONS],
+  COMBINED: [...BLISTER_MACHINE_REASONS],
   HANDPACK_BLISTER: [...HAND_WORK_REASONS],
   BOTTLE_HANDPACK: [...HAND_WORK_REASONS],
   PACKAGING: [...HAND_WORK_REASONS],

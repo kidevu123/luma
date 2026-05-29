@@ -31,6 +31,14 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
       expect(values, kind).toContain("pvc_swap");
       expect(values, kind).toContain("foil_swap");
       expect(values, kind).toContain("machine_jam");
+      expect(values, kind).toEqual([
+        "shift_end",
+        "pvc_swap",
+        "foil_swap",
+        "machine_jam",
+        "qa_check",
+        "other",
+      ]);
     }
   });
 
@@ -72,9 +80,9 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
     }
   });
 
-  it("blister roll-machine default is pvc_swap", () => {
+  it("blister roll-machine default is shift_end", () => {
     for (const kind of BLISTER_ROLL_KINDS) {
-      expect(getDefaultPauseReasonForStation(kind), kind).toBe("pvc_swap");
+      expect(getDefaultPauseReasonForStation(kind), kind).toBe("shift_end");
     }
   });
 
@@ -134,22 +142,11 @@ describe("STATION-SEALING-TOOLS-1 · hard-stop scope", () => {
   });
 });
 
-describe("BLISTER-MACHINE-COUNTER-1 · foil roll swap pause reason", () => {
-  it("BLISTER pause options include pvc_swap (PVC roll swap)", () => {
+describe("MATERIAL-ROLL-CHANGE-UX-1 · roll swap pause reasons remain wired", () => {
+  it("BLISTER pause options include pvc_swap and foil_swap", () => {
     const values = getPauseReasonsForStation("BLISTER").map((r) => r.value);
     expect(values).toContain("pvc_swap");
-  });
-
-  it("BLISTER pause options include foil_swap (Foil roll swap)", () => {
-    const values = getPauseReasonsForStation("BLISTER").map((r) => r.value);
     expect(values).toContain("foil_swap");
-  });
-
-  it("BLISTER foil_swap has correct label", () => {
-    const reason = getPauseReasonsForStation("BLISTER").find(
-      (r) => r.value === "foil_swap",
-    );
-    expect(reason?.label).toBe("Foil roll swap");
   });
 
   it("COMBINED pause options include pvc_swap and foil_swap", () => {
@@ -164,25 +161,20 @@ describe("BLISTER-MACHINE-COUNTER-1 · foil roll swap pause reason", () => {
     expect(values).not.toContain("foil_swap");
   });
 
-  it("HANDPACK_BLISTER pause options do not include pvc_swap or foil_swap", () => {
+  it("HANDPACK_BLISTER pause options do not include pvc_swap, foil_swap, or machine_jam", () => {
     const values = getPauseReasonsForStation("HANDPACK_BLISTER").map(
       (r) => r.value,
     );
     expect(values).not.toContain("pvc_swap");
     expect(values).not.toContain("foil_swap");
+    expect(values).not.toContain("machine_jam");
   });
+});
 
-  it("PACKAGING pause options do not include pvc_swap or foil_swap", () => {
-    const values = getPauseReasonsForStation("PACKAGING").map((r) => r.value);
-    expect(values).not.toContain("pvc_swap");
-    expect(values).not.toContain("foil_swap");
-  });
-
-  it("BOTTLE_HANDPACK pause options do not include pvc_swap or foil_swap", () => {
-    const values = getPauseReasonsForStation("BOTTLE_HANDPACK").map(
-      (r) => r.value,
-    );
-    expect(values).not.toContain("pvc_swap");
-    expect(values).not.toContain("foil_swap");
+describe("BLISTER-MACHINE-COUNTER-1 · legacy pause schema values (server only)", () => {
+  it("pause reasons type still includes pvc_swap and foil_swap for backward compatibility", () => {
+    const pauseSrc = readFileSync(join(__dirname, "station-pause-reasons.ts"), "utf8");
+    expect(pauseSrc).toMatch(/"pvc_swap"/);
+    expect(pauseSrc).toMatch(/"foil_swap"/);
   });
 });

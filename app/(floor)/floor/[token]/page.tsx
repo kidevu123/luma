@@ -21,6 +21,7 @@ import {
   productPackagingSpecs,
   productAllowedTablets,
   packagingMaterials,
+  packagingLots,
   inventoryBags,
   tabletTypes,
   smallBoxes,
@@ -52,9 +53,12 @@ import { QcPanel, type PendingReworkRow } from "./qc-panel";
 import { loadAutoLots, STATION_AUTO_MATERIAL_KINDS, type AutoLoadedLot } from "@/lib/production/auto-load-lots";
 import {
   floorSupervisorToolsForStation,
+  FLOOR_ROLL_STATION_KINDS,
   formatStationPageSubtitle,
   type FloorSupervisorToolLink,
 } from "@/lib/production/floor-station-mobile-nav";
+import { getActiveRollsForMachine } from "@/lib/production/active-rolls";
+import { StationRollPanel } from "./station-roll-panel";
 import { ElapsedTimer } from "./elapsed-timer";
 import { formatFloorTimeEastern } from "@/lib/floor-time";
 import { readFileSync } from "fs";
@@ -436,6 +440,108 @@ export default async function FloorStationPage({
       )
     : null;
 
+  const ROLL_MATERIAL_KINDS = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"] as const;
+  const showRollPanel = FLOOR_ROLL_STATION_KINDS.has(station.station.kind);
+  type RollChangeRole = "PVC" | "FOIL";
+  let requiredRollChangeRole: RollChangeRole | null = null;
+  let rollPanelData: {
+    activeRolls: {
+      role: "PVC" | "FOIL";
+      rollNumber: string | null;
+      materialName: string;
+      materialKind: string;
+      currentWeightEstimateGrams: number | null;
+      mountedAt: string;
+      confidence: "HIGH" | "MEDIUM" | "LOW";
+    }[];
+    idleRollLots: {
+      id: string;
+      rollNumber: string | null;
+      netWeightGrams: number | null;
+      currentEstimateGrams: number | null;
+      materialName: string;
+    }[];
+    activeBag: { id: string; label: string; startedAt: Date | string | null } | null;
+    machineBound: boolean;
+  } | null = null;
+
+  if (showRollPanel) {
+    if (currentAtStation?.state?.isPaused) {
+      const [pauseEvent] = await db
+        .select({ payload: workflowEvents.payload })
+        .from(workflowEvents)
+        .where(
+          and(
+            eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
+            eq(workflowEvents.eventType, "BAG_PAUSED"),
+          ),
+        )
+        .orderBy(desc(workflowEvents.occurredAt), desc(workflowEvents.id))
+        .limit(1);
+      const payload = (pauseEvent?.payload ?? {}) as Record<string, unknown>;
+      const reason = typeof payload.reason === "string" ? payload.reason : null;
+      requiredRollChangeRole =
+        reason === "pvc_swap" ? "PVC" : reason === "foil_swap" ? "FOIL" : null;
+    }
+
+    const machineBound = station.machine != null;
+    const [activeRollsRaw, availableLots] = await Promise.all([
+      machineBound && station.machine
+        ? getActiveRollsForMachine(station.machine.id)
+        : Promise.resolve([]),
+      machineBound
+        ? db
+            .select({
+              id: packagingLots.id,
+              rollNumber: packagingLots.rollNumber,
+              netWeightGrams: packagingLots.netWeightGrams,
+              currentEstimateGrams: packagingLots.currentWeightGramsEstimate,
+              materialName: packagingMaterials.name,
+              materialKind: packagingMaterials.kind,
+            })
+            .from(packagingLots)
+            .innerJoin(
+              packagingMaterials,
+              eq(packagingMaterials.id, packagingLots.packagingMaterialId),
+            )
+            .where(and(eq(packagingLots.status, "AVAILABLE")))
+        : Promise.resolve([]),
+    ]);
+    const idleRollLots = availableLots.filter((l) =>
+      ROLL_MATERIAL_KINDS.includes(
+        l.materialKind as (typeof ROLL_MATERIAL_KINDS)[number],
+      ),
+    );
+    const activeBagForRolls =
+      currentAtStation && !currentAtStation.state?.isFinalized
+        ? {
+            id: currentAtStation.bag.id,
+            label: currentAtStation.card?.label ?? "Active bag",
+            startedAt: currentAtStation.bag.startedAt,
+          }
+        : null;
+    rollPanelData = {
+      machineBound,
+      activeRolls: activeRollsRaw.map((r) => ({
+        role: r.role,
+        rollNumber: r.rollNumber,
+        materialName: r.materialName,
+        materialKind: r.materialKind,
+        currentWeightEstimateGrams: r.currentWeightEstimateGrams,
+        mountedAt: r.mountedAt,
+        confidence: r.confidence,
+      })),
+      idleRollLots: idleRollLots.map((l) => ({
+        id: l.id,
+        rollNumber: l.rollNumber,
+        netWeightGrams: l.netWeightGrams,
+        currentEstimateGrams: l.currentEstimateGrams,
+        materialName: l.materialName,
+      })),
+      activeBag: activeBagForRolls,
+    };
+  }
+
   return (
     <main className="min-h-dvh bg-page px-4 pt-2 sm:px-6 sm:pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-3">
       <header className="space-y-0.5">
@@ -456,6 +562,18 @@ export default async function FloorStationPage({
         activeSession={activeSession}
         employeeOptions={employeeOptions}
       />
+
+      {rollPanelData ? (
+        <StationRollPanel
+          token={token}
+          stationId={station.station.id}
+          machineBound={rollPanelData.machineBound}
+          activeRolls={rollPanelData.activeRolls}
+          idleRollLots={rollPanelData.idleRollLots}
+          activeBag={rollPanelData.activeBag}
+          requiredChangeRole={requiredRollChangeRole}
+        />
+      ) : null}
 
       <AutoLoadedLotsPanel lots={autoLots} stationKind={station.station.kind} />
 
@@ -861,4 +979,3 @@ function AutoLoadedLotsPanel({
     </div>
   );
 }
-

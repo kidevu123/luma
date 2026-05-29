@@ -384,11 +384,20 @@ export function ChangeRollForm({
   stationId,
   activeBag,
   idleRollLots,
+  fixedRole,
+  replacementInputMode = "select",
+  showEndingWeight = false,
+  onCancel,
 }: {
   token: string;
   stationId: string;
   activeBag: { id: string; label: string; startedAt: Date | string | null };
   idleRollLots: Lot[];
+  /** When set, role is locked (station main-page roll change buttons). */
+  fixedRole?: "PVC" | "FOIL";
+  replacementInputMode?: "select" | "text";
+  showEndingWeight?: boolean;
+  onCancel?: () => void;
 }) {
   const { pending, error, okMsg, submit } = useFormSubmit();
   return (
@@ -397,6 +406,15 @@ export function ChangeRollForm({
         fd.set("token", token);
         fd.set("stationId", stationId);
         fd.set("workflowBagId", activeBag.id);
+        if (fixedRole) fd.set("role", fixedRole);
+        const newRollToken = String(fd.get("newRollToken") ?? "").trim();
+        if (newRollToken) {
+          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(newRollToken)) {
+            fd.set("newPackagingLotId", newRollToken);
+          } else {
+            fd.set("newRollNumber", newRollToken);
+          }
+        }
         fd.set("clientEventId", newClientEventId());
         return submit(changeRollAction, fd, "Roll changed.");
       }}
@@ -423,19 +441,26 @@ export function ChangeRollForm({
         roll AND to the other active roll for the segment.
       </p>
       <Field label="Role being changed">
-        <div className="flex gap-2">
-          {(["PVC", "FOIL"] as const).map((r) => (
-            <label
-              key={r}
-              className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded border border-border bg-surface text-sm cursor-pointer"
-            >
-              <input type="radio" name="role" value={r} required />
-              {r}
-            </label>
-          ))}
-        </div>
+        {fixedRole ? (
+          <input type="hidden" name="role" value={fixedRole} />
+        ) : null}
+        {fixedRole ? (
+          <p className="text-sm font-medium py-2">{fixedRole} roll</p>
+        ) : (
+          <div className="flex gap-2">
+            {(["PVC", "FOIL"] as const).map((r) => (
+              <label
+                key={r}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded border border-border bg-surface text-sm cursor-pointer"
+              >
+                <input type="radio" name="role" value={r} required />
+                {r}
+              </label>
+            ))}
+          </div>
+        )}
       </Field>
-      <Field label="Counter when this roll stopped (segment count)">
+      <Field label="Machine counter reading">
         <input
           type="number"
           inputMode="numeric"
@@ -446,24 +471,48 @@ export function ChangeRollForm({
           className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm tabular-nums"
         />
       </Field>
-      <Field label="New roll lot (replacement)">
-        <select
-          name="newPackagingLotId"
-          required
-          defaultValue=""
-          className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
-        >
-          <option value="" disabled>
-            — Select new roll —
-          </option>
-          {idleRollLots.map((lot) => (
-            <option key={lot.id} value={lot.id}>
-              {lot.rollNumber ?? lot.id.slice(0, 8)} · {lot.materialName} ·{" "}
-              {lot.netWeightGrams != null ? `${lot.netWeightGrams} g` : "weight ?"}
+      {replacementInputMode === "text" ? (
+        <Field label="New roll scan token or lot token">
+          <input
+            type="text"
+            name="newRollToken"
+            required
+            autoCapitalize="characters"
+            className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
+          />
+        </Field>
+      ) : (
+        <Field label="New roll lot (replacement)">
+          <select
+            name="newPackagingLotId"
+            required
+            defaultValue=""
+            className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
+          >
+            <option value="" disabled>
+              — Select new roll —
             </option>
-          ))}
-        </select>
-      </Field>
+            {idleRollLots.map((lot) => (
+              <option key={lot.id} value={lot.id}>
+                {lot.rollNumber ?? lot.id.slice(0, 8)} · {lot.materialName} ·{" "}
+                {lot.netWeightGrams != null ? `${lot.netWeightGrams} g` : "weight ?"}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {showEndingWeight ? (
+        <Field label="Ending weight of old roll (g, optional)">
+          <input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            step="1"
+            name="endingWeightGrams"
+            className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm tabular-nums"
+          />
+        </Field>
+      ) : null}
       <Field label="Notes (optional)">
         <input
           type="text"
@@ -473,7 +522,25 @@ export function ChangeRollForm({
         />
       </Field>
       <StatusBanner error={error} ok={okMsg} />
-      <Submit pending={pending} label="Change roll" pendingLabel="Changing…" />
+      <div className={onCancel ? "flex gap-2" : undefined}>
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={pending}
+            className="flex-1 rounded-lg border border-border bg-surface text-sm font-medium px-4 py-3 transition-colors disabled:opacity-60"
+          >
+            Cancel
+          </button>
+        ) : null}
+        <div className={onCancel ? "flex-1" : undefined}>
+          <Submit
+            pending={pending}
+            label="Change roll"
+            pendingLabel="Changing…"
+          />
+        </div>
+      </div>
     </form>
   );
 }

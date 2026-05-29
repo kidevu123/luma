@@ -301,3 +301,97 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
     expect(scanSrc).not.toMatch(/PRODUCT_AT_START/);
   });
 });
+
+describe("MATERIAL-ROLL-CHANGE-1 · station roll panel on main page", () => {
+  it("imports StationRollPanel and active roll helper", () => {
+    expect(pageSrc).toMatch(/StationRollPanel/);
+    expect(pageSrc).toMatch(/getActiveRollsForMachine/);
+    expect(pageSrc).toMatch(/FLOOR_ROLL_STATION_KINDS/);
+  });
+
+  it("gates roll panel to BLISTER/COMBINED via FLOOR_ROLL_STATION_KINDS", () => {
+    expect(pageSrc).toMatch(/FLOOR_ROLL_STATION_KINDS\.has/);
+    expect(pageSrc).toMatch(/rollPanelData/);
+  });
+
+  it("renders StationRollPanel between operator session and current bag", () => {
+    const sessionIdx = pageSrc.indexOf("OperatorSessionPanel");
+    const rollIdx = pageSrc.indexOf("<StationRollPanel");
+    const bagIdx = pageSrc.indexOf("Current bag");
+    expect(rollIdx).toBeGreaterThan(sessionIdx);
+    expect(bagIdx).toBeGreaterThan(rollIdx);
+  });
+
+  it("passes active roll status props to StationRollPanel", () => {
+    expect(pageSrc).toMatch(/activeRolls=\{rollPanelData\.activeRolls\}/);
+    expect(pageSrc).toMatch(/idleRollLots=\{rollPanelData\.idleRollLots\}/);
+    expect(pageSrc).toMatch(/activeBag=\{rollPanelData\.activeBag\}/);
+  });
+
+  it("derives a required PVC roll-change card only from latest pvc_swap pause", () => {
+    expect(pageSrc).toMatch(/requiredRollChangeRole/);
+    expect(pageSrc).toMatch(/eq\(workflowEvents\.eventType, "BAG_PAUSED"\)/);
+    expect(pageSrc).toMatch(/reason === "pvc_swap" \? "PVC"/);
+  });
+
+  it("derives a required Foil roll-change card only from latest foil_swap pause", () => {
+    expect(pageSrc).toMatch(/reason === "foil_swap" \? "FOIL"/);
+    expect(pageSrc).toMatch(/requiredChangeRole=\{requiredRollChangeRole\}/);
+  });
+
+  it("does not derive roll-change prompts for non-roll station kinds", () => {
+    const showRollPanelIdx = pageSrc.indexOf("const showRollPanel");
+    const queryIdx = pageSrc.indexOf('eq(workflowEvents.eventType, "BAG_PAUSED")');
+    expect(showRollPanelIdx).toBeGreaterThan(-1);
+    expect(queryIdx).toBeGreaterThan(showRollPanelIdx);
+    expect(pageSrc).toMatch(/if \(showRollPanel\)/);
+  });
+});
+
+describe("MATERIAL-ROLL-CHANGE-1 · station roll panel component", () => {
+  const panelSrc = readFileSync(
+    join(__dirname, "station-roll-panel.tsx"),
+    "utf8",
+  );
+
+  it("is a client component with Change PVC roll and Change Foil roll buttons", () => {
+    expect(panelSrc).toMatch(/^"use client"/);
+    expect(panelSrc).toMatch(/Change PVC roll/);
+    expect(panelSrc).toMatch(/Change Foil roll/);
+  });
+
+  it("shows mounted vs not mounted for PVC and FOIL", () => {
+    expect(panelSrc).toMatch(/Not mounted/);
+    expect(panelSrc).toMatch(/\["PVC", "FOIL"\]/);
+  });
+
+  it("reuses ChangeRollForm with fixedRole from rolls-forms", () => {
+    expect(panelSrc).toMatch(/ChangeRollForm/);
+    expect(panelSrc).toMatch(/fixedRole=\{openRole\}/);
+    expect(panelSrc).toMatch(/from "\.\/rolls-forms"/);
+  });
+
+  it("shows PVC and Foil roll-change required cards only when requested", () => {
+    expect(panelSrc).toMatch(/requiredChangeRole/);
+    expect(panelSrc).toMatch(/role === "PVC" \? "PVC" : "Foil"/);
+    expect(panelSrc).toMatch(/\{label\} roll change required/);
+  });
+
+  it("handles a missing active roll without blocking resume", () => {
+    expect(panelSrc).toMatch(/Supervisor check required/);
+    expect(panelSrc).toMatch(/No active \{label\} roll is mounted/);
+    expect(panelSrc).not.toMatch(/Resume bag/);
+  });
+
+  it("pause-triggered form uses roll token input and existing changeRollAction path", () => {
+    const formSrc = readFileSync(join(__dirname, "rolls-forms.tsx"), "utf8");
+    expect(panelSrc).toMatch(/replacementInputMode=\{requiredChangeRole \? "text" : "select"\}/);
+    expect(panelSrc).toMatch(/showEndingWeight=\{requiredChangeRole != null\}/);
+    expect(formSrc).toMatch(/name="newRollToken"/);
+    expect(formSrc).toMatch(/fd\.set\("newPackagingLotId", newRollToken\)/);
+    expect(formSrc).toMatch(/fd\.set\("newRollNumber", newRollToken\)/);
+    expect(formSrc).toMatch(/name="counterSegmentCount"/);
+    expect(formSrc).toMatch(/name="endingWeightGrams"/);
+    expect(formSrc).toMatch(/changeRollAction/);
+  });
+});
