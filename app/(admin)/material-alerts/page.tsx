@@ -20,6 +20,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 
 export const dynamic = "force-dynamic";
 
@@ -224,9 +225,7 @@ export default async function MaterialAlertsPage() {
                         align="right"
                         className="tabular-nums font-mono text-text-muted"
                       >
-                        {r.currentWeightGramsEstimate != null
-                          ? `${r.currentWeightGramsEstimate} g`
-                          : "—"}
+                        {formatGramsAsKg(r.currentWeightGramsEstimate)}
                       </Td>
                       <Td
                         align="right"

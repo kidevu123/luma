@@ -12,6 +12,7 @@ import {
   materialInventoryEvents,
 } from "@/lib/db/schema";
 import { computeNetWeight } from "@/lib/production/material";
+import { kgToGrams } from "@/lib/inbound/roll-weight";
 import {
   computeAcceptance,
   classifyVarianceSeverity,
@@ -233,6 +234,7 @@ export async function receivePackagingMaterialAction(
 
 // ─── Mode 2 — PVC / foil roll receive ───────────────────────────
 
+// User enters kg (decimal). Server converts to integer grams before storage.
 const rollSchema = z
   .object({
     packagingMaterialId: z.string().uuid(),
@@ -240,26 +242,25 @@ const rollSchema = z
     receiptNumber: z.string().max(60).optional().nullable(),
     lotNumber: z.string().max(60).optional().nullable(),
     rollNumber: z.string().min(1, "Roll number is required").max(80),
-    grossWeightGrams: z.coerce.number().int().min(0).optional().nullable(),
-    tareWeightGrams: z.coerce.number().int().min(0).optional().nullable(),
-    netWeightGrams: z.coerce.number().int().min(0).optional().nullable(),
-    weightUnit: z.enum(["g", "kg", "lb"]).default("g"),
+    grossWeightKg: z.coerce.number().min(0).optional().nullable(),
+    tareWeightKg: z.coerce.number().min(0).optional().nullable(),
+    netWeightKg: z.coerce.number().min(0).optional().nullable(),
     widthMm: z.coerce.number().int().min(0).optional().nullable(),
     thicknessMicrons: z.coerce.number().int().min(0).optional().nullable(),
     materialSpec: z.string().max(120).optional().nullable(),
-    coreWeightGrams: z.coerce.number().int().min(0).optional().nullable(),
+    coreWeightKg: z.coerce.number().min(0).optional().nullable(),
     location: z.string().max(120).optional().nullable(),
     notes: z.string().max(500).optional().nullable(),
   })
   .refine(
     // Either gross+tare OR direct net must produce a positive net.
     (d) =>
-      (d.grossWeightGrams != null && d.tareWeightGrams != null) ||
-      (d.netWeightGrams != null && d.netWeightGrams > 0),
+      (d.grossWeightKg != null && d.tareWeightKg != null) ||
+      (d.netWeightKg != null && d.netWeightKg > 0),
     {
       message:
         "Provide gross + tare weights OR enter the net weight directly.",
-      path: ["netWeightGrams"],
+      path: ["netWeightKg"],
     },
   );
 
@@ -273,14 +274,13 @@ export async function receiveRollAction(
     receiptNumber: formData.get("receiptNumber") || null,
     lotNumber: formData.get("lotNumber") || null,
     rollNumber: formData.get("rollNumber"),
-    grossWeightGrams: formData.get("grossWeightGrams") || null,
-    tareWeightGrams: formData.get("tareWeightGrams") || null,
-    netWeightGrams: formData.get("netWeightGrams") || null,
-    weightUnit: formData.get("weightUnit") || "g",
+    grossWeightKg: formData.get("grossWeightKg") || null,
+    tareWeightKg: formData.get("tareWeightKg") || null,
+    netWeightKg: formData.get("netWeightKg") || null,
     widthMm: formData.get("widthMm") || null,
     thicknessMicrons: formData.get("thicknessMicrons") || null,
     materialSpec: formData.get("materialSpec") || null,
-    coreWeightGrams: formData.get("coreWeightGrams") || null,
+    coreWeightKg: formData.get("coreWeightKg") || null,
     location: formData.get("location") || null,
     notes: formData.get("notes") || null,
   });
@@ -314,11 +314,17 @@ export async function receiveRollAction(
     };
   }
 
+  // Convert user-entered kg → integer grams at the server boundary.
+  const grossWeightGrams = kgToGrams(parsed.data.grossWeightKg ?? null);
+  const tareWeightGrams = kgToGrams(parsed.data.tareWeightKg ?? null);
+  const directNetGrams = kgToGrams(parsed.data.netWeightKg ?? null);
+  const coreWeightGrams = kgToGrams(parsed.data.coreWeightKg ?? null);
+
   // Compute net weight via the pure helper. Never invents.
   const net = computeNetWeight({
-    grossWeightGrams: parsed.data.grossWeightGrams ?? null,
-    tareWeightGrams: parsed.data.tareWeightGrams ?? null,
-    directNetGrams: parsed.data.netWeightGrams ?? null,
+    grossWeightGrams,
+    tareWeightGrams,
+    directNetGrams,
   });
   if (net.netGrams == null) {
     return { error: "Could not compute net weight from inputs." };
@@ -339,15 +345,16 @@ export async function receiveRollAction(
             qtyOnHand: 1,
             supplier: parsed.data.supplier,
             rollNumber: parsed.data.rollNumber,
-            grossWeightGrams: parsed.data.grossWeightGrams ?? null,
-            tareWeightGrams: parsed.data.tareWeightGrams ?? null,
+            // All weight columns store integer grams. User entered kg.
+            grossWeightGrams,
+            tareWeightGrams,
             netWeightGrams: net.netGrams,
             currentWeightGramsEstimate: net.netGrams,
-            weightUnit: parsed.data.weightUnit,
+            weightUnit: "kg" as const,
             widthMm: parsed.data.widthMm ?? null,
             thicknessMicrons: parsed.data.thicknessMicrons ?? null,
             materialSpec: parsed.data.materialSpec ?? null,
-            coreWeightGrams: parsed.data.coreWeightGrams ?? null,
+            coreWeightGrams,
             location: parsed.data.location ?? null,
             notes: parsed.data.notes ?? null,
             status: "AVAILABLE" as const,
@@ -370,9 +377,11 @@ export async function receiveRollAction(
             receipt_number: parsed.data.receiptNumber ?? null,
             lot_number: parsed.data.lotNumber ?? null,
             roll_number: parsed.data.rollNumber,
-            gross_weight_grams: parsed.data.grossWeightGrams ?? null,
-            tare_weight_grams: parsed.data.tareWeightGrams ?? null,
-            weight_unit: parsed.data.weightUnit,
+            gross_weight_kg: parsed.data.grossWeightKg ?? null,
+            tare_weight_kg: parsed.data.tareWeightKg ?? null,
+            gross_weight_grams: grossWeightGrams,
+            tare_weight_grams: tareWeightGrams,
+            weight_unit: "kg",
             confidence: net.confidence,
             missing_inputs: net.missingInputs,
           },

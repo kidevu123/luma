@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { MaterialsTabs } from "@/components/ui/materials-tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import { scrapLotAction, deleteLotAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -161,9 +162,9 @@ export default async function PackagingInventoryPage({
                       </td>
                       <td className="p-2 text-right tabular-nums">
                         {l.currentWeightGramsEstimate != null
-                          ? `${l.currentWeightGramsEstimate} g`
+                          ? formatGramsAsKg(l.currentWeightGramsEstimate)
                           : l.netWeightGrams != null
-                            ? `${l.netWeightGrams} g`
+                            ? formatGramsAsKg(l.netWeightGrams)
                             : l.acceptedQuantity != null
                               ? `${l.acceptedQuantity} ${l.uom}`
                               : "Missing"}

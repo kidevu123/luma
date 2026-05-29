@@ -14,6 +14,7 @@ import {
   voidPackagingLotAction,
 } from "./actions";
 import { isQaTestMaterial } from "@/lib/production/material-filters";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import {
   AlertTriangle,
   Box,
@@ -324,33 +325,25 @@ export default async function ReceivePackagingPage({
                     placeholder="e.g. PVC-23-A-04"
                   />
                   <FormField
-                    name="grossWeightGrams"
-                    label="Gross weight (g)"
+                    name="grossWeightKg"
+                    label="Gross weight (kg)"
                     type="number"
                     min={0}
+                    step="0.001"
                   />
                   <FormField
-                    name="tareWeightGrams"
-                    label="Tare weight (g)"
+                    name="tareWeightKg"
+                    label="Tare weight (kg)"
                     type="number"
                     min={0}
+                    step="0.001"
                   />
                   <FormField
-                    name="netWeightGrams"
-                    label="Net weight (g — only if no tare)"
+                    name="netWeightKg"
+                    label="Net weight (kg — only if no tare)"
                     type="number"
                     min={0}
-                  />
-                  <FormField
-                    name="weightUnit"
-                    label="Weight unit"
-                    required
-                    type="select"
-                    options={[
-                      { value: "g", label: "grams" },
-                      { value: "kg", label: "kg" },
-                      { value: "lb", label: "lb" },
-                    ]}
+                    step="0.001"
                   />
                   <FormField
                     name="widthMm"
@@ -370,10 +363,11 @@ export default async function ReceivePackagingPage({
                     placeholder="PVC clear 250μ"
                   />
                   <FormField
-                    name="coreWeightGrams"
-                    label="Core weight (g)"
+                    name="coreWeightKg"
+                    label="Core weight (kg)"
                     type="number"
                     min={0}
+                    step="0.001"
                   />
                   <FormField name="supplier" label="Supplier" />
                   <FormField
@@ -385,9 +379,10 @@ export default async function ReceivePackagingPage({
                   <FormField name="notes" label="Notes" />
                   <div className="sm:col-span-2 flex items-center justify-between pt-1">
                     <p className="text-[11px] text-text-muted">
-                      Net weight = gross − tare. If you only know the net weight,
-                      enter it directly — the lot is tagged{" "}
+                      Enter all weights in <span className="font-semibold">kilograms</span> (e.g. 12.4, 8.75, 0.35).
+                      Net = gross − tare. If you enter only the net weight directly, the lot is tagged{" "}
                       <span className="font-semibold">confidence MEDIUM</span>.
+                      Luma records weights in grams internally.
                     </p>
                     <FormSubmit label="Receive roll" />
                   </div>
@@ -432,7 +427,7 @@ export default async function ReceivePackagingPage({
                       Qty
                     </th>
                     <th className="text-right px-3 py-2 text-[10px] uppercase tracking-[0.12em] text-text-subtle font-semibold">
-                      Net g
+                      Net (kg)
                     </th>
                     <th className="text-left px-3 py-2 text-[10px] uppercase tracking-[0.12em] text-text-subtle font-semibold">
                       Source
@@ -470,7 +465,7 @@ export default async function ReceivePackagingPage({
                         {l.qtyReceived ?? "—"}
                       </td>
                       <td className="px-3 py-2.5 text-right font-mono tabular-nums text-text-muted">
-                        {l.netWeightGrams ?? "—"}
+                        {formatGramsAsKg(l.netWeightGrams)}
                       </td>
                       <td className="px-3 py-2.5">
                         <span

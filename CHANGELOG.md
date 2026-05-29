@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.42] — 2026-05-29
+
+### Changed (ROLL-WEIGHT-KG-INPUT-1)
+- **Roll receive form now accepts kilograms:** All weight fields (gross, tare, net, core) accept decimal kg values (e.g. 12.4, 8.75, 0.35). The weight-unit selector has been removed — input is always kg.
+- **kg → grams conversion at server boundary:** `receiveRollAction` converts entered kg to integer grams via `kgToGrams` before storing. DB columns (`gross_weight_grams`, `tare_weight_grams`, `net_weight_grams`, `core_weight_grams`) are unchanged. `weight_unit` stored as `"kg"` on all new rolls.
+- **Admin displays converted to kg:** Recent receipts table ("Net (kg)"), packaging inventory weight column, and material-alerts runout weight column now show `X kg` instead of raw gram integers.
+- **Help text updated:** Form footer explains decimal kg input and internal grams storage.
+
+### Tests added (ROLL-WEIGHT-KG-INPUT-1)
+- `lib/inbound/roll-weight.test.ts` — 12 tests for `kgToGrams` and `formatGramsAsKg` (conversions, decimals, null handling, roundtrip).
+- `app/(admin)/inbound/packaging-materials/roll-kg-input.test.ts` — 19 source-scan tests verifying form labels, field names, action wiring, and display column.
+
 ## [0.4.41] — 2026-05-27
 
 ### Fixed (PRODUCT-AT-SEALING-UI-FIX-1)
