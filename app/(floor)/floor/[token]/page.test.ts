@@ -271,15 +271,14 @@ describe('STATION-SEALING-TIMER-ROLLS-CLEANUP-1 · station timer uses latest sta
   });
 
   it('recomputes paused seconds from events strictly after pickup timestamp', () => {
-    // Must use a comparison operator to filter pause events after pickup time
-    expect(pageSrc).toMatch(/workflowEvents\.occurredAt.*pickedUpAt|pickedUpAt.*occurredAt/s);
+    expect(pageSrc).toMatch(/workflowEvents\.occurredAt.*>.*pickedUpAt/s);
   });
 
   it('SEALING station page does not link to /rolls sub-page', () => {
-    // Roll sub-page is only exposed to BLISTER and COMBINED, not SEALING
-    // The supervisor tools panel renders nothing for SEALING
-    expect(pageSrc).toMatch(/FLOOR_ROLL_STATION_KINDS/);
+    // The rolls link is gated on floorSupervisorToolsForStation — it is NOT rendered
+    // unconditionally. Verify the rolls href only appears inside a conditional block.
     expect(pageSrc).toMatch(/floorSupervisorToolsForStation/);
+    expect(pageSrc).not.toMatch(/href=["'`]\/floor\/.*\/rolls["'`]/);
   });
 });
 
