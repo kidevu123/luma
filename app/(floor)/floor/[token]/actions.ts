@@ -697,12 +697,12 @@ export async function fireStageEventAction(
 
         const [rawContext] = await tx
           .select({ tabletTypeId: inventoryBags.tabletTypeId })
-          .from(qrCards)
+          .from(workflowBags)
           .leftJoin(
             inventoryBags,
-            eq(inventoryBags.bagQrCode, qrCards.scanToken),
+            eq(inventoryBags.id, workflowBags.inventoryBagId),
           )
-          .where(eq(qrCards.assignedWorkflowBagId, workflowBagId))
+          .where(eq(workflowBags.id, workflowBagId))
           .limit(1);
 
         const tabletRows = await tx

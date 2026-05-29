@@ -9,6 +9,45 @@ import {
 /** Product kinds eligible when mapping at a card-route sealing station. */
 export const SEALING_STATION_KINDS = new Set(["SEALING", "COMBINED"]);
 
+/** Station kinds where card/blister bags defer finished-SKU selection to sealing. */
+const DEFERRED_TO_SEALING_STATION_KINDS = new Set([
+  "BLISTER",
+  "HANDPACK_BLISTER",
+  "COMBINED",
+]);
+
+export type UnmappedProductBanner = {
+  title: string;
+  detail: string;
+};
+
+/** Copy for the amber banner when workflow_bags.product_id is null. */
+export function getUnmappedProductBanner(stationKind: string): UnmappedProductBanner {
+  if (SEALING_STATION_KINDS.has(stationKind)) {
+    return {
+      title: "No product selected yet.",
+      detail: "Select finished product before sealing close-out.",
+    };
+  }
+  if (stationKind === "PACKAGING") {
+    return {
+      title: "No product set on this bag.",
+      detail: "Select finished product at sealing before packaging close-out.",
+    };
+  }
+  if (DEFERRED_TO_SEALING_STATION_KINDS.has(stationKind)) {
+    return {
+      title: "No product selected yet.",
+      detail: "Finished product will be chosen at sealing.",
+    };
+  }
+  return {
+    title: "No product set on this bag.",
+    detail:
+      "This bag was started before the first-op product picker landed. Packaging completion will be blocked.",
+  };
+}
+
 export type SealingProductRow = {
   id: string;
   sku: string | null;

@@ -68,6 +68,7 @@ import {
   type PauseReasonValue,
 } from "@/lib/production/station-pause-reasons";
 import { SEALING_COUNTER_CONFIG_ERROR } from "@/lib/production/sealing-counter";
+import { SEALING_STATION_KINDS } from "@/lib/production/sealing-product";
 
 type PackagingSpecLine = {
   materialName: string;
@@ -140,6 +141,8 @@ export function StageActionButtons({
   const [packagingOpen, setPackagingOpen] = React.useState(false);
   const [sealingOpen, setSealingOpen] = React.useState(false);
   const [blisterOpen, setBlisterOpen] = React.useState(false);
+  const [selectedSealingProductId, setSelectedSealingProductId] =
+    React.useState("");
 
   // Operator code persists per-station for the browser session so an
   // operator only types it once a shift. Cleared with sessionStorage
@@ -184,6 +187,10 @@ export function StageActionButtons({
   const isPackaging = stationKind === "PACKAGING" || stationKind === "COMBINED";
   const packagingReady = !currentStage || currentStage === "SEALED";
   const needsSealingProductMapping = !hasProductMapped;
+  const showSealingProductPicker =
+    needsSealingProductMapping && SEALING_STATION_KINDS.has(stationKind);
+  const sealingProductReady =
+    !showSealingProductPicker || selectedSealingProductId.trim().length > 0;
   const packagingBlockedNoProduct =
     isPackaging && packagingReady && !hasProductMapped;
 
@@ -353,6 +360,36 @@ export function StageActionButtons({
         )}
       </div>
 
+      {!isPaused && showSealingProductPicker && !sealingOpen && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
+          <div className="font-semibold text-sm">
+            Select finished product before sealing close-out.
+          </div>
+          {sealingProductOptions.length === 0 ? (
+            <p className="text-sm text-red-800">
+              No active products are configured for this bag&apos;s tablet type.
+              Ask a supervisor to set up the product mapping.
+            </p>
+          ) : (
+            <select
+              required
+              value={selectedSealingProductId}
+              onChange={(e) => setSelectedSealingProductId(e.target.value)}
+              className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
+            >
+              <option value="" disabled>
+                — Select product —
+              </option>
+              {sealingProductOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
       {/* Per-stage complete buttons — large, primary action.
        *  SEALING and BLISTER events open a close-out form instead of
        *  firing immediately (counter presses vs blister count). */}
@@ -361,7 +398,10 @@ export function StageActionButtons({
           <button
             key={s.eventType}
             type="button"
-            disabled={pending !== null}
+            disabled={
+              pending !== null ||
+              (s.eventType === "SEALING_COMPLETE" && !sealingProductReady)
+            }
             onClick={() => {
               if (s.eventType === "SEALING_COMPLETE") setSealingOpen(true);
               else if (s.eventType === "BLISTER_COMPLETE") setBlisterOpen(true);
@@ -513,6 +553,9 @@ export function StageActionButtons({
           operatorCode={operatorCode}
           sealingCardsPerPress={sealingCardsPerPress}
           needsProductMapping={needsSealingProductMapping}
+          {...(selectedSealingProductId
+            ? { preselectedProductId: selectedSealingProductId }
+            : {})}
           sealingProductOptions={sealingProductOptions}
           onClose={(success) => {
             setSealingOpen(false);
@@ -759,6 +802,7 @@ function SealingCompleteForm({
   operatorCode,
   sealingCardsPerPress,
   needsProductMapping = false,
+  preselectedProductId,
   sealingProductOptions = [],
   onClose,
   onError,
@@ -769,13 +813,17 @@ function SealingCompleteForm({
   operatorCode: string;
   sealingCardsPerPress: number | null;
   needsProductMapping?: boolean;
+  /** When set from the inline picker, skip duplicate product UI. */
+  preselectedProductId?: string;
   sealingProductOptions?: SealingProductOption[];
   onClose: (success: boolean) => void;
   onError: (msg: string) => void;
 }) {
   const [pending, setPending] = React.useState(false);
   const [counterPresses, setCounterPresses] = React.useState("");
-  const [selectedProductId, setSelectedProductId] = React.useState("");
+  const [selectedProductId, setSelectedProductId] = React.useState(
+    preselectedProductId ?? "",
+  );
   const containerRef = React.useRef<HTMLDivElement>(null);
   const configReady =
     sealingCardsPerPress != null && sealingCardsPerPress >= 1;
@@ -783,8 +831,11 @@ function SealingCompleteForm({
     configReady && counterPresses !== ""
       ? Number(counterPresses) * sealingCardsPerPress
       : null;
+  const productIdForSubmit = preselectedProductId || selectedProductId;
+  const showProductPickerInForm =
+    needsProductMapping && !preselectedProductId?.trim();
   const productReady =
-    !needsProductMapping || selectedProductId.trim().length > 0;
+    !needsProductMapping || productIdForSubmit.trim().length > 0;
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, []);
@@ -792,7 +843,7 @@ function SealingCompleteForm({
   return (
     <div ref={containerRef} className="rounded-lg border-2 border-sky-300 bg-sky-50/40 p-3 space-y-3">
       <p className="text-sm font-semibold text-sky-900">Sealing close-out</p>
-      {needsProductMapping && (
+      {showProductPickerInForm && (
         <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
           <div className="font-semibold text-sm">What finished product is this?</div>
           <div className="text-amber-900/80">
@@ -869,8 +920,8 @@ function SealingCompleteForm({
               fd.set("stationId", stationId);
               fd.set("eventType", "SEALING_COMPLETE");
               fd.set("counterPresses", counterPresses || "0");
-              if (needsProductMapping && selectedProductId) {
-                fd.set("productId", selectedProductId);
+              if (needsProductMapping && productIdForSubmit) {
+                fd.set("productId", productIdForSubmit);
               }
               if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
               fd.set("clientEventId", newClientEventId());

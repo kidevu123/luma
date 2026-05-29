@@ -43,6 +43,7 @@ import {
 } from "@/lib/production/first-op-product";
 import {
   filterSealingProductsByTabletType,
+  getUnmappedProductBanner,
   SEALING_STATION_KINDS,
 } from "@/lib/production/sealing-product";
 import { OperatorSessionPanel } from "./operator-session-form";
@@ -369,6 +370,10 @@ export default async function FloorStationPage({
       : [];
 
   const hasProductMapped = currentProductId != null;
+  const unmappedProductBanner =
+    currentAtStation && !hasProductMapped
+      ? getUnmappedProductBanner(station.station.kind)
+      : null;
 
   let sealingProductOptionsForForm: {
     id: string;
@@ -382,9 +387,9 @@ export default async function FloorStationPage({
   ) {
     const [rawBagContext] = await db
       .select({ tabletTypeId: inventoryBags.tabletTypeId })
-      .from(qrCards)
-      .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
-      .where(eq(qrCards.assignedWorkflowBagId, currentAtStation.bag.id))
+      .from(workflowBags)
+      .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+      .where(eq(workflowBags.id, currentAtStation.bag.id))
       .limit(1);
 
     const sealingProductsRaw = await db
@@ -647,15 +652,12 @@ export default async function FloorStationPage({
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : unmappedProductBanner ? (
                 <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <div className="font-semibold">No product set on this bag.</div>
-                  <div>
-                    This bag was started before the first-op product picker
-                    landed. Packaging completion will be blocked.
-                  </div>
+                  <div className="font-semibold">{unmappedProductBanner.title}</div>
+                  <div>{unmappedProductBanner.detail}</div>
                 </div>
-              )}
+              ) : null}
               <p className="text-xs text-text-muted mt-2">
                 {stationTimerPickedUpAt ? (
                   <>

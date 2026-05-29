@@ -543,12 +543,28 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging g
   it("SealingCompleteForm includes product picker when needsProductMapping", () => {
     expect(src).toMatch(/needsProductMapping/);
     expect(src).toMatch(/What finished product is this/);
-    expect(src).toMatch(/fd\.set\("productId", selectedProductId\)/);
+    expect(src).toMatch(/fd\.set\("productId", productIdForSubmit\)/);
   });
 
   it("Complete sealing disabled until product selected when mapping required", () => {
     expect(src).toMatch(/productReady/);
     expect(src).toMatch(/disabled=\{pending \|\| !configReady \|\| !productReady\}/);
+  });
+
+  it("inline sealing product picker shown before close-out when unmapped", () => {
+    expect(src).toMatch(/showSealingProductPicker/);
+    expect(src).toMatch(
+      /Select finished product before sealing close-out/,
+    );
+    expect(src).toMatch(/sealingProductReady/);
+    expect(src).toMatch(
+      /s\.eventType === "SEALING_COMPLETE" && !sealingProductReady/,
+    );
+  });
+
+  it("mapped bag at SEALING stays counter-only — no inline picker when product set", () => {
+    expect(src).toMatch(/showSealingProductPicker/);
+    expect(src).toMatch(/needsSealingProductMapping && SEALING_STATION_KINDS/);
   });
 
   it("sealing counter UI remains counter presses only", () => {

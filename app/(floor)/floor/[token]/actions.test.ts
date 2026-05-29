@@ -236,6 +236,17 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
       /Select the finished product before completing sealing/,
     );
   });
+
+  it("resolves tablet type via workflow_bags.inventory_bag_id for sealing pick", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    expect(block).toMatch(
+      /eq\(inventoryBags\.id, workflowBags\.inventoryBagId\)/,
+    );
+    const mapBlock = block.slice(block.indexOf('eventType: "PRODUCT_MAPPED"') - 400);
+    expect(mapBlock).not.toMatch(/bagQrCode/);
+  });
 });
 
 describe("BLISTER-MACHINE-COUNTER-1 · pause schema accepts foil_swap", () => {

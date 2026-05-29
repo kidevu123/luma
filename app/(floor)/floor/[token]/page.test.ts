@@ -295,6 +295,25 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
     expect(pageSrc).toMatch(/sealingProductOptions=\{sealingProductOptionsForForm\}/);
   });
 
+  it("uses station-aware unmapped product banner, not legacy copy at SEALING", () => {
+    expect(pageSrc).toMatch(/getUnmappedProductBanner/);
+    expect(pageSrc).toMatch(/unmappedProductBanner/);
+    expect(pageSrc).not.toMatch(
+      /This bag was started before the first-op product picker/,
+    );
+  });
+
+  it("resolves tablet type via workflow_bags.inventory_bag_id for sealing options", () => {
+    expect(pageSrc).toMatch(
+      /eq\(inventoryBags\.id, workflowBags\.inventoryBagId\)/,
+    );
+    const optionsBlock = pageSrc.slice(
+      pageSrc.indexOf("sealingProductOptionsForForm"),
+      pageSrc.indexOf("sealingProductOptionsForForm") + 1200,
+    );
+    expect(optionsBlock).not.toMatch(/bagQrCode/);
+  });
+
   it("does not import scan-card-form changes", () => {
     const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
     expect(scanSrc).toMatch(/requireProductForFreshBag/);

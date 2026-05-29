@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.41] — 2026-05-27
+
+### Fixed (PRODUCT-AT-SEALING-UI-FIX-1)
+- **Sealing station unmapped bags:** Station-aware amber banner replaces the misleading “started before the first-op product picker” copy at SEALING/COMBINED. Unmapped bags now read “Select finished product before sealing close-out.”
+- **Inline product picker at sealing:** Product dropdown (tablet-type filtered) appears on the main stage panel before Sealing complete; the stage button stays disabled until a SKU is chosen.
+- **Tablet type lookup:** Sealing product options and `PRODUCT_MAPPED` validation resolve tablet type via `workflow_bags.inventory_bag_id`, not bag-card QR join.
+
+### Tests added (PRODUCT-AT-SEALING-UI-FIX-1)
+- `sealing-product.test.ts` — `getUnmappedProductBanner` per station kind.
+- `page.test.ts` — station-aware banner + inventory_bag_id join.
+- `stage-action-buttons.test.ts` — inline picker + disabled sealing button.
+- `actions.test.ts` — inventory_bag_id join for sealing product pick.
+
 ## [0.4.40] — 2026-05-29
 
 ### Added (ZOHO-FINISHED-GOODS-OUTBOX-1)

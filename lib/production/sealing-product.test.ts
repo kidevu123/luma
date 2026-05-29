@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   filterSealingProductsByTabletType,
+  getUnmappedProductBanner,
   validateSealingProductPick,
 } from "./sealing-product";
 
@@ -63,5 +64,34 @@ describe("filterSealingProductsByTabletType", () => {
   it("filters to matching tablet type", () => {
     const filtered = filterSealingProductsByTabletType(products, "tt-1");
     expect(filtered.map((p) => p.id)).toEqual(["a"]);
+  });
+});
+
+describe("getUnmappedProductBanner", () => {
+  it("SEALING shows sealing close-out copy, not legacy warning", () => {
+    const banner = getUnmappedProductBanner("SEALING");
+    expect(banner.detail).toMatch(/Select finished product before sealing close-out/);
+    expect(banner.detail).not.toMatch(/started before the first-op product picker/);
+  });
+
+  it("COMBINED at sealing uses sealing close-out copy", () => {
+    const banner = getUnmappedProductBanner("COMBINED");
+    expect(banner.detail).toMatch(/Select finished product before sealing close-out/);
+  });
+
+  it("HANDPACK_BLISTER defers to sealing without legacy warning", () => {
+    const banner = getUnmappedProductBanner("HANDPACK_BLISTER");
+    expect(banner.detail).toMatch(/chosen at sealing/);
+    expect(banner.detail).not.toMatch(/started before the first-op product picker/);
+  });
+
+  it("PACKAGING points back to sealing", () => {
+    const banner = getUnmappedProductBanner("PACKAGING");
+    expect(banner.detail).toMatch(/Select finished product at sealing/);
+  });
+
+  it("unknown station keeps legacy copy", () => {
+    const banner = getUnmappedProductBanner("BOTTLE_HANDPACK");
+    expect(banner.detail).toMatch(/started before the first-op product picker/);
   });
 });
