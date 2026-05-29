@@ -72,8 +72,13 @@ describe("ROLL-INTAKE-BULK-COUNT-LIMIT-1 — server row cap", () => {
     expect("rows" in r && r.rows).toHaveLength(250);
   });
 
-  it("rejects 251 rolls with aligned server error", () => {
-    const r = parseRollReceiveRowsJson(rowsJson(251));
+  it("accepts 500 rolls in rollsJson", () => {
+    const r = parseRollReceiveRowsJson(rowsJson(500));
+    expect("rows" in r && r.rows).toHaveLength(500);
+  });
+
+  it("rejects 501 rolls with aligned server error", () => {
+    const r = parseRollReceiveRowsJson(rowsJson(501));
     expect("error" in r && r.error).toBe(`Maximum ${ROLL_COUNT_MAX} rolls per receipt.`);
   });
 });

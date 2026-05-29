@@ -37,17 +37,18 @@ describe("ROLL-INTAKE-NUMBER-INPUT-FIX-1 — roll count parsing", () => {
 });
 
 describe("ROLL-INTAKE-BULK-COUNT-LIMIT-1 — roll count ceiling", () => {
-  it("accepts 50, 58, and 250 rolls", () => {
+  it("accepts 50, 58, 250, and 500 rolls", () => {
     expect(parseRollCountInput("50")).toEqual({ ok: true, value: 50 });
     expect(parseRollCountInput("58")).toEqual({ ok: true, value: 58 });
     expect(parseRollCountInput("250")).toEqual({ ok: true, value: 250 });
+    expect(parseRollCountInput("500")).toEqual({ ok: true, value: 500 });
   });
 
-  it("rejects 251 with aligned error copy", () => {
-    const result = parseRollCountInput("251");
+  it("rejects 501 with aligned error copy", () => {
+    const result = parseRollCountInput("501");
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toBe("Roll count must be between 1 and 250.");
+      expect(result.error).toBe("Roll count must be between 1 and 500.");
     }
   });
 
