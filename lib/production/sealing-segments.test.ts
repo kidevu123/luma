@@ -3,6 +3,7 @@ import {
   deriveSealingSegmentProgress,
   readSealingSegmentCount,
   SEALING_SEGMENT_EVENT,
+  needsSealingLaneClose,
 } from "./sealing-segments";
 import {
   checkStageProgression,
@@ -40,6 +41,26 @@ describe("SEALING_SEGMENT_EVENT", () => {
         eventType: "SEALING_COMPLETE",
         currentStage: "SEALED",
       }).allowed,
+    ).toBe(false);
+  });
+});
+
+describe("needsSealingLaneClose", () => {
+  it("is true for BLISTERED bags with at least one segment", () => {
+    expect(
+      needsSealingLaneClose({ stage: "BLISTERED", segmentCount: 1 }),
+    ).toBe(true);
+  });
+
+  it("is false when lane-close already advanced stage", () => {
+    expect(
+      needsSealingLaneClose({ stage: "SEALED", segmentCount: 2 }),
+    ).toBe(false);
+  });
+
+  it("is false before any segment exists", () => {
+    expect(
+      needsSealingLaneClose({ stage: "BLISTERED", segmentCount: 0 }),
     ).toBe(false);
   });
 });

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.58] — 2026-05-30
+
+### Fixed (MULTI-SEALING-FINAL-CLOSE-UNSTICK-1)
+- **Sealing segment no longer auto-releases the bag:** After `SEALING_SEGMENT_COMPLETE`, the bag stays pinned at the sealing station so **Sealing complete — all machines done** remains visible. Operators explicitly hand off to the next sealing machine via a new button when needed.
+- **Idle sealing station surfaces bags awaiting lane-close:** When no bag is active, sealing stations show a banner and pickup labels for BLISTERED bags with segment(s) but no final close, so stuck bags (e.g. Bag Card 102) can be picked up to finalize.
+
+### Tests added (MULTI-SEALING-FINAL-CLOSE-UNSTICK-1)
+- `sealing-segments.test.ts` — `needsSealingLaneClose` helper.
+- `actions.test.ts` — segment keeps pin; `releaseSealingHandoffAction` guards.
+- `stage-action-buttons.test.ts` — handoff button wiring.
+
 ## [0.4.57] — 2026-05-30
 
 ### Added (ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1)

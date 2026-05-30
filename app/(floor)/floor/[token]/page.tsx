@@ -50,7 +50,10 @@ import {
   getSealingProductFilterHint,
   resolveWorkflowBagTabletTypeId,
 } from "@/lib/production/workflow-bag-tablet-context";
-import { deriveSealingSegmentProgress } from "@/lib/production/sealing-segments";
+import {
+  deriveSealingSegmentProgress,
+  needsSealingLaneClose,
+} from "@/lib/production/sealing-segments";
 import { OperatorSessionPanel } from "./operator-session-form";
 import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
@@ -282,6 +285,47 @@ export default async function FloorStationPage({
               inArray(readBagState.stage, pickupStages as string[]),
             ),
           );
+
+  const pickupBagIds = eligiblePickups
+    .map((c) => c.bagId)
+    .filter((id): id is string => id != null);
+  const sealingSegmentCountsByBag =
+    pickupBagIds.length > 0
+      ? new Map(
+          (
+            await db
+              .select({
+                workflowBagId: workflowEvents.workflowBagId,
+                n: sql<number>`count(*)::int`,
+              })
+              .from(workflowEvents)
+              .where(
+                and(
+                  inArray(workflowEvents.workflowBagId, pickupBagIds),
+                  eq(workflowEvents.eventType, "SEALING_SEGMENT_COMPLETE"),
+                ),
+              )
+              .groupBy(workflowEvents.workflowBagId)
+          ).map((row) => [row.workflowBagId, row.n ?? 0] as const),
+        )
+      : new Map<string, number>();
+
+  const eligiblePickupsForForm = eligiblePickups.map((c) => ({
+    ...c,
+    needsSealingFinalClose:
+      station.station.kind === "SEALING" &&
+      needsSealingLaneClose({
+        stage: c.bagStage,
+        segmentCount: c.bagId
+          ? (sealingSegmentCountsByBag.get(c.bagId) ?? 0)
+          : 0,
+      }),
+  }));
+
+  const sealingFinalizePickups =
+    station.station.kind === "SEALING"
+      ? eligiblePickupsForForm.filter((c) => c.needsSealingFinalClose)
+      : [];
 
   // Auto-load available lots for deterministic-material stations
   const autoLots = STATION_AUTO_MATERIAL_KINDS[station.station.kind]
@@ -628,6 +672,28 @@ export default async function FloorStationPage({
         </p>
         {!currentAtStation ? (
           <div className="py-1">
+            {sealingFinalizePickups.length > 0 ? (
+              <div className="rounded-lg border-2 border-sky-400 bg-sky-50 px-3 py-2 text-sm text-sky-900 mb-3 space-y-1">
+                <p className="font-semibold">
+                  {sealingFinalizePickups.length === 1
+                    ? "1 bag waiting for final sealing close"
+                    : `${sealingFinalizePickups.length} bags waiting for final sealing close`}
+                </p>
+                <p className="text-xs leading-relaxed">
+                  Pick the bag below (or scan its QR) to mark{" "}
+                  <span className="font-medium">Sealing complete — all machines done</span>.
+                  Packaging stays blocked until that step.
+                </p>
+                <ul className="text-xs font-medium list-disc pl-4">
+                  {sealingFinalizePickups.map((c) => (
+                    <li key={c.id}>
+                      {c.label}
+                      {c.productSku ? ` — ${c.productSku}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <p className="text-sm text-text-muted mb-2">
               {canStartFreshBag
                 ? "Scan a bag QR to start, or pick a backup below."
@@ -638,7 +704,7 @@ export default async function FloorStationPage({
               stationId={station.station.id}
               canStartFreshBag={canStartFreshBag}
               receivedCards={receivedCards}
-              eligiblePickups={eligiblePickups
+              eligiblePickups={eligiblePickupsForForm
                 .filter(
                   (
                     c,
@@ -649,6 +715,7 @@ export default async function FloorStationPage({
                     bagId: string;
                     bagStage: string;
                     productSku: string | null;
+                    needsSealingFinalClose: boolean;
                   } => c.bagId != null,
                 )
                 .map((c) => ({
@@ -658,6 +725,7 @@ export default async function FloorStationPage({
                   bagId: c.bagId,
                   bagStage: c.bagStage ?? "",
                   productSku: c.productSku ?? null,
+                  needsSealingFinalClose: c.needsSealingFinalClose,
                 }))}
               allowedProducts={allowedProducts.map((p) => ({
                 id: p.id,

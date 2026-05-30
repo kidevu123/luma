@@ -920,15 +920,9 @@ export async function fireStageEventAction(
           }
         }
       }
-      if (isSealingSegment && isPureSealingStation) {
-        await maybeAutoReleaseAfterSegment(tx, {
-          workflowBagId,
-          stationId,
-          stationKind: station.kind,
-          clientEventId: clientEventId ?? null,
-          accountability,
-        });
-      }
+      // Segment submit intentionally keeps the bag pinned at this station
+      // so the final lane-close button stays visible. Operators hand off to
+      // the next sealing machine via releaseSealingHandoffAction.
       if (
         eventType === "HANDPACK_BLISTER_COMPLETE" ||
         (eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER") ||
@@ -1552,8 +1546,8 @@ async function projectBagFinalizedEvent(
   });
 }
 
-/** SEALING segment submit — release this station without advancing bag stage. */
-async function maybeAutoReleaseAfterSegment(
+/** SEALING handoff — release this station without advancing bag stage. */
+async function projectSealingStationHandoff(
   tx: DbTx,
   args: {
     workflowBagId: string;
@@ -1719,6 +1713,86 @@ const releaseSchema = z.object({
   stationId: z.string().uuid(),
   clientEventId: clientEventIdField,
 });
+
+const sealingHandoffSchema = releaseSchema;
+
+/** SEALING only — hand the bag to the next sealing machine after a
+ *  segment without lane-close. Clears this station's pin; bag stays
+ *  BLISTERED until SEALING_COMPLETE with lane_close. */
+export async function releaseSealingHandoffAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const parsed = sealingHandoffSchema.safeParse({
+    token: formData.get("token"),
+    workflowBagId: formData.get("workflowBagId"),
+    stationId: formData.get("stationId"),
+    clientEventId: pickClientEventId(formData),
+  });
+  if (!parsed.success) return { error: "Invalid input." };
+  try {
+    const station = await authStation(parsed.data.token, parsed.data.stationId);
+    if (station.kind !== "SEALING") {
+      return { error: "Only sealing stations can hand off mid-lane." };
+    }
+    const [state] = await db
+      .select({
+        isFinalized: readBagState.isFinalized,
+        isPaused: readBagState.isPaused,
+        stage: readBagState.stage,
+      })
+      .from(readBagState)
+      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
+    if (state?.isFinalized) return { error: "Bag is already finalized." };
+    if (state?.isPaused) {
+      return { error: "Bag is paused — resume before handing off." };
+    }
+    if (state?.stage !== "BLISTERED") {
+      return {
+        error: `Bag must be blistered before handoff (currently ${state?.stage ?? "unknown"}).`,
+      };
+    }
+    const [segmentRow] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(workflowEvents)
+      .where(
+        and(
+          eq(workflowEvents.workflowBagId, parsed.data.workflowBagId),
+          eq(workflowEvents.eventType, SEALING_SEGMENT_EVENT),
+        ),
+      );
+    if ((segmentRow?.n ?? 0) < 1) {
+      return {
+        error:
+          "Record a sealing segment on this machine before handing the bag off.",
+      };
+    }
+    const [live] = await db
+      .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+      .from(readStationLive)
+      .where(eq(readStationLive.stationId, parsed.data.stationId));
+    if (live?.currentWorkflowBagId !== parsed.data.workflowBagId) {
+      return { error: "This bag is not active at this sealing station." };
+    }
+
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+      });
+      await projectSealingStationHandoff(tx, {
+        workflowBagId: parsed.data.workflowBagId,
+        stationId: parsed.data.stationId,
+        stationKind: station.kind,
+        clientEventId: parsed.data.clientEventId ?? null,
+        accountability,
+      });
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Handoff failed." };
+  }
+  revalidatePath(`/floor/${parsed.data.token}`);
+  revalidatePath(`/floor-board`);
+  return { ok: true };
+}
 
 /** Hand the bag forward without finalizing it. Clears this station's
  *  read_station_live entry. The QR card stays ASSIGNED to travel

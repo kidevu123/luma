@@ -33,6 +33,8 @@ export type EligiblePickup = {
   bagId: string;
   bagStage: string;
   productSku: string | null;
+  /** BLISTERED bag with segment(s) but no lane-close yet. */
+  needsSealingFinalClose?: boolean;
 };
 
 export type AllowedProduct = {
@@ -381,7 +383,9 @@ export function ScanCardForm({
                     <option key={c.id} value={c.id}>
                       {c.label}
                       {c.productSku ? ` — ${c.productSku}` : ""}
-                      {` · ${c.bagStage}`}
+                      {c.needsSealingFinalClose
+                        ? " · sealing in progress — pick up to finalize"
+                        : ` · ${c.bagStage}`}
                     </option>
                   ))}
                 </optgroup>

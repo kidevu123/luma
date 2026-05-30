@@ -931,3 +931,10 @@ describe("FLOOR-FIRST-RUN-E2E-1 · submit button onClick priority", () => {
     expect(kdResolvedIdx).toBeLessThan(kdRawIdx);
   });
 });
+
+describe("MULTI-SEALING-FINAL-CLOSE-UNSTICK-1 · pickup labels", () => {
+  it("labels finalize-pending pickups clearly in the dropdown", () => {
+    expect(formSrc).toMatch(/needsSealingFinalClose/);
+    expect(formSrc).toMatch(/sealing in progress — pick up to finalize/);
+  });
+});

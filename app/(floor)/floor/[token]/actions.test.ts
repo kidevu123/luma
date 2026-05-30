@@ -138,10 +138,20 @@ describe("MULTI-SEALING-SAME-BAG-1 · segment vs final sealing", () => {
     expect(actionsSrc).toMatch(/"SEALING_SEGMENT_COMPLETE"/);
   });
 
-  it("segment submit uses counter payload and auto-releases station pin", () => {
-    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterSegment/);
-    expect(actionsSrc).toMatch(/isSealingSegment && isPureSealingStation/);
+  it("segment submit keeps bag pinned — handoff is explicit", () => {
+    expect(actionsSrc).toMatch(/projectSealingStationHandoff/);
+    expect(actionsSrc).toMatch(/releaseSealingHandoffAction/);
+    expect(actionsSrc).not.toMatch(
+      /isSealingSegment && isPureSealingStation[\s\S]{0,120}maybeAutoReleaseAfterSegment/,
+    );
     expect(actionsSrc).toMatch(/SEALING_SEGMENT_EVENT/);
+  });
+
+  it("releaseSealingHandoffAction requires BLISTERED stage and prior segment", () => {
+    expect(actionsSrc).toMatch(
+      /Record a sealing segment on this machine before handing the bag off/,
+    );
+    expect(actionsSrc).toMatch(/Bag must be blistered before handoff/);
   });
 
   it("final SEALING_COMPLETE on pure sealing requires prior segment", () => {

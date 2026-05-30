@@ -782,6 +782,12 @@ describe("MULTI-SEALING-SAME-BAG-1 · dual sealing actions", () => {
     expect(src).toMatch(/packagingSealingInProgress/);
     expect(src).toMatch(/packaging unlocks when sealing is marked[\s\S]*complete/);
   });
+
+  it("sealing handoff button frees station without lane-close", () => {
+    expect(src).toMatch(/releaseSealingHandoffAction/);
+    expect(src).toMatch(/Done at this machine — hand off to next sealer/);
+    expect(src).toMatch(/sealingHandoff/);
+  });
 });
 
 describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · operator code submit guard", () => {

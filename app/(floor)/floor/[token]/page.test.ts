@@ -459,3 +459,17 @@ describe("MATERIAL-ROLL-CHANGE-1 · station roll panel component", () => {
     expect(formSrc).toMatch(/changeRollAction/);
   });
 });
+
+describe("MULTI-SEALING-FINAL-CLOSE-UNSTICK-1 · idle sealing finalize pickup", () => {
+  it("flags eligible pickups that need lane-close", () => {
+    expect(pageSrc).toMatch(/needsSealingLaneClose/);
+    expect(pageSrc).toMatch(/needsSealingFinalClose/);
+    expect(pageSrc).toMatch(/SEALING_SEGMENT_COMPLETE/);
+  });
+
+  it("shows banner when sealing station has no bag but finalize pickups exist", () => {
+    expect(pageSrc).toMatch(/sealingFinalizePickups/);
+    expect(pageSrc).toMatch(/waiting for final sealing close/);
+    expect(pageSrc).toMatch(/Sealing complete — all machines done/);
+  });
+});

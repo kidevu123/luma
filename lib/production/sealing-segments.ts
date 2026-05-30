@@ -24,6 +24,14 @@ export function readSealingSegmentCount(
 }
 
 /** Fold segment events into progress totals (bag-level, all stations). */
+/** True when the bag has sealing segment(s) but lane-close has not fired yet. */
+export function needsSealingLaneClose(args: {
+  stage: string | null | undefined;
+  segmentCount: number;
+}): boolean {
+  return args.stage === "BLISTERED" && args.segmentCount > 0;
+}
+
 export function deriveSealingSegmentProgress(
   events: ReadonlyArray<{
     eventType: string;

@@ -13,6 +13,7 @@ import {
   fireStageEventAction,
   finalizeBagAction,
   releaseBagAction,
+  releaseSealingHandoffAction,
   pauseBagAction,
   resumeBagAction,
   setOperatorAction,
@@ -341,6 +342,18 @@ export function StageActionButtons({
     }
   }
 
+  async function sealingHandoff() {
+    if (!workflowBagId) return;
+    setPending("sealing-handoff");
+    setError(null);
+    try {
+      const r = await releaseSealingHandoffAction(baseFd());
+      if (r?.error) setError(r.error);
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function pause() {
     if (!workflowBagId) return;
     setPending("pause");
@@ -521,6 +534,18 @@ export function StageActionButtons({
               ? "Saving…"
               : "Sealing complete — all machines done"}
           </button>
+          {hasSealingSegments ? (
+            <button
+              type="button"
+              disabled={pending !== null}
+              onClick={sealingHandoff}
+              className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface-2 text-text text-sm font-medium disabled:opacity-60 transition-colors"
+            >
+              {pending === "sealing-handoff"
+                ? "Handing off…"
+                : "Done at this machine — hand off to next sealer"}
+            </button>
+          ) : null}
         </div>
       )}
 
