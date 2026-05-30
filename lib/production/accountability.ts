@@ -196,8 +196,14 @@ async function loadActiveEmployeeByCode(
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function isUuid(s: string): boolean {
+/** True when a string is a canonical employees.id UUID shape. Exported so
+ *  floor call sites can route identity to employeeId vs employeeCode. */
+export function isEmployeeUuidShape(s: string): boolean {
   return UUID_RE.test(s);
+}
+
+function isUuid(s: string): boolean {
+  return isEmployeeUuidShape(s);
 }
 
 /** Pure helper: classify accountability confidence from the resolver

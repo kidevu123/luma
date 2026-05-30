@@ -47,6 +47,12 @@ function newClientEventId(): string {
   return `${h[0]}${h[1]}${h[2]}${h[3]}-${h[4]}${h[5]}-${h[6]}${h[7]}-${h[8]}${h[9]}-${h[10]}${h[11]}${h[12]}${h[13]}${h[14]}${h[15]}`;
 }
 
+/** Numeric badge only — rejects UUID-shaped stale sessionStorage values. */
+function operatorBadgeCodeForSubmit(code: string): string | null {
+  const trimmed = code.trim();
+  return /^\d{1,4}$/.test(trimmed) ? trimmed : null;
+}
+
 const STAGE_BY_KIND: Record<string, { label: string; eventType: string }[]> = {
   BLISTER: [{ label: "Blister complete", eventType: "BLISTER_COMPLETE" }],
   HANDPACK_BLISTER: [{ label: "Hand-pack complete", eventType: "HANDPACK_BLISTER_COMPLETE" }],
@@ -174,17 +180,23 @@ export function StageActionButtons({
 
   // Operator code persists per-station for the browser session so an
   // operator only types it once a shift. Cleared with sessionStorage
-  // when the tab closes.
+  // when the tab closes. Only 1–4 digit badge codes are stored — reject
+  // stale UUID-shaped values that would hit employee_code lookup.
   const opStorageKey = `luma.op.${stationId}`;
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const saved = window.sessionStorage.getItem(opStorageKey);
-    if (saved) setOperatorCode(saved);
+    if (saved && operatorBadgeCodeForSubmit(saved)) {
+      setOperatorCode(saved);
+    } else if (saved) {
+      window.sessionStorage.removeItem(opStorageKey);
+    }
   }, [opStorageKey]);
   function updateOperatorCode(v: string) {
     setOperatorCode(v);
     if (typeof window !== "undefined") {
-      if (v) window.sessionStorage.setItem(opStorageKey, v);
+      const badge = operatorBadgeCodeForSubmit(v);
+      if (badge) window.sessionStorage.setItem(opStorageKey, badge);
       else window.sessionStorage.removeItem(opStorageKey);
     }
   }
@@ -287,11 +299,12 @@ export function StageActionButtons({
       if (eventType === "HANDPACK_BLISTER_COMPLETE" && selectedHandpackTabletTypeId) {
         fd.set("tabletTypeId", selectedHandpackTabletTypeId);
       }
-      if (operatorCode) {
+      const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+      if (badgeCode) {
         // OPERATOR_CHANGE doesn't get an idempotency key — re-firing
         // it with the same code is a no-op already.
         const op = baseFd({ withClientEventId: false });
-        op.set("operatorCode", operatorCode);
+        op.set("operatorCode", badgeCode);
         await setOperatorAction(op);
       }
       const r = await fireStageEventAction(fd);
@@ -335,7 +348,8 @@ export function StageActionButtons({
     try {
       const fd = baseFd();
       fd.set("reason", pauseReason);
-      if (operatorCode) fd.set("operatorCode", operatorCode);
+      const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+      if (badgeCode) fd.set("operatorCode", badgeCode);
       const r = await pauseBagAction(fd);
       setPauseOpen(false);
       if (r?.error) setError(r.error);
@@ -350,7 +364,8 @@ export function StageActionButtons({
     setError(null);
     try {
       const fd = baseFd();
-      if (operatorCode) fd.set("operatorCode", operatorCode);
+      const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+      if (badgeCode) fd.set("operatorCode", badgeCode);
       const r = await resumeBagAction(fd);
       if (r?.error) setError(r.error);
     } finally {
@@ -898,7 +913,8 @@ function PackagingCompleteForm({
               fd.set("looseCards", looseCards || "0");
               fd.set("damagedPackaging", damagedPackaging || "0");
               fd.set("rippedCards", rippedCards || "0");
-              if (operatorCode) fd.set("operatorCode", operatorCode);
+              const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+              if (badgeCode) fd.set("operatorCode", badgeCode);
               fd.set("clientEventId", newClientEventId());
               const r = await packagingCompleteAction(fd);
               if (r?.error) {
@@ -1093,7 +1109,8 @@ function SealingSegmentForm({
               if (needsProductMapping && productIdForSubmit) {
                 fd.set("productId", productIdForSubmit);
               }
-              if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
+              const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+              if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
               fd.set("clientEventId", newClientEventId());
               const r = await fireStageEventAction(fd);
               if (r?.error) {
@@ -1168,7 +1185,8 @@ function SealingFinalConfirmForm({
               fd.set("workflowBagId", workflowBagId);
               fd.set("stationId", stationId);
               fd.set("eventType", "SEALING_COMPLETE");
-              if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
+              const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+              if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
               fd.set("clientEventId", newClientEventId());
               const r = await fireStageEventAction(fd);
               if (r?.error) {
@@ -1318,7 +1336,8 @@ function SealingCompleteForm({
               if (needsProductMapping && productIdForSubmit) {
                 fd.set("productId", productIdForSubmit);
               }
-              if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
+              const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+              if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
               fd.set("clientEventId", newClientEventId());
               const r = await fireStageEventAction(fd);
               if (r?.error) {
@@ -1392,7 +1411,8 @@ function BlisterCompleteForm({
               fd.set("stationId", stationId);
               fd.set("eventType", "BLISTER_COMPLETE");
               fd.set("countTotal", machineCounter || "0");
-              if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
+              const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+              if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
               fd.set("clientEventId", newClientEventId());
               const r = await fireStageEventAction(fd);
               if (r?.error) {
@@ -1507,7 +1527,8 @@ function RollChangeCard({
             fd.set("newRollNumber", newRollNumber);
             if (newStartingWeight)
               fd.set("newStartingWeightGrams", newStartingWeight);
-            if (operatorCode) fd.set("overrideEmployeeCode", operatorCode);
+            const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+            if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
             fd.set("clientEventId", newClientEventId());
             const r = await changeRollAction(fd);
             if (r && "error" in r && r.error) {

@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.55] — 2026-05-30
+
+### Added (PACKAGING-RECONCILIATION-SLICE-A)
+- **`MATERIAL_ESTIMATED_VOIDED` enum value:** Added to `materialEventTypeEnum` in schema and Drizzle migration (`ALTER TYPE ... ADD VALUE IF NOT EXISTS`). Required by Slice B to mark pending estimated consumption events as voided when a receipt is reconciled.
+- **`planPendingConsumptionAttribution` helper:** Pure planning function in `lib/projector/packaging-lot-receipt-attribution.ts`. Takes pending estimated events + a received lot, returns an attribution plan (FIFO, material-scoped, quantity-capped, partial splits supported). No DB writes; foundation for Slice B.
+
+### Tests added (PACKAGING-RECONCILIATION-SLICE-A)
+- `lib/projector/packaging-lot-receipt-attribution.test.ts` — 10 tests covering full attribution, partial attribution, cross-material isolation, FIFO ordering, deterministic tie-break, zero/negative guards, invalid event qty, empty inputs.
+
+## [0.4.54] — 2026-05-30
+
+### Fixed (OPERATOR-PACKAGING-UUID-CLOSEOUT-1)
+- **Packaging close-out no longer sends employee UUID as operator code:** Stale `sessionStorage` could restore a UUID into the optional operator-code field; that value was passed as `overrideEmployeeCode` and hit `employees.employee_code` comparison (`text = uuid`). UUID-shaped overrides now route as `employeeId` at the station-accountability boundary; the floor UI only persists/submits 1–4 digit badge codes.
+
+### Tests added (OPERATOR-PACKAGING-UUID-CLOSEOUT-1)
+- `accountability.test.ts` — UUID-shaped `employeeCode` resolves via ID lookup; unknown codes fail cleanly in strict mode.
+- `station-operator-session.test.ts` — UUID override boundary documents `employeeId` routing.
+- `actions.test.ts` — packaging complete wires `resolveStationAccountability` and does not embed code lookup.
+- `stage-action-buttons.test.ts` — `operatorBadgeCodeForSubmit` guard and sessionStorage purge.
+
 ## [0.4.53] — 2026-05-29
 
 ### Fixed (OPERATOR-PICKER-UUID-SUBMIT-FIX-1)

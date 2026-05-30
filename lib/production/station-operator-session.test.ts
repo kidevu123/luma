@@ -295,9 +295,8 @@ describe("OPERATOR-PICKER-UUID-SUBMIT-FIX-1 · UUID-shaped override routing", ()
   });
 
   it("UUID override routes to employee-ID lookup to prevent text=uuid Postgres type error", async () => {
-    // When overrideEmployeeCode is UUID-shaped, the fix routes through
-    // loadEmployeeById (uuid = uuid) instead of loadActiveEmployeeByCode
-    // (text = uuid → "operator does not exist: text = uuid").
+    // resolveStationAccountability passes UUID overrides as employeeId
+    // (not employeeCode) so accountability never compares text = uuid.
     const tx = buildTxStub({ results: [ALICE] });
     const r = await resolveStationAccountability(tx, {
       stationId: STATION_ID,

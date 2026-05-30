@@ -354,3 +354,28 @@ describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · first-op count guard", () => {
     expect(actionsSrc).not.toMatch(/LEGACY_TEXT.*accountableEmployeeId/s);
   });
 });
+
+describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · packaging complete accountability", () => {
+  it("packagingCompleteAction resolves accountability via resolveStationAccountability", () => {
+    const idx = actionsSrc.indexOf("export async function packagingCompleteAction");
+    expect(idx).toBeGreaterThan(-1);
+    const chunk = actionsSrc.slice(idx, idx + 4500);
+    expect(chunk).toMatch(/resolveStationAccountability\(tx,/);
+    expect(chunk).toMatch(/overrideEmployeeCode: parsed\.data\.operatorCode/);
+    expect(chunk).toMatch(
+      /accountableEmployeeId: accountability\.accountableEmployeeId/,
+    );
+  });
+
+  it("packaging complete does not compare employee_id UUID against employee_code text in actions", () => {
+    expect(actionsSrc).not.toMatch(/loadActiveEmployeeByCode/);
+    expect(actionsSrc).not.toMatch(/employees\.employeeCode.*operatorCode/s);
+  });
+
+  it("BLISTER_COMPLETE and SEALING paths still use resolveStationAccountability", () => {
+    expect(actionsSrc).toMatch(
+      /export async function fireStageEventAction[\s\S]*resolveStationAccountability\(tx,/,
+    );
+    expect(actionsSrc).toMatch(/overrideEmployeeCode: overrideEmployeeCode/);
+  });
+});

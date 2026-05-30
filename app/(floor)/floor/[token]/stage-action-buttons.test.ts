@@ -783,3 +783,28 @@ describe("MULTI-SEALING-SAME-BAG-1 · dual sealing actions", () => {
     expect(src).toMatch(/packaging unlocks when sealing is marked[\s\S]*complete/);
   });
 });
+
+describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · operator code submit guard", () => {
+  it("defines operatorBadgeCodeForSubmit to accept only 1–4 digit badge codes", () => {
+    expect(src).toMatch(/function operatorBadgeCodeForSubmit/);
+    expect(src).toMatch(/\\d\{1,4\}/);
+  });
+
+  it("packaging close-out only submits sanitized operator code", () => {
+    const idx = src.indexOf("await packagingCompleteAction(fd)");
+    expect(idx).toBeGreaterThan(-1);
+    const chunk = src.slice(idx - 600, idx + 50);
+    expect(chunk).toMatch(/operatorBadgeCodeForSubmit\(operatorCode\)/);
+  });
+
+  it("sessionStorage load purges stale UUID-shaped operator codes", () => {
+    expect(src).toMatch(/sessionStorage\.getItem\(opStorageKey\)/);
+    expect(src).toMatch(/sessionStorage\.removeItem\(opStorageKey\)/);
+    expect(src).toMatch(/operatorBadgeCodeForSubmit\(saved\)/);
+  });
+
+  it("BLISTER and SEALING close-out forms use sanitized overrideEmployeeCode", () => {
+    expect(src).toMatch(/operatorBadgeCodeForSubmit\(operatorCode\)/);
+    expect(src).toMatch(/overrideEmployeeCode/);
+  });
+});

@@ -17,6 +17,7 @@ import {
 
 import {
   resolveAccountableEmployee,
+  isEmployeeUuidShape,
   type AccountabilityInput,
   type AccountabilityResolution,
 } from "@/lib/production/accountability";
@@ -118,8 +119,11 @@ export async function resolveStationAccountability(
   // 1) Per-form override.
   const overrideCode = trimOrNull(input.overrideEmployeeCode);
   if (overrideCode) {
+    const overrideInput: AccountabilityInput = isEmployeeUuidShape(overrideCode)
+      ? { employeeId: overrideCode }
+      : { employeeCode: overrideCode };
     const r = await resolveAccountableEmployee(tx, {
-      employeeCode: overrideCode,
+      ...overrideInput,
       sourceHint: input.sourceHint ?? "SUPERVISOR_OVERRIDE",
     });
     if (r) return resolutionToEvent(r);

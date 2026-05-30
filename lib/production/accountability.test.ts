@@ -136,6 +136,26 @@ describe("resolveAccountableEmployee — input shape routing", () => {
     expect(out!.isStable).toBe(true);
   });
 
+  it("resolves UUID-shaped employeeCode via ID lookup (avoids text=uuid Postgres error)", async () => {
+    const tx = buildTxStub(() => ALICE);
+    const out = await resolveAccountableEmployee(tx, {
+      employeeCode: ALICE.id,
+    });
+    expect(out!.accountableEmployeeId).toBe(ALICE.id);
+    expect(out!.source).toBe("EMPLOYEE_CODE");
+    expect(out!.isStable).toBe(true);
+  });
+
+  it("invalid free-text operator code does not reach employee_code SQL in strict mode", async () => {
+    const tx = buildTxStub(() => null);
+    const out = await resolveAccountableEmployee(
+      tx,
+      { employeeCode: "NOT-A-REAL-CODE" },
+      { strict: true },
+    );
+    expect(out).toBeNull();
+  });
+
   it("falls through past employeeCode when stub returns no row (inactive / unknown)", async () => {
     const tx = buildTxStub(() => null);
     const out = await resolveAccountableEmployee(tx, {
