@@ -11,21 +11,57 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/zoho/production-output-preview", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/zoho/production-output-preview")>();
+  const actual =
+    await importOriginal<
+      typeof import("@/lib/zoho/production-output-preview")
+    >();
   return {
     ...actual,
     callProductionOutputPreview: vi.fn(),
   };
 });
 
+vi.mock("@/lib/db/queries/zoho-production-output", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/lib/db/queries/zoho-production-output")
+    >();
+  return {
+    ...actual,
+    upsertZohoProductionOutputPreviewOp: vi.fn(),
+  };
+});
+
 import { requireAdmin } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
+import { upsertZohoProductionOutputPreviewOp } from "@/lib/db/queries/zoho-production-output";
 import { callProductionOutputPreview } from "@/lib/zoho/production-output-preview";
 import { previewZohoProductionOutputAction } from "./zoho-production-output-preview-actions";
 
 const LOT_ID = "11111111-1111-4111-8111-111111111111";
 
-const LOT_ROW = {
+type LotRow = {
+  finishedLot: {
+    id: string;
+    workflowBagId: string | null;
+    producedOn: string;
+    unitsProduced: number;
+    displaysProduced: number;
+    casesProduced: number;
+  };
+  product: {
+    zohoItemIdUnit: string | null;
+    zohoItemIdDisplay: string | null;
+    zohoItemIdCase: string | null;
+  };
+  metrics: {
+    damagedPackaging: number | null;
+    rippedCards: number | null;
+    looseCards: number | null;
+  } | null;
+};
+
+const LOT_ROW: LotRow = {
   finishedLot: {
     id: LOT_ID,
     workflowBagId: "22222222-2222-4222-8222-222222222222",
@@ -46,13 +82,20 @@ const LOT_ROW = {
   },
 };
 
-function mockLotQuery(row: typeof LOT_ROW | null) {
+function mockLotQuery(
+  row: LotRow | null,
+  rawBagLinks = [{ confidence: "HIGH" }],
+) {
   const limit = vi.fn().mockResolvedValue(row ? [row] : []);
   const where = vi.fn(() => ({ limit }));
   const leftJoin = vi.fn(() => ({ where }));
   const innerJoin = vi.fn(() => ({ leftJoin }));
   const from = vi.fn(() => ({ innerJoin }));
-  vi.mocked(db.select).mockReturnValue({ from } as never);
+  const rawWhere = vi.fn().mockResolvedValue(rawBagLinks);
+  const rawFrom = vi.fn(() => ({ where: rawWhere }));
+  vi.mocked(db.select)
+    .mockReturnValueOnce({ from } as never)
+    .mockReturnValueOnce({ from: rawFrom } as never);
 }
 
 beforeEach(() => {
@@ -66,6 +109,19 @@ beforeEach(() => {
   vi.stubEnv("ZOHO_SERVICE_BEARER_SECRET", "secret-prefix-rest");
   vi.stubEnv("ZOHO_BRAND", "haute_brands");
   vi.stubEnv("ZOHO_WAREHOUSE_ID", "");
+  vi.mocked(upsertZohoProductionOutputPreviewOp).mockResolvedValue({
+    id: "op-1",
+    status: "PREVIEWED",
+    requestHash: "request-hash",
+    metricsState: "HIGH",
+    genealogyState: "HIGH",
+    previewedAt: new Date("2026-05-30T12:00:00Z"),
+    previewHttpStatus: 200,
+    zohoPurchaseorderId: "po-1",
+    zohoPurchaseorderLineItemId: "line-1",
+    zohoWarehouseId: "warehouse-1",
+    zohoCompositeItemId: "unit-composite-1",
+  });
 });
 
 afterEach(() => {
@@ -89,8 +145,121 @@ describe("previewZohoProductionOutputAction", () => {
     expect(result.kind).toBe("PAYLOAD_BLOCKED");
     expect(result.blockers).toContainEqual({
       field: "warehouse_id",
-      message: "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
+      message:
+        "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
     });
     expect(callProductionOutputPreview).not.toHaveBeenCalled();
+  });
+
+  it("persists a PREVIEWED operation row after a successful preview", async () => {
+    mockLotQuery(LOT_ROW);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(upsertZohoProductionOutputPreviewOp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        finishedLotId: LOT_ID,
+        workflowBagId: LOT_ROW.finishedLot.workflowBagId,
+        status: "PREVIEWED",
+        previewHttpStatus: 200,
+        previewResponse: { preview: true },
+        metricsState: "HIGH",
+        genealogyState: "HIGH",
+        userId: "admin-user",
+      }),
+    );
+    if (!result.ok) return;
+    expect(result.persistedPreview.status).toBe("PREVIEWED");
+  });
+
+  it("stores service validation responses as DRAFT, not PREVIEWED", async () => {
+    mockLotQuery(LOT_ROW);
+    vi.mocked(upsertZohoProductionOutputPreviewOp).mockResolvedValueOnce({
+      id: "op-1",
+      status: "DRAFT",
+      requestHash: "request-hash",
+      metricsState: "HIGH",
+      genealogyState: "HIGH",
+      previewedAt: null,
+      previewHttpStatus: 422,
+      zohoPurchaseorderId: "po-1",
+      zohoPurchaseorderLineItemId: "line-1",
+      zohoWarehouseId: "warehouse-1",
+      zohoCompositeItemId: "unit-composite-1",
+    });
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: false,
+      httpStatus: 422,
+      body: { code: "INSUFFICIENT_PO_REMAINING" },
+      message: "validation",
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(upsertZohoProductionOutputPreviewOp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "DRAFT",
+        previewHttpStatus: 422,
+        previewResponse: { code: "INSUFFICIENT_PO_REMAINING" },
+      }),
+    );
+    if (result.ok) return;
+    expect(result.persistedPreview?.status).toBe("DRAFT");
+  });
+
+  it("persists missing metrics and missing genealogy honestly", async () => {
+    mockLotQuery(
+      {
+        ...LOT_ROW,
+        finishedLot: {
+          ...LOT_ROW.finishedLot,
+          workflowBagId: null,
+        },
+        metrics: null,
+      },
+      [],
+    );
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(upsertZohoProductionOutputPreviewOp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metricsState: "MISSING",
+        genealogyState: "MISSING",
+      }),
+    );
   });
 });

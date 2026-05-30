@@ -4,7 +4,10 @@ import {
   buildProductionOutputPreviewHeaders,
   buildProductionOutputPreviewIdempotencyKey,
   buildProductionOutputPreviewPayload,
+  buildProductionOutputPreviewRequestHash,
   callProductionOutputPreview,
+  classifyProductionOutputGenealogyState,
+  classifyProductionOutputMetricsState,
   validateProductionOutputPreviewConfig,
   type ProductionOutputPreviewBuildInput,
 } from "./production-output-preview";
@@ -126,7 +129,8 @@ describe("buildProductionOutputPreviewPayload", () => {
     if (result.ok) return;
     expect(result.blockers).toContainEqual({
       field: "warehouse_id",
-      message: "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
+      message:
+        "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
     });
   });
 });
@@ -149,9 +153,11 @@ describe("production output preview client", () => {
     const result = buildProductionOutputPreviewPayload(BASE_INPUT);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ preview: true }), { status: 200 }),
-    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ preview: true }), { status: 200 }),
+      );
     const response = await callProductionOutputPreview({
       payload: result.payload,
       idempotencyKey: "idem-1",
@@ -161,7 +167,9 @@ describe("production output preview client", () => {
 
     expect(response.ok).toBe(true);
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`http://192.168.1.205:8000${PRODUCTION_OUTPUT_PREVIEW_PATH}`);
+    expect(url).toBe(
+      `http://192.168.1.205:8000${PRODUCTION_OUTPUT_PREVIEW_PATH}`,
+    );
     expect(url).not.toContain("/commit");
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
@@ -184,36 +192,47 @@ describe("production output preview client", () => {
     expect(response.ok).toBe(false);
     if (response.ok) return;
     expect(response.httpStatus).toBeNull();
-    expect(response.message).toMatch(/ZOHO_SERVICE_BASE_URL|ZOHO_INTEGRATION_URL/);
+    expect(response.message).toMatch(
+      /ZOHO_SERVICE_BASE_URL|ZOHO_INTEGRATION_URL/,
+    );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it.each([
     [400, "validation"],
     [422, "validation"],
-  ])("surfaces HTTP %i preview/preflight feedback instead of swallowing it", async (status, phrase) => {
-    const result = buildProductionOutputPreviewPayload(BASE_INPUT);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ code: "PO_NOT_FOUND", message: "missing PO" }), {
-        status,
-      }),
-    );
+  ])(
+    "surfaces HTTP %i preview/preflight feedback instead of swallowing it",
+    async (status, phrase) => {
+      const result = buildProductionOutputPreviewPayload(BASE_INPUT);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const fetchImpl = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ code: "PO_NOT_FOUND", message: "missing PO" }),
+          {
+            status,
+          },
+        ),
+      );
 
-    const response = await callProductionOutputPreview({
-      payload: result.payload,
-      idempotencyKey: "idem-1",
-      env: VALID_ENV,
-      fetchImpl,
-    });
+      const response = await callProductionOutputPreview({
+        payload: result.payload,
+        idempotencyKey: "idem-1",
+        env: VALID_ENV,
+        fetchImpl,
+      });
 
-    expect(response.ok).toBe(false);
-    if (response.ok) return;
-    expect(response.httpStatus).toBe(status);
-    expect(response.message.toLowerCase()).toContain(phrase);
-    expect(response.body).toEqual({ code: "PO_NOT_FOUND", message: "missing PO" });
-  });
+      expect(response.ok).toBe(false);
+      if (response.ok) return;
+      expect(response.httpStatus).toBe(status);
+      expect(response.message.toLowerCase()).toContain(phrase);
+      expect(response.body).toEqual({
+        code: "PO_NOT_FOUND",
+        message: "missing PO",
+      });
+    },
+  );
 });
 
 describe("buildProductionOutputPreviewIdempotencyKey", () => {
@@ -238,8 +257,61 @@ describe("buildProductionOutputPreviewIdempotencyKey", () => {
     expect(changed.ok).toBe(true);
     if (!changed.ok) return;
     expect(
-      buildProductionOutputPreviewIdempotencyKey(BASE_INPUT.finishedLotId, changed.payload),
+      buildProductionOutputPreviewIdempotencyKey(
+        BASE_INPUT.finishedLotId,
+        changed.payload,
+      ),
     ).not.toBe(first);
+    expect(buildProductionOutputPreviewRequestHash(changed.payload)).not.toBe(
+      buildProductionOutputPreviewRequestHash(result.payload),
+    );
+  });
+});
+
+describe("production output preview data quality states", () => {
+  it("classifies metrics as missing when the preview contract had to default to zero", () => {
+    expect(
+      classifyProductionOutputMetricsState({
+        workflowBagId: BASE_INPUT.workflowBagId,
+        metrics: BASE_INPUT.metrics,
+      }),
+    ).toBe("HIGH");
+    expect(
+      classifyProductionOutputMetricsState({
+        workflowBagId: BASE_INPUT.workflowBagId,
+        metrics: null,
+      }),
+    ).toBe("MISSING");
+    expect(
+      classifyProductionOutputMetricsState({
+        workflowBagId: null,
+        metrics: BASE_INPUT.metrics,
+      }),
+    ).toBe("MISSING");
+  });
+
+  it("classifies genealogy as high, low, or missing without overstating confidence", () => {
+    expect(
+      classifyProductionOutputGenealogyState({
+        workflowBagId: BASE_INPUT.workflowBagId,
+        rawBagLinkCount: 1,
+        highConfidenceRawBagLinkCount: 1,
+      }),
+    ).toBe("HIGH");
+    expect(
+      classifyProductionOutputGenealogyState({
+        workflowBagId: BASE_INPUT.workflowBagId,
+        rawBagLinkCount: 0,
+        highConfidenceRawBagLinkCount: 0,
+      }),
+    ).toBe("LOW");
+    expect(
+      classifyProductionOutputGenealogyState({
+        workflowBagId: null,
+        rawBagLinkCount: 0,
+        highConfidenceRawBagLinkCount: 0,
+      }),
+    ).toBe("MISSING");
   });
 });
 

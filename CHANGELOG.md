@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.57] — 2026-05-30
+
+### Added (ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1)
+- **Finished-lot Zoho production-output preview:** Owner/Admin users can run a preview-only production-output request from a finished lot detail page using explicit Zoho PO, PO line, and warehouse inputs. The flow calls only the Zoho Integration Service preview endpoint and performs no live Zoho write.
+- **Preview request/response summary:** The card shows the generated request summary, preflight/steps/warnings response details, HTTP status, request ID, and idempotency replay state without rendering bearer secrets.
+- **Mapping blockers:** Missing PO, PO line, warehouse, or product composite item IDs return clear admin-facing blockers before any HTTP request when possible.
+
+### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-A)
+- **Durable preview snapshots:** Added `zoho_production_output_ops` to store the active preview-only production-output mapping per finished lot, including request payload/hash, response snapshot, metrics confidence, genealogy confidence, PO/line/warehouse targets, and quantity basis.
+- **Preview persistence:** Finished-lot Zoho preview now updates the active draft/preview row after preview calls. Successful previews become `PREVIEWED`; validation responses stay `DRAFT` and do not masquerade as successful previews.
+- **Preview metadata in UI:** The finished-lot preview card shows stored snapshot status, last preview time, request hash, mapping summary, metrics state, and genealogy state while continuing to say “Preview only — no Zoho write performed.”
+
+### Tests added (ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1 / SLICE-A)
+- `lib/zoho/production-output-preview.test.ts` — payload mapping, idempotency key/hash, data-quality state classification, bearer headers, preview endpoint, no commit path, and 400/422 feedback handling.
+- `lib/db/queries/zoho-production-output.test.ts` — migration/table shape, active-per-lot constraint, request hash changes, and missing metrics stored as nullable values rather than confirmed zero.
+- `zoho-production-output-preview-actions.test.ts` — missing warehouse blocks before HTTP, successful preview persistence, service-validation draft persistence, and missing metrics/genealogy state handling.
+- `zoho-production-output-preview-wiring.test.ts` — finished-lot page wiring, preview-only copy, persisted metadata rendering, no page-load call, no rendered secrets, and no approval/send/live-write controls.
+
 ## [0.4.56] — 2026-05-30
 
 ### Fixed (PACKAGING-CLIENT-EVENT-ID-TEXT-CAST-1)
@@ -27,6 +45,7 @@
 - `station-operator-session.test.ts` — UUID override boundary documents `employeeId` routing.
 - `actions.test.ts` — packaging complete wires `resolveStationAccountability` and does not embed code lookup.
 - `stage-action-buttons.test.ts` — `operatorBadgeCodeForSubmit` guard and sessionStorage purge.
+
 ## [0.4.54] — 2026-05-30
 
 ### Added (ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1)

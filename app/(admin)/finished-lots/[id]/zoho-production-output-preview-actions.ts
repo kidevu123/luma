@@ -4,11 +4,23 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
-import { finishedLots, products, readBagMetrics } from "@/lib/db/schema";
+import {
+  finishedLotRawBags,
+  finishedLots,
+  products,
+  readBagMetrics,
+} from "@/lib/db/schema";
+import {
+  upsertZohoProductionOutputPreviewOp,
+  type ZohoProductionOutputPreviewMetadata,
+} from "@/lib/db/queries/zoho-production-output";
 import {
   buildProductionOutputPreviewIdempotencyKey,
   buildProductionOutputPreviewPayload,
+  buildProductionOutputPreviewRequestHash,
   callProductionOutputPreview,
+  classifyProductionOutputGenealogyState,
+  classifyProductionOutputMetricsState,
   productionOutputPreviewStatusMessage,
   validateProductionOutputPreviewConfig,
   type ProductionOutputPreviewBlocker,
@@ -17,17 +29,27 @@ import {
 
 const previewInputSchema = z.object({
   finishedLotId: z.string().uuid(),
-  purchaseorderId: z.string().trim().min(1, "Enter the Zoho purchase order ID.").max(120),
+  purchaseorderId: z
+    .string()
+    .trim()
+    .min(1, "Enter the Zoho purchase order ID.")
+    .max(120),
   purchaseorderLineItemId: z
     .string()
     .trim()
     .min(1, "Enter the Zoho PO line item ID.")
     .max(120),
   warehouseId: z.string().trim().max(120).optional(),
-  notes: z.string().trim().max(1000, "Notes must be 1000 characters or fewer.").optional(),
+  notes: z
+    .string()
+    .trim()
+    .max(1000, "Notes must be 1000 characters or fewer.")
+    .optional(),
 });
 
-export type ProductionOutputPreviewActionInput = z.input<typeof previewInputSchema>;
+export type ProductionOutputPreviewActionInput = z.input<
+  typeof previewInputSchema
+>;
 
 export type ProductionOutputPreviewActionResult =
   | {
@@ -37,10 +59,15 @@ export type ProductionOutputPreviewActionResult =
       payload: ProductionOutputPreviewPayload;
       idempotencyKey: string;
       idempotencyReplay: boolean | null;
+      persistedPreview: ZohoProductionOutputPreviewMetadata;
     }
   | {
       ok: false;
-      kind: "VALIDATION_ERROR" | "LOCAL_ERROR" | "PAYLOAD_BLOCKED" | "SERVICE_ERROR";
+      kind:
+        | "VALIDATION_ERROR"
+        | "LOCAL_ERROR"
+        | "PAYLOAD_BLOCKED"
+        | "SERVICE_ERROR";
       message: string;
       httpStatus?: number | null;
       body?: unknown;
@@ -48,12 +75,13 @@ export type ProductionOutputPreviewActionResult =
       payload?: ProductionOutputPreviewPayload;
       idempotencyKey?: string;
       idempotencyReplay?: boolean | null;
+      persistedPreview?: ZohoProductionOutputPreviewMetadata;
     };
 
 export async function previewZohoProductionOutputAction(
   input: ProductionOutputPreviewActionInput,
 ): Promise<ProductionOutputPreviewActionResult> {
-  await requireAdmin();
+  const actor = await requireAdmin();
 
   const parsed = previewInputSchema.safeParse(input);
   if (!parsed.success) {
@@ -71,10 +99,15 @@ export async function previewZohoProductionOutputAction(
 
   const lot = await loadProductionOutputPreviewLot(parsed.data.finishedLotId);
   if (!lot) {
-    return { ok: false, kind: "LOCAL_ERROR", message: "Finished lot was not found." };
+    return {
+      ok: false,
+      kind: "LOCAL_ERROR",
+      message: "Finished lot was not found.",
+    };
   }
 
-  const warehouseId = parsed.data.warehouseId || config.defaultWarehouseId || "";
+  const warehouseId =
+    parsed.data.warehouseId || config.defaultWarehouseId || "";
   const buildResult = buildProductionOutputPreviewPayload({
     finishedLotId: lot.finishedLot.id,
     workflowBagId: lot.finishedLot.workflowBagId,
@@ -105,12 +138,38 @@ export async function previewZohoProductionOutputAction(
     lot.finishedLot.id,
     buildResult.payload,
   );
+  const requestHash = buildProductionOutputPreviewRequestHash(
+    buildResult.payload,
+  );
+  const metricsState = classifyProductionOutputMetricsState({
+    workflowBagId: lot.finishedLot.workflowBagId,
+    metrics: lot.metrics,
+  });
+  const genealogyState = classifyProductionOutputGenealogyState({
+    workflowBagId: lot.finishedLot.workflowBagId,
+    rawBagLinkCount: lot.rawBagLinkCount,
+    highConfidenceRawBagLinkCount: lot.highConfidenceRawBagLinkCount,
+  });
   const response = await callProductionOutputPreview({
     payload: buildResult.payload,
     idempotencyKey,
   });
 
   if (response.ok) {
+    const persistedPreview = await upsertZohoProductionOutputPreviewOp({
+      finishedLotId: lot.finishedLot.id,
+      workflowBagId: lot.finishedLot.workflowBagId,
+      lumaOperationId: buildResult.payload.luma_operation_id,
+      status: "PREVIEWED",
+      payload: buildResult.payload,
+      requestHash,
+      previewIdempotencyKey: idempotencyKey,
+      previewHttpStatus: response.httpStatus,
+      previewResponse: response.body,
+      metricsState,
+      genealogyState,
+      userId: actor.id,
+    });
     return {
       ok: true,
       httpStatus: response.httpStatus,
@@ -118,8 +177,27 @@ export async function previewZohoProductionOutputAction(
       payload: buildResult.payload,
       idempotencyKey,
       idempotencyReplay: response.idempotencyReplay,
+      persistedPreview,
     };
   }
+
+  const persistedPreview =
+    response.httpStatus == null
+      ? undefined
+      : await upsertZohoProductionOutputPreviewOp({
+          finishedLotId: lot.finishedLot.id,
+          workflowBagId: lot.finishedLot.workflowBagId,
+          lumaOperationId: buildResult.payload.luma_operation_id,
+          status: "DRAFT",
+          payload: buildResult.payload,
+          requestHash,
+          previewIdempotencyKey: idempotencyKey,
+          previewHttpStatus: response.httpStatus,
+          previewResponse: response.body,
+          metricsState,
+          genealogyState,
+          userId: actor.id,
+        });
 
   return {
     ok: false,
@@ -133,6 +211,7 @@ export async function previewZohoProductionOutputAction(
     payload: buildResult.payload,
     idempotencyKey,
     idempotencyReplay: response.idempotencyReplay,
+    ...(persistedPreview ? { persistedPreview } : {}),
   };
 }
 
@@ -160,9 +239,25 @@ async function loadProductionOutputPreviewLot(finishedLotId: string) {
     })
     .from(finishedLots)
     .innerJoin(products, eq(products.id, finishedLots.productId))
-    .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, finishedLots.workflowBagId))
+    .leftJoin(
+      readBagMetrics,
+      eq(readBagMetrics.workflowBagId, finishedLots.workflowBagId),
+    )
     .where(eq(finishedLots.id, finishedLotId))
     .limit(1);
 
-  return row ?? null;
+  if (!row) return null;
+
+  const rawBagLinks = await db
+    .select({ confidence: finishedLotRawBags.confidence })
+    .from(finishedLotRawBags)
+    .where(eq(finishedLotRawBags.finishedLotId, finishedLotId));
+
+  return {
+    ...row,
+    rawBagLinkCount: rawBagLinks.length,
+    highConfidenceRawBagLinkCount: rawBagLinks.filter(
+      (link) => link.confidence === "HIGH",
+    ).length,
+  };
 }

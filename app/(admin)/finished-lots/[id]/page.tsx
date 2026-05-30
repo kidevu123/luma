@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { getFinishedLot } from "@/lib/db/queries/finished-lots";
 import { planZohoAssemblyForFinishedLot } from "@/lib/zoho/assembly-planner";
 import { listZohoAssemblyOps } from "@/lib/db/queries/zoho-assembly";
+import { getActiveZohoProductionOutputOpForLot } from "@/lib/db/queries/zoho-production-output";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
@@ -30,10 +31,11 @@ export default async function FinishedLotDetailPage({
 }) {
   const user = await requireSession();
   const { id } = await params;
-  const [lot, zohoplan, existingZohoOps] = await Promise.all([
+  const [lot, zohoplan, existingZohoOps, existingProductionOutputPreview] = await Promise.all([
     getFinishedLot(id),
     planZohoAssemblyForFinishedLot(id),
     listZohoAssemblyOps({ finishedLotId: id }),
+    getActiveZohoProductionOutputOpForLot(id),
   ]);
   if (!lot) notFound();
 
@@ -155,6 +157,7 @@ export default async function FinishedLotDetailPage({
             <ZohoProductionOutputPreviewCard
               finishedLotId={id}
               defaultWarehouseId={process.env.ZOHO_WAREHOUSE_ID?.trim() ?? ""}
+              persistedPreview={existingProductionOutputPreview}
             />
           )}
 

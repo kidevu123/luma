@@ -54,6 +54,8 @@ export type ProductionOutputPreviewBlocker = {
   message: string;
 };
 
+export type ProductionOutputDataQualityState = "HIGH" | "LOW" | "MISSING";
+
 export type ProductionOutputPreviewBuildResult =
   | { ok: true; payload: ProductionOutputPreviewPayload }
   | { ok: false; blockers: ProductionOutputPreviewBlocker[] };
@@ -63,7 +65,9 @@ function present(value: string | null | undefined): string | null {
   return trimmed && trimmed.length > 0 ? trimmed : null;
 }
 
-export function buildProductionOutputOperationId(finishedLotId: string): string {
+export function buildProductionOutputOperationId(
+  finishedLotId: string,
+): string {
   return `luma-production-output-preview:${finishedLotId}`;
 }
 
@@ -72,7 +76,9 @@ export function buildProductionOutputPreviewPayload(
 ): ProductionOutputPreviewBuildResult {
   const blockers: ProductionOutputPreviewBlocker[] = [];
   const purchaseorderId = present(input.mapping.purchaseorderId);
-  const purchaseorderLineItemId = present(input.mapping.purchaseorderLineItemId);
+  const purchaseorderLineItemId = present(
+    input.mapping.purchaseorderLineItemId,
+  );
   const warehouseId = present(input.mapping.warehouseId);
   const unitCompositeItemId = present(input.product?.zohoItemIdUnit);
   const displayCompositeItemId = present(input.product?.zohoItemIdDisplay);
@@ -96,7 +102,8 @@ export function buildProductionOutputPreviewPayload(
   if (!warehouseId) {
     blockers.push({
       field: "warehouse_id",
-      message: "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
+      message:
+        "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
     });
   }
   if (!unitCompositeItemId) {
@@ -157,27 +164,60 @@ export function buildProductionOutputPreviewPayload(
   return { ok: true, payload };
 }
 
-function stableStringify(value: unknown): string {
+export function stableStringifyProductionOutputPreview(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+    return `[${value.map((item) => stableStringifyProductionOutputPreview(item)).join(",")}]`;
   }
   const obj = value as Record<string, unknown>;
   return `{${Object.keys(obj)
     .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
+    .map(
+      (key) =>
+        `${JSON.stringify(key)}:${stableStringifyProductionOutputPreview(obj[key])}`,
+    )
     .join(",")}}`;
+}
+
+export function buildProductionOutputPreviewRequestHash(
+  payload: ProductionOutputPreviewPayload,
+): string {
+  return createHash("sha256")
+    .update(stableStringifyProductionOutputPreview(payload))
+    .digest("hex");
 }
 
 export function buildProductionOutputPreviewIdempotencyKey(
   finishedLotId: string,
   payload: ProductionOutputPreviewPayload,
 ): string {
-  const hash = createHash("sha256")
-    .update(stableStringify(payload))
-    .digest("hex")
-    .slice(0, 16);
+  const hash = buildProductionOutputPreviewRequestHash(payload).slice(0, 16);
   return `luma-production-output-preview-${finishedLotId}-${hash}`;
+}
+
+export function classifyProductionOutputMetricsState(input: {
+  workflowBagId: string | null;
+  metrics:
+    | {
+        damagedPackaging: number | null;
+        rippedCards: number | null;
+        looseCards: number | null;
+      }
+    | null
+    | undefined;
+}): ProductionOutputDataQualityState {
+  return input.workflowBagId && input.metrics ? "HIGH" : "MISSING";
+}
+
+export function classifyProductionOutputGenealogyState(input: {
+  workflowBagId: string | null;
+  rawBagLinkCount: number;
+  highConfidenceRawBagLinkCount: number;
+}): ProductionOutputDataQualityState {
+  if (input.workflowBagId && input.highConfidenceRawBagLinkCount > 0)
+    return "HIGH";
+  if (input.workflowBagId || input.rawBagLinkCount > 0) return "LOW";
+  return "MISSING";
 }
 
 export type ProductionOutputPreviewConfig =
@@ -201,7 +241,8 @@ export function validateProductionOutputPreviewConfig(
   if (!rawUrl || rawUrl.trim().length === 0) {
     return {
       ok: false,
-      reason: "ZOHO_SERVICE_BASE_URL (or ZOHO_INTEGRATION_URL) is not configured.",
+      reason:
+        "ZOHO_SERVICE_BASE_URL (or ZOHO_INTEGRATION_URL) is not configured.",
     };
   }
   const baseUrl = rawUrl.trim().replace(/\/+$/, "");
@@ -218,7 +259,10 @@ export function validateProductionOutputPreviewConfig(
   }
 
   if (!rawBearer || rawBearer.trim().length === 0) {
-    return { ok: false, reason: "ZOHO_SERVICE_BEARER_SECRET is not configured." };
+    return {
+      ok: false,
+      reason: "ZOHO_SERVICE_BEARER_SECRET is not configured.",
+    };
   }
 
   return {
@@ -247,7 +291,12 @@ export function buildProductionOutputPreviewHeaders(opts: {
 type FetchLike = typeof fetch;
 
 export type ProductionOutputPreviewCallResult =
-  | { ok: true; httpStatus: number; body: unknown; idempotencyReplay: boolean | null }
+  | {
+      ok: true;
+      httpStatus: number;
+      body: unknown;
+      idempotencyReplay: boolean | null;
+    }
   | {
       ok: false;
       httpStatus: number | null;
@@ -279,16 +328,19 @@ export async function callProductionOutputPreview(opts: {
   let response: Response;
 
   try {
-    response = await (opts.fetchImpl ?? fetch)(`${config.baseUrl}${PRODUCTION_OUTPUT_PREVIEW_PATH}`, {
-      method: "POST",
-      headers: buildProductionOutputPreviewHeaders({
-        bearerSecret: config.bearerSecret,
-        brand: config.brand,
-        idempotencyKey: opts.idempotencyKey,
-      }),
-      body: JSON.stringify(opts.payload),
-      signal: ctrl.signal,
-    });
+    response = await (opts.fetchImpl ?? fetch)(
+      `${config.baseUrl}${PRODUCTION_OUTPUT_PREVIEW_PATH}`,
+      {
+        method: "POST",
+        headers: buildProductionOutputPreviewHeaders({
+          bearerSecret: config.bearerSecret,
+          brand: config.brand,
+          idempotencyKey: opts.idempotencyKey,
+        }),
+        body: JSON.stringify(opts.payload),
+        signal: ctrl.signal,
+      },
+    );
     clearTimeout(timeout);
   } catch (err) {
     clearTimeout(timeout);

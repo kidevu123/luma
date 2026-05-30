@@ -1351,6 +1351,65 @@ export const zohoSyncState = pgTable(
   ],
 );
 
+export const zohoProductionOutputOps = pgTable(
+  "zoho_production_output_ops",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    lumaOperationId: text("luma_operation_id").notNull(),
+    finishedLotId: uuid("finished_lot_id")
+      .notNull()
+      .references(() => finishedLots.id, { onDelete: "restrict" }),
+    workflowBagId: uuid("workflow_bag_id").references(() => workflowBags.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull().default("DRAFT"),
+    zohoPurchaseorderId: text("zoho_purchaseorder_id").notNull(),
+    zohoPurchaseorderLineItemId: text("zoho_purchaseorder_line_item_id").notNull(),
+    zohoWarehouseId: text("zoho_warehouse_id"),
+    zohoCompositeItemId: text("zoho_composite_item_id"),
+    zohoDisplayCompositeItemId: text("zoho_display_composite_item_id"),
+    zohoCaseCompositeItemId: text("zoho_case_composite_item_id"),
+    quantityGood: integer("quantity_good").notNull(),
+    unitAssemblyQuantity: integer("unit_assembly_quantity").notNull(),
+    displayAssemblyQuantity: integer("display_assembly_quantity").notNull().default(0),
+    caseAssemblyQuantity: integer("case_assembly_quantity").notNull().default(0),
+    quantityDamaged: integer("quantity_damaged"),
+    quantityRipped: integer("quantity_ripped"),
+    quantityLoose: integer("quantity_loose"),
+    quantityBasis: jsonb("quantity_basis")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    metricsState: text("metrics_state").notNull().default("MISSING"),
+    genealogyState: text("genealogy_state").notNull().default("MISSING"),
+    requestPayload: jsonb("request_payload").$type<Record<string, unknown>>().notNull(),
+    requestHash: text("request_hash").notNull(),
+    previewIdempotencyKey: text("preview_idempotency_key"),
+    previewHttpStatus: integer("preview_http_status"),
+    previewResponse: jsonb("preview_response").$type<unknown>(),
+    previewedByUserId: uuid("previewed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    previewedAt: timestamp("previewed_at", { withTimezone: true }),
+    selectedByUserId: uuid("selected_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    selectedAt: timestamp("selected_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("zoho_prod_output_ops_luma_op_unique").on(t.lumaOperationId),
+    uniqueIndex("zoho_prod_output_ops_active_lot_unique")
+      .on(t.finishedLotId)
+      .where(sql`voided_at IS NULL`),
+    index("zoho_prod_output_ops_lot_idx").on(t.finishedLotId),
+    index("zoho_prod_output_ops_status_idx").on(t.status),
+    index("zoho_prod_output_ops_request_hash_idx").on(t.requestHash),
+  ],
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Context 5b — Legacy import (PythonAnywhere fetcher)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3664,6 +3723,7 @@ export type QrCard = typeof qrCards.$inferSelect;
 export type WorkflowBag = typeof workflowBags.$inferSelect;
 export type WorkflowEvent = typeof workflowEvents.$inferSelect;
 export type ZohoPush = typeof zohoPushes.$inferSelect;
+export type ZohoProductionOutputOp = typeof zohoProductionOutputOps.$inferSelect;
 export type ReadStationLive = typeof readStationLive.$inferSelect;
 export type ReadBagState = typeof readBagState.$inferSelect;
 export type ReadDailyThroughput = typeof readDailyThroughput.$inferSelect;
