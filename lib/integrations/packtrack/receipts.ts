@@ -246,6 +246,9 @@ export async function upsertPackagingLotFromPackTrackReceipt(
 
   const receivedAt = new Date(payload.received_at);
 
+  // TODO(PACKAGING-RECONCILIATION-SLICE-C): call applyReceiptAttribution here
+  // once source-system guard PM decision is made for PackTrack lots.
+
   const [inserted] = await tx
     .insert(packagingLots)
     .values({

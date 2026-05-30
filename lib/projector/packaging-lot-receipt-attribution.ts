@@ -3,6 +3,15 @@
 // received lot, returns an attribution plan (FIFO, material-scoped,
 // quantity-capped, partial splits supported).
 
+// PACKAGING-RECONCILIATION-SLICE-B — DB loader + write helper added below.
+
+import { sql } from "drizzle-orm";
+import type { db as Db } from "@/lib/db";
+import { materialInventoryEvents } from "@/lib/db/schema";
+
+/** Accept both a transaction and the top-level db object. */
+type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0] | typeof Db;
+
 export type PendingEstimatedEvent = {
   id: string;
   packagingMaterialId: string;
@@ -113,4 +122,151 @@ export function planPendingConsumptionAttribution(
   }
 
   return { rows, remainingLotQty, skipped };
+}
+
+// ─── PACKAGING-RECONCILIATION-SLICE-B — DB loader + write helper ─────────────
+
+/**
+ * Load pending MATERIAL_CONSUMED_ESTIMATED events for a packaging material,
+ * subtracting prior MATERIAL_ESTIMATED_VOIDED quantities so each row
+ * reflects remaining unattributed qty. Returns FIFO-sorted rows with
+ * remaining_pending_qty > 0 only.
+ *
+ * NOTE: id is returned as string (bigint → string) for planner compatibility.
+ * SQL ORDER BY (occurred_at ASC, id ASC) is authoritative — do not re-sort
+ * by string id in JS (lexicographic sort is wrong for multi-digit bigints).
+ */
+export async function loadPendingEstimatedEventsForAttribution(
+  tx: Tx,
+  packagingMaterialId: string,
+): Promise<PendingEstimatedEvent[]> {
+  const rows = await tx.execute(sql`
+    WITH voided_sums AS (
+      SELECT
+        (v.payload->>'source_estimated_event_id')::bigint AS source_id,
+        COALESCE(SUM(v.quantity_units), 0)::int           AS voided_qty
+      FROM material_inventory_events v
+      WHERE v.event_type = 'MATERIAL_ESTIMATED_VOIDED'
+        AND v.payload->>'source_estimated_event_id' IS NOT NULL
+        AND v.packaging_material_id = ${packagingMaterialId}::uuid
+      GROUP BY source_id
+    )
+    SELECT
+      ev.id::text                                                         AS id,
+      ev.packaging_material_id::text                                      AS packaging_material_id,
+      (COALESCE(ev.quantity_units, 0)
+         - COALESCE(vs.voided_qty, 0))::int                              AS qty_consumed,
+      ev.occurred_at                                                      AS occurred_at
+    FROM material_inventory_events ev
+    LEFT JOIN voided_sums vs ON vs.source_id = ev.id
+    WHERE ev.event_type = 'MATERIAL_CONSUMED_ESTIMATED'
+      AND ev.packaging_lot_id IS NULL
+      AND ev.packaging_material_id = ${packagingMaterialId}::uuid
+      AND (COALESCE(ev.quantity_units, 0) - COALESCE(vs.voided_qty, 0)) > 0
+    ORDER BY ev.occurred_at ASC, ev.id ASC
+  `);
+
+  return (rows as Array<Record<string, unknown>>).map((r) => ({
+    id: String(r.id),
+    packagingMaterialId: String(r.packaging_material_id),
+    qtyConsumed: Number(r.qty_consumed),
+    occurredAt:
+      r.occurred_at instanceof Date
+        ? r.occurred_at
+        : new Date(String(r.occurred_at)),
+  }));
+}
+
+export type AttributionContext = {
+  /** The newly received packaging lot id */
+  lotId: string;
+  /** packaging_material_id of the lot (uuid string) */
+  packagingMaterialId: string;
+  /** qty_on_hand of the new lot — used as available qty for attribution */
+  qtyAvailable: number;
+  /** The admin user performing the receipt */
+  actorUserId: string | null;
+};
+
+/**
+ * Load pending estimated events, compute an attribution plan, and write
+ * MATERIAL_CONSUMED_ACTUAL + MATERIAL_ESTIMATED_VOIDED pairs for each
+ * plan row. All writes happen inside the caller's transaction.
+ *
+ * Idempotent: the unique index on MATERIAL_ESTIMATED_VOIDED
+ * (payload->>'source_estimated_event_id') prevents double-voiding on retry.
+ * Uses onConflictDoNothing so retries succeed silently.
+ *
+ * Returns: number of plan rows written (0 = no pending events, receipt still succeeds).
+ */
+export async function applyReceiptAttribution(
+  tx: Tx,
+  ctx: AttributionContext,
+): Promise<number> {
+  if (ctx.qtyAvailable <= 0) return 0;
+
+  const pendingEvents = await loadPendingEstimatedEventsForAttribution(
+    tx,
+    ctx.packagingMaterialId,
+  );
+
+  if (pendingEvents.length === 0) return 0;
+
+  const plan = planPendingConsumptionAttribution(pendingEvents, {
+    id: ctx.lotId,
+    packagingMaterialId: ctx.packagingMaterialId,
+    qtyAvailableToAttribute: ctx.qtyAvailable,
+  });
+
+  if (plan.rows.length === 0) return 0;
+
+  const now = new Date();
+
+  for (const row of plan.rows) {
+    // MATERIAL_CONSUMED_ACTUAL — the attributed quantity linked to the new lot
+    await tx
+      .insert(materialInventoryEvents)
+      .values({
+        eventType: "MATERIAL_CONSUMED_ACTUAL",
+        packagingMaterialId: row.packagingMaterialId,
+        packagingLotId: row.packagingLotId,
+        quantityUnits: row.qtyToAttribute,
+        occurredAt: now,
+        actorUserId: ctx.actorUserId,
+        source: "admin.receive_packaging.attribution",
+        payload: {
+          source_estimated_event_id: row.sourceEstimatedEventId,
+          attribution_lot_id: row.packagingLotId,
+          attribution_source: "receipt_attribution",
+          fully_attributed: row.fullyAttributed,
+          qty_to_attribute: row.qtyToAttribute,
+          remaining_pending_qty: row.remainingPendingQty,
+        },
+      })
+      .onConflictDoNothing();
+
+    // MATERIAL_ESTIMATED_VOIDED — marks this portion as attributed; idempotency key
+    await tx
+      .insert(materialInventoryEvents)
+      .values({
+        eventType: "MATERIAL_ESTIMATED_VOIDED",
+        packagingMaterialId: row.packagingMaterialId,
+        packagingLotId: row.packagingLotId,
+        quantityUnits: row.qtyToAttribute,
+        occurredAt: now,
+        actorUserId: ctx.actorUserId,
+        source: "admin.receive_packaging.attribution",
+        payload: {
+          source_estimated_event_id: row.sourceEstimatedEventId, // ← idempotency key
+          attribution_lot_id: row.packagingLotId,
+          attribution_source: "receipt_attribution",
+          fully_attributed: row.fullyAttributed,
+          voided_qty: row.qtyToAttribute,
+          remaining_pending_qty: row.remainingPendingQty,
+        },
+      })
+      .onConflictDoNothing(); // idempotency index on (payload->>'source_estimated_event_id') WHERE event_type='MATERIAL_ESTIMATED_VOIDED'
+  }
+
+  return plan.rows.length;
 }

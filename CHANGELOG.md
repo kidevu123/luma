@@ -7,7 +7,17 @@
 - **`planPendingConsumptionAttribution` helper:** Pure planning function in `lib/projector/packaging-lot-receipt-attribution.ts`. Takes pending estimated events + a received lot, returns an attribution plan (FIFO, material-scoped, quantity-capped, partial splits supported). No DB writes; foundation for Slice B.
 
 ### Tests added (PACKAGING-RECONCILIATION-SLICE-A)
-- `lib/projector/packaging-lot-receipt-attribution.test.ts` — 10 tests covering full attribution, partial attribution, cross-material isolation, FIFO ordering, deterministic tie-break, zero/negative guards, invalid event qty, empty inputs.
+- `lib/projector/packaging-lot-receipt-attribution.test.ts` — planner tests covering full attribution, partial attribution, cross-material isolation, FIFO ordering, deterministic tie-break, zero/negative guards, invalid event qty, empty inputs.
+
+### Added (PACKAGING-RECONCILIATION-SLICE-B)
+- **Receipt attribution wired for manual packaging receipts:** When a packaging material lot is received via the admin receive flow, any pending `MATERIAL_CONSUMED_ESTIMATED` events (null-lot, same material) are attributed to the new lot via FIFO greedy matching. Attribution emits append-only `MATERIAL_CONSUMED_ACTUAL` + `MATERIAL_ESTIMATED_VOIDED` pairs inside the receipt transaction. Partial attribution is supported — unattributed remainder stays pending for future receipts.
+- **Idempotency guard:** Migration `0051_material_estimated_voided_idempotency.sql` adds a partial unique index preventing double-voiding the same estimated event on receipt retry.
+- **Pending display updated:** `loadPendingConsumptionRows`, `loadPendingConsumptionByMaterial`, and `loadMaterialBalanceSummary` subtract prior `MATERIAL_ESTIMATED_VOIDED` quantities. Fully attributed events disappear from pending; partially attributed events show remaining pending qty.
+
+### Tests added (PACKAGING-RECONCILIATION-SLICE-B)
+- DB loader tests: row mapping, empty result, string-to-Date conversion for `occurred_at`
+- Write helper tests: ACTUAL+VOIDED pair insertion, partial attribution multi-row, zero-pending no-op, zero-qty early exit, `onConflictDoNothing` called on all inserts
+- PackTrack Slice-C TODO comment added to `lib/integrations/packtrack/receipts.ts`
 
 ## [0.4.59] — 2026-05-27
 

@@ -36,6 +36,7 @@ import {
   resolveAdminAccountability,
   withAccountabilityPayload,
 } from "@/lib/production/station-operator-session";
+import { applyReceiptAttribution } from "@/lib/projector/packaging-lot-receipt-attribution";
 
 // ─── Mode 1 — count-based receive ───────────────────────────────
 
@@ -239,6 +240,15 @@ export async function receivePackagingMaterialAction(
           source: "admin.receive_packaging",
         });
       }
+
+      // PACKAGING-RECONCILIATION-SLICE-B: attribute pending estimated consumption to this lot.
+      // No-op if no pending events exist for this material. Idempotent on retry.
+      await applyReceiptAttribution(tx, {
+        lotId: lot.id,
+        packagingMaterialId: parsed.data.packagingMaterialId,
+        qtyAvailable: acceptedQty,
+        actorUserId: actor.id,
+      });
     });
     revalidatePath("/inbound/packaging-materials");
     return { ok: true, ...(lotId ? { lotId } : {}) };

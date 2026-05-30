@@ -43,20 +43,34 @@ export type MaterialBalanceRow = {
   netBalance: number;
 };
 
-/** Null-lot MATERIAL_CONSUMED_ESTIMATED rows awaiting receipt / allocation. */
+/** Null-lot MATERIAL_CONSUMED_ESTIMATED rows awaiting receipt / allocation.
+ *  Subtracts MATERIAL_ESTIMATED_VOIDED quantities so partially-attributed
+ *  events show their remaining pending qty; fully attributed events are
+ *  excluded. */
 export async function loadPendingConsumptionRows(
   tx: Queryable = db,
   opts: { materialId?: string; limit?: number } = {},
 ): Promise<PendingConsumptionRow[]> {
   const limit = opts.limit ?? 200;
   const rows = (await tx.execute(sql`
+    WITH voided_sums AS (
+      SELECT
+        (v.payload->>'source_estimated_event_id')::bigint AS source_id,
+        COALESCE(SUM(v.quantity_units), 0)::int           AS voided_qty
+      FROM material_inventory_events v
+      WHERE v.event_type = 'MATERIAL_ESTIMATED_VOIDED'
+        AND v.payload->>'source_estimated_event_id' IS NOT NULL
+        ${opts.materialId ? sql`AND v.packaging_material_id = ${opts.materialId}::uuid` : sql``}
+      GROUP BY source_id
+    )
     SELECT
       ev.id::int                              AS event_id,
       ev.packaging_material_id::text          AS packaging_material_id,
       pm.name                                 AS material_name,
       pm.sku                                  AS material_sku,
       pm.kind::text                           AS material_kind,
-      COALESCE(ev.quantity_units, 0)::int    AS quantity_units,
+      (COALESCE(ev.quantity_units, 0)
+         - COALESCE(vs.voided_qty, 0))::int  AS quantity_units,
       ev.unit_of_measure                      AS unit_of_measure,
       ev.workflow_bag_id::text                AS workflow_bag_id,
       ev.product_id::text                     AS product_id,
@@ -66,9 +80,11 @@ export async function loadPendingConsumptionRows(
       NULLIF((ev.payload->>'observed_qty_on_hand')::int, 0)         AS observed_qty_on_hand
     FROM material_inventory_events ev
     JOIN packaging_materials pm ON pm.id = ev.packaging_material_id
+    LEFT JOIN voided_sums vs ON vs.source_id = ev.id
     WHERE ev.event_type = 'MATERIAL_CONSUMED_ESTIMATED'
       AND ev.packaging_lot_id IS NULL
       ${opts.materialId ? sql`AND ev.packaging_material_id = ${opts.materialId}::uuid` : sql``}
+      AND (COALESCE(ev.quantity_units, 0) - COALESCE(vs.voided_qty, 0)) > 0
     ORDER BY ev.occurred_at DESC, ev.id DESC
     LIMIT ${limit}
   `)) as unknown as Array<Record<string, unknown>>;
@@ -91,27 +107,49 @@ export async function loadPendingConsumptionRows(
   }));
 }
 
-/** Aggregate pending consumption per material (count-based kinds only). */
+/** Aggregate pending consumption per material (count-based kinds only).
+ *  Subtracts MATERIAL_ESTIMATED_VOIDED quantities so fully attributed
+ *  events are excluded and partially attributed events show remaining qty. */
 export async function loadPendingConsumptionByMaterial(
   tx: Queryable = db,
 ): Promise<PendingConsumptionByMaterial[]> {
   const rows = (await tx.execute(sql`
+    WITH voided_sums AS (
+      SELECT
+        (v.payload->>'source_estimated_event_id')::bigint AS source_id,
+        COALESCE(SUM(v.quantity_units), 0)::int           AS voided_qty
+      FROM material_inventory_events v
+      WHERE v.event_type = 'MATERIAL_ESTIMATED_VOIDED'
+        AND v.payload->>'source_estimated_event_id' IS NOT NULL
+      GROUP BY source_id
+    ),
+    pending_events AS (
+      SELECT
+        ev.packaging_material_id,
+        ev.unit_of_measure,
+        ev.occurred_at,
+        (COALESCE(ev.quantity_units, 0)
+           - COALESCE(vs.voided_qty, 0))::int AS remaining_qty
+      FROM material_inventory_events ev
+      LEFT JOIN voided_sums vs ON vs.source_id = ev.id
+      WHERE ev.event_type = 'MATERIAL_CONSUMED_ESTIMATED'
+        AND ev.packaging_lot_id IS NULL
+        AND (COALESCE(ev.quantity_units, 0) - COALESCE(vs.voided_qty, 0)) > 0
+    )
     SELECT
-      ev.packaging_material_id::text       AS packaging_material_id,
+      pe.packaging_material_id::text       AS packaging_material_id,
       pm.name                              AS material_name,
       pm.sku                               AS material_sku,
       pm.kind::text                        AS material_kind,
-      COALESCE(MAX(ev.unit_of_measure), pm.uom) AS unit_of_measure,
-      COALESCE(SUM(ev.quantity_units), 0)::int AS pending_qty,
-      COUNT(*)::int                        AS event_count,
-      MAX(ev.occurred_at)::text            AS last_occurred_at
-    FROM material_inventory_events ev
-    JOIN packaging_materials pm ON pm.id = ev.packaging_material_id
-    WHERE ev.event_type = 'MATERIAL_CONSUMED_ESTIMATED'
-      AND ev.packaging_lot_id IS NULL
-      AND pm.kind::text NOT IN ('PVC_ROLL', 'FOIL_ROLL', 'BLISTER_FOIL')
-    GROUP BY ev.packaging_material_id, pm.name, pm.sku, pm.kind, pm.uom
-    HAVING COALESCE(SUM(ev.quantity_units), 0) > 0
+      COALESCE(MAX(pe.unit_of_measure), pm.uom) AS unit_of_measure,
+      COALESCE(SUM(pe.remaining_qty), 0)::int   AS pending_qty,
+      COUNT(*)::int                             AS event_count,
+      MAX(pe.occurred_at)::text                 AS last_occurred_at
+    FROM pending_events pe
+    JOIN packaging_materials pm ON pm.id = pe.packaging_material_id
+    WHERE pm.kind::text NOT IN ('PVC_ROLL', 'FOIL_ROLL', 'BLISTER_FOIL')
+    GROUP BY pe.packaging_material_id, pm.name, pm.sku, pm.kind, pm.uom
+    HAVING COALESCE(SUM(pe.remaining_qty), 0) > 0
     ORDER BY pending_qty DESC, pm.name
   `)) as unknown as Array<Record<string, unknown>>;
 
@@ -127,16 +165,33 @@ export async function loadPendingConsumptionByMaterial(
   }));
 }
 
-/** On-hand, pending, and net balance per active count-based material. */
+/** On-hand, pending, and net balance per active count-based material.
+ *  Pending qty subtracts MATERIAL_ESTIMATED_VOIDED so attributed events
+ *  are removed from the pending column and net balance improves accordingly. */
 export async function loadMaterialBalanceSummary(
   tx: Queryable = db,
 ): Promise<MaterialBalanceRow[]> {
   const rows = (await tx.execute(sql`
-    WITH pending AS (
+    WITH voided_sums AS (
+      SELECT
+        (v.payload->>'source_estimated_event_id')::bigint AS source_id,
+        COALESCE(SUM(v.quantity_units), 0)::int           AS voided_qty
+      FROM material_inventory_events v
+      WHERE v.event_type = 'MATERIAL_ESTIMATED_VOIDED'
+        AND v.payload->>'source_estimated_event_id' IS NOT NULL
+      GROUP BY source_id
+    ),
+    pending AS (
       SELECT
         ev.packaging_material_id,
-        COALESCE(SUM(ev.quantity_units), 0)::int AS pending_qty
+        COALESCE(SUM(
+          GREATEST(
+            COALESCE(ev.quantity_units, 0) - COALESCE(vs.voided_qty, 0),
+            0
+          )
+        ), 0)::int AS pending_qty
       FROM material_inventory_events ev
+      LEFT JOIN voided_sums vs ON vs.source_id = ev.id
       WHERE ev.event_type = 'MATERIAL_CONSUMED_ESTIMATED'
         AND ev.packaging_lot_id IS NULL
       GROUP BY ev.packaging_material_id
