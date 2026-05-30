@@ -133,6 +133,7 @@ export const materialEventTypeEnum = pgEnum("material_event_type", [
   "PACKAGING_BOX_COUNTED",
   "PACKAGING_RECEIPT_ADJUSTED",
   "PACKAGING_VARIANCE_RECORDED",
+  "MATERIAL_ESTIMATED_VOIDED",
 ]);
 
 /** Source system that produced a packaging-receipt row. PackTrack is

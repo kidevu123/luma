@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.60] — 2026-05-30
+
+### Added (PACKAGING-RECONCILIATION-SLICE-A)
+- **`MATERIAL_ESTIMATED_VOIDED` enum value:** Added to `materialEventTypeEnum` in schema and Drizzle migration `0050_material_estimated_voided.sql` (`ALTER TYPE ... ADD VALUE IF NOT EXISTS`). Required by Slice B to mark pending estimated consumption events as voided when a receipt is reconciled.
+- **`planPendingConsumptionAttribution` helper:** Pure planning function in `lib/projector/packaging-lot-receipt-attribution.ts`. Takes pending estimated events + a received lot, returns an attribution plan (FIFO, material-scoped, quantity-capped, partial splits supported). No DB writes; foundation for Slice B.
+
+### Tests added (PACKAGING-RECONCILIATION-SLICE-A)
+- `lib/projector/packaging-lot-receipt-attribution.test.ts` — 10 tests covering full attribution, partial attribution, cross-material isolation, FIFO ordering, deterministic tie-break, zero/negative guards, invalid event qty, empty inputs.
+
 ## [0.4.59] — 2026-05-27
 
 ### Added (ROLL-MANAGEMENT-ACCESS-FOOTER-KG-1)
