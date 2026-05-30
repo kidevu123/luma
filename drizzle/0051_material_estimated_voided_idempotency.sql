@@ -3,5 +3,5 @@
 -- when the manual receipt action retries or is re-run.
 CREATE UNIQUE INDEX IF NOT EXISTS material_events_estimated_voided_source_unique
   ON material_inventory_events ((payload->>'source_estimated_event_id'))
-  WHERE event_type = 'MATERIAL_ESTIMATED_VOIDED'
+  WHERE event_type::text = 'MATERIAL_ESTIMATED_VOIDED'
     AND payload->>'source_estimated_event_id' IS NOT NULL;
