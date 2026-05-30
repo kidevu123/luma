@@ -15,6 +15,7 @@ import { db } from "@/lib/db";
 import { batches, tabletTypes } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { BagEditHistoryPanel } from "./bag-edit-history-panel";
+import { BagNotesCell } from "./bag-notes-cell";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -171,8 +172,17 @@ export default async function ReceiveDetailPage({
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
               <CardTitle>Bags ({r.bags.length})</CardTitle>
+              {r.receive.closedAt ? (
+                <p className="text-[11px] text-text-muted max-w-[220px] text-right leading-snug">
+                  Receive closed — reopen from Edit receive to add bags.
+                </p>
+              ) : r.boxes.length > 0 ? (
+                <Button variant="secondary" size="sm" asChild>
+                  <Link href={`/inbound/${id}/add-bag`}>Add bag</Link>
+                </Button>
+              ) : null}
             </CardHeader>
             <CardContent>
               {r.bags.length > 0 && (
@@ -226,8 +236,8 @@ export default async function ReceiveDetailPage({
                               ? (bag.weightGrams / 1000).toFixed(3)
                               : "—"}
                           </TD>
-                          <TD className="text-xs text-text-muted max-w-[120px] truncate">
-                            {bag.notes ?? "—"}
+                          <TD className="max-w-[160px]">
+                            <BagNotesCell notes={bag.notes ?? null} />
                           </TD>
                           <TD>
                             <BagStatus status={bag.status} />

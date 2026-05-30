@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.62] — 2026-05-27
+
+### Added (RECEIVE-ADD-BAG-NOTES-1)
+- **Add bag to existing receive:** Open receives show **Add bag** on the detail page. New bags attach to the same receive/box context (inherited PO, tablet, batch) with required add reason; closed receives are blocked with clear copy.
+- **View bag notes without edit:** Long bag notes on the receive detail table expand in-place via **View**; empty notes stay clean.
+
+### Tests added (RECEIVE-ADD-BAG-NOTES-1)
+- `lib/receive/add-bag.test.ts` — validation, box resolution, bag numbering, summary helpers.
+- `app/(admin)/inbound/[id]/page.test.ts` — add-bag wiring, closed-receive guard, notes cell, audit action.
+
 ## [0.4.61] — 2026-05-27
 
 ### Changed (ROLL-CHANGE-QA-SORT-COPY-1)
