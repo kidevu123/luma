@@ -50,6 +50,20 @@ describe("buildPackagingConsumptionPayloadSummary", () => {
   });
 });
 
+describe("PACKAGING-CLIENT-EVENT-ID-TEXT-CAST-1 · client_event_id patch SQL", () => {
+  const summarySrc = readFileSync(
+    join(import.meta.dirname, "./packaging-consumption-summary.ts"),
+    "utf8",
+  );
+
+  it("does not cast client_event_id to uuid (column is text)", () => {
+    expect(summarySrc).not.toMatch(
+      /client_event_id = \$\{args\.clientEventId\}::uuid/,
+    );
+    expect(summarySrc).toMatch(/client_event_id = \$\{args\.clientEventId\}/);
+  });
+});
+
 describe("material-lot-state honesty", () => {
   const lotStateSrc = readFileSync(
     join(import.meta.dirname, "../projector/material-lot-state.ts"),

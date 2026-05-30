@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.56] — 2026-05-30
+
+### Fixed (PACKAGING-CLIENT-EVENT-ID-TEXT-CAST-1)
+- **Packaging close-out no longer fails with `text = uuid` on consumption summary patch:** `workflow_events.client_event_id` is `text`, but `patchPackagingCompleteConsumptionSummary` compared it with `::uuid`, causing Postgres `operator does not exist: text = uuid` on every floor packaging submit that sends a client event id.
+
+### Tests added (PACKAGING-CLIENT-EVENT-ID-TEXT-CAST-1)
+- `packaging-consumption-summary.test.ts` — patch SQL must not cast `client_event_id` to uuid.
+
 ## [0.4.55] — 2026-05-30
 
 ### Added (PACKAGING-RECONCILIATION-SLICE-A)

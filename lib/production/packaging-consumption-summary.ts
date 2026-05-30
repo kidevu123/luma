@@ -46,7 +46,7 @@ export async function patchPackagingCompleteConsumptionSummary(
       SET payload = payload || ${summaryJson}::jsonb
       WHERE workflow_bag_id = ${args.workflowBagId}::uuid
         AND event_type = 'PACKAGING_COMPLETE'
-        AND client_event_id = ${args.clientEventId}::uuid
+        AND client_event_id = ${args.clientEventId}
     `);
     return;
   }
