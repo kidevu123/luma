@@ -5,6 +5,7 @@ import {
   filterIdleRollLotsForRole,
   idleRollLotMatchesRole,
 } from "./idle-roll-lots";
+import { sortRollLotsForPicker } from "./roll-lot-sort";
 
 describe("idle-roll-lots — mount dropdown filter", () => {
   it("AVAILABLE PVC/foil rolls are selectable", () => {
@@ -82,5 +83,43 @@ describe("idle-roll-lots — role-first mount filtering", () => {
       "foil1",
       "foil2",
     ]);
+  });
+
+  it("role filter then natural sort orders replacement dropdown options", () => {
+    const numbered = [
+      {
+        id: "pvc40",
+        status: "AVAILABLE",
+        materialKind: "PVC_ROLL",
+        rollNumber: "PVC-40",
+      },
+      {
+        id: "pvc4",
+        status: "AVAILABLE",
+        materialKind: "PVC_ROLL",
+        rollNumber: "PVC-4",
+      },
+      {
+        id: "pvc23",
+        status: "AVAILABLE",
+        materialKind: "PVC_ROLL",
+        rollNumber: "PVC-23",
+      },
+      {
+        id: "foil1",
+        status: "AVAILABLE",
+        materialKind: "FOIL_ROLL",
+        rollNumber: "FOIL-9",
+      },
+    ];
+    const pvcSorted = sortRollLotsForPicker(
+      filterIdleRollLotsForRole(numbered, "PVC"),
+    );
+    expect(pvcSorted.map((l) => l.rollNumber)).toEqual([
+      "PVC-4",
+      "PVC-23",
+      "PVC-40",
+    ]);
+    expect(filterIdleRollLotsForRole(numbered, "FOIL")).toHaveLength(1);
   });
 });

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.61] — 2026-05-27
+
+### Changed (ROLL-CHANGE-QA-SORT-COPY-1)
+- **Natural roll dropdown order:** Mount and mid-bag change-roll pickers sort roll labels numerically (PVC-4 before PVC-23). Legacy-prefixed labels sort after standard numbered rolls.
+- **Mid-bag change-roll copy:** Clarifies that the entered counter closes the segment for the removed roll, the other active roll, and the bag — not the replacement roll, which starts after the change.
+
+### Tests added (ROLL-CHANGE-QA-SORT-COPY-1)
+- `lib/production/roll-lot-sort.test.ts` — PVC/FOIL natural order, legacy labels, immutability.
+- `lib/production/idle-roll-lots.test.ts` — role filter + natural sort integration for replacement dropdown.
+
 ## [0.4.60] — 2026-05-30
 
 ### Added (PACKAGING-RECONCILIATION-SLICE-A)

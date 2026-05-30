@@ -28,6 +28,7 @@ import {
   filterIdleRollLotsForRole,
   idleRollLotMatchesRole,
 } from "@/lib/production/idle-roll-lots";
+import { sortRollLotsForPicker } from "@/lib/production/roll-lot-sort";
 
 type ActionResult = { ok?: true; error?: string } | void;
 
@@ -195,7 +196,7 @@ export function MountRollForm({
 
   const lotsForRole =
     role === "PVC" || role === "FOIL"
-      ? filterIdleRollLotsForRole(idleRollLots, role)
+      ? sortRollLotsForPicker(filterIdleRollLotsForRole(idleRollLots, role))
       : [];
 
   React.useEffect(() => {
@@ -450,10 +451,11 @@ export function ChangeRollForm({
   onCancel?: () => void;
 }) {
   const { pending, error, okMsg, submit } = useFormSubmit();
-  const replacementLots =
+  const replacementLots = sortRollLotsForPicker(
     fixedRole != null
       ? filterIdleRollLotsForRole(idleRollLots, fixedRole)
-      : idleRollLots;
+      : idleRollLots,
+  );
   return (
     <form
       action={(fd) => {
@@ -485,14 +487,15 @@ export function ChangeRollForm({
             : "—"}
         </div>
         <div className="text-amber-900/80">
-          Counter goes to the old roll, the still-active other-role roll, and
-          this bag.
+          This count is assigned to the roll being removed, the still-active other
+          roll, and this bag. The replacement roll starts after this change.
         </div>
       </div>
       <p className="text-xs text-text-muted">
         Use this when a roll runs out (or is changed out) mid-bag. Enter the
-        machine counter when this roll stopped — that count goes to the old
-        roll AND to the other active roll for the segment.
+        machine counter when the roll being removed stopped. That count closes
+        the segment for the removed roll, the other active roll, and this bag.
+        The replacement roll does not receive this count.
       </p>
       <Field label="Role being changed">
         {fixedRole ? (
