@@ -23,6 +23,11 @@ import {
   weighRollAction,
   changeRollAction,
 } from "./roll-actions";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
+import {
+  filterIdleRollLotsForRole,
+  idleRollLotMatchesRole,
+} from "@/lib/production/idle-roll-lots";
 
 type ActionResult = { ok?: true; error?: string } | void;
 
@@ -102,6 +107,7 @@ type Lot = {
   netWeightGrams: number | null;
   currentEstimateGrams: number | null;
   materialName: string;
+  materialKind: string;
 };
 
 type ActiveRoll = {
@@ -168,6 +174,12 @@ function useFormSubmit() {
   return { pending, error, okMsg, submit };
 }
 
+function formatLotOptionLabel(lot: Lot): string {
+  const weight =
+    lot.netWeightGrams != null ? formatGramsAsKg(lot.netWeightGrams) : "weight ?";
+  return `${lot.rollNumber ?? lot.id.slice(0, 8)} · ${lot.materialName} · ${weight}`;
+}
+
 export function MountRollForm({
   token,
   stationId,
@@ -178,6 +190,26 @@ export function MountRollForm({
   idleRollLots: Lot[];
 }) {
   const { pending, error, okMsg, submit } = useFormSubmit();
+  const [role, setRole] = React.useState<"PVC" | "FOIL" | "">("");
+  const [lotId, setLotId] = React.useState("");
+
+  const lotsForRole =
+    role === "PVC" || role === "FOIL"
+      ? filterIdleRollLotsForRole(idleRollLots, role)
+      : [];
+
+  React.useEffect(() => {
+    if (!lotId) return;
+    const selected = idleRollLots.find((l) => l.id === lotId);
+    if (
+      !selected ||
+      (role !== "PVC" && role !== "FOIL") ||
+      !idleRollLotMatchesRole(selected, role)
+    ) {
+      setLotId("");
+    }
+  }, [role, lotId, idleRollLots]);
+
   return (
     <form
       action={(fd) => {
@@ -188,44 +220,61 @@ export function MountRollForm({
       }}
       className="space-y-3"
     >
-      <Field label="Roll lot">
-        <select
-          name="packagingLotId"
-          required
-          defaultValue=""
-          className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
-        >
-          <option value="" disabled>
-            — Select roll —
-          </option>
-          {idleRollLots.map((lot) => (
-            <option key={lot.id} value={lot.id}>
-              {lot.rollNumber ?? lot.id.slice(0, 8)} · {lot.materialName} ·{" "}
-              {lot.netWeightGrams != null ? `${lot.netWeightGrams} g` : "weight ?"}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Role">
+      <Field label="Roll type / material role">
         <div className="flex gap-2">
           {(["PVC", "FOIL"] as const).map((r) => (
             <label
               key={r}
               className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded border border-border bg-surface text-sm cursor-pointer"
             >
-              <input type="radio" name="role" value={r} required />
+              <input
+                type="radio"
+                name="role"
+                value={r}
+                required
+                checked={role === r}
+                onChange={() => setRole(r)}
+              />
               {r}
             </label>
           ))}
         </div>
       </Field>
-      <Field label="Starting weight (g, optional override)">
+      <Field label="Roll lot">
+        {role !== "PVC" && role !== "FOIL" ? (
+          <p className="text-sm text-text-muted py-2">
+            Select PVC or FOIL above to see available rolls.
+          </p>
+        ) : lotsForRole.length === 0 ? (
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            No available {role} rolls. Receive rolls in inbound first.
+          </p>
+        ) : (
+          <select
+            name="packagingLotId"
+            required
+            value={lotId}
+            onChange={(e) => setLotId(e.target.value)}
+            className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
+          >
+            <option value="" disabled>
+              — Select roll —
+            </option>
+            {lotsForRole.map((lot) => (
+              <option key={lot.id} value={lot.id}>
+                {formatLotOptionLabel(lot)}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      <Field label="Starting weight (kg, optional override)">
         <input
           type="number"
-          inputMode="numeric"
-          min="1"
-          step="1"
-          name="startingWeightGrams"
+          inputMode="decimal"
+          min="0"
+          step="0.001"
+          name="startingWeightKg"
           className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm tabular-nums"
         />
       </Field>
@@ -351,14 +400,14 @@ export function WeighRollForm({
           ))}
         </select>
       </Field>
-      <Field label="Current weight (g)">
+      <Field label="Current weight (kg)">
         <input
           type="number"
-          inputMode="numeric"
-          min="1"
-          step="1"
+          inputMode="decimal"
+          min="0"
+          step="0.001"
           required
-          name="currentWeightGrams"
+          name="currentWeightKg"
           className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm tabular-nums"
         />
       </Field>
@@ -401,6 +450,10 @@ export function ChangeRollForm({
   onCancel?: () => void;
 }) {
   const { pending, error, okMsg, submit } = useFormSubmit();
+  const replacementLots =
+    fixedRole != null
+      ? filterIdleRollLotsForRole(idleRollLots, fixedRole)
+      : idleRollLots;
   return (
     <form
       action={(fd) => {
@@ -484,22 +537,27 @@ export function ChangeRollForm({
         </Field>
       ) : (
         <Field label="New roll lot (replacement)">
-          <select
-            name="newPackagingLotId"
-            required
-            defaultValue=""
-            className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
-          >
-            <option value="" disabled>
-              — Select new roll —
-            </option>
-            {idleRollLots.map((lot) => (
-              <option key={lot.id} value={lot.id}>
-                {lot.rollNumber ?? lot.id.slice(0, 8)} · {lot.materialName} ·{" "}
-                {lot.netWeightGrams != null ? `${lot.netWeightGrams} g` : "weight ?"}
+          {fixedRole != null && replacementLots.length === 0 ? (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              No available {fixedRole} rolls.
+            </p>
+          ) : (
+            <select
+              name="newPackagingLotId"
+              required
+              defaultValue=""
+              className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm"
+            >
+              <option value="" disabled>
+                — Select new roll —
               </option>
-            ))}
-          </select>
+              {replacementLots.map((lot) => (
+                <option key={lot.id} value={lot.id}>
+                  {formatLotOptionLabel(lot)}
+                </option>
+              ))}
+            </select>
+          )}
         </Field>
       )}
       {showEndingWeight ? (

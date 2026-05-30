@@ -1,6 +1,8 @@
 // ROLL-INTAKE-UX-LEGACY-1 — shared filter for mount / change-roll dropdowns.
 // Only AVAILABLE roll-kind lots are selectable; depleted/scrapped/in-use are excluded.
 
+import { inferRollRole } from "@/lib/production/roll-role";
+
 export const ROLL_MATERIAL_KINDS = [
   "PVC_ROLL",
   "FOIL_ROLL",
@@ -25,4 +27,18 @@ export function filterSelectableIdleRollLots<
   T extends { status: string; materialKind: string },
 >(lots: readonly T[]): T[] {
   return lots.filter(isSelectableIdleRollLot);
+}
+
+/** Filter idle lots to PVC or FOIL mount role (material kind is source of truth). */
+export function idleRollLotMatchesRole(
+  lot: { materialKind: string },
+  role: "PVC" | "FOIL",
+): boolean {
+  return inferRollRole(lot.materialKind, null) === role;
+}
+
+export function filterIdleRollLotsForRole<
+  T extends { materialKind: string },
+>(lots: readonly T[], role: "PVC" | "FOIL"): T[] {
+  return lots.filter((lot) => idleRollLotMatchesRole(lot, role));
 }

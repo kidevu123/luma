@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.59] — 2026-05-27
+
+### Added (ROLL-MANAGEMENT-ACCESS-FOOTER-KG-1)
+- **Admin roll management landing:** New `/roll-management` page under Inventory lists blister/combined stations with links to each station's floor roll page. Sidebar and Materials tabs include the shortcut.
+- **Consistent version footer:** Floor station sub-pages (including roll management) share `LumaBuildFooter` via `app/(floor)/floor/[token]/layout.tsx`; admin pages continue using `AdminFooter`.
+
+### Changed (ROLL-MANAGEMENT-ACCESS-FOOTER-KG-1)
+- **Operator roll weights in kg:** Mount, weigh, unmount, and active-roll displays convert grams to kg for operators; backend storage remains grams.
+- **Mount form role-first:** Select PVC or FOIL before the roll lot dropdown; lots filter by material kind with clear empty states.
+
+### Tests added (ROLL-MANAGEMENT-ACCESS-FOOTER-KG-1)
+- `idle-roll-lots.test.ts` — role-first PVC/FOIL filtering.
+- `page.test.ts` — footer moved to station layout.
+- `sidebar.test.ts` — roll management nav link.
+
 ## [0.4.58] — 2026-05-30
 
 ### Fixed (MULTI-SEALING-FINAL-CLOSE-UNSTICK-1)

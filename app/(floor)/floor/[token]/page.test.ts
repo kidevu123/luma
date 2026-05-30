@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const pageSrc = readFileSync(join(__dirname, "page.tsx"), "utf8");
+const layoutSrc = readFileSync(join(__dirname, "layout.tsx"), "utf8");
 
 describe("STATION-MOBILE-UX-1 · floor station page layout", () => {
   it("does not render primary top tool nav row", () => {
@@ -17,10 +18,18 @@ describe("STATION-MOBILE-UX-1 · floor station page layout", () => {
     expect(pageSrc).toMatch(/SupervisorToolsPanel/);
   });
 
-  it("keeps scan card and footer version", () => {
+  it("keeps scan card; version footer lives in station layout", () => {
     expect(pageSrc).toMatch(/ScanCardForm/);
-    expect(pageSrc).toMatch(/getPackageVersion/);
-    expect(pageSrc).toMatch(/Luma · v/);
+    expect(pageSrc).not.toMatch(/getPackageVersion/);
+    expect(pageSrc).not.toMatch(/Luma · v/);
+    expect(layoutSrc).toMatch(/LumaBuildFooter/);
+    expect(layoutSrc).toMatch(/min-h-dvh flex flex-col/);
+  });
+
+  it("places supervisor tools after current bag (footer is in layout)", () => {
+    const toolsIdx = pageSrc.indexOf("SupervisorToolsPanel");
+    const bagIdx = pageSrc.indexOf("Current bag");
+    expect(toolsIdx).toBeGreaterThan(bagIdx);
   });
 
   it("keeps operator session before current bag section", () => {
@@ -28,14 +37,6 @@ describe("STATION-MOBILE-UX-1 · floor station page layout", () => {
     const bagIdx = pageSrc.indexOf("Current bag");
     expect(sessionIdx).toBeGreaterThan(-1);
     expect(bagIdx).toBeGreaterThan(sessionIdx);
-  });
-
-  it("places supervisor tools after current bag, before footer", () => {
-    const toolsIdx = pageSrc.indexOf("SupervisorToolsPanel");
-    const bagIdx = pageSrc.indexOf("Current bag");
-    const footerIdx = pageSrc.indexOf("Luma · v");
-    expect(toolsIdx).toBeGreaterThan(bagIdx);
-    expect(footerIdx).toBeGreaterThan(toolsIdx);
   });
 });
 

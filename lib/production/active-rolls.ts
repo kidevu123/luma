@@ -14,6 +14,7 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { inferRollRole } from "@/lib/production/roll-role";
 
 export type ActiveRoll = {
   packagingLotId: string;
@@ -145,7 +146,7 @@ export async function getActiveRollsForMachine(
   const list = rows as unknown as Row[];
 
   return list.map((r) => {
-    const role = inferRole(r.material_kind, r.payload_role);
+    const role = inferRollRole(r.material_kind, r.payload_role);
     const confidence: ActiveRoll["confidence"] =
       r.last_weighed_at != null
         ? "HIGH"
@@ -173,19 +174,12 @@ export async function getActiveRollsForMachine(
 
 /** Pure helper. Prefers the explicit role from the mount event's
  *  payload, falls back to inferring from the material kind. */
+/** @deprecated Use inferRollRole from roll-role.ts in client-safe code. */
 export function inferRole(
   materialKind: string,
   payloadRole: string | null | undefined,
 ): "PVC" | "FOIL" {
-  if (payloadRole === "PVC" || payloadRole === "FOIL") return payloadRole;
-  if (materialKind === "PVC_ROLL") return "PVC";
-  if (materialKind === "FOIL_ROLL" || materialKind === "BLISTER_FOIL") return "FOIL";
-  // Default conservatively to PVC so callers don't crash when a
-  // future roll kind is introduced. The UI surfaces this as the
-  // explicit role from the mount payload, so the fallback only
-  // matters when a payload was never written — which is itself a
-  // bug.
-  return "PVC";
+  return inferRollRole(materialKind, payloadRole);
 }
 
 /** Pure helper used by the unmount action to decide the next lot

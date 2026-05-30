@@ -5,6 +5,7 @@ import { loadActiveRollPanel, type ActiveRollRow } from "@/lib/production/materi
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 
 export const dynamic = "force-dynamic";
 
@@ -98,9 +99,9 @@ export default async function ActiveRollsPage() {
                       </td>
                       <td className="p-2 text-right tabular-nums">
                         {r.currentWeightGramsEstimate != null
-                          ? `${r.currentWeightGramsEstimate} g`
+                          ? formatGramsAsKg(r.currentWeightGramsEstimate)
                           : r.startingWeightGrams != null
-                            ? `${r.startingWeightGrams} g`
+                            ? formatGramsAsKg(r.startingWeightGrams)
                             : "Missing"}
                       </td>
                       <td className="p-2 text-right tabular-nums">
@@ -130,9 +131,9 @@ function RoleBadge({ label, roll }: { label: string; roll: ActiveRollRow }) {
       <span className="font-semibold mr-1">{label}</span>
       {roll.rollNumber ?? roll.packagingLotId.slice(0, 8)} ·{" "}
       {roll.currentWeightGramsEstimate != null
-        ? `${roll.currentWeightGramsEstimate} g`
+        ? formatGramsAsKg(roll.currentWeightGramsEstimate)
         : roll.startingWeightGrams != null
-          ? `${roll.startingWeightGrams} g`
+          ? formatGramsAsKg(roll.startingWeightGrams)
           : "Missing"}{" "}
       · <ConfidenceBadge confidence={roll.confidence} className="align-middle" />
     </span>

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, RotateCcw, Bell } from "lucide-react";
+import { Boxes, RotateCcw, Bell, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { href: "/packaging-inventory", label: "Stock",        icon: Boxes },
   { href: "/active-rolls",        label: "Active rolls", icon: RotateCcw },
+  { href: "/roll-management",     label: "Roll management", icon: Wrench },
   { href: "/material-alerts",     label: "Alerts",       icon: Bell },
 ] as const;
 

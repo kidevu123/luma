@@ -71,20 +71,8 @@ import { filterSelectableIdleRollLots } from "@/lib/production/idle-roll-lots";
 import { StationRollPanel } from "./station-roll-panel";
 import { ElapsedTimer } from "./elapsed-timer";
 import { formatFloorTimeEastern } from "@/lib/floor-time";
-import { readFileSync } from "fs";
-import path from "path";
 
 export const dynamic = "force-dynamic";
-
-function getPackageVersion(): string {
-  try {
-    const raw = readFileSync(path.join(process.cwd(), "package.json"), "utf-8");
-    const pkg = JSON.parse(raw) as { version?: string };
-    return pkg.version ?? "?";
-  } catch {
-    return "?";
-  }
-}
 
 export default async function FloorStationPage({
   params,
@@ -551,6 +539,7 @@ export default async function FloorStationPage({
       netWeightGrams: number | null;
       currentEstimateGrams: number | null;
       materialName: string;
+      materialKind: string;
     }[];
     activeBag: { id: string; label: string; startedAt: Date | string | null } | null;
     machineBound: boolean;
@@ -625,6 +614,7 @@ export default async function FloorStationPage({
         netWeightGrams: l.netWeightGrams,
         currentEstimateGrams: l.currentEstimateGrams,
         materialName: l.materialName,
+        materialKind: l.materialKind,
       })),
       activeBag: activeBagForRolls,
     };
@@ -856,11 +846,6 @@ export default async function FloorStationPage({
       </section>
 
       <SupervisorToolsPanel tools={supervisorTools} />
-
-      <p className="text-center text-[10px] font-mono text-text-subtle">
-        Luma · v{getPackageVersion()} · {process.env.BUILD_GIT_SHA?.slice(0, 7) ?? "local"}
-        {process.env.BUILD_GIT_BRANCH ? ` · ${process.env.BUILD_GIT_BRANCH}` : ""}
-      </p>
     </main>
   );
 }

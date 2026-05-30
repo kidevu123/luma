@@ -127,6 +127,7 @@ const mountSchema = z
     role: z.enum(["PVC", "FOIL"]),
     workflowBagId: z.string().uuid().optional().nullable().or(z.literal("")),
     startingWeightGrams: z.coerce.number().int().min(1).optional().nullable(),
+    startingWeightKg: z.coerce.number().positive().optional().nullable(),
     notes: z.string().max(500).optional().nullable(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
     /** OP-1C per-form supervisor override — resolved against
@@ -149,6 +150,7 @@ export async function mountRollAction(
     role: formData.get("role"),
     workflowBagId: formData.get("workflowBagId") || undefined,
     startingWeightGrams: formData.get("startingWeightGrams") || undefined,
+    startingWeightKg: formData.get("startingWeightKg") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: formData.get("clientEventId") || undefined,
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
@@ -157,6 +159,9 @@ export async function mountRollAction(
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+  const startingWeightGrams =
+    d.startingWeightGrams ??
+    (d.startingWeightKg != null ? kgToGrams(d.startingWeightKg) : null);
   try {
     const station = await authStation(d.token, d.stationId);
     if (!station.machineId) return { error: "Station is not bound to a machine." };
@@ -215,7 +220,7 @@ export async function mountRollAction(
       };
     }
 
-    const startingWeight = d.startingWeightGrams ?? lot.net_weight_grams;
+    const startingWeight = startingWeightGrams ?? lot.net_weight_grams;
     const workflowBagId = d.workflowBagId && d.workflowBagId !== "" ? d.workflowBagId : null;
 
     await db.transaction(async (tx) => {
@@ -453,11 +458,18 @@ const weighSchema = z
     stationId: z.string().uuid(),
     packagingLotId: z.string().uuid().optional(),
     rollNumber: z.string().min(1).max(80).optional(),
-    currentWeightGrams: z.coerce.number().int().min(1, "Weight must be > 0"),
+    currentWeightGrams: z.coerce.number().int().min(1, "Weight must be > 0").optional(),
+    currentWeightKg: z.coerce.number().positive("Weight must be > 0").optional(),
     notes: z.string().max(500).optional().nullable(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
     overrideEmployeeCode: z.string().max(40).optional().nullable(),
   })
+  .refine(
+    (d) =>
+      (d.currentWeightGrams != null && d.currentWeightGrams > 0) ||
+      (d.currentWeightKg != null && d.currentWeightKg > 0),
+    { message: "Weight must be > 0", path: ["currentWeightKg"] },
+  )
   .refine((d) => d.packagingLotId != null || (d.rollNumber != null && d.rollNumber !== ""), {
     message: "Roll number or lot id is required.",
     path: ["packagingLotId"],
@@ -471,7 +483,8 @@ export async function weighRollAction(
     stationId: formData.get("stationId"),
     packagingLotId: formData.get("packagingLotId") || undefined,
     rollNumber: formData.get("rollNumber") || undefined,
-    currentWeightGrams: formData.get("currentWeightGrams"),
+    currentWeightGrams: formData.get("currentWeightGrams") || undefined,
+    currentWeightKg: formData.get("currentWeightKg") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: formData.get("clientEventId") || undefined,
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
@@ -480,6 +493,12 @@ export async function weighRollAction(
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+  const currentWeightGrams =
+    d.currentWeightGrams ??
+    (d.currentWeightKg != null ? kgToGrams(d.currentWeightKg) : null);
+  if (currentWeightGrams == null || currentWeightGrams < 1) {
+    return { error: "Weight must be > 0" };
+  }
   try {
     const station = await authStation(d.token, d.stationId);
     if (!station.machineId) return { error: "Station is not bound to a machine." };
@@ -494,7 +513,7 @@ export async function weighRollAction(
     }
 
     const previousEstimate = lot.current_weight_grams_estimate;
-    const variance = previousEstimate != null ? d.currentWeightGrams - previousEstimate : null;
+    const variance = previousEstimate != null ? currentWeightGrams - previousEstimate : null;
 
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
@@ -507,12 +526,12 @@ export async function weighRollAction(
         packagingLotId: lot.id,
         machineId: station.machineId,
         stationId: station.id,
-        quantityGrams: d.currentWeightGrams,
+        quantityGrams: currentWeightGrams,
         unitOfMeasure: "g",
         payload: withAccountabilityPayload(
           {
             previous_weight_estimate: previousEstimate,
-            current_weight: d.currentWeightGrams,
+            current_weight: currentWeightGrams,
             weight_unit: "g",
             variance_from_estimate: variance,
             confidence: "HIGH",
@@ -525,7 +544,7 @@ export async function weighRollAction(
       });
       await tx
         .update(packagingLots)
-        .set({ currentWeightGramsEstimate: d.currentWeightGrams })
+        .set({ currentWeightGramsEstimate: currentWeightGrams })
         .where(eq(packagingLots.id, lot.id));
       await rebuildRollUsage(tx);
       try {

@@ -6,6 +6,7 @@
 
 import * as React from "react";
 import { ChangeRollForm } from "./rolls-forms";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 
 export type StationRollStatus = {
   role: "PVC" | "FOIL";
@@ -23,6 +24,7 @@ type IdleLot = {
   netWeightGrams: number | null;
   currentEstimateGrams: number | null;
   materialName: string;
+  materialKind: string;
 };
 
 type ActiveBag = {
@@ -196,7 +198,7 @@ function RollChangeRequiredCard({
           </div>
           <div className="text-amber-900/70">
             {activeRoll.currentWeightEstimateGrams != null
-              ? `${activeRoll.currentWeightEstimateGrams} g estimated`
+              ? `${formatGramsAsKg(activeRoll.currentWeightEstimateGrams)} estimated`
               : "Weight estimate missing"}{" "}
             · conf {activeRoll.confidence} · mounted{" "}
             {new Date(activeRoll.mountedAt).toLocaleString()}

@@ -95,6 +95,9 @@ describe("NAV-REDESIGN-1 · Inventory entries", () => {
   it("Materials (packaging-inventory) is in Inventory", () => {
     expect(inInventory('"/packaging-inventory"')).toBe(true);
   });
+  it("Roll management is in Inventory", () => {
+    expect(inInventory('"/roll-management"')).toBe(true);
+  });
   it("Finished lots is in Inventory", () => {
     expect(inInventory('"/finished-lots"')).toBe(true);
   });
@@ -146,6 +149,7 @@ describe("NAV-REDESIGN-1 · sidebar routes", () => {
     "/packaging-output",
     "/qc-review",
     "/packaging-inventory",
+    "/roll-management",
     "/finished-lots",
     "/batches",
     "/workflow-submissions",

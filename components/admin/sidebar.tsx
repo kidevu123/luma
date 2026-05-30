@@ -22,6 +22,7 @@ import {
   ClipboardList,
   Archive,
   ScrollText,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,7 @@ const SECTIONS: Section[] = [
     heading: "Inventory",
     items: [
       { href: "/packaging-inventory", label: "Materials",     icon: Boxes },
+      { href: "/roll-management",    label: "Roll management", icon: Wrench },
       { href: "/finished-lots",       label: "Finished lots", icon: PackageCheck },
       { href: "/batches",             label: "Batches",       icon: ShieldCheck },
       { href: "/workflow-submissions", label: "Workflows",    icon: ClipboardList },

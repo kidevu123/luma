@@ -20,6 +20,7 @@ import {
 } from "@/lib/db/schema";
 import { getActiveRollsForMachine } from "@/lib/production/active-rolls";
 import { filterSelectableIdleRollLots } from "@/lib/production/idle-roll-lots";
+import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import {
   MountRollForm,
   UnmountRollForm,
@@ -71,6 +72,7 @@ export default async function FloorRollsPage({
     netWeightGrams: l.netWeightGrams,
     currentEstimateGrams: l.currentEstimateGrams,
     materialName: l.materialName,
+    materialKind: l.materialKind,
   }));
   const activeRollsForForm = activeRolls.map((r) => ({
     packagingLotId: r.packagingLotId,
@@ -103,7 +105,7 @@ export default async function FloorRollsPage({
       : null;
 
   return (
-    <main className="min-h-dvh bg-page p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
+    <main className="bg-page p-4 sm:p-6 max-w-2xl mx-auto space-y-5">
       <header>
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-subtle">
           Roll management
@@ -137,7 +139,7 @@ export default async function FloorRollsPage({
                   <div className="text-xs text-right tabular-nums">
                     <div>
                       {r.currentWeightEstimateGrams != null
-                        ? `${r.currentWeightEstimateGrams} g est.`
+                        ? `${formatGramsAsKg(r.currentWeightEstimateGrams)} est.`
                         : "—"}
                     </div>
                     <div className="text-text-muted">
