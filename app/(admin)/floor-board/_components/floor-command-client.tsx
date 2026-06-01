@@ -105,10 +105,10 @@ export function FloorCommandClient({
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden">
-      {/* Zone 1: Shift Status Bar */}
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <div className="flex-1">
+    <div className="flex flex-col h-screen bg-[#060a12] text-slate-100 overflow-hidden">
+      {/* Zone 1: Shift status */}
+      <div className="flex items-center gap-2 flex-shrink-0 border-b border-white/[0.06]">
+        <div className="flex-1 min-w-0">
           <StatusBar data={shiftStatus} />
         </div>
         <div className="px-3 flex-shrink-0">
@@ -140,14 +140,17 @@ export function FloorCommandClient({
         </div>
       </div>
 
-      {/* Production manager — always visible */}
-      <div className="flex-shrink-0 max-h-[42vh] min-h-[200px] border-b border-white/10 overflow-hidden">
+      {/* Zone 2: Shift pulse — hero KPIs + queue chart */}
+      <ProductionIntelligenceStrip data={productionIntelligence} />
+
+      {/* Zone 3: Production command — machines, scans, yield */}
+      <div className="flex-shrink-0 h-[min(52vh,520px)] min-h-[240px] border-b border-white/[0.06] overflow-hidden">
         <ProductionManagerWidget snapshot={managerSnapshot} />
       </div>
 
-      {/* Zone 2: Configurable Widget Grid */}
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
+      {/* Zone 4: Floor map, throughput, events (configurable) */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 overflow-y-auto bg-[#060a12]">
           <WidgetGrid
             layout={layout}
             onLayoutChange={handleLayoutChange}
@@ -165,11 +168,8 @@ export function FloorCommandClient({
         )}
       </div>
 
-      {/* Zone 3: Production metrics (canonical API) + shift KPI strip */}
-      <div className="flex-shrink-0 flex flex-col">
-        <ProductionIntelligenceStrip data={productionIntelligence} />
-        <KpiStrip data={kpiData} />
-      </div>
+      {/* Zone 5: Shift KPI footer */}
+      <KpiStrip data={kpiData} />
     </div>
   );
 }
