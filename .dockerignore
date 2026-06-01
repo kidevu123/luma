@@ -5,3 +5,10 @@ node_modules
 .env.local
 data
 *.log
+
+# Untracked ad-hoc smoke scripts on deploy hosts (root + scripts/ only).
+# Leading / anchors to repo root so app/**/_*.tsx route helpers are not excluded.
+/_*.ts
+/_*.tsx
+scripts/_*.ts
+scripts/_*.tsx
