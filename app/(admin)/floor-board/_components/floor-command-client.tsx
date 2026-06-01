@@ -12,19 +12,20 @@ import {
 } from "@/lib/floor-command/types";
 import type { ShiftStatusData } from "@/lib/floor-command/types";
 import type { KpiStripData } from "@/lib/production/floor-command";
+import type { FloorProductionIntelligence } from "@/lib/production/floor-production-intelligence-types";
 import { StatusBar } from "./status-bar";
 import { KpiStrip } from "./kpi-strip";
+import { ProductionIntelligenceStrip } from "./production-intelligence-strip";
+import { ProductionManagerWidget } from "./widgets/production-manager-widget";
+import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import { WidgetGrid, type WidgetGridData } from "./widget-grid";
 import { WidgetPicker } from "./widget-picker";
-
-// TODO(Task 15): reconcile WidgetGridData with widget-grid.tsx once Task 13 lands.
-// If widget-grid.tsx doesn't export WidgetGridData, this re-export keeps page.tsx
-// compiling in the meantime.
-export type { WidgetGridData };
 
 type Props = {
   shiftStatus: ShiftStatusData;
   kpiData: KpiStripData;
+  productionIntelligence: FloorProductionIntelligence;
+  managerSnapshot: FloorManagerSnapshot;
   widgetData: WidgetGridData;
   savedLayout: WidgetLayout[];
 };
@@ -32,6 +33,8 @@ type Props = {
 export function FloorCommandClient({
   shiftStatus,
   kpiData,
+  productionIntelligence,
+  managerSnapshot,
   widgetData,
   savedLayout,
 }: Props) {
@@ -137,6 +140,11 @@ export function FloorCommandClient({
         </div>
       </div>
 
+      {/* Production manager — always visible */}
+      <div className="flex-shrink-0 max-h-[42vh] min-h-[200px] border-b border-white/10 overflow-hidden">
+        <ProductionManagerWidget snapshot={managerSnapshot} />
+      </div>
+
       {/* Zone 2: Configurable Widget Grid */}
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-y-auto">
@@ -157,8 +165,9 @@ export function FloorCommandClient({
         )}
       </div>
 
-      {/* Zone 3: KPI Strip */}
-      <div className="flex-shrink-0">
+      {/* Zone 3: Production metrics (canonical API) + shift KPI strip */}
+      <div className="flex-shrink-0 flex flex-col">
+        <ProductionIntelligenceStrip data={productionIntelligence} />
         <KpiStrip data={kpiData} />
       </div>
     </div>

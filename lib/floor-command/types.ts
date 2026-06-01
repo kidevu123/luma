@@ -7,7 +7,8 @@ export type WidgetKey =
   | "operator-board"
   | "quality-watch"
   | "machine-focus"
-  | "recent-events";
+  | "recent-events"
+  | "production-manager";
 
 export type WidgetConfig = {
   stationId?: string; // used by machine-focus
@@ -59,6 +60,7 @@ export type StationWithLive = {
   currentWorkflowBagId: string | null;
   currentProductId: string | null;
   currentProductName: string | null;
+  currentReceiptNumber: string | null;
   currentEmployeeName: string | null;
   lastEventType: string | null;
   lastEventAt: string | null;
@@ -180,6 +182,17 @@ export const WIDGET_CATALOG: {
     minW: 3,
     minH: 3,
     defaultIncluded: false,
+  },
+  {
+    key: "production-manager",
+    label: "Production Manager",
+    description:
+      "Machines (cycle times), station scans, material→product yield, operators, downtime",
+    defaultW: 12,
+    defaultH: 10,
+    minW: 8,
+    minH: 6,
+    defaultIncluded: true,
   },
   {
     key: "recent-events",

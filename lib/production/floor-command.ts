@@ -11,6 +11,7 @@ import {
   readBagMetrics,
   stations,
   workflowEvents,
+  workflowBags,
 } from "@/lib/db/schema";
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import type {
@@ -88,6 +89,7 @@ export async function getStationsWithLiveState(): Promise<StationWithLive[]> {
       currentWorkflowBagId: readStationLive.currentWorkflowBagId,
       currentProductId: readStationLive.currentProductId,
       currentProductName: products.name,
+      currentReceiptNumber: workflowBags.receiptNumber,
       currentEmployeeName: readStationLive.currentEmployeeName,
       lastEventType: readStationLive.lastEventType,
       lastEventAt: readStationLive.lastEventAt,
@@ -97,6 +99,10 @@ export async function getStationsWithLiveState(): Promise<StationWithLive[]> {
     .leftJoin(machines, eq(stations.machineId, machines.id))
     .leftJoin(readStationLive, eq(stations.id, readStationLive.stationId))
     .leftJoin(products, eq(readStationLive.currentProductId, products.id))
+    .leftJoin(
+      workflowBags,
+      eq(readStationLive.currentWorkflowBagId, workflowBags.id),
+    )
     .where(eq(stations.isActive, true))
     .orderBy(stations.label);
 

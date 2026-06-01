@@ -11,6 +11,8 @@ import {
   getShiftTargetStatus,
   getStationsWithLiveState,
 } from "@/lib/production/floor-command";
+import { getFloorProductionIntelligence } from "@/lib/production/floor-production-intelligence";
+import { getFloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot";
 import { db } from "@/lib/db";
 import { companies, userDashboardConfig } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -53,6 +55,8 @@ export default async function FloorBoardPage() {
     recentEvents,
     kpiData,
     hourlyThroughput,
+    productionIntelligence,
+    managerSnapshot,
     savedLayoutRow,
   ] = await Promise.all([
     safe("getStationsWithLiveState", () => getStationsWithLiveState()),
@@ -63,6 +67,8 @@ export default async function FloorBoardPage() {
     safe("getRecentEvents", () => getRecentEvents(50)),
     safe("getKpiStripData", () => getKpiStripData(tz)),
     safe("getHourlyThroughput", () => getHourlyThroughput(tz)),
+    safe("getFloorProductionIntelligence", () => getFloorProductionIntelligence()),
+    safe("getFloorManagerSnapshot", () => getFloorManagerSnapshot(tz)),
     safe("savedLayoutRow", () =>
       db
         .select({ layoutJson: userDashboardConfig.layoutJson })
@@ -96,6 +102,7 @@ export default async function FloorBoardPage() {
     targetBagsPerHour:
       stations.find((s) => s.machineTargetBagsPerHour !== null)
         ?.machineTargetBagsPerHour ?? null,
+    managerSnapshot,
   };
 
   console.log("[floor-board] rendering FloorCommandClient");
@@ -104,6 +111,8 @@ export default async function FloorBoardPage() {
     <FloorCommandClient
       shiftStatus={shiftStatus}
       kpiData={kpiData}
+      productionIntelligence={productionIntelligence}
+      managerSnapshot={managerSnapshot}
       savedLayout={savedLayout}
       widgetData={widgetData}
     />

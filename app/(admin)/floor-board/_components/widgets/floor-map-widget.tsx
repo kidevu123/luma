@@ -173,6 +173,11 @@ function MachineCard({ station }: { station: StationWithLive }) {
           {station.currentProductName}
         </div>
       )}
+      {station.currentReceiptNumber && (
+        <div className="text-[10px] text-emerald-400/90 truncate font-mono">
+          {station.currentReceiptNumber}
+        </div>
+      )}
       {station.machineTargetBagsPerHour !== null &&
         station.busyForSeconds !== null && (
           <div className="text-[10px] text-slate-500">

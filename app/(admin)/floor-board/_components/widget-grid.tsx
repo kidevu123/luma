@@ -15,7 +15,9 @@ import { QualityWatchWidget } from "./widgets/quality-watch-widget";
 import { ThroughputChartWidget } from "./widgets/throughput-chart-widget";
 import { OperatorBoardWidget } from "./widgets/operator-board-widget";
 import { MachineFocusWidget } from "./widgets/machine-focus-widget";
+import { ProductionManagerWidget } from "./widgets/production-manager-widget";
 import { RecentEventsWidget } from "./widgets/recent-events-widget";
+import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import { X, GripVertical } from "lucide-react";
 
 export type WidgetGridData = {
@@ -25,6 +27,7 @@ export type WidgetGridData = {
   recentEvents: RecentEventRow[];
   throughputPoints: ThroughputDataPoint[];
   targetBagsPerHour: number | null;
+  managerSnapshot: FloorManagerSnapshot;
 };
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
@@ -99,6 +102,8 @@ function renderWidget(
         />
       );
     }
+    case "production-manager":
+      return <ProductionManagerWidget snapshot={data.managerSnapshot} />;
     case "recent-events":
       return <RecentEventsWidget events={data.recentEvents} />;
     default:
