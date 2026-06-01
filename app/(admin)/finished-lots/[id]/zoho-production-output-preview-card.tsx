@@ -165,7 +165,10 @@ export function ZohoProductionOutputPreviewCard({
         )}
 
         {isTerminalCommitState && persistedPreview && (
-          <TerminalCommitStateNotice status={persistedPreview.status} />
+          <TerminalCommitStateNotice
+            status={persistedPreview.status}
+            metadata={persistedPreview}
+          />
         )}
 
         {persistedPreview && (
@@ -330,17 +333,31 @@ function GateResult({
   );
 }
 
-function TerminalCommitStateNotice({ status }: { status: string }) {
+function TerminalCommitStateNotice({
+  status,
+  metadata,
+}: {
+  status: string;
+  metadata: ZohoProductionOutputPreviewMetadata;
+}) {
   const copy =
     status === "COMMITTED"
-      ? "This operation is marked committed. Live commit controls are not available in this release."
+      ? "Marked committed (mock/live commit processing is not exposed in the UI yet)."
       : status === "COMMITTING"
-        ? "This operation is marked as committing. No operator action is available until a future worker release."
-        : "This operation is marked failed. Review audit history; no live commit controls are shown here.";
+        ? "Commit in progress. No operator action is available in this release."
+        : "Commit failed. Review audit history; no retry control is shown here yet.";
   return (
     <div className="rounded-md border border-border bg-surface-2/40 px-3 py-2 text-xs text-text-muted">
       <p className="font-semibold text-text">{status}</p>
       <p className="mt-1">{copy}</p>
+      {metadata.externalReferenceId && (
+        <p className="mt-2 font-mono text-[10px] text-text">
+          External reference: {metadata.externalReferenceId}
+        </p>
+      )}
+      {metadata.commitError && (
+        <p className="mt-1 text-danger-800">{metadata.commitError}</p>
+      )}
     </div>
   );
 }

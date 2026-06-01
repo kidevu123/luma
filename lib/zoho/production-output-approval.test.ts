@@ -3,6 +3,7 @@ import {
   buildZohoProductionOutputCommitIdempotencyKey,
   canVoidZohoProductionOutputOp,
   evaluateZohoProductionOutputCommitReadiness,
+  evaluateZohoProductionOutputProcessCommitEligibility,
   evaluateZohoProductionOutputQueueEligibility,
   evaluateZohoProductionOutputApproval,
 } from "./production-output-approval";
@@ -323,5 +324,151 @@ describe("evaluateZohoProductionOutputQueueEligibility", () => {
     expect(result.blockers.map((b) => b.code)).toContain(
       "COMMIT_IDEMPOTENCY_MISMATCH",
     );
+  });
+});
+
+const PROCESS_QUEUED_READY = {
+  opExists: true,
+  status: "QUEUED" as const,
+  voidedAt: null,
+  lumaOperationId: "luma-op-1",
+  approvedRequestHash: "hash-a",
+  requestHash: "hash-a",
+  requestPayload: { purchaseorder_id: "po-1" },
+  previewResponse: { preview: true },
+  previewHttpStatus: 200,
+  metricsState: "HIGH" as const,
+  genealogyState: "HIGH" as const,
+  finishedLotExists: true,
+  committedOpExists: false,
+  legacyAssemblyOpExists: false,
+  legacyZohoPushExists: false,
+  commitIdempotencyKey: "luma-production-output:luma-op-1:hash-a",
+  externalReferenceId: null,
+};
+
+describe("evaluateZohoProductionOutputProcessCommitEligibility", () => {
+  it("allows QUEUED op when all conditions pass", () => {
+    const result = evaluateZohoProductionOutputProcessCommitEligibility(
+      PROCESS_QUEUED_READY,
+    );
+    expect(result.eligible).toBe(true);
+    expect(result.blockers).toEqual([]);
+  });
+
+  it("blocks non-QUEUED statuses", () => {
+    for (const status of ["DRAFT", "PREVIEWED", "APPROVED"] as const) {
+      const result = evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        status,
+      });
+      expect(result.eligible).toBe(false);
+      expect(result.blockers.map((b) => b.code)).toContain("NOT_QUEUED");
+    }
+  });
+
+  it("blocks voided, missing idempotency, and key mismatch", () => {
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        voidedAt: new Date(),
+      }).blockers.map((b) => b.code),
+    ).toContain("VOIDED");
+
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        commitIdempotencyKey: null,
+      }).blockers.map((b) => b.code),
+    ).toContain("MISSING_IDEMPOTENCY_KEY");
+
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        commitIdempotencyKey: "wrong-key",
+      }).blockers.map((b) => b.code),
+    ).toContain("IDEMPOTENCY_KEY_MISMATCH");
+  });
+
+  it("blocks hash mismatch and missing preview payload", () => {
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        requestHash: "hash-b",
+      }).blockers.map((b) => b.code),
+    ).toContain("APPROVED_HASH_MISMATCH");
+
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        requestPayload: null,
+        previewResponse: null,
+      }).blockers.map((b) => b.code),
+    ).toEqual(
+      expect.arrayContaining([
+        "MISSING_REQUEST_PAYLOAD",
+        "MISSING_PREVIEW_RESPONSE",
+      ]),
+    );
+  });
+
+  it("blocks unsuccessful preview HTTP status", () => {
+    const result = evaluateZohoProductionOutputProcessCommitEligibility({
+      ...PROCESS_QUEUED_READY,
+      previewHttpStatus: 422,
+    });
+    expect(result.blockers.map((b) => b.code)).toContain("PREVIEW_NOT_SUCCESSFUL");
+  });
+
+  it("blocks non-HIGH metrics and genealogy", () => {
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        metricsState: "MISSING",
+      }).blockers.map((b) => b.code),
+    ).toContain("METRICS_NOT_HIGH");
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        genealogyState: "LOW",
+      }).blockers.map((b) => b.code),
+    ).toContain("GENEALOGY_NOT_HIGH");
+  });
+
+  it("blocks missing lot, committed op, external reference, and legacy paths", () => {
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        finishedLotExists: false,
+      }).blockers.map((b) => b.code),
+    ).toContain("FINISHED_LOT_MISSING");
+
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        committedOpExists: true,
+      }).blockers.map((b) => b.code),
+    ).toContain("ALREADY_COMMITTED");
+
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        externalReferenceId: "already-there",
+      }).blockers.map((b) => b.code),
+    ).toContain("EXTERNAL_REFERENCE_EXISTS");
+
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        legacyAssemblyOpExists: true,
+      }).blockers.map((b) => b.code),
+    ).toContain("LEGACY_ASSEMBLY_OP_EXISTS");
+
+    expect(
+      evaluateZohoProductionOutputProcessCommitEligibility({
+        ...PROCESS_QUEUED_READY,
+        legacyZohoPushExists: true,
+      }).blockers.map((b) => b.code),
+    ).toContain("LEGACY_ZOHO_PUSH_EXISTS");
   });
 });

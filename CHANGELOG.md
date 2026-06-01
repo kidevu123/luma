@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.67] — 2026-06-01
+
+### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-C3A)
+- **Mock commit state machine:** QUEUED ops can be claimed (`COMMITTING`), completed to `COMMITTED` or `FAILED`, and exercised via `mockCallZohoProductionOutputCommit` only. Includes `evaluateZohoProductionOutputProcessCommitEligibility`, audit events `commit_started` / `commit_succeeded` / `commit_failed`, and a test-only orchestrator. No real HTTP, no admin process button, no worker/pg-boss.
+
+### Tests added (ZOHO-PRODUCTION-OUTPUT-SLICE-C3A)
+- Processor eligibility, claim/complete/orchestrator, mock gateway, and guard tests (no live `/commit`, no `zoho_assembly_ops` writes).
+
 ## [0.4.66] — 2026-06-01
 
 ### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-C2)

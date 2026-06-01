@@ -132,7 +132,7 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
     expect(gateActionSrc).not.toContain("zoho_assembly_ops");
   });
 
-  it("does not enqueue workers or expose live commit controls in C2", () => {
+  it("does not enqueue workers or expose live commit controls in C2/C3a", () => {
     expect(cardSrc).not.toContain("Send to Zoho");
     expect(cardSrc).not.toContain("Apply to Zoho");
     expect(cardSrc).not.toContain("Commit to Zoho");
@@ -142,5 +142,9 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
     expect(querySrc).not.toContain("pg-boss");
     expect(cardSrc).toContain('status === "QUEUED"');
     expect(cardSrc).not.toContain("Queue commit to Zoho");
+    expect(cardSrc).not.toContain("Process queued");
+    expect(cardSrc).not.toContain("processQueuedZohoProductionOutputCommit");
+    expect(querySrc).toContain("mockCallZohoProductionOutputCommit");
+    expect(querySrc).not.toContain("callProductionOutputCommit");
   });
 });

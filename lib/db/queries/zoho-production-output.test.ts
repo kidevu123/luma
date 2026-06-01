@@ -267,10 +267,22 @@ describe("buildZohoProductionOutputPreviewOpValues", () => {
     expect(querySrc).toContain("Already queued for future commit.");
     expect(querySrc).not.toContain("pg-boss");
     expect(querySrc).not.toContain("boss.send");
-    expect(querySrc).not.toContain("callProductionOutput");
-    expect(querySrc).not.toContain("commitStartedAt:");
-    expect(querySrc).not.toContain("committedAt:");
-    expect(querySrc).not.toContain("commitResponse:");
-    expect(querySrc).not.toContain("externalReferenceId:");
+    expect(querySrc).not.toContain("callProductionOutputPreview");
+  });
+
+  it("adds C3a mock commit state machine without live HTTP", () => {
+    expect(querySrc).toContain("evaluateZohoProductionOutputProcessCommitEligibility");
+    expect(querySrc).toContain("claimZohoProductionOutputOpForCommit");
+    expect(querySrc).toContain("completeZohoProductionOutputCommitSuccess");
+    expect(querySrc).toContain("completeZohoProductionOutputCommitFailure");
+    expect(querySrc).toContain("processQueuedZohoProductionOutputCommitWithMockGateway");
+    expect(querySrc).toContain("mockCallZohoProductionOutputCommit");
+    expect(querySrc).toContain('action: "zoho_production_output_op.commit_started"');
+    expect(querySrc).toContain('action: "zoho_production_output_op.commit_succeeded"');
+    expect(querySrc).toContain('action: "zoho_production_output_op.commit_failed"');
+    expect(querySrc).not.toContain("/commit");
+    expect(querySrc).not.toContain("fetch(");
+    expect(querySrc).not.toContain(".insert(zohoAssemblyOps)");
+    expect(querySrc).not.toContain(".update(zohoAssemblyOps)");
   });
 });

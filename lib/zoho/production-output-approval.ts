@@ -289,3 +289,160 @@ export function evaluateZohoProductionOutputCommitReadiness(
 
   return { ready: blockers.length === 0, blockers };
 }
+
+export type ZohoProductionOutputProcessCommitBlockerCode =
+  | "OP_NOT_FOUND"
+  | "NOT_QUEUED"
+  | "VOIDED"
+  | "MISSING_IDEMPOTENCY_KEY"
+  | "IDEMPOTENCY_KEY_MISMATCH"
+  | "APPROVED_HASH_MISMATCH"
+  | "MISSING_REQUEST_PAYLOAD"
+  | "MISSING_PREVIEW_RESPONSE"
+  | "PREVIEW_NOT_SUCCESSFUL"
+  | "METRICS_NOT_HIGH"
+  | "GENEALOGY_NOT_HIGH"
+  | "FINISHED_LOT_MISSING"
+  | "ALREADY_COMMITTED"
+  | "EXTERNAL_REFERENCE_EXISTS"
+  | "LEGACY_ASSEMBLY_OP_EXISTS"
+  | "LEGACY_ZOHO_PUSH_EXISTS";
+
+export type ZohoProductionOutputProcessCommitBlocker = {
+  code: ZohoProductionOutputProcessCommitBlockerCode;
+  message: string;
+};
+
+export type ZohoProductionOutputProcessCommitEligibilityInput = {
+  opExists: boolean;
+  status: ZohoProductionOutputOpStatus | null;
+  voidedAt: Date | null;
+  lumaOperationId: string;
+  approvedRequestHash: string | null;
+  requestHash: string | null;
+  requestPayload: unknown;
+  previewResponse: unknown;
+  previewHttpStatus: number | null;
+  metricsState: ProductionOutputDataQualityState | null;
+  genealogyState: ProductionOutputDataQualityState | null;
+  finishedLotExists: boolean;
+  committedOpExists: boolean;
+  legacyAssemblyOpExists: boolean;
+  legacyZohoPushExists: boolean;
+  commitIdempotencyKey: string | null;
+  externalReferenceId: string | null;
+};
+
+export type ZohoProductionOutputProcessCommitEligibility = {
+  eligible: boolean;
+  blockers: ZohoProductionOutputProcessCommitBlocker[];
+};
+
+export function evaluateZohoProductionOutputProcessCommitEligibility(
+  op: ZohoProductionOutputProcessCommitEligibilityInput,
+): ZohoProductionOutputProcessCommitEligibility {
+  const blockers: ZohoProductionOutputProcessCommitBlocker[] = [];
+
+  const add = (
+    code: ZohoProductionOutputProcessCommitBlockerCode,
+    message: string,
+  ) => blockers.push({ code, message });
+
+  if (!op.opExists) {
+    add("OP_NOT_FOUND", "Production output operation not found.");
+    return { eligible: false, blockers };
+  }
+  if (op.voidedAt != null || op.status === "VOIDED") {
+    add("VOIDED", "This operation is voided.");
+  }
+  if (op.status !== "QUEUED") {
+    add("NOT_QUEUED", "Operation must be QUEUED before commit processing.");
+  }
+  if (op.commitIdempotencyKey == null || op.commitIdempotencyKey.trim() === "") {
+    add("MISSING_IDEMPOTENCY_KEY", "Commit idempotency key is missing.");
+  }
+  if (
+    op.approvedRequestHash == null ||
+    op.requestHash == null ||
+    op.approvedRequestHash !== op.requestHash
+  ) {
+    add(
+      "APPROVED_HASH_MISMATCH",
+      "Approved request hash does not match the stored preview payload.",
+    );
+  }
+  const expectedKey =
+    op.approvedRequestHash != null
+      ? buildZohoProductionOutputCommitIdempotencyKey(
+          op.lumaOperationId,
+          op.approvedRequestHash,
+        )
+      : null;
+  if (
+    op.commitIdempotencyKey != null &&
+    expectedKey != null &&
+    op.commitIdempotencyKey !== expectedKey
+  ) {
+    add(
+      "IDEMPOTENCY_KEY_MISMATCH",
+      "Stored commit idempotency key does not match the approved preview hash.",
+    );
+  }
+  if (op.requestPayload == null) {
+    add("MISSING_REQUEST_PAYLOAD", "Stored preview request payload is missing.");
+  }
+  if (op.previewResponse == null) {
+    add("MISSING_PREVIEW_RESPONSE", "Stored preview response is missing.");
+  }
+  if (
+    op.previewHttpStatus == null ||
+    op.previewHttpStatus < 200 ||
+    op.previewHttpStatus >= 300
+  ) {
+    add(
+      "PREVIEW_NOT_SUCCESSFUL",
+      "Latest stored preview did not return a successful HTTP status.",
+    );
+  }
+  if (op.metricsState !== "HIGH") {
+    add(
+      "METRICS_NOT_HIGH",
+      `Metrics state is ${op.metricsState ?? "Missing"}; commit requires HIGH.`,
+    );
+  }
+  if (op.genealogyState !== "HIGH") {
+    add(
+      "GENEALOGY_NOT_HIGH",
+      `Genealogy state is ${op.genealogyState ?? "Missing"}; commit requires HIGH.`,
+    );
+  }
+  if (!op.finishedLotExists) {
+    add("FINISHED_LOT_MISSING", "Finished lot no longer exists.");
+  }
+  if (op.committedOpExists) {
+    add(
+      "ALREADY_COMMITTED",
+      "A committed production-output operation already exists for this lot.",
+    );
+  }
+  if (op.externalReferenceId != null && op.externalReferenceId.trim() !== "") {
+    add(
+      "EXTERNAL_REFERENCE_EXISTS",
+      "An external Zoho reference is already stored for this operation.",
+    );
+  }
+  if (op.legacyAssemblyOpExists) {
+    add(
+      "LEGACY_ASSEMBLY_OP_EXISTS",
+      "Legacy Zoho assembly operations exist for this lot. Production-output commit is blocked to prevent double-posting.",
+    );
+  }
+  if (op.legacyZohoPushExists) {
+    add(
+      "LEGACY_ZOHO_PUSH_EXISTS",
+      "A successful legacy Zoho push exists for this lot. Production-output commit is blocked to prevent double-posting.",
+    );
+  }
+
+  return { eligible: blockers.length === 0, blockers };
+}
