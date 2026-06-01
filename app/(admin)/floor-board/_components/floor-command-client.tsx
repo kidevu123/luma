@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Edit2 } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Edit2 } from "lucide-react";
 import {
   DEFAULT_LAYOUT,
   WIDGET_CATALOG,
@@ -44,9 +44,9 @@ export function FloorCommandClient({
   );
   const [isEditing, setIsEditing] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // SSE — re-fetch server data on any floor event
   useEffect(() => {
     const es = new EventSource("/api/floor-board/stream");
     const handler = () => router.refresh();
@@ -104,10 +104,11 @@ export function FloorCommandClient({
     setShowPicker(false);
   };
 
+  const wipCount = managerSnapshot.plant.bagsInFlow;
+
   return (
-    <div className="flex flex-col h-screen bg-[#060a12] text-slate-100 overflow-hidden">
-      {/* Zone 1: Shift status */}
-      <div className="flex items-center gap-2 flex-shrink-0 border-b border-white/[0.06]">
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden">
+      <div className="flex items-center gap-2 flex-shrink-0">
         <div className="flex-1 min-w-0">
           <StatusBar data={shiftStatus} />
         </div>
@@ -115,12 +116,14 @@ export function FloorCommandClient({
           {isEditing ? (
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => setShowPicker((p) => !p)}
                 className="text-[11px] text-sky-400 border border-sky-500/40 px-2 py-1 rounded hover:bg-sky-500/10"
               >
                 + Add Widget
               </button>
               <button
+                type="button"
                 onClick={handleDoneEditing}
                 className="flex items-center gap-1 text-[11px] text-emerald-400 border border-emerald-500/40 px-2 py-1 rounded hover:bg-emerald-500/10"
               >
@@ -130,6 +133,7 @@ export function FloorCommandClient({
             </div>
           ) : (
             <button
+              type="button"
               onClick={() => setIsEditing(true)}
               className="flex items-center gap-1 text-[11px] text-slate-500 border border-white/10 px-2 py-1 rounded hover:text-slate-300 hover:border-white/20"
             >
@@ -140,17 +144,9 @@ export function FloorCommandClient({
         </div>
       </div>
 
-      {/* Zone 2: Shift pulse — hero KPIs + queue chart */}
-      <ProductionIntelligenceStrip data={productionIntelligence} />
-
-      {/* Zone 3: Production command — machines, scans, yield */}
-      <div className="flex-shrink-0 h-[min(52vh,520px)] min-h-[240px] border-b border-white/[0.06] overflow-hidden">
-        <ProductionManagerWidget snapshot={managerSnapshot} />
-      </div>
-
-      {/* Zone 4: Floor map, throughput, events (configurable) */}
+      {/* Primary: floor map, queues, throughput */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <div className="flex-1 overflow-y-auto bg-[#060a12]">
+        <div className="flex-1 overflow-y-auto min-h-0">
           <WidgetGrid
             layout={layout}
             onLayoutChange={handleLayoutChange}
@@ -168,7 +164,37 @@ export function FloorCommandClient({
         )}
       </div>
 
-      {/* Zone 5: Shift KPI footer */}
+      {/* Optional: machines / scans / yield (collapsed by default) */}
+      <div className="flex-shrink-0 border-t border-white/10 bg-slate-950">
+        <button
+          type="button"
+          onClick={() => setDetailsOpen((o) => !o)}
+          className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-white/[0.03] transition-colors"
+          aria-expanded={detailsOpen}
+        >
+          <span className="text-[11px] font-medium text-slate-400">
+            Production details
+            <span className="text-slate-600 font-normal ml-2">
+              machines · station scans · material yield
+              {wipCount > 0 && (
+                <span className="text-slate-500"> · {wipCount} WIP</span>
+              )}
+            </span>
+          </span>
+          {detailsOpen ? (
+            <ChevronUp size={14} className="text-slate-500 shrink-0" aria-hidden />
+          ) : (
+            <ChevronDown size={14} className="text-slate-500 shrink-0" aria-hidden />
+          )}
+        </button>
+        {detailsOpen && (
+          <div className="h-[min(36vh,320px)] border-t border-white/10 overflow-hidden">
+            <ProductionManagerWidget snapshot={managerSnapshot} compact />
+          </div>
+        )}
+      </div>
+
+      <ProductionIntelligenceStrip data={productionIntelligence} />
       <KpiStrip data={kpiData} />
     </div>
   );

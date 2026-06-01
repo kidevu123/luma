@@ -20,6 +20,7 @@ export function MetricCard({
   hint,
   size = "md",
   variant = "dark",
+  showConfidence = true,
 }: {
   label: string;
   metric: MetricResult;
@@ -27,6 +28,8 @@ export function MetricCard({
   hint?: string;
   size?: "sm" | "md" | "lg";
   variant?: "dark" | "light";
+  /** Floor board hides per-card LIVE chips — one live indicator per strip is enough. */
+  showConfidence?: boolean;
 }) {
   const isMissing = metric.confidence === "MISSING";
   const valueText = formatValue(metric);
@@ -64,7 +67,7 @@ export function MetricCard({
     <div className={cn(containerClass, className)}>
       <div className="flex items-start justify-between gap-2">
         <div className={labelClass}>{label}</div>
-        <ConfidenceBadge confidence={metric.confidence} />
+        {showConfidence && <ConfidenceBadge confidence={metric.confidence} />}
       </div>
       <div className="mt-1.5 flex items-baseline gap-1.5 min-w-0">
         {isMissing ? (
