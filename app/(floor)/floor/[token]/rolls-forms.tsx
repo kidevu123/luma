@@ -492,7 +492,7 @@ export function ChangeRollForm({
         </div>
       </div>
       <p className="text-xs text-text-muted">
-        Use this when a roll runs out (or is changed out) mid-bag. Enter the
+        Use this when a roll runs out or is changed out mid-bag. Enter the
         machine counter when the roll being removed stopped. That count closes
         the segment for the removed roll, the other active roll, and this bag.
         The replacement roll does not receive this count.
@@ -527,6 +527,43 @@ export function ChangeRollForm({
           name="counterSegmentCount"
           className="block w-full bg-surface border border-border/60 rounded px-2 py-2 text-sm tabular-nums"
         />
+      </Field>
+      <Field label="Old roll status">
+        <div className="grid gap-2">
+          <label className="flex items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="oldRollEndState"
+              value="depleted"
+              required
+              className="mt-1"
+            />
+            <span>
+              <span className="block font-medium">Finished / depleted</span>
+              <span className="block text-xs text-text-muted">
+                Mark the old roll depleted after assigning this count.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="oldRollEndState"
+              value="removed_partial"
+              required
+              className="mt-1"
+            />
+            <span>
+              <span className="block font-medium">
+                Removed with material remaining
+              </span>
+              <span className="block text-xs text-text-muted">
+                The old roll will be removed and can be mounted again later. It
+                will not be marked depleted.
+              </span>
+            </span>
+          </label>
+        </div>
       </Field>
       {replacementInputMode === "text" ? (
         <Field label="New roll scan token or lot token">

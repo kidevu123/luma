@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.68] — 2026-06-01
+
+### Changed (PARTIAL-ROLL-SWAP-1)
+- **Mid-bag material changes now require old-roll status:** Operators choose whether the removed PVC/Foil roll is finished/depleted or removed with material remaining.
+- **Partial roll removal:** Choosing “Removed with material remaining” records the same bag/roll counter segment, emits `ROLL_UNMOUNTED` instead of `ROLL_DEPLETED`, returns the old roll to `AVAILABLE`, and mounts the replacement roll without assigning it the prior count.
+
+### Tests added (PARTIAL-ROLL-SWAP-1)
+- Source/wiring tests cover old-roll status UI, server event branching, depleted-path compatibility, partial-removal payloads, and event ordering.
+
 ## [0.4.67] — 2026-06-01
 
 ### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-C3A)

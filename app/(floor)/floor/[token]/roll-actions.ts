@@ -583,8 +583,9 @@ export async function weighRollAction(
 //   2. Records ROLL_COUNTER_SEGMENT_RECORDED for both PVC and FOIL
 //      active rolls (the segment was produced under both, even if
 //      only one is being changed) — segment_reason='ROLL_CHANGE'
-//   3. Marks the OLD roll DEPLETED (status = DEPLETED), emits
-//      ROLL_DEPLETED with final_roll_yield_blisters
+//   3. Ends the OLD roll according to operator choice:
+//        depleted        -> ROLL_DEPLETED, status DEPLETED
+//        removed_partial -> ROLL_UNMOUNTED, status AVAILABLE
 //   4. Mounts the NEW roll for the same role with ROLL_MOUNTED
 //   5. Bag stays open
 //
@@ -599,8 +600,13 @@ const changeSchema = z
       .string()
       .uuid("Mid-bag roll change requires an active workflow bag at this station."),
     counterSegmentCount: z.coerce.number().int().min(1, "Counter segment must be > 0"),
+    oldRollEndState: z.enum(["depleted", "removed_partial"], {
+      message: "Old roll status is required.",
+    }),
     newPackagingLotId: z.string().uuid().optional(),
     newRollNumber: z.string().min(1).max(80).optional(),
+    endingWeightGrams: z.coerce.number().int().min(0).optional().nullable(),
+    endingWeightKg: z.coerce.number().min(0).optional().nullable(),
     newStartingWeightGrams: z.coerce.number().int().min(1).optional().nullable(),
     notes: z.string().max(500).optional().nullable(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id.").optional(),
@@ -630,8 +636,11 @@ export async function changeRollAction(
     role: formData.get("role"),
     workflowBagId: formData.get("workflowBagId"),
     counterSegmentCount: formData.get("counterSegmentCount"),
+    oldRollEndState: formData.get("oldRollEndState"),
     newPackagingLotId: formData.get("newPackagingLotId") || undefined,
     newRollNumber: formData.get("newRollNumber") || undefined,
+    endingWeightGrams: formData.get("endingWeightGrams") || undefined,
+    endingWeightKg: formData.get("endingWeightKg") || undefined,
     newStartingWeightGrams: formData.get("newStartingWeightGrams") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: formData.get("clientEventId") || undefined,
@@ -641,6 +650,9 @@ export async function changeRollAction(
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+  const oldEndingWeightGrams =
+    d.endingWeightGrams ??
+    (d.endingWeightKg != null ? kgToGrams(d.endingWeightKg) : null);
   try {
     const station = await authStation(d.token, d.stationId);
     if (!station.machineId) return { error: "Station is not bound to a machine." };
@@ -812,6 +824,11 @@ export async function changeRollAction(
               machine_id: station.machineId,
               confidence: "HIGH",
               notes: d.notes ?? null,
+              change_reason: "material_swap",
+              old_roll_end_state: d.oldRollEndState,
+              changed_role: d.role,
+              old_lot_id: activeForRole.packaging_lot_id,
+              new_lot_id: newLot.id,
               // Correlation across the rows this form submit emits.
               segment_group_id: segmentGroupId,
               source_action: "change_roll",
@@ -828,50 +845,103 @@ export async function changeRollAction(
         });
       }
 
-      // 2. Deplete the OLD roll for the chosen role.
+      // 2. End the OLD roll for the chosen role. Depleted keeps the
+      // historical behavior; removed_partial uses the existing
+      // unmount/remount model so the roll can be mounted again later.
       const oldLot = activeForRole;
       const gramsPerBlister =
         oldLot.net_weight_grams != null && oldFinalYield > 0
           ? oldLot.net_weight_grams / oldFinalYield
           : null;
 
-      await tx.insert(materialInventoryEvents).values({
-        eventType: "ROLL_DEPLETED",
-        packagingMaterialId: oldLot.packaging_material_id,
-        packagingLotId: oldLot.packaging_lot_id,
-        machineId: station.machineId,
-        stationId: station.id,
-        ...(workflowBagId ? { workflowBagId } : {}),
-        unitOfMeasure: "g",
-        payload: withAccountabilityPayload(
-          {
-            roll_role: d.role,
-            material_lot_id: oldLot.packaging_lot_id,
-            final_roll_yield_blisters: oldFinalYield,
-            net_weight_grams: oldLot.net_weight_grams,
-            grams_per_blister: gramsPerBlister,
-            depleted_during_bag: workflowBagId != null,
-            workflow_bag_id: workflowBagId,
-            confidence: gramsPerBlister != null ? "HIGH" : "MEDIUM",
-            notes: d.notes ?? null,
-            segment_group_id: segmentGroupId,
-            source_action: "change_roll",
-            form_client_event_id: d.clientEventId ?? null,
-          },
-          accountability,
-        ),
-        source: "floor.change_roll",
-        // ROLL_DEPLETED is a distinct event_type from the segment
-        // rows above, so the partial unique on (workflow_bag_id,
-        // event_type, client_event_id) does NOT collide. Reuse
-        // d.clientEventId so a network retry of the whole form
-        // submit is rejected by the index.
-        ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
-      });
-      await tx
-        .update(packagingLots)
-        .set({ status: "DEPLETED" })
-        .where(eq(packagingLots.id, oldLot.packaging_lot_id));
+      if (d.oldRollEndState === "depleted") {
+        await tx.insert(materialInventoryEvents).values({
+          eventType: "ROLL_DEPLETED",
+          packagingMaterialId: oldLot.packaging_material_id,
+          packagingLotId: oldLot.packaging_lot_id,
+          machineId: station.machineId,
+          stationId: station.id,
+          ...(workflowBagId ? { workflowBagId } : {}),
+          unitOfMeasure: "g",
+          payload: withAccountabilityPayload(
+            {
+              roll_role: d.role,
+              material_lot_id: oldLot.packaging_lot_id,
+              final_roll_yield_blisters: oldFinalYield,
+              net_weight_grams: oldLot.net_weight_grams,
+              grams_per_blister: gramsPerBlister,
+              depleted_during_bag: workflowBagId != null,
+              workflow_bag_id: workflowBagId,
+              confidence: gramsPerBlister != null ? "HIGH" : "MEDIUM",
+              notes: d.notes ?? null,
+              change_reason: "material_swap",
+              old_roll_end_state: d.oldRollEndState,
+              old_lot_id: oldLot.packaging_lot_id,
+              new_lot_id: newLot.id,
+              counter_segment_count: d.counterSegmentCount,
+              segment_group_id: segmentGroupId,
+              source_action: "change_roll",
+              form_client_event_id: d.clientEventId ?? null,
+            },
+            accountability,
+          ),
+          source: "floor.change_roll",
+          // ROLL_DEPLETED is a distinct event_type from the segment
+          // rows above, so the partial unique on (workflow_bag_id,
+          // event_type, client_event_id) does NOT collide. Reuse
+          // d.clientEventId so a network retry of the whole form
+          // submit is rejected by the index.
+          ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
+        });
+        await tx
+          .update(packagingLots)
+          .set({ status: "DEPLETED" })
+          .where(eq(packagingLots.id, oldLot.packaging_lot_id));
+      } else {
+        await tx.insert(materialInventoryEvents).values({
+          eventType: "ROLL_UNMOUNTED",
+          packagingMaterialId: oldLot.packaging_material_id,
+          packagingLotId: oldLot.packaging_lot_id,
+          machineId: station.machineId,
+          stationId: station.id,
+          ...(workflowBagId ? { workflowBagId } : {}),
+          ...(oldEndingWeightGrams != null ? { quantityGrams: oldEndingWeightGrams } : {}),
+          unitOfMeasure: "g",
+          payload: withAccountabilityPayload(
+            {
+              roll_role: d.role,
+              material_lot_id: oldLot.packaging_lot_id,
+              ending_weight_grams: oldEndingWeightGrams,
+              ending_weight_kg:
+                d.endingWeightKg ??
+                (oldEndingWeightGrams != null ? oldEndingWeightGrams / 1000 : null),
+              weight_unit: "kg",
+              workflow_bag_id: workflowBagId,
+              confidence: oldEndingWeightGrams != null ? "HIGH" : "MEDIUM",
+              notes: d.notes ?? null,
+              change_reason: "material_swap",
+              old_roll_end_state: d.oldRollEndState,
+              old_lot_id: oldLot.packaging_lot_id,
+              new_lot_id: newLot.id,
+              counter_segment_count: d.counterSegmentCount,
+              segment_group_id: segmentGroupId,
+              source_action: "change_roll",
+              form_client_event_id: d.clientEventId ?? null,
+            },
+            accountability,
+          ),
+          source: "floor.change_roll",
+          ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
+        });
+        await tx
+          .update(packagingLots)
+          .set(
+            oldEndingWeightGrams != null
+              ? { status: "AVAILABLE", currentWeightGramsEstimate: oldEndingWeightGrams }
+              : { status: "AVAILABLE" },
+          )
+          .where(eq(packagingLots.id, oldLot.packaging_lot_id));
+      }
 
       // 3. Mount the NEW roll for the same role.
       await tx.insert(materialInventoryEvents).values({
@@ -890,6 +960,10 @@ export async function changeRollAction(
             previous_status: newLot.status,
             mounted_via: "ROLL_CHANGE",
             notes: d.notes ?? null,
+            change_reason: "material_swap",
+            old_roll_end_state: d.oldRollEndState,
+            old_lot_id: oldLot.packaging_lot_id,
+            new_lot_id: newLot.id,
             segment_group_id: segmentGroupId,
             source_action: "change_roll",
             form_client_event_id: d.clientEventId ?? null,
@@ -926,6 +1000,7 @@ export async function changeRollAction(
               role: d.role,
               new_lot_id: newLot.id,
               counter_segment_count: d.counterSegmentCount,
+              old_roll_end_state: d.oldRollEndState,
               old_final_yield: oldFinalYield,
               workflow_bag_id: workflowBagId,
             },
