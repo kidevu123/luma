@@ -1,6 +1,11 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { zohoProductionOutputOps } from "@/lib/db/schema";
+import {
+  finishedLots,
+  zohoAssemblyOps,
+  zohoProductionOutputOps,
+  zohoPushes,
+} from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
 import type {
@@ -9,7 +14,9 @@ import type {
 } from "@/lib/zoho/production-output-preview";
 import {
   canVoidZohoProductionOutputOp,
+  evaluateZohoProductionOutputCommitReadiness,
   evaluateZohoProductionOutputApproval,
+  type ZohoProductionOutputCommitReadiness,
   type ZohoProductionOutputOpStatus,
 } from "@/lib/zoho/production-output-approval";
 
@@ -28,6 +35,7 @@ export type ZohoProductionOutputPreviewMetadata = {
   approvedAt: Date | null;
   approvalEligible: boolean;
   approvalBlockers: string[];
+  commitReadiness?: ZohoProductionOutputCommitReadiness;
   zohoPurchaseorderId: string;
   zohoPurchaseorderLineItemId: string;
   zohoWarehouseId: string | null;
@@ -117,9 +125,13 @@ export async function upsertZohoProductionOutputPreviewOp(
     )
     .limit(1);
 
-  if (existing?.status === "APPROVED") {
+  if (
+    existing &&
+    existing.status !== "DRAFT" &&
+    existing.status !== "PREVIEWED"
+  ) {
     throw new Error(
-      "An approved preview is frozen. Void it before running a new preview.",
+      "This production-output operation is frozen. Void it before running a new preview.",
     );
   }
 
@@ -156,7 +168,20 @@ export async function getActiveZohoProductionOutputOpForLot(
       ),
     )
     .limit(1);
-  return row ? toPreviewMetadata(row) : null;
+  if (!row) return null;
+  return withCommitReadiness(toPreviewMetadata(row), row);
+}
+
+export async function getZohoProductionOutputCommitReadinessForOp(
+  opId: string,
+): Promise<ZohoProductionOutputCommitReadiness | null> {
+  const [row] = await db
+    .select()
+    .from(zohoProductionOutputOps)
+    .where(eq(zohoProductionOutputOps.id, opId))
+    .limit(1);
+  if (!row) return null;
+  return evaluateCommitReadinessFromDb(row);
 }
 
 export async function approveZohoProductionOutputOp(
@@ -329,4 +354,70 @@ function toPreviewMetadata(
     zohoWarehouseId: row.zohoWarehouseId,
     zohoCompositeItemId: row.zohoCompositeItemId,
   };
+}
+
+async function withCommitReadiness(
+  metadata: ZohoProductionOutputPreviewMetadata,
+  row: typeof zohoProductionOutputOps.$inferSelect,
+): Promise<ZohoProductionOutputPreviewMetadata> {
+  if (row.status !== "APPROVED") return metadata;
+  return {
+    ...metadata,
+    commitReadiness: await evaluateCommitReadinessFromDb(row),
+  };
+}
+
+async function evaluateCommitReadinessFromDb(
+  row: typeof zohoProductionOutputOps.$inferSelect,
+): Promise<ZohoProductionOutputCommitReadiness> {
+  const [
+    finishedLotCount,
+    committedOpCount,
+    legacyAssemblyOpCount,
+    legacyZohoPushCount,
+  ] = await Promise.all([
+    db
+      .select({ value: count() })
+      .from(finishedLots)
+      .where(eq(finishedLots.id, row.finishedLotId)),
+    db
+      .select({ value: count() })
+      .from(zohoProductionOutputOps)
+      .where(
+        and(
+          eq(zohoProductionOutputOps.finishedLotId, row.finishedLotId),
+          eq(zohoProductionOutputOps.status, "COMMITTED"),
+          ne(zohoProductionOutputOps.id, row.id),
+        ),
+      ),
+    db
+      .select({ value: count() })
+      .from(zohoAssemblyOps)
+      .where(eq(zohoAssemblyOps.finishedLotId, row.finishedLotId)),
+    db
+      .select({ value: count() })
+      .from(zohoPushes)
+      .where(
+        and(
+          eq(zohoPushes.finishedLotId, row.finishedLotId),
+          eq(zohoPushes.status, "SUCCESS"),
+        ),
+      ),
+  ]);
+
+  return evaluateZohoProductionOutputCommitReadiness({
+    status: row.status as ZohoProductionOutputOpStatus,
+    voidedAt: row.voidedAt,
+    approvedRequestHash: row.approvedRequestHash,
+    requestHash: row.requestHash,
+    requestPayload: row.requestPayload,
+    previewResponse: row.previewResponse,
+    previewHttpStatus: row.previewHttpStatus,
+    metricsState: row.metricsState as ProductionOutputDataQualityState,
+    genealogyState: row.genealogyState as ProductionOutputDataQualityState,
+    finishedLotExists: (finishedLotCount[0]?.value ?? 0) > 0,
+    committedOpExists: (committedOpCount[0]?.value ?? 0) > 0,
+    legacyAssemblyOpExists: (legacyAssemblyOpCount[0]?.value ?? 0) > 0,
+    legacyZohoPushExists: (legacyZohoPushCount[0]?.value ?? 0) > 0,
+  });
 }

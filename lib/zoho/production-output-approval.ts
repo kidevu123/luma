@@ -4,7 +4,11 @@ export type ZohoProductionOutputOpStatus =
   | "DRAFT"
   | "PREVIEWED"
   | "APPROVED"
-  | "VOIDED";
+  | "VOIDED"
+  | "QUEUED"
+  | "COMMITTING"
+  | "COMMITTED"
+  | "FAILED";
 
 export type ZohoProductionOutputApprovalInput = {
   status: ZohoProductionOutputOpStatus;
@@ -80,4 +84,125 @@ export function canVoidZohoProductionOutputOp(
     return { ok: false, error: "This operation cannot be voided." };
   }
   return { ok: true };
+}
+
+export type ZohoProductionOutputCommitReadinessBlockerCode =
+  | "NOT_APPROVED"
+  | "VOIDED"
+  | "APPROVED_HASH_MISMATCH"
+  | "MISSING_REQUEST_PAYLOAD"
+  | "MISSING_PREVIEW_RESPONSE"
+  | "PREVIEW_NOT_SUCCESSFUL"
+  | "METRICS_NOT_HIGH"
+  | "GENEALOGY_NOT_HIGH"
+  | "FINISHED_LOT_MISSING"
+  | "ALREADY_COMMITTED"
+  | "LEGACY_ASSEMBLY_OP_EXISTS"
+  | "LEGACY_ZOHO_PUSH_EXISTS"
+  | "CONFIG_MISSING";
+
+export type ZohoProductionOutputCommitReadinessBlocker = {
+  code: ZohoProductionOutputCommitReadinessBlockerCode;
+  message: string;
+};
+
+export type ZohoProductionOutputCommitReadinessInput = {
+  status: ZohoProductionOutputOpStatus | null;
+  voidedAt: Date | null;
+  approvedRequestHash: string | null;
+  requestHash: string | null;
+  requestPayload: unknown;
+  previewResponse: unknown;
+  previewHttpStatus: number | null;
+  metricsState: ProductionOutputDataQualityState | null;
+  genealogyState: ProductionOutputDataQualityState | null;
+  finishedLotExists: boolean;
+  committedOpExists: boolean;
+  legacyAssemblyOpExists: boolean;
+  legacyZohoPushExists: boolean;
+  configMissing?: boolean;
+};
+
+export type ZohoProductionOutputCommitReadiness = {
+  ready: boolean;
+  blockers: ZohoProductionOutputCommitReadinessBlocker[];
+};
+
+export function evaluateZohoProductionOutputCommitReadiness(
+  op: ZohoProductionOutputCommitReadinessInput,
+): ZohoProductionOutputCommitReadiness {
+  const blockers: ZohoProductionOutputCommitReadinessBlocker[] = [];
+
+  const add = (
+    code: ZohoProductionOutputCommitReadinessBlockerCode,
+    message: string,
+  ) => blockers.push({ code, message });
+
+  if (!op.finishedLotExists) {
+    add("FINISHED_LOT_MISSING", "Finished lot no longer exists.");
+  }
+  if (op.voidedAt != null || op.status === "VOIDED") {
+    add("VOIDED", "This operation is voided.");
+  }
+  if (op.status !== "APPROVED") {
+    add("NOT_APPROVED", "Operation must be APPROVED before future commit.");
+  }
+  if (
+    op.approvedRequestHash == null ||
+    op.requestHash == null ||
+    op.approvedRequestHash !== op.requestHash
+  ) {
+    add(
+      "APPROVED_HASH_MISMATCH",
+      "Approved request hash does not match the stored preview payload.",
+    );
+  }
+  if (op.requestPayload == null) {
+    add("MISSING_REQUEST_PAYLOAD", "Stored preview request payload is missing.");
+  }
+  if (op.previewResponse == null) {
+    add("MISSING_PREVIEW_RESPONSE", "Stored preview response is missing.");
+  }
+  if (
+    op.previewHttpStatus == null ||
+    op.previewHttpStatus < 200 ||
+    op.previewHttpStatus >= 300
+  ) {
+    add(
+      "PREVIEW_NOT_SUCCESSFUL",
+      "Latest stored preview did not return a successful HTTP status.",
+    );
+  }
+  if (op.metricsState !== "HIGH") {
+    add(
+      "METRICS_NOT_HIGH",
+      `Metrics state is ${op.metricsState ?? "Missing"}; future commit requires HIGH.`,
+    );
+  }
+  if (op.genealogyState !== "HIGH") {
+    add(
+      "GENEALOGY_NOT_HIGH",
+      `Genealogy state is ${op.genealogyState ?? "Missing"}; future commit requires HIGH.`,
+    );
+  }
+  if (op.committedOpExists) {
+    add("ALREADY_COMMITTED", "A committed production-output operation already exists for this lot.");
+  }
+  if (op.legacyAssemblyOpExists) {
+    add(
+      "LEGACY_ASSEMBLY_OP_EXISTS",
+      "Legacy Zoho assembly operations exist for this lot. Consolidated production-output commit is blocked to prevent double-posting.",
+    );
+  }
+  if (op.legacyZohoPushExists) {
+    add(
+      "LEGACY_ZOHO_PUSH_EXISTS",
+      "A successful legacy Zoho push exists for this lot. Future commit is blocked to prevent double-posting.",
+    );
+  }
+  if (op.configMissing) {
+    add("CONFIG_MISSING", "Zoho service configuration is missing.");
+  }
+
+  return { ready: blockers.length === 0, blockers };
 }

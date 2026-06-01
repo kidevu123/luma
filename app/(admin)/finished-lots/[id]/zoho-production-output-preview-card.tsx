@@ -118,6 +118,10 @@ export function ZohoProductionOutputPreviewCard({
           <PersistedPreviewMetadata metadata={persistedPreview} />
         )}
 
+        {isApproved && (
+          <FutureCommitReadiness metadata={persistedPreview} />
+        )}
+
         {persistedPreview && (
           <div className="space-y-3 rounded-md border border-border bg-surface-2/40 px-3 py-2 text-xs">
             <p className="font-semibold text-text">Approval and void</p>
@@ -398,6 +402,66 @@ function PersistedPreviewMetadata({
           {metadata.requestHash}
         </span>
       </div>
+    </div>
+  );
+}
+
+function FutureCommitReadiness({
+  metadata,
+}: {
+  metadata: ZohoProductionOutputPreviewMetadata | null;
+}) {
+  const readiness = metadata?.commitReadiness;
+  return (
+    <div className="space-y-2 rounded-md border border-border bg-surface-2/40 px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-semibold text-text">Future commit readiness</p>
+        {readiness?.ready ? (
+          <span className="rounded border border-good-300 bg-good-50 px-2 py-0.5 font-mono text-[10px] text-good-800">
+            READY
+          </span>
+        ) : (
+          <span className="rounded border border-warn-300 bg-warn-50 px-2 py-0.5 font-mono text-[10px] text-warn-800">
+            BLOCKED
+          </span>
+        )}
+      </div>
+      <p className="text-text-muted">
+        Approved — no Zoho write yet. This section only checks whether the
+        frozen preview looks ready for a future release.
+      </p>
+      {metadata?.approvedRequestHash && (
+        <div className="rounded border border-border/70 bg-surface px-2 py-1">
+          <span className="text-text-muted">Approved request hash </span>
+          <span className="font-mono text-[10px] text-text">
+            {metadata.approvedRequestHash}
+          </span>
+        </div>
+      )}
+      {readiness?.ready ? (
+        <p className="rounded border border-good-300/60 bg-good-50 px-2 py-1.5 text-good-800">
+          Ready to queue for Zoho commit in a future release. No queue action is
+          available in this slice.
+        </p>
+      ) : (
+        <ul className="list-disc space-y-1 rounded border border-warn-300/60 bg-warn-50 px-4 py-2 text-warn-800">
+          {(readiness?.blockers.length
+            ? readiness.blockers
+            : [
+                {
+                  code: "CONFIG_MISSING",
+                  message:
+                    "Commit readiness could not be checked for this snapshot.",
+                },
+              ]
+          ).map((blocker) => (
+            <li key={blocker.code}>
+              <span className="font-mono">{blocker.code}</span>:{" "}
+              {blocker.message}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

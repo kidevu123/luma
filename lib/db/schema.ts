@@ -1401,6 +1401,22 @@ export const zohoProductionOutputOps = pgTable(
       onDelete: "set null",
     }),
     approvedRequestHash: text("approved_request_hash"),
+    commitIdempotencyKey: text("commit_idempotency_key"),
+    commitRequestedAt: timestamp("commit_requested_at", { withTimezone: true }),
+    commitRequestedByUserId: uuid("commit_requested_by_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    commitStartedAt: timestamp("commit_started_at", { withTimezone: true }),
+    committedAt: timestamp("committed_at", { withTimezone: true }),
+    commitFinishedAt: timestamp("commit_finished_at", { withTimezone: true }),
+    commitAttemptCount: integer("commit_attempt_count").notNull().default(0),
+    lastCommitAttemptAt: timestamp("last_commit_attempt_at", {
+      withTimezone: true,
+    }),
+    commitResponse: jsonb("commit_response").$type<unknown>(),
+    commitError: text("commit_error"),
+    externalReferenceId: text("external_reference_id"),
     voidReason: text("void_reason"),
     voidedByUserId: uuid("voided_by_user_id").references(() => users.id, {
       onDelete: "set null",
@@ -1417,6 +1433,12 @@ export const zohoProductionOutputOps = pgTable(
     index("zoho_prod_output_ops_lot_idx").on(t.finishedLotId),
     index("zoho_prod_output_ops_status_idx").on(t.status),
     index("zoho_prod_output_ops_request_hash_idx").on(t.requestHash),
+    uniqueIndex("zoho_prod_output_ops_commit_idem_unique")
+      .on(t.commitIdempotencyKey)
+      .where(sql`commit_idempotency_key IS NOT NULL`),
+    uniqueIndex("zoho_prod_output_ops_committed_lot_unique")
+      .on(t.finishedLotId)
+      .where(sql`status = 'COMMITTED'`),
   ],
 );
 

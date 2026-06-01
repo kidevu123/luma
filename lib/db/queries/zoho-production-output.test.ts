@@ -27,6 +27,10 @@ const migrationApprovalSrc = readFileSync(
   join(root, "drizzle/0052_zoho_production_output_approval.sql"),
   "utf8",
 );
+const migrationCommitReadinessSrc = readFileSync(
+  join(root, "drizzle/0053_zoho_production_output_commit_readiness.sql"),
+  "utf8",
+);
 const querySrc = readFileSync(
   join(root, "lib/db/queries/zoho-production-output.ts"),
   "utf8",
@@ -84,6 +88,29 @@ describe("zoho production output durable preview schema", () => {
     expect(schemaSrc).toContain("approvedAt:");
     expect(schemaSrc).toContain("approvedRequestHash:");
     expect(schemaSrc).toContain("voidReason:");
+  });
+
+  it("adds future commit metadata/status columns in migration 0053", () => {
+    expect(migrationCommitReadinessSrc).toContain("'QUEUED'");
+    expect(migrationCommitReadinessSrc).toContain("'COMMITTING'");
+    expect(migrationCommitReadinessSrc).toContain("'COMMITTED'");
+    expect(migrationCommitReadinessSrc).toContain("'FAILED'");
+    expect(migrationCommitReadinessSrc).toContain('"commit_idempotency_key" text');
+    expect(migrationCommitReadinessSrc).toContain('"commit_requested_at" timestamptz');
+    expect(migrationCommitReadinessSrc).toContain('"commit_attempt_count" integer NOT NULL DEFAULT 0');
+    expect(migrationCommitReadinessSrc).toContain('"commit_response" jsonb');
+    expect(migrationCommitReadinessSrc).toContain('"external_reference_id" text');
+    expect(migrationCommitReadinessSrc).toContain('"zoho_prod_output_ops_commit_idem_unique"');
+    expect(migrationCommitReadinessSrc).toContain('"zoho_prod_output_ops_committed_lot_unique"');
+    expect(migrationCommitReadinessSrc).not.toContain("/commit");
+    expect(journalSrc).toContain(
+      '"tag": "0053_zoho_production_output_commit_readiness"',
+    );
+
+    expect(schemaSrc).toContain("commitIdempotencyKey:");
+    expect(schemaSrc).toContain("commitRequestedAt:");
+    expect(schemaSrc).toContain("commitAttemptCount:");
+    expect(schemaSrc).toContain("externalReferenceId:");
   });
 });
 
@@ -168,6 +195,7 @@ describe("buildZohoProductionOutputPreviewOpValues", () => {
     expect(querySrc).not.toContain("/send");
     expect(migrationSrc).not.toContain("/commit");
     expect(migrationApprovalSrc).not.toContain("/commit");
+    expect(migrationCommitReadinessSrc).not.toContain("/commit");
   });
 
   it("blocks approval for DRAFT, MISSING metrics, and LOW genealogy via shared evaluator", () => {
@@ -212,8 +240,20 @@ describe("buildZohoProductionOutputPreviewOpValues", () => {
   });
 
   it("guards approved ops from silent re-preview in query layer", () => {
-    expect(querySrc).toContain('existing?.status === "APPROVED"');
+    expect(querySrc).toContain('existing.status !== "DRAFT"');
+    expect(querySrc).toContain('existing.status !== "PREVIEWED"');
     expect(querySrc).toContain("approvedRequestHash: row.requestHash");
     expect(querySrc).toContain('status: "VOIDED"');
+  });
+
+  it("evaluates future commit readiness with legacy double-post blockers read-only", () => {
+    expect(querySrc).toContain("evaluateZohoProductionOutputCommitReadiness");
+    expect(querySrc).toContain("zohoAssemblyOps");
+    expect(querySrc).toContain("zohoPushes");
+    expect(querySrc).toContain('eq(zohoProductionOutputOps.status, "COMMITTED")');
+    expect(querySrc).toContain('eq(zohoPushes.status, "SUCCESS")');
+    expect(querySrc).not.toContain(".insert(zohoAssemblyOps)");
+    expect(querySrc).not.toContain(".update(zohoAssemblyOps)");
+    expect(querySrc).not.toContain(".delete(zohoAssemblyOps)");
   });
 });

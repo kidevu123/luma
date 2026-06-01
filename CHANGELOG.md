@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.65] — 2026-06-01
+
+### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-C1)
+- **Future commit readiness gate:** Approved Zoho production-output preview rows now expose read-only readiness blockers for a future live commit, including hash drift, non-HIGH metrics/genealogy, missing preview state, existing committed output, and legacy Zoho double-post risks.
+- **Commit metadata foundation:** Added nullable commit metadata/status columns and uniqueness guards to `zoho_production_output_ops`. This slice does not add queueing, workers, `/commit`, `/apply`, `/send`, outbox enqueue, or live Zoho writes.
+- **Finished-lot readiness UI:** Approved finished-lot preview cards show “Future commit readiness” with blocker explanations and no queue/commit button.
+
+### Tests added (ZOHO-PRODUCTION-OUTPUT-SLICE-C1)
+- Schema/query/wiring tests cover commit metadata shape, readiness evaluation, legacy `zoho_assembly_ops`/`zoho_pushes` blockers, no live endpoint references, and read-only UI states.
+
 ## [0.4.64] — 2026-06-01
 
 ### Added (BLISTER-PAUSE-COUNT-SNAPSHOT-1)

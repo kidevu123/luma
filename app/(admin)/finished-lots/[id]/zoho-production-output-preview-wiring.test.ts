@@ -36,6 +36,10 @@ const clientSrc = readFileSync(
   join(root, "lib/zoho/production-output-preview.ts"),
   "utf8",
 );
+const approvalSrc = readFileSync(
+  join(root, "lib/zoho/production-output-approval.ts"),
+  "utf8",
+);
 const migrationSrc = readFileSync(
   join(root, "drizzle/0052_zoho_production_output_approval.sql"),
   "utf8",
@@ -65,6 +69,9 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
     expect(cardSrc).toContain("no Zoho write performed");
     expect(cardSrc).toContain("Approved for future Zoho commit");
     expect(cardSrc).toContain("Approve for future commit");
+    expect(cardSrc).toContain("Future commit readiness");
+    expect(cardSrc).toContain("Ready to queue for Zoho commit in a future release");
+    expect(approvalSrc).toContain("Legacy Zoho assembly operations exist for this lot");
     expect(cardSrc).toContain("Void reason");
     expect(cardSrc).toContain('status === "PREVIEWED"');
     expect(cardSrc).toContain('status === "APPROVED"');
@@ -88,6 +95,7 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
       expect(src).not.toMatch(/\/apply['"`]/);
       expect(src).not.toMatch(/\/send['"`]/);
       expect(src).not.toContain("Send to Zoho");
+      expect(src).not.toContain("Queue commit to Zoho");
     }
     expect(migrationSrc).toContain("No commit/apply/send");
   });
@@ -108,8 +116,13 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
     expect(cardSrc).not.toContain("Authorization");
   });
 
-  it("does not touch legacy zoho_assembly_ops", () => {
-    expect(querySrc).not.toContain("zoho_assembly_ops");
+  it("checks legacy zoho_assembly_ops as a read-only future-commit blocker", () => {
+    expect(querySrc).toContain("zohoAssemblyOps");
+    expect(querySrc).toContain("legacyAssemblyOpExists");
+    expect(approvalSrc).toContain("LEGACY_ASSEMBLY_OP_EXISTS");
+    expect(querySrc).not.toContain(".insert(zohoAssemblyOps)");
+    expect(querySrc).not.toContain(".update(zohoAssemblyOps)");
+    expect(querySrc).not.toContain(".delete(zohoAssemblyOps)");
     expect(gateActionSrc).not.toContain("zoho_assembly_ops");
   });
 });
