@@ -256,4 +256,21 @@ describe("buildZohoProductionOutputPreviewOpValues", () => {
     expect(querySrc).not.toContain(".update(zohoAssemblyOps)");
     expect(querySrc).not.toContain(".delete(zohoAssemblyOps)");
   });
+
+  it("queues APPROVED ops without live Zoho calls or worker enqueue", () => {
+    expect(querySrc).toContain("queueZohoProductionOutputOpForFutureCommit");
+    expect(querySrc).toContain("evaluateZohoProductionOutputQueueEligibility");
+    expect(querySrc).toContain('status: "QUEUED"');
+    expect(querySrc).toContain("commitRequestedAt");
+    expect(querySrc).toContain("commitIdempotencyKey");
+    expect(querySrc).toContain('action: "zoho_production_output_op.queue"');
+    expect(querySrc).toContain("Already queued for future commit.");
+    expect(querySrc).not.toContain("pg-boss");
+    expect(querySrc).not.toContain("boss.send");
+    expect(querySrc).not.toContain("callProductionOutput");
+    expect(querySrc).not.toContain("commitStartedAt:");
+    expect(querySrc).not.toContain("committedAt:");
+    expect(querySrc).not.toContain("commitResponse:");
+    expect(querySrc).not.toContain("externalReferenceId:");
+  });
 });

@@ -79,11 +79,63 @@ export function canVoidZohoProductionOutputOp(
   if (
     op.status !== "DRAFT" &&
     op.status !== "PREVIEWED" &&
-    op.status !== "APPROVED"
+    op.status !== "APPROVED" &&
+    op.status !== "QUEUED"
   ) {
     return { ok: false, error: "This operation cannot be voided." };
   }
   return { ok: true };
+}
+
+export function evaluateZohoProductionOutputQueueEligibility(
+  op: ZohoProductionOutputQueueEligibilityInput,
+): ZohoProductionOutputQueueEligibility {
+  const readiness = evaluateZohoProductionOutputCommitReadiness(op);
+  const blockers: ZohoProductionOutputQueueBlocker[] = readiness.blockers.map(
+    (blocker) => ({
+      code: blocker.code,
+      message: blocker.message,
+    }),
+  );
+
+  const add = (code: ZohoProductionOutputQueueBlockerCode, message: string) => {
+    blockers.push({ code, message });
+  };
+
+  if (op.status === "QUEUED") {
+    add("ALREADY_QUEUED", "Already queued for future commit.");
+  }
+  if (op.commitRequestedAt != null && op.status !== "QUEUED") {
+    add(
+      "COMMIT_ALREADY_REQUESTED",
+      "A commit request timestamp is already set for this operation.",
+    );
+  }
+
+  const expectedKey =
+    op.approvedRequestHash != null
+      ? buildZohoProductionOutputCommitIdempotencyKey(
+          op.lumaOperationId,
+          op.approvedRequestHash,
+        )
+      : null;
+
+  if (
+    op.commitIdempotencyKey != null &&
+    expectedKey != null &&
+    op.commitIdempotencyKey !== expectedKey
+  ) {
+    add(
+      "COMMIT_IDEMPOTENCY_MISMATCH",
+      "Stored commit idempotency key does not match the approved preview hash.",
+    );
+  }
+
+  return {
+    eligible: blockers.length === 0,
+    blockers,
+    commitIdempotencyKey: expectedKey,
+  };
 }
 
 export type ZohoProductionOutputCommitReadinessBlockerCode =
@@ -100,6 +152,37 @@ export type ZohoProductionOutputCommitReadinessBlockerCode =
   | "LEGACY_ASSEMBLY_OP_EXISTS"
   | "LEGACY_ZOHO_PUSH_EXISTS"
   | "CONFIG_MISSING";
+
+export type ZohoProductionOutputQueueBlockerCode =
+  | ZohoProductionOutputCommitReadinessBlockerCode
+  | "ALREADY_QUEUED"
+  | "COMMIT_IDEMPOTENCY_MISMATCH"
+  | "COMMIT_ALREADY_REQUESTED";
+
+export function buildZohoProductionOutputCommitIdempotencyKey(
+  lumaOperationId: string,
+  approvedRequestHash: string,
+): string {
+  return `luma-production-output:${lumaOperationId}:${approvedRequestHash}`;
+}
+
+export type ZohoProductionOutputQueueEligibilityInput =
+  ZohoProductionOutputCommitReadinessInput & {
+    lumaOperationId: string;
+    commitRequestedAt: Date | null;
+    commitIdempotencyKey: string | null;
+  };
+
+export type ZohoProductionOutputQueueBlocker = {
+  code: ZohoProductionOutputQueueBlockerCode;
+  message: string;
+};
+
+export type ZohoProductionOutputQueueEligibility = {
+  eligible: boolean;
+  blockers: ZohoProductionOutputQueueBlocker[];
+  commitIdempotencyKey: string | null;
+};
 
 export type ZohoProductionOutputCommitReadinessBlocker = {
   code: ZohoProductionOutputCommitReadinessBlockerCode;

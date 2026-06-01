@@ -110,12 +110,14 @@ export async function previewZohoProductionOutputAction(
   const activeOp = await getActiveZohoProductionOutputOpForLot(
     parsed.data.finishedLotId,
   );
-  if (activeOp?.status === "APPROVED") {
+  if (activeOp?.status === "APPROVED" || activeOp?.status === "QUEUED") {
     return {
       ok: false,
       kind: "LOCAL_ERROR",
       message:
-        "An approved preview is frozen. Void it before running a new preview.",
+        activeOp.status === "QUEUED"
+          ? "A queued preview is frozen. Void it before running a new preview."
+          : "An approved preview is frozen. Void it before running a new preview.",
     };
   }
 

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildZohoProductionOutputCommitIdempotencyKey,
   canVoidZohoProductionOutputOp,
   evaluateZohoProductionOutputCommitReadiness,
+  evaluateZohoProductionOutputQueueEligibility,
   evaluateZohoProductionOutputApproval,
 } from "./production-output-approval";
 
@@ -95,6 +97,12 @@ describe("canVoidZohoProductionOutputOp", () => {
         voidedAt: new Date(),
       }).ok,
     ).toBe(false);
+  });
+
+  it("allows void for QUEUED operations", () => {
+    expect(
+      canVoidZohoProductionOutputOp({ status: "QUEUED", voidedAt: null }).ok,
+    ).toBe(true);
   });
 });
 
@@ -198,6 +206,122 @@ describe("evaluateZohoProductionOutputCommitReadiness", () => {
         "LEGACY_ASSEMBLY_OP_EXISTS",
         "LEGACY_ZOHO_PUSH_EXISTS",
       ]),
+    );
+  });
+});
+
+const QUEUE_READY = {
+  ...APPROVED_READY,
+  lumaOperationId: "luma-op-1",
+  commitRequestedAt: null,
+  commitIdempotencyKey: null,
+};
+
+describe("buildZohoProductionOutputCommitIdempotencyKey", () => {
+  it("is deterministic for the same operation and approved hash", () => {
+    const first = buildZohoProductionOutputCommitIdempotencyKey(
+      "luma-op-1",
+      "hash-a",
+    );
+    const second = buildZohoProductionOutputCommitIdempotencyKey(
+      "luma-op-1",
+      "hash-a",
+    );
+    expect(first).toBe(second);
+    expect(first).toBe("luma-production-output:luma-op-1:hash-a");
+  });
+
+  it("changes when the approved hash changes", () => {
+    const first = buildZohoProductionOutputCommitIdempotencyKey(
+      "luma-op-1",
+      "hash-a",
+    );
+    const second = buildZohoProductionOutputCommitIdempotencyKey(
+      "luma-op-1",
+      "hash-b",
+    );
+    expect(first).not.toBe(second);
+  });
+});
+
+describe("evaluateZohoProductionOutputQueueEligibility", () => {
+  it("allows APPROVED ready ops with no prior queue metadata", () => {
+    const result = evaluateZohoProductionOutputQueueEligibility(QUEUE_READY);
+    expect(result.eligible).toBe(true);
+    expect(result.commitIdempotencyKey).toBe(
+      "luma-production-output:luma-op-1:hash-a",
+    );
+  });
+
+  it("blocks NOT_APPROVED, VOIDED, and hash mismatch", () => {
+    expect(
+      evaluateZohoProductionOutputQueueEligibility({
+        ...QUEUE_READY,
+        status: "PREVIEWED",
+      }).eligible,
+    ).toBe(false);
+    expect(
+      evaluateZohoProductionOutputQueueEligibility({
+        ...QUEUE_READY,
+        status: "VOIDED",
+        voidedAt: new Date(),
+      }).blockers.map((b) => b.code),
+    ).toContain("VOIDED");
+    expect(
+      evaluateZohoProductionOutputQueueEligibility({
+        ...QUEUE_READY,
+        requestHash: "hash-b",
+      }).blockers.map((b) => b.code),
+    ).toContain("APPROVED_HASH_MISMATCH");
+  });
+
+  it("blocks non-HIGH metrics and genealogy", () => {
+    expect(
+      evaluateZohoProductionOutputQueueEligibility({
+        ...QUEUE_READY,
+        metricsState: "MISSING",
+      }).blockers.map((b) => b.code),
+    ).toContain("METRICS_NOT_HIGH");
+    expect(
+      evaluateZohoProductionOutputQueueEligibility({
+        ...QUEUE_READY,
+        genealogyState: "LOW",
+      }).blockers.map((b) => b.code),
+    ).toContain("GENEALOGY_NOT_HIGH");
+  });
+
+  it("blocks legacy assembly ops, committed ops, and already queued state", () => {
+    const legacy = evaluateZohoProductionOutputQueueEligibility({
+      ...QUEUE_READY,
+      legacyAssemblyOpExists: true,
+    });
+    expect(legacy.blockers.map((b) => b.code)).toContain(
+      "LEGACY_ASSEMBLY_OP_EXISTS",
+    );
+
+    const committed = evaluateZohoProductionOutputQueueEligibility({
+      ...QUEUE_READY,
+      committedOpExists: true,
+    });
+    expect(committed.blockers.map((b) => b.code)).toContain("ALREADY_COMMITTED");
+
+    const queued = evaluateZohoProductionOutputQueueEligibility({
+      ...QUEUE_READY,
+      status: "QUEUED",
+      commitRequestedAt: new Date(),
+      commitIdempotencyKey: "luma-production-output:luma-op-1:hash-a",
+    });
+    expect(queued.eligible).toBe(false);
+    expect(queued.blockers.map((b) => b.code)).toContain("ALREADY_QUEUED");
+  });
+
+  it("blocks mismatched commit idempotency keys", () => {
+    const result = evaluateZohoProductionOutputQueueEligibility({
+      ...QUEUE_READY,
+      commitIdempotencyKey: "stale-key",
+    });
+    expect(result.blockers.map((b) => b.code)).toContain(
+      "COMMIT_IDEMPOTENCY_MISMATCH",
     );
   });
 });

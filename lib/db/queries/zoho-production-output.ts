@@ -13,11 +13,14 @@ import type {
   ProductionOutputPreviewPayload,
 } from "@/lib/zoho/production-output-preview";
 import {
+  buildZohoProductionOutputCommitIdempotencyKey,
   canVoidZohoProductionOutputOp,
   evaluateZohoProductionOutputCommitReadiness,
+  evaluateZohoProductionOutputQueueEligibility,
   evaluateZohoProductionOutputApproval,
   type ZohoProductionOutputCommitReadiness,
   type ZohoProductionOutputOpStatus,
+  type ZohoProductionOutputQueueEligibility,
 } from "@/lib/zoho/production-output-approval";
 
 export type { ZohoProductionOutputOpStatus };
@@ -36,6 +39,10 @@ export type ZohoProductionOutputPreviewMetadata = {
   approvalEligible: boolean;
   approvalBlockers: string[];
   commitReadiness?: ZohoProductionOutputCommitReadiness;
+  queueEligible?: boolean;
+  queueBlockers?: string[];
+  commitRequestedAt?: Date | null;
+  commitIdempotencyKey?: string | null;
   zohoPurchaseorderId: string;
   zohoPurchaseorderLineItemId: string;
   zohoWarehouseId: string | null;
@@ -169,7 +176,7 @@ export async function getActiveZohoProductionOutputOpForLot(
     )
     .limit(1);
   if (!row) return null;
-  return withCommitReadiness(toPreviewMetadata(row), row);
+  return withCommitAndQueueState(toPreviewMetadata(row), row);
 }
 
 export async function getZohoProductionOutputCommitReadinessForOp(
@@ -321,6 +328,127 @@ export async function voidZohoProductionOutputOp(
   return { ok: true };
 }
 
+export async function queueZohoProductionOutputOpForFutureCommit(
+  opId: string,
+  actor: CurrentUser,
+): Promise<
+  | {
+      ok: true;
+      metadata: ZohoProductionOutputPreviewMetadata;
+      queueEligibility: ZohoProductionOutputQueueEligibility;
+    }
+  | { ok: false; error: string }
+> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(zohoProductionOutputOps)
+      .where(eq(zohoProductionOutputOps.id, opId))
+      .limit(1);
+
+    if (!row) {
+      return { ok: false, error: "Production output operation not found." };
+    }
+
+    if (row.status === "QUEUED") {
+      return {
+        ok: false,
+        error: "Already queued for future commit.",
+      };
+    }
+
+    const queueEligibility = await evaluateQueueEligibilityFromDbRow(tx, row);
+
+    if (!queueEligibility.eligible) {
+      return {
+        ok: false,
+        error:
+          queueEligibility.blockers[0]?.message ??
+          "This operation cannot be queued for future commit.",
+      };
+    }
+
+    const commitIdempotencyKey =
+      queueEligibility.commitIdempotencyKey ??
+      buildZohoProductionOutputCommitIdempotencyKey(
+        row.lumaOperationId,
+        row.approvedRequestHash ?? row.requestHash,
+      );
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(zohoProductionOutputOps)
+      .set({
+        status: "QUEUED",
+        commitRequestedAt: now,
+        commitRequestedByUserId: actor.id,
+        commitIdempotencyKey,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(zohoProductionOutputOps.id, opId),
+          eq(zohoProductionOutputOps.status, "APPROVED"),
+          isNull(zohoProductionOutputOps.voidedAt),
+          isNull(zohoProductionOutputOps.commitRequestedAt),
+        ),
+      )
+      .returning();
+
+    if (!updated) {
+      const [latest] = await tx
+        .select({ status: zohoProductionOutputOps.status })
+        .from(zohoProductionOutputOps)
+        .where(eq(zohoProductionOutputOps.id, opId))
+        .limit(1);
+      if (latest?.status === "QUEUED") {
+        return {
+          ok: false,
+          error: "Already queued for future commit.",
+        };
+      }
+      return {
+        ok: false,
+        error:
+          "Queue could not be saved. Refresh and confirm the operation is still approved and ready.",
+      };
+    }
+
+    await writeAudit({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action: "zoho_production_output_op.queue",
+      targetType: "ZohoProductionOutputOp",
+      targetId: opId,
+      before: {
+        status: row.status,
+        commitRequestedAt: row.commitRequestedAt,
+        commitIdempotencyKey: row.commitIdempotencyKey,
+      },
+      after: {
+        status: "QUEUED",
+        commitRequestedAt: now.toISOString(),
+        commitRequestedByUserId: actor.id,
+        commitIdempotencyKey,
+        commitAttemptCount: 0,
+      },
+    });
+
+    const metadata = toPreviewMetadata(updated);
+    return {
+      ok: true,
+      metadata: {
+        ...metadata,
+        commitRequestedAt: updated.commitRequestedAt,
+        commitIdempotencyKey: updated.commitIdempotencyKey,
+        queueEligible: false,
+        queueBlockers: ["Already queued for future commit."],
+      },
+      queueEligibility,
+    };
+  });
+}
+
 function toPreviewMetadata(
   row: typeof zohoProductionOutputOps.$inferSelect,
 ): ZohoProductionOutputPreviewMetadata {
@@ -356,15 +484,93 @@ function toPreviewMetadata(
   };
 }
 
-async function withCommitReadiness(
+async function withCommitAndQueueState(
   metadata: ZohoProductionOutputPreviewMetadata,
   row: typeof zohoProductionOutputOps.$inferSelect,
 ): Promise<ZohoProductionOutputPreviewMetadata> {
-  if (row.status !== "APPROVED") return metadata;
-  return {
+  const base = {
     ...metadata,
-    commitReadiness: await evaluateCommitReadinessFromDb(row),
+    commitRequestedAt: row.commitRequestedAt,
+    commitIdempotencyKey: row.commitIdempotencyKey,
   };
+
+  if (row.status === "QUEUED") {
+    return {
+      ...base,
+      queueEligible: false,
+      queueBlockers: ["Already queued for future commit."],
+    };
+  }
+
+  if (row.status !== "APPROVED") return base;
+
+  const commitReadiness = await evaluateCommitReadinessFromDb(row);
+  const queueEligibility = await evaluateQueueEligibilityFromDbRow(db, row);
+  return {
+    ...base,
+    commitReadiness,
+    queueEligible: queueEligibility.eligible,
+    queueBlockers: queueEligibility.blockers.map((b) => b.message),
+  };
+}
+
+async function evaluateQueueEligibilityFromDbRow(
+  executor: Pick<typeof db, "select">,
+  row: typeof zohoProductionOutputOps.$inferSelect,
+): Promise<ZohoProductionOutputQueueEligibility> {
+  const [
+    finishedLotCount,
+    committedOpCount,
+    legacyAssemblyOpCount,
+    legacyZohoPushCount,
+  ] = await Promise.all([
+    executor
+      .select({ value: count() })
+      .from(finishedLots)
+      .where(eq(finishedLots.id, row.finishedLotId)),
+    executor
+      .select({ value: count() })
+      .from(zohoProductionOutputOps)
+      .where(
+        and(
+          eq(zohoProductionOutputOps.finishedLotId, row.finishedLotId),
+          eq(zohoProductionOutputOps.status, "COMMITTED"),
+          ne(zohoProductionOutputOps.id, row.id),
+        ),
+      ),
+    executor
+      .select({ value: count() })
+      .from(zohoAssemblyOps)
+      .where(eq(zohoAssemblyOps.finishedLotId, row.finishedLotId)),
+    executor
+      .select({ value: count() })
+      .from(zohoPushes)
+      .where(
+        and(
+          eq(zohoPushes.finishedLotId, row.finishedLotId),
+          eq(zohoPushes.status, "SUCCESS"),
+        ),
+      ),
+  ]);
+
+  return evaluateZohoProductionOutputQueueEligibility({
+    lumaOperationId: row.lumaOperationId,
+    status: row.status as ZohoProductionOutputOpStatus,
+    voidedAt: row.voidedAt,
+    approvedRequestHash: row.approvedRequestHash,
+    requestHash: row.requestHash,
+    requestPayload: row.requestPayload,
+    previewResponse: row.previewResponse,
+    previewHttpStatus: row.previewHttpStatus,
+    metricsState: row.metricsState as ProductionOutputDataQualityState,
+    genealogyState: row.genealogyState as ProductionOutputDataQualityState,
+    finishedLotExists: (finishedLotCount[0]?.value ?? 0) > 0,
+    committedOpExists: (committedOpCount[0]?.value ?? 0) > 0,
+    legacyAssemblyOpExists: (legacyAssemblyOpCount[0]?.value ?? 0) > 0,
+    legacyZohoPushExists: (legacyZohoPushCount[0]?.value ?? 0) > 0,
+    commitRequestedAt: row.commitRequestedAt,
+    commitIdempotencyKey: row.commitIdempotencyKey,
+  });
 }
 
 async function evaluateCommitReadinessFromDb(

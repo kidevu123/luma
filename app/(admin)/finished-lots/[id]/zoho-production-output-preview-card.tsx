@@ -10,8 +10,10 @@ import {
 } from "./zoho-production-output-preview-actions";
 import {
   approveZohoProductionOutputAction,
+  queueZohoProductionOutputAction,
   voidZohoProductionOutputAction,
   type ApproveZohoProductionOutputResult,
+  type QueueZohoProductionOutputResult,
   type VoidZohoProductionOutputResult,
 } from "./zoho-production-output-gate-actions";
 import type { ZohoProductionOutputPreviewMetadata } from "@/lib/db/queries/zoho-production-output";
@@ -30,11 +32,23 @@ export function ZohoProductionOutputPreviewCard({
   const [result, setResult] =
     React.useState<ProductionOutputPreviewActionResult | null>(null);
   const [gateResult, setGateResult] = React.useState<
-    ApproveZohoProductionOutputResult | VoidZohoProductionOutputResult | null
+    | ApproveZohoProductionOutputResult
+    | QueueZohoProductionOutputResult
+    | VoidZohoProductionOutputResult
+    | null
   >(null);
   const [voidReason, setVoidReason] = React.useState("");
 
   const isApproved = persistedPreview?.status === "APPROVED";
+  const isQueued = persistedPreview?.status === "QUEUED";
+  const isTerminalCommitState =
+    persistedPreview?.status === "COMMITTING" ||
+    persistedPreview?.status === "COMMITTED" ||
+    persistedPreview?.status === "FAILED";
+  const canQueue =
+    isApproved &&
+    persistedPreview.queueEligible === true &&
+    !gatePending;
   const canApprove =
     persistedPreview?.status === "PREVIEWED" &&
     persistedPreview.approvalEligible;
@@ -67,6 +81,22 @@ export function ZohoProductionOutputPreviewCard({
     setGateResult(null);
     startGateTransition(async () => {
       const response = await approveZohoProductionOutputAction({
+        finishedLotId,
+        opId: persistedPreview.id,
+      });
+      setGateResult(response);
+    });
+  }
+
+  function handleQueue() {
+    if (!persistedPreview) return;
+    const confirmed = window.confirm(
+      "Queue for future Zoho commit?\n\nThis will not write to Zoho yet. It only marks this approved request as queued for a future commit worker.",
+    );
+    if (!confirmed) return;
+    setGateResult(null);
+    startGateTransition(async () => {
+      const response = await queueZohoProductionOutputAction({
         finishedLotId,
         opId: persistedPreview.id,
       });
@@ -114,12 +144,41 @@ export function ZohoProductionOutputPreviewCard({
           </div>
         )}
 
+        {isQueued && (
+          <div className="rounded-md border border-info-300/60 bg-info-50 px-3 py-2 text-xs text-info-800">
+            <p className="font-semibold">Queued for future Zoho commit</p>
+            <p className="mt-1">
+              No Zoho write has been performed yet. Waiting for a future commit
+              worker.
+            </p>
+            {persistedPreview.commitIdempotencyKey && (
+              <p className="mt-2 font-mono text-[10px] opacity-90">
+                Commit idempotency key: {persistedPreview.commitIdempotencyKey}
+              </p>
+            )}
+            {persistedPreview.commitRequestedAt && (
+              <p className="mt-1 text-[11px] opacity-90">
+                Queued at {formatDateTime(persistedPreview.commitRequestedAt)}
+              </p>
+            )}
+          </div>
+        )}
+
+        {isTerminalCommitState && persistedPreview && (
+          <TerminalCommitStateNotice status={persistedPreview.status} />
+        )}
+
         {persistedPreview && (
           <PersistedPreviewMetadata metadata={persistedPreview} />
         )}
 
         {isApproved && (
-          <FutureCommitReadiness metadata={persistedPreview} />
+          <FutureCommitReadiness
+            metadata={persistedPreview}
+            canQueue={canQueue}
+            onQueue={handleQueue}
+            queuePending={gatePending}
+          />
         )}
 
         {persistedPreview && (
@@ -180,9 +239,9 @@ export function ZohoProductionOutputPreviewCard({
           </div>
         )}
 
-        {isApproved ? (
+        {isApproved || isQueued ? (
           <p className="text-xs text-text-muted">
-            Void the approved operation to change mapping or run a new preview.
+            Void the operation to change mapping or run a new preview.
           </p>
         ) : (
           <form className="grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
@@ -249,18 +308,39 @@ export function ZohoProductionOutputPreviewCard({
 function GateResult({
   result,
 }: {
-  result: ApproveZohoProductionOutputResult | VoidZohoProductionOutputResult;
+  result:
+    | ApproveZohoProductionOutputResult
+    | QueueZohoProductionOutputResult
+    | VoidZohoProductionOutputResult;
 }) {
   const className = result.ok
     ? "border-good-300/60 bg-good-50 text-good-800"
     : "border-danger-300/60 bg-danger-50 text-danger-800";
+  let successMessage = "Operation voided. You can run a new preview.";
+  if (result.ok && "metadata" in result) {
+    successMessage =
+      result.metadata.status === "QUEUED"
+        ? "Queued for future Zoho commit — no Zoho write has been performed yet."
+        : `Approved — frozen hash ${result.metadata.approvedRequestHash ?? result.metadata.requestHash}.`;
+  }
   return (
     <div className={`rounded-md border px-2 py-1.5 text-xs ${className}`}>
-      {result.ok
-        ? "ok" in result && "metadata" in result
-          ? `Approved — frozen hash ${result.metadata.approvedRequestHash ?? result.metadata.requestHash}.`
-          : "Operation voided. You can run a new preview."
-        : result.message}
+      {result.ok ? successMessage : result.message}
+    </div>
+  );
+}
+
+function TerminalCommitStateNotice({ status }: { status: string }) {
+  const copy =
+    status === "COMMITTED"
+      ? "This operation is marked committed. Live commit controls are not available in this release."
+      : status === "COMMITTING"
+        ? "This operation is marked as committing. No operator action is available until a future worker release."
+        : "This operation is marked failed. Review audit history; no live commit controls are shown here.";
+  return (
+    <div className="rounded-md border border-border bg-surface-2/40 px-3 py-2 text-xs text-text-muted">
+      <p className="font-semibold text-text">{status}</p>
+      <p className="mt-1">{copy}</p>
     </div>
   );
 }
@@ -408,10 +488,25 @@ function PersistedPreviewMetadata({
 
 function FutureCommitReadiness({
   metadata,
+  canQueue,
+  onQueue,
+  queuePending,
 }: {
   metadata: ZohoProductionOutputPreviewMetadata | null;
+  canQueue: boolean;
+  onQueue: () => void;
+  queuePending: boolean;
 }) {
   const readiness = metadata?.commitReadiness;
+  const blockers =
+    readiness?.ready === false
+      ? readiness.blockers
+      : metadata?.queueBlockers?.length
+        ? metadata.queueBlockers.map((message) => ({
+            code: "QUEUE_BLOCKED",
+            message,
+          }))
+        : [];
   return (
     <div className="space-y-2 rounded-md border border-border bg-surface-2/40 px-3 py-2 text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -427,8 +522,8 @@ function FutureCommitReadiness({
         )}
       </div>
       <p className="text-text-muted">
-        Approved — no Zoho write yet. This section only checks whether the
-        frozen preview looks ready for a future release.
+        Approved — no Zoho write yet. Queueing only records intent for a future
+        worker; it does not call Zoho.
       </p>
       {metadata?.approvedRequestHash && (
         <div className="rounded border border-border/70 bg-surface px-2 py-1">
@@ -439,14 +534,35 @@ function FutureCommitReadiness({
         </div>
       )}
       {readiness?.ready ? (
-        <p className="rounded border border-good-300/60 bg-good-50 px-2 py-1.5 text-good-800">
-          Ready to queue for Zoho commit in a future release. No queue action is
-          available in this slice.
-        </p>
+        <div className="space-y-2">
+          <p className="rounded border border-good-300/60 bg-good-50 px-2 py-1.5 text-good-800">
+            Ready for future commit.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="primary"
+              disabled={!canQueue || queuePending}
+              onClick={onQueue}
+            >
+              {queuePending ? "Queueing…" : "Queue for future Zoho commit"}
+            </Button>
+            {!canQueue && metadata?.queueBlockers?.length ? (
+              <span className="text-[11px] text-text-muted">
+                Queue blocked — resolve blockers below.
+              </span>
+            ) : null}
+          </div>
+          <p className="text-[11px] text-text-muted">
+            This will not write to Zoho yet. It only marks this approved request
+            as queued for a future commit worker.
+          </p>
+        </div>
       ) : (
         <ul className="list-disc space-y-1 rounded border border-warn-300/60 bg-warn-50 px-4 py-2 text-warn-800">
-          {(readiness?.blockers.length
-            ? readiness.blockers
+          {(blockers.length
+            ? blockers
             : [
                 {
                   code: "CONFIG_MISSING",
@@ -455,7 +571,7 @@ function FutureCommitReadiness({
                 },
               ]
           ).map((blocker) => (
-            <li key={blocker.code}>
+            <li key={`${blocker.code}:${blocker.message}`}>
               <span className="font-mono">{blocker.code}</span>:{" "}
               {blocker.message}
             </li>
@@ -470,11 +586,17 @@ function StatusChip({ status }: { status: string }) {
   const tone =
     status === "APPROVED"
       ? "border-good-300 bg-good-50 text-good-800"
-      : status === "VOIDED"
-        ? "border-border bg-surface text-text-muted"
-        : status === "PREVIEWED"
-          ? "border-info-300 bg-info-50 text-info-800"
-          : "border-warn-300 bg-warn-50 text-warn-800";
+      : status === "QUEUED"
+        ? "border-info-300 bg-info-50 text-info-800"
+        : status === "VOIDED"
+          ? "border-border bg-surface text-text-muted"
+          : status === "PREVIEWED"
+            ? "border-info-300 bg-info-50 text-info-800"
+            : status === "COMMITTED"
+              ? "border-good-300 bg-good-50 text-good-800"
+              : status === "FAILED"
+                ? "border-danger-300 bg-danger-50 text-danger-800"
+                : "border-warn-300 bg-warn-50 text-warn-800";
   return (
     <span
       className={`rounded border px-2 py-0.5 font-mono text-[10px] ${tone}`}

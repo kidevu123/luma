@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.66] — 2026-06-01
+
+### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-C2)
+- **Queue-only gate:** OWNER/ADMIN can queue an APPROVED, commit-ready production-output op for a future worker (`APPROVED` → `QUEUED`) with `commit_requested_at`, `commit_requested_by_user_id`, and a deterministic `commit_idempotency_key`. No Zoho HTTP, no worker, no pg-boss/outbox enqueue, and no `/commit`/`/apply`/`/send` endpoints.
+- **Finished-lot UI:** Ready approved ops show “Queue for future Zoho commit” with explicit no-write copy; queued ops show waiting-for-worker state and idempotency key. C1 readiness blockers still gate queueing.
+
+### Tests added (ZOHO-PRODUCTION-OUTPUT-SLICE-C2)
+- Queue eligibility/idempotency, query/gate-action, and wiring tests cover transactional readiness re-check, duplicate-queue rejection, audit `zoho_production_output_op.queue`, and absence of live-write/worker paths.
+
 ## [0.4.65] — 2026-06-01
 
 ### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-C1)

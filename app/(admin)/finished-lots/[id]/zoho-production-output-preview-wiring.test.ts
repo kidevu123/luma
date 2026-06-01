@@ -58,9 +58,11 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
   it("does not call preview or gate actions during page render", () => {
     expect(pageSrc).not.toContain("previewZohoProductionOutputAction");
     expect(pageSrc).not.toContain("approveZohoProductionOutputAction");
+    expect(pageSrc).not.toContain("queueZohoProductionOutputAction");
     expect(cardSrc).toContain("onSubmit={handleSubmit}");
     expect(cardSrc).toContain("previewZohoProductionOutputAction({");
     expect(cardSrc).toContain("approveZohoProductionOutputAction({");
+    expect(cardSrc).toContain("queueZohoProductionOutputAction({");
     expect(cardSrc).toContain("voidZohoProductionOutputAction({");
   });
 
@@ -70,7 +72,10 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
     expect(cardSrc).toContain("Approved for future Zoho commit");
     expect(cardSrc).toContain("Approve for future commit");
     expect(cardSrc).toContain("Future commit readiness");
-    expect(cardSrc).toContain("Ready to queue for Zoho commit in a future release");
+    expect(cardSrc).toContain("Queue for future Zoho commit");
+    expect(cardSrc).toContain("Ready for future commit.");
+    expect(cardSrc).toContain("Queued for future Zoho commit");
+    expect(cardSrc).toContain("No Zoho write has been performed yet");
     expect(approvalSrc).toContain("Legacy Zoho assembly operations exist for this lot");
     expect(cardSrc).toContain("Void reason");
     expect(cardSrc).toContain('status === "PREVIEWED"');
@@ -100,8 +105,9 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
     expect(migrationSrc).toContain("No commit/apply/send");
   });
 
-  it("uses gate actions for approve/void without live-write helpers", () => {
+  it("uses gate actions for approve/queue/void without live-write helpers", () => {
     expect(gateActionSrc).toContain("approveZohoProductionOutputOp");
+    expect(gateActionSrc).toContain("queueZohoProductionOutputOpForFutureCommit");
     expect(gateActionSrc).toContain("voidZohoProductionOutputOp");
     expect(gateActionSrc).not.toContain("callProductionOutputPreview");
     expect(querySrc).not.toContain("callProductionOutputPreview");
@@ -124,5 +130,17 @@ describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
     expect(querySrc).not.toContain(".update(zohoAssemblyOps)");
     expect(querySrc).not.toContain(".delete(zohoAssemblyOps)");
     expect(gateActionSrc).not.toContain("zoho_assembly_ops");
+  });
+
+  it("does not enqueue workers or expose live commit controls in C2", () => {
+    expect(cardSrc).not.toContain("Send to Zoho");
+    expect(cardSrc).not.toContain("Apply to Zoho");
+    expect(cardSrc).not.toContain("Commit to Zoho");
+    expect(gateActionSrc).not.toContain("pg-boss");
+    expect(gateActionSrc).not.toContain("boss.send");
+    expect(querySrc).toContain("queueZohoProductionOutputOpForFutureCommit");
+    expect(querySrc).not.toContain("pg-boss");
+    expect(cardSrc).toContain('status === "QUEUED"');
+    expect(cardSrc).not.toContain("Queue commit to Zoho");
   });
 });

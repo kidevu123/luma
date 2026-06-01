@@ -5,11 +5,17 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth-guards";
 import {
   approveZohoProductionOutputOp,
+  queueZohoProductionOutputOpForFutureCommit,
   voidZohoProductionOutputOp,
   type ZohoProductionOutputPreviewMetadata,
 } from "@/lib/db/queries/zoho-production-output";
 
 const approveInputSchema = z.object({
+  finishedLotId: z.string().uuid(),
+  opId: z.string().uuid(),
+});
+
+const queueInputSchema = z.object({
   finishedLotId: z.string().uuid(),
   opId: z.string().uuid(),
 });
@@ -32,6 +38,10 @@ export type VoidZohoProductionOutputResult =
   | { ok: true }
   | { ok: false; message: string };
 
+export type QueueZohoProductionOutputResult =
+  | { ok: true; metadata: ZohoProductionOutputPreviewMetadata }
+  | { ok: false; message: string };
+
 export async function approveZohoProductionOutputAction(
   input: z.input<typeof approveInputSchema>,
 ): Promise<ApproveZohoProductionOutputResult> {
@@ -45,6 +55,30 @@ export async function approveZohoProductionOutputAction(
   }
 
   const result = await approveZohoProductionOutputOp(parsed.data.opId, actor);
+  if (!result.ok) {
+    return { ok: false, message: result.error };
+  }
+
+  revalidatePath(`/finished-lots/${parsed.data.finishedLotId}`);
+  return { ok: true, metadata: result.metadata };
+}
+
+export async function queueZohoProductionOutputAction(
+  input: z.input<typeof queueInputSchema>,
+): Promise<QueueZohoProductionOutputResult> {
+  const actor = await requireAdmin();
+  const parsed = queueInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Invalid queue input.",
+    };
+  }
+
+  const result = await queueZohoProductionOutputOpForFutureCommit(
+    parsed.data.opId,
+    actor,
+  );
   if (!result.ok) {
     return { ok: false, message: result.error };
   }

@@ -10,6 +10,7 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@/lib/db/queries/zoho-production-output", () => ({
   approveZohoProductionOutputOp: vi.fn(),
+  queueZohoProductionOutputOpForFutureCommit: vi.fn(),
   voidZohoProductionOutputOp: vi.fn(),
 }));
 
@@ -17,10 +18,12 @@ import { requireAdmin } from "@/lib/auth-guards";
 import { revalidatePath } from "next/cache";
 import {
   approveZohoProductionOutputOp,
+  queueZohoProductionOutputOpForFutureCommit,
   voidZohoProductionOutputOp,
 } from "@/lib/db/queries/zoho-production-output";
 import {
   approveZohoProductionOutputAction,
+  queueZohoProductionOutputAction,
   voidZohoProductionOutputAction,
 } from "./zoho-production-output-gate-actions";
 
@@ -87,6 +90,67 @@ describe("approveZohoProductionOutputAction", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.message).toContain("MISSING");
+  });
+});
+
+describe("queueZohoProductionOutputAction", () => {
+  it("queues a ready APPROVED op and revalidates without calling Zoho", async () => {
+    vi.mocked(queueZohoProductionOutputOpForFutureCommit).mockResolvedValue({
+      ok: true,
+      metadata: {
+        id: OP_ID,
+        status: "QUEUED",
+        requestHash: "hash-a",
+        approvedRequestHash: "hash-a",
+        metricsState: "HIGH",
+        genealogyState: "HIGH",
+        previewedAt: new Date(),
+        previewHttpStatus: 200,
+        hasPreviewResponse: true,
+        approvedAt: new Date(),
+        approvalEligible: false,
+        approvalBlockers: [],
+        commitRequestedAt: new Date(),
+        commitIdempotencyKey: "luma-production-output:op:hash-a",
+        zohoPurchaseorderId: "po-1",
+        zohoPurchaseorderLineItemId: "line-1",
+        zohoWarehouseId: "wh-1",
+        zohoCompositeItemId: "item-1",
+      },
+      queueEligibility: {
+        eligible: true,
+        blockers: [],
+        commitIdempotencyKey: "luma-production-output:op:hash-a",
+      },
+    });
+
+    const result = await queueZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      opId: OP_ID,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(revalidatePath).toHaveBeenCalledWith(`/finished-lots/${LOT_ID}`);
+    expect(queueZohoProductionOutputOpForFutureCommit).toHaveBeenCalledWith(
+      OP_ID,
+      expect.objectContaining({ id: "admin-user" }),
+    );
+  });
+
+  it("returns query-layer errors without calling Zoho", async () => {
+    vi.mocked(queueZohoProductionOutputOpForFutureCommit).mockResolvedValue({
+      ok: false,
+      error: "Already queued for future commit.",
+    });
+
+    const result = await queueZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      opId: OP_ID,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain("Already queued");
   });
 });
 
