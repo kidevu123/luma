@@ -1,21 +1,33 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { zohoProductionOutputOps } from "@/lib/db/schema";
+import { writeAudit } from "@/lib/db/audit";
+import type { CurrentUser } from "@/lib/auth";
 import type {
   ProductionOutputDataQualityState,
   ProductionOutputPreviewPayload,
 } from "@/lib/zoho/production-output-preview";
+import {
+  canVoidZohoProductionOutputOp,
+  evaluateZohoProductionOutputApproval,
+  type ZohoProductionOutputOpStatus,
+} from "@/lib/zoho/production-output-approval";
 
-export type ZohoProductionOutputPreviewStatus = "DRAFT" | "PREVIEWED";
+export type { ZohoProductionOutputOpStatus };
 
 export type ZohoProductionOutputPreviewMetadata = {
   id: string;
-  status: ZohoProductionOutputPreviewStatus;
+  status: ZohoProductionOutputOpStatus;
   requestHash: string;
+  approvedRequestHash: string | null;
   metricsState: ProductionOutputDataQualityState;
   genealogyState: ProductionOutputDataQualityState;
   previewedAt: Date | null;
   previewHttpStatus: number | null;
+  hasPreviewResponse: boolean;
+  approvedAt: Date | null;
+  approvalEligible: boolean;
+  approvalBlockers: string[];
   zohoPurchaseorderId: string;
   zohoPurchaseorderLineItemId: string;
   zohoWarehouseId: string | null;
@@ -26,7 +38,7 @@ export type UpsertZohoProductionOutputPreviewOpInput = {
   finishedLotId: string;
   workflowBagId: string | null;
   lumaOperationId: string;
-  status: ZohoProductionOutputPreviewStatus;
+  status: "DRAFT" | "PREVIEWED";
   payload: ProductionOutputPreviewPayload;
   requestHash: string;
   previewIdempotencyKey: string;
@@ -92,7 +104,10 @@ export async function upsertZohoProductionOutputPreviewOp(
 ): Promise<ZohoProductionOutputPreviewMetadata> {
   const values = buildZohoProductionOutputPreviewOpValues(input);
   const [existing] = await db
-    .select({ id: zohoProductionOutputOps.id })
+    .select({
+      id: zohoProductionOutputOps.id,
+      status: zohoProductionOutputOps.status,
+    })
     .from(zohoProductionOutputOps)
     .where(
       and(
@@ -101,6 +116,12 @@ export async function upsertZohoProductionOutputPreviewOp(
       ),
     )
     .limit(1);
+
+  if (existing?.status === "APPROVED") {
+    throw new Error(
+      "An approved preview is frozen. Void it before running a new preview.",
+    );
+  }
 
   if (existing) {
     const [updated] = await db
@@ -138,17 +159,171 @@ export async function getActiveZohoProductionOutputOpForLot(
   return row ? toPreviewMetadata(row) : null;
 }
 
+export async function approveZohoProductionOutputOp(
+  opId: string,
+  actor: CurrentUser,
+): Promise<
+  { ok: true; metadata: ZohoProductionOutputPreviewMetadata } | { ok: false; error: string }
+> {
+  const [row] = await db
+    .select()
+    .from(zohoProductionOutputOps)
+    .where(eq(zohoProductionOutputOps.id, opId))
+    .limit(1);
+
+  if (!row) return { ok: false, error: "Production output operation not found." };
+
+  const evaluation = evaluateZohoProductionOutputApproval({
+    status: row.status as ZohoProductionOutputOpStatus,
+    voidedAt: row.voidedAt,
+    previewResponse: row.previewResponse,
+    previewHttpStatus: row.previewHttpStatus,
+    metricsState: row.metricsState as ProductionOutputDataQualityState,
+    genealogyState: row.genealogyState as ProductionOutputDataQualityState,
+    requestHash: row.requestHash,
+    approvedRequestHash: row.approvedRequestHash,
+  });
+
+  if (!evaluation.eligible) {
+    return {
+      ok: false,
+      error: evaluation.reasons[0] ?? "This preview cannot be approved.",
+    };
+  }
+
+  const now = new Date();
+  const [updated] = await db
+    .update(zohoProductionOutputOps)
+    .set({
+      status: "APPROVED",
+      approvedAt: now,
+      approvedByUserId: actor.id,
+      approvedRequestHash: row.requestHash,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(zohoProductionOutputOps.id, opId),
+        eq(zohoProductionOutputOps.status, "PREVIEWED"),
+        isNull(zohoProductionOutputOps.voidedAt),
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    return {
+      ok: false,
+      error: "Preview changed before approval could be saved. Refresh and try again.",
+    };
+  }
+
+  await writeAudit({
+    actorId: actor.id,
+    actorRole: actor.role,
+    action: "zoho_production_output_op.approve",
+    targetType: "ZohoProductionOutputOp",
+    targetId: opId,
+    before: { status: row.status, requestHash: row.requestHash },
+    after: {
+      status: "APPROVED",
+      approvedRequestHash: row.requestHash,
+      metricsState: row.metricsState,
+      genealogyState: row.genealogyState,
+    },
+  });
+
+  return { ok: true, metadata: toPreviewMetadata(updated) };
+}
+
+export async function voidZohoProductionOutputOp(
+  opId: string,
+  reason: string,
+  actor: CurrentUser,
+): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
+  const trimmed = reason.trim();
+  if (!trimmed) {
+    return { ok: false, error: "Void reason is required." };
+  }
+
+  const [row] = await db
+    .select()
+    .from(zohoProductionOutputOps)
+    .where(eq(zohoProductionOutputOps.id, opId))
+    .limit(1);
+
+  if (!row) return { ok: false, error: "Production output operation not found." };
+
+  const canVoid = canVoidZohoProductionOutputOp({
+    status: row.status as ZohoProductionOutputOpStatus,
+    voidedAt: row.voidedAt,
+  });
+  if (!canVoid.ok) return canVoid;
+
+  const now = new Date();
+  const [updated] = await db
+    .update(zohoProductionOutputOps)
+    .set({
+      status: "VOIDED",
+      voidedAt: now,
+      voidedByUserId: actor.id,
+      voidReason: trimmed,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(zohoProductionOutputOps.id, opId),
+        isNull(zohoProductionOutputOps.voidedAt),
+      ),
+    )
+    .returning({ id: zohoProductionOutputOps.id });
+
+  if (!updated) {
+    return { ok: false, error: "This operation was already voided." };
+  }
+
+  await writeAudit({
+    actorId: actor.id,
+    actorRole: actor.role,
+    action: "zoho_production_output_op.void",
+    targetType: "ZohoProductionOutputOp",
+    targetId: opId,
+    before: { status: row.status },
+    after: { status: "VOIDED", voidReason: trimmed },
+  });
+
+  return { ok: true };
+}
+
 function toPreviewMetadata(
   row: typeof zohoProductionOutputOps.$inferSelect,
 ): ZohoProductionOutputPreviewMetadata {
+  const status = row.status as ZohoProductionOutputOpStatus;
+  const evaluation = evaluateZohoProductionOutputApproval({
+    status,
+    voidedAt: row.voidedAt,
+    previewResponse: row.previewResponse,
+    previewHttpStatus: row.previewHttpStatus,
+    metricsState: row.metricsState as ProductionOutputDataQualityState,
+    genealogyState: row.genealogyState as ProductionOutputDataQualityState,
+    requestHash: row.requestHash,
+    approvedRequestHash: row.approvedRequestHash,
+  });
+
   return {
     id: row.id,
-    status: row.status as ZohoProductionOutputPreviewStatus,
+    status,
     requestHash: row.requestHash,
+    approvedRequestHash: row.approvedRequestHash,
     metricsState: row.metricsState as ProductionOutputDataQualityState,
     genealogyState: row.genealogyState as ProductionOutputDataQualityState,
     previewedAt: row.previewedAt,
     previewHttpStatus: row.previewHttpStatus,
+    hasPreviewResponse: row.previewResponse != null,
+    approvedAt: row.approvedAt,
+    approvalEligible: evaluation.eligible,
+    approvalBlockers: evaluation.reasons,
     zohoPurchaseorderId: row.zohoPurchaseorderId,
     zohoPurchaseorderLineItemId: row.zohoPurchaseorderLineItemId,
     zohoWarehouseId: row.zohoWarehouseId,

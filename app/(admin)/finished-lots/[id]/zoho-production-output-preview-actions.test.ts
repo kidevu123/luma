@@ -28,13 +28,14 @@ vi.mock("@/lib/db/queries/zoho-production-output", async (importOriginal) => {
     >();
   return {
     ...actual,
+    getActiveZohoProductionOutputOpForLot: vi.fn(),
     upsertZohoProductionOutputPreviewOp: vi.fn(),
   };
 });
 
 import { requireAdmin } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
-import { upsertZohoProductionOutputPreviewOp } from "@/lib/db/queries/zoho-production-output";
+import { upsertZohoProductionOutputPreviewOp, getActiveZohoProductionOutputOpForLot } from "@/lib/db/queries/zoho-production-output";
 import { callProductionOutputPreview } from "@/lib/zoho/production-output-preview";
 import { previewZohoProductionOutputAction } from "./zoho-production-output-preview-actions";
 
@@ -109,14 +110,20 @@ beforeEach(() => {
   vi.stubEnv("ZOHO_SERVICE_BEARER_SECRET", "secret-prefix-rest");
   vi.stubEnv("ZOHO_BRAND", "haute_brands");
   vi.stubEnv("ZOHO_WAREHOUSE_ID", "");
+  vi.mocked(getActiveZohoProductionOutputOpForLot).mockResolvedValue(null);
   vi.mocked(upsertZohoProductionOutputPreviewOp).mockResolvedValue({
     id: "op-1",
     status: "PREVIEWED",
     requestHash: "request-hash",
+    approvedRequestHash: null,
     metricsState: "HIGH",
     genealogyState: "HIGH",
     previewedAt: new Date("2026-05-30T12:00:00Z"),
     previewHttpStatus: 200,
+    hasPreviewResponse: true,
+    approvedAt: null,
+    approvalEligible: true,
+    approvalBlockers: [],
     zohoPurchaseorderId: "po-1",
     zohoPurchaseorderLineItemId: "line-1",
     zohoWarehouseId: "warehouse-1",
@@ -191,10 +198,15 @@ describe("previewZohoProductionOutputAction", () => {
       id: "op-1",
       status: "DRAFT",
       requestHash: "request-hash",
+      approvedRequestHash: null,
       metricsState: "HIGH",
       genealogyState: "HIGH",
       previewedAt: null,
       previewHttpStatus: 422,
+      hasPreviewResponse: true,
+      approvedAt: null,
+      approvalEligible: false,
+      approvalBlockers: ["Run a successful Zoho preview before approval."],
       zohoPurchaseorderId: "po-1",
       zohoPurchaseorderLineItemId: "line-1",
       zohoWarehouseId: "warehouse-1",
@@ -261,5 +273,40 @@ describe("previewZohoProductionOutputAction", () => {
         genealogyState: "MISSING",
       }),
     );
+  });
+
+  it("blocks preview when an approved op is still active", async () => {
+    vi.mocked(getActiveZohoProductionOutputOpForLot).mockResolvedValueOnce({
+      id: "op-approved",
+      status: "APPROVED",
+      requestHash: "hash",
+      approvedRequestHash: "hash",
+      metricsState: "HIGH",
+      genealogyState: "HIGH",
+      previewedAt: new Date(),
+      previewHttpStatus: 200,
+      hasPreviewResponse: true,
+      approvedAt: new Date(),
+      approvalEligible: false,
+      approvalBlockers: [],
+      zohoPurchaseorderId: "po-1",
+      zohoPurchaseorderLineItemId: "line-1",
+      zohoWarehouseId: "warehouse-1",
+      zohoCompositeItemId: "unit-composite-1",
+    });
+    mockLotQuery(LOT_ROW);
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain("Void it");
+    expect(callProductionOutputPreview).not.toHaveBeenCalled();
   });
 });

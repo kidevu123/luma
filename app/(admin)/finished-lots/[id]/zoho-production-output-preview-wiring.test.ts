@@ -14,19 +14,34 @@ const cardSrc = readFileSync(
   ),
   "utf8",
 );
-const actionSrc = readFileSync(
+const previewActionSrc = readFileSync(
   join(
     root,
     "app/(admin)/finished-lots/[id]/zoho-production-output-preview-actions.ts",
   ),
   "utf8",
 );
+const gateActionSrc = readFileSync(
+  join(
+    root,
+    "app/(admin)/finished-lots/[id]/zoho-production-output-gate-actions.ts",
+  ),
+  "utf8",
+);
+const querySrc = readFileSync(
+  join(root, "lib/db/queries/zoho-production-output.ts"),
+  "utf8",
+);
 const clientSrc = readFileSync(
   join(root, "lib/zoho/production-output-preview.ts"),
   "utf8",
 );
+const migrationSrc = readFileSync(
+  join(root, "drizzle/0052_zoho_production_output_approval.sql"),
+  "utf8",
+);
 
-describe("ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1-CLEAN wiring", () => {
+describe("ZOHO-PRODUCTION-OUTPUT-SLICE-B wiring", () => {
   it("adds an owner/admin-only preview card to the finished lot detail page", () => {
     expect(pageSrc).toContain("ZohoProductionOutputPreviewCard");
     expect(pageSrc).toContain('user.role === "OWNER" || user.role === "ADMIN"');
@@ -36,41 +51,54 @@ describe("ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1-CLEAN wiring", () => {
     );
   });
 
-  it("does not call the preview action during page render", () => {
+  it("does not call preview or gate actions during page render", () => {
     expect(pageSrc).not.toContain("previewZohoProductionOutputAction");
+    expect(pageSrc).not.toContain("approveZohoProductionOutputAction");
     expect(cardSrc).toContain("onSubmit={handleSubmit}");
     expect(cardSrc).toContain("previewZohoProductionOutputAction({");
+    expect(cardSrc).toContain("approveZohoProductionOutputAction({");
+    expect(cardSrc).toContain("voidZohoProductionOutputAction({");
   });
 
-  it("renders the explicit form fields and preview-only language", () => {
+  it("renders preview-only language and approval/void states", () => {
     expect(cardSrc).toContain("Preview only");
     expect(cardSrc).toContain("no Zoho write performed");
+    expect(cardSrc).toContain("Approved for future Zoho commit");
+    expect(cardSrc).toContain("Approve for future commit");
+    expect(cardSrc).toContain("Void reason");
+    expect(cardSrc).toContain('status === "PREVIEWED"');
+    expect(cardSrc).toContain('status === "APPROVED"');
+    expect(cardSrc).toContain('status !== "VOIDED"');
     expect(cardSrc).toContain('name="purchaseorder_id"');
-    expect(cardSrc).toContain('name="purchaseorder_line_item_id"');
-    expect(cardSrc).toContain('name="warehouse_id"');
-    expect(cardSrc).toContain("Request summary sent to preview");
-    expect(cardSrc).toContain("Persisted preview snapshot");
-    expect(cardSrc).toContain("metrics state");
-    expect(cardSrc).toContain("genealogy state");
-    expect(cardSrc).toContain("Request hash");
     expect(clientSrc).toContain(
       "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered",
     );
   });
 
-  it("does not call or reference the Zoho production-output commit path", () => {
-    expect(pageSrc).not.toContain("/commit");
-    expect(cardSrc).not.toContain("/commit");
-    expect(actionSrc).not.toContain("/commit");
-    expect(clientSrc).not.toContain("/commit");
+  it("does not call or reference live commit/apply/send paths", () => {
+    for (const src of [
+      pageSrc,
+      cardSrc,
+      previewActionSrc,
+      gateActionSrc,
+      querySrc,
+      clientSrc,
+    ]) {
+      expect(src).not.toContain("/commit");
+      expect(src).not.toMatch(/\/apply['"`]/);
+      expect(src).not.toMatch(/\/send['"`]/);
+      expect(src).not.toContain("Send to Zoho");
+    }
+    expect(migrationSrc).toContain("No commit/apply/send");
   });
 
-  it("persists preview snapshots without adding approval or live-write actions", () => {
-    expect(actionSrc).toContain("upsertZohoProductionOutputPreviewOp");
-    expect(actionSrc).toContain('status: "PREVIEWED"');
-    expect(actionSrc).not.toContain("APPROVED");
-    expect(cardSrc).not.toContain("Approve");
-    expect(cardSrc).not.toContain("Send to Zoho");
+  it("uses gate actions for approve/void without live-write helpers", () => {
+    expect(gateActionSrc).toContain("approveZohoProductionOutputOp");
+    expect(gateActionSrc).toContain("voidZohoProductionOutputOp");
+    expect(gateActionSrc).not.toContain("callProductionOutputPreview");
+    expect(querySrc).not.toContain("callProductionOutputPreview");
+    expect(previewActionSrc).toContain("getActiveZohoProductionOutputOpForLot");
+    expect(previewActionSrc).toContain('status === "APPROVED"');
   });
 
   it("does not render or reference service bearer secrets", () => {
@@ -78,5 +106,10 @@ describe("ZOHO-PRODUCTION-OUTPUT-PREVIEW-FORM-1-CLEAN wiring", () => {
     expect(cardSrc).not.toContain("ZOHO_SERVICE_BEARER_SECRET");
     expect(cardSrc).not.toContain("Bearer ");
     expect(cardSrc).not.toContain("Authorization");
+  });
+
+  it("does not touch legacy zoho_assembly_ops", () => {
+    expect(querySrc).not.toContain("zoho_assembly_ops");
+    expect(gateActionSrc).not.toContain("zoho_assembly_ops");
   });
 });

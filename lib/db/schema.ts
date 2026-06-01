@@ -1396,6 +1396,15 @@ export const zohoProductionOutputOps = pgTable(
       onDelete: "set null",
     }),
     selectedAt: timestamp("selected_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedRequestHash: text("approved_request_hash"),
+    voidReason: text("void_reason"),
+    voidedByUserId: uuid("voided_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

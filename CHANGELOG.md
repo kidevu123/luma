@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.63] — 2026-05-27
+
+### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-B)
+- **Approval / void gate:** Finished-lot Zoho production-output preview ops support `APPROVED` and `VOIDED` statuses with frozen `approved_request_hash`, required void reason, and audit log entries. Approval is blocked for DRAFT, missing preview, `metrics_state = MISSING`, `genealogy_state = MISSING` or `LOW`. Still preview-only — no commit/apply/send or live Zoho write.
+
+### Tests added (ZOHO-PRODUCTION-OUTPUT-SLICE-B)
+- `drizzle/0052_zoho_production_output_approval.sql` + schema/query/wiring/gate-action tests.
+
 ## [0.4.62] — 2026-05-27
 
 ### Added (RECEIVE-ADD-BAG-NOTES-1)

@@ -11,6 +11,7 @@ import {
   readBagMetrics,
 } from "@/lib/db/schema";
 import {
+  getActiveZohoProductionOutputOpForLot,
   upsertZohoProductionOutputPreviewOp,
   type ZohoProductionOutputPreviewMetadata,
 } from "@/lib/db/queries/zoho-production-output";
@@ -103,6 +104,18 @@ export async function previewZohoProductionOutputAction(
       ok: false,
       kind: "LOCAL_ERROR",
       message: "Finished lot was not found.",
+    };
+  }
+
+  const activeOp = await getActiveZohoProductionOutputOpForLot(
+    parsed.data.finishedLotId,
+  );
+  if (activeOp?.status === "APPROVED") {
+    return {
+      ok: false,
+      kind: "LOCAL_ERROR",
+      message:
+        "An approved preview is frozen. Void it before running a new preview.",
     };
   }
 

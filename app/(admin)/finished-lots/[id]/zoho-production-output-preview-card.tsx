@@ -1,13 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, CheckCircle2, Eye, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, ShieldCheck, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   previewZohoProductionOutputAction,
   type ProductionOutputPreviewActionResult,
 } from "./zoho-production-output-preview-actions";
+import {
+  approveZohoProductionOutputAction,
+  voidZohoProductionOutputAction,
+  type ApproveZohoProductionOutputResult,
+  type VoidZohoProductionOutputResult,
+} from "./zoho-production-output-gate-actions";
 import type { ZohoProductionOutputPreviewMetadata } from "@/lib/db/queries/zoho-production-output";
 
 export function ZohoProductionOutputPreviewCard({
@@ -20,13 +26,28 @@ export function ZohoProductionOutputPreviewCard({
   persistedPreview: ZohoProductionOutputPreviewMetadata | null;
 }) {
   const [pending, startTransition] = React.useTransition();
+  const [gatePending, startGateTransition] = React.useTransition();
   const [result, setResult] =
     React.useState<ProductionOutputPreviewActionResult | null>(null);
+  const [gateResult, setGateResult] = React.useState<
+    ApproveZohoProductionOutputResult | VoidZohoProductionOutputResult | null
+  >(null);
+  const [voidReason, setVoidReason] = React.useState("");
+
+  const isApproved = persistedPreview?.status === "APPROVED";
+  const canApprove =
+    persistedPreview?.status === "PREVIEWED" &&
+    persistedPreview.approvalEligible;
+  const canVoid =
+    persistedPreview != null &&
+    persistedPreview.status !== "VOIDED" &&
+    !gatePending;
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     setResult(null);
+    setGateResult(null);
     startTransition(async () => {
       const response = await previewZohoProductionOutputAction({
         finishedLotId,
@@ -38,6 +59,33 @@ export function ZohoProductionOutputPreviewCard({
         notes: String(formData.get("notes") ?? ""),
       });
       setResult(response);
+    });
+  }
+
+  function handleApprove() {
+    if (!persistedPreview) return;
+    setGateResult(null);
+    startGateTransition(async () => {
+      const response = await approveZohoProductionOutputAction({
+        finishedLotId,
+        opId: persistedPreview.id,
+      });
+      setGateResult(response);
+    });
+  }
+
+  function handleVoid(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!persistedPreview) return;
+    setGateResult(null);
+    startGateTransition(async () => {
+      const response = await voidZohoProductionOutputAction({
+        finishedLotId,
+        opId: persistedPreview.id,
+        reason: voidReason,
+      });
+      setGateResult(response);
+      if (response.ok) setVoidReason("");
     });
   }
 
@@ -56,67 +104,160 @@ export function ZohoProductionOutputPreviewCard({
           exist.
         </div>
 
+        {isApproved && (
+          <div className="rounded-md border border-good-300/60 bg-good-50 px-3 py-2 text-xs text-good-800">
+            <p className="font-semibold">Approved for future Zoho commit</p>
+            <p className="mt-1">
+              No Zoho write performed. Mapping and quantities are frozen until
+              this operation is voided.
+            </p>
+          </div>
+        )}
+
         {persistedPreview && (
           <PersistedPreviewMetadata metadata={persistedPreview} />
         )}
 
-        <form className="grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
-          <Field label="Zoho purchaseorder_id" htmlFor="purchaseorder_id">
-            <input
-              id="purchaseorder_id"
-              name="purchaseorder_id"
-              required
-              maxLength={120}
-              className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
-              placeholder="Zoho PO ID"
-            />
-          </Field>
-          <Field
-            label="Zoho purchaseorder_line_item_id"
-            htmlFor="purchaseorder_line_item_id"
-          >
-            <input
-              id="purchaseorder_line_item_id"
-              name="purchaseorder_line_item_id"
-              required
-              maxLength={120}
-              className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
-              placeholder="Zoho PO line item ID"
-            />
-          </Field>
-          <Field label="Warehouse ID" htmlFor="warehouse_id">
-            <input
-              id="warehouse_id"
-              name="warehouse_id"
-              defaultValue={defaultWarehouseId}
-              maxLength={120}
-              className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
-              placeholder="Required if no env default"
-            />
-          </Field>
-          <Field label="Notes" htmlFor="notes">
-            <textarea
-              id="notes"
-              name="notes"
-              maxLength={1000}
-              rows={2}
-              className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
-              placeholder="Optional"
-            />
-          </Field>
-          <div className="md:col-span-2 flex items-center gap-3">
-            <Button type="submit" size="sm" disabled={pending}>
-              {pending ? "Previewing…" : "Run Zoho preview"}
-            </Button>
-            <span className="text-[11px] text-text-muted">
-              Sends one dry-run request only when submitted.
-            </span>
+        {persistedPreview && (
+          <div className="space-y-3 rounded-md border border-border bg-surface-2/40 px-3 py-2 text-xs">
+            <p className="font-semibold text-text">Approval and void</p>
+            {persistedPreview.status === "PREVIEWED" &&
+              !persistedPreview.approvalEligible &&
+              persistedPreview.approvalBlockers.length > 0 && (
+                <ul className="list-disc space-y-1 pl-5 text-warn-800">
+                  {persistedPreview.approvalBlockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="primary"
+                disabled={!canApprove || gatePending}
+                onClick={handleApprove}
+              >
+                <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                {gatePending ? "Saving…" : "Approve for future commit"}
+              </Button>
+              {!canApprove && persistedPreview.status === "PREVIEWED" && (
+                <span className="text-[11px] text-text-muted">
+                  Approval blocked until preview data is reviewable.
+                </span>
+              )}
+            </div>
+            <form className="space-y-2" onSubmit={handleVoid}>
+              <label className="block space-y-1 text-text-muted" htmlFor="void_reason">
+                <span>Void reason (required)</span>
+                <textarea
+                  id="void_reason"
+                  name="void_reason"
+                  required
+                  maxLength={500}
+                  rows={2}
+                  value={voidReason}
+                  onChange={(event) => setVoidReason(event.target.value)}
+                  disabled={!canVoid}
+                  className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-text"
+                  placeholder="Wrong PO line, mapping change, etc."
+                />
+              </label>
+              <Button
+                type="submit"
+                size="sm"
+                variant="secondary"
+                disabled={!canVoid || voidReason.trim().length === 0}
+              >
+                Void operation
+              </Button>
+            </form>
+            {gateResult && <GateResult result={gateResult} />}
           </div>
-        </form>
+        )}
+
+        {isApproved ? (
+          <p className="text-xs text-text-muted">
+            Void the approved operation to change mapping or run a new preview.
+          </p>
+        ) : (
+          <form className="grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
+            <Field label="Zoho purchaseorder_id" htmlFor="purchaseorder_id">
+              <input
+                id="purchaseorder_id"
+                name="purchaseorder_id"
+                required
+                maxLength={120}
+                className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
+                placeholder="Zoho PO ID"
+              />
+            </Field>
+            <Field
+              label="Zoho purchaseorder_line_item_id"
+              htmlFor="purchaseorder_line_item_id"
+            >
+              <input
+                id="purchaseorder_line_item_id"
+                name="purchaseorder_line_item_id"
+                required
+                maxLength={120}
+                className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
+                placeholder="Zoho PO line item ID"
+              />
+            </Field>
+            <Field label="Warehouse ID" htmlFor="warehouse_id">
+              <input
+                id="warehouse_id"
+                name="warehouse_id"
+                defaultValue={defaultWarehouseId}
+                maxLength={120}
+                className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
+                placeholder="Required if no env default"
+              />
+            </Field>
+            <Field label="Notes" htmlFor="notes">
+              <textarea
+                id="notes"
+                name="notes"
+                maxLength={1000}
+                rows={2}
+                className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
+                placeholder="Optional"
+              />
+            </Field>
+            <div className="md:col-span-2 flex items-center gap-3">
+              <Button type="submit" size="sm" disabled={pending}>
+                {pending ? "Previewing…" : "Run Zoho preview"}
+              </Button>
+              <span className="text-[11px] text-text-muted">
+                Sends one dry-run request only when submitted.
+              </span>
+            </div>
+          </form>
+        )}
 
         {result && <PreviewResult result={result} />}
       </CardContent>
     </Card>
+  );
+}
+
+function GateResult({
+  result,
+}: {
+  result: ApproveZohoProductionOutputResult | VoidZohoProductionOutputResult;
+}) {
+  const className = result.ok
+    ? "border-good-300/60 bg-good-50 text-good-800"
+    : "border-danger-300/60 bg-danger-50 text-danger-800";
+  return (
+    <div className={`rounded-md border px-2 py-1.5 text-xs ${className}`}>
+      {result.ok
+        ? "ok" in result && "metadata" in result
+          ? `Approved — frozen hash ${result.metadata.approvedRequestHash ?? result.metadata.requestHash}.`
+          : "Operation voided. You can run a new preview."
+        : result.message}
+    </div>
   );
 }
 
@@ -221,9 +362,7 @@ function PersistedPreviewMetadata({
     <div className="space-y-2 rounded-md border border-border bg-surface-2/40 px-3 py-2 text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-semibold text-text">Persisted preview snapshot</p>
-        <span className="rounded border border-border bg-surface px-2 py-0.5 font-mono text-[10px] text-text-muted">
-          {metadata.status}
-        </span>
+        <StatusChip status={metadata.status} />
       </div>
       <div className="grid gap-1 sm:grid-cols-2">
         <SummaryRow
@@ -240,6 +379,18 @@ function PersistedPreviewMetadata({
         />
         <SummaryRow label="warehouse" value={metadata.zohoWarehouseId} />
         <SummaryRow label="unit item" value={metadata.zohoCompositeItemId} />
+        {metadata.approvedAt && (
+          <SummaryRow
+            label="approved at"
+            value={formatDateTime(metadata.approvedAt)}
+          />
+        )}
+        {metadata.approvedRequestHash && (
+          <SummaryRow
+            label="approved hash"
+            value={metadata.approvedRequestHash}
+          />
+        )}
       </div>
       <div className="rounded border border-border/70 bg-surface px-2 py-1">
         <span className="text-text-muted">Request hash </span>
@@ -248,6 +399,24 @@ function PersistedPreviewMetadata({
         </span>
       </div>
     </div>
+  );
+}
+
+function StatusChip({ status }: { status: string }) {
+  const tone =
+    status === "APPROVED"
+      ? "border-good-300 bg-good-50 text-good-800"
+      : status === "VOIDED"
+        ? "border-border bg-surface text-text-muted"
+        : status === "PREVIEWED"
+          ? "border-info-300 bg-info-50 text-info-800"
+          : "border-warn-300 bg-warn-50 text-warn-800";
+  return (
+    <span
+      className={`rounded border px-2 py-0.5 font-mono text-[10px] ${tone}`}
+    >
+      {status}
+    </span>
   );
 }
 

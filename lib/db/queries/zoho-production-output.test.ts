@@ -6,7 +6,12 @@ import {
   buildProductionOutputPreviewRequestHash,
   type ProductionOutputPreviewBuildInput,
 } from "@/lib/zoho/production-output-preview";
-import { buildZohoProductionOutputPreviewOpValues } from "./zoho-production-output";
+import {
+  buildZohoProductionOutputPreviewOpValues,
+} from "./zoho-production-output";
+import {
+  evaluateZohoProductionOutputApproval,
+} from "@/lib/zoho/production-output-approval";
 
 const root = process.cwd();
 const migrationSrc = readFileSync(
@@ -16,6 +21,14 @@ const migrationSrc = readFileSync(
 const schemaSrc = readFileSync(join(root, "lib/db/schema.ts"), "utf8");
 const journalSrc = readFileSync(
   join(root, "drizzle/meta/_journal.json"),
+  "utf8",
+);
+const migrationApprovalSrc = readFileSync(
+  join(root, "drizzle/0052_zoho_production_output_approval.sql"),
+  "utf8",
+);
+const querySrc = readFileSync(
+  join(root, "lib/db/queries/zoho-production-output.ts"),
   "utf8",
 );
 
@@ -58,6 +71,19 @@ describe("zoho production output durable preview schema", () => {
       'uniqueIndex("zoho_prod_output_ops_active_lot_unique")',
     );
     expect(journalSrc).toContain('"tag": "0049_zoho_production_output_ops"');
+  });
+
+  it("extends status and approval/void columns in migration 0052", () => {
+    expect(migrationApprovalSrc).toContain("'DRAFT', 'PREVIEWED', 'APPROVED', 'VOIDED'");
+    expect(migrationApprovalSrc).toContain('"approved_at"');
+    expect(migrationApprovalSrc).toContain('"approved_request_hash"');
+    expect(migrationApprovalSrc).toContain('"void_reason"');
+    expect(migrationApprovalSrc).not.toContain("/commit");
+    expect(journalSrc).toContain('"tag": "0052_zoho_production_output_approval"');
+
+    expect(schemaSrc).toContain("approvedAt:");
+    expect(schemaSrc).toContain("approvedRequestHash:");
+    expect(schemaSrc).toContain("voidReason:");
   });
 });
 
@@ -137,11 +163,57 @@ describe("buildZohoProductionOutputPreviewOpValues", () => {
   });
 
   it("does not reference live commit endpoints", () => {
-    const helperSrc = readFileSync(
-      join(root, "lib/db/queries/zoho-production-output.ts"),
-      "utf8",
-    );
-    expect(helperSrc).not.toContain("/commit");
+    expect(querySrc).not.toContain("/commit");
+    expect(querySrc).not.toContain("/apply");
+    expect(querySrc).not.toContain("/send");
     expect(migrationSrc).not.toContain("/commit");
+    expect(migrationApprovalSrc).not.toContain("/commit");
+  });
+
+  it("blocks approval for DRAFT, MISSING metrics, and LOW genealogy via shared evaluator", () => {
+    expect(
+      evaluateZohoProductionOutputApproval({
+        status: "DRAFT",
+        voidedAt: null,
+        previewResponse: null,
+        previewHttpStatus: null,
+        metricsState: "HIGH",
+        genealogyState: "HIGH",
+        requestHash: "h",
+        approvedRequestHash: null,
+      }).eligible,
+    ).toBe(false);
+
+    expect(
+      evaluateZohoProductionOutputApproval({
+        status: "PREVIEWED",
+        voidedAt: null,
+        previewResponse: { preview: true },
+        previewHttpStatus: 200,
+        metricsState: "MISSING",
+        genealogyState: "HIGH",
+        requestHash: "h",
+        approvedRequestHash: null,
+      }).eligible,
+    ).toBe(false);
+
+    expect(
+      evaluateZohoProductionOutputApproval({
+        status: "PREVIEWED",
+        voidedAt: null,
+        previewResponse: { preview: true },
+        previewHttpStatus: 200,
+        metricsState: "HIGH",
+        genealogyState: "LOW",
+        requestHash: "h",
+        approvedRequestHash: null,
+      }).eligible,
+    ).toBe(false);
+  });
+
+  it("guards approved ops from silent re-preview in query layer", () => {
+    expect(querySrc).toContain('existing?.status === "APPROVED"');
+    expect(querySrc).toContain("approvedRequestHash: row.requestHash");
+    expect(querySrc).toContain('status: "VOIDED"');
   });
 });
