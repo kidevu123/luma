@@ -118,6 +118,48 @@ describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
   });
 });
 
+describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause counter snapshots", () => {
+  it("imports counter snapshot helpers and roll segment recorder", () => {
+    expect(actionsSrc).toMatch(/stationRequiresBlisterCounterSnapshot/);
+    expect(actionsSrc).toMatch(/parseNonnegativeIntegerInput/);
+    expect(actionsSrc).toMatch(/recordBlisterCounterRollSegment/);
+  });
+
+  it("pauseSchema accepts counterSnapshotCount as a nonnegative integer", () => {
+    expect(actionsSrc).toMatch(/counterSnapshotCount/);
+    expect(actionsSrc).toMatch(/z\.number\(\)\.int\(\)\.nonnegative\(\)\.optional/);
+  });
+
+  it("BLISTER and COMBINED machine-jam pauses require a counter snapshot server-side", () => {
+    expect(actionsSrc).toMatch(/stationRequiresBlisterCounterSnapshot\(\s*station\.kind/);
+    expect(actionsSrc).toMatch(/Enter the machine counter at pause before pausing for a machine jam/);
+  });
+
+  it("pause payload stores the actual counter snapshot, including zero", () => {
+    expect(actionsSrc).toMatch(/counter_snapshot_count/);
+    expect(actionsSrc).toMatch(/counter_snapshot_reason/);
+    expect(actionsSrc).toMatch(/good_blisters_since_last_reset/);
+    expect(actionsSrc).toMatch(/operator_entry/);
+  });
+
+  it("positive pause snapshots emit roll segments and zero snapshots do not", () => {
+    expect(actionsSrc).toMatch(/counterSnapshotCount > 0/);
+    expect(actionsSrc).toMatch(/segmentReason/);
+    expect(actionsSrc).toMatch(/PAUSE_SNAPSHOT/);
+    expect(actionsSrc).toMatch(/SHIFT_END_SNAPSHOT/);
+    expect(actionsSrc).toMatch(/rebuildRollUsage/);
+  });
+
+  it("resume remains a plain BAG_RESUMED action without counter segment emission", () => {
+    const resumeIdx = actionsSrc.indexOf("export async function resumeBagAction");
+    const operatorIdx = actionsSrc.indexOf("// ── operator handoff");
+    const block = actionsSrc.slice(resumeIdx, operatorIdx);
+    expect(block).toMatch(/eventType: "BAG_RESUMED"/);
+    expect(block).not.toMatch(/recordBlisterCounterRollSegment/);
+    expect(block).not.toMatch(/counterSnapshotCount/);
+  });
+});
+
 describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
   it("chains maybeAutoReleaseAfterComplete after final SEALING on SEALING stations", () => {
     expect(actionsSrc).toMatch(/isSealingFinal && station\.kind === "SEALING"/);

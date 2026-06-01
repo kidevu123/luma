@@ -13,12 +13,15 @@ import { eq, and, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   stations,
+  readBagState,
+  readStationLive,
   stationOperatorSessions,
   employees,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { resolveAccountableEmployee } from "@/lib/production/accountability";
 import { FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS } from "@/lib/production/station-operator-session";
+import { isBlisterCounterSnapshotStation } from "@/lib/production/blister-counter-snapshot";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -182,6 +185,25 @@ export async function endOperatorSessionAction(
   const station = await resolveStationByToken(token);
   if (!station || station.id !== stationId) {
     return { error: "Invalid station token." };
+  }
+
+  if (isBlisterCounterSnapshotStation(station.kind)) {
+    const [live] = await db
+      .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+      .from(readStationLive)
+      .where(eq(readStationLive.stationId, stationId));
+    if (live?.currentWorkflowBagId) {
+      const [state] = await db
+        .select({ isPaused: readBagState.isPaused })
+        .from(readBagState)
+        .where(eq(readBagState.workflowBagId, live.currentWorkflowBagId));
+      if (!state || !state.isPaused) {
+        return {
+          error:
+            "Pause this bag with a shift-end counter before ending shift.",
+        };
+      }
+    }
   }
 
   try {

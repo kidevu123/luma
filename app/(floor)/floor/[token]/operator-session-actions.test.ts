@@ -57,6 +57,29 @@ describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · operator session form UI", () => {
   });
 });
 
+describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · end-shift counter guard", () => {
+  it("server blocks direct end shift while an active BLISTER/COMBINED bag is running", () => {
+    expect(actionsSrc).toMatch(/isBlisterCounterSnapshotStation\(station\.kind\)/);
+    expect(actionsSrc).toMatch(/readStationLive\.currentWorkflowBagId/);
+    expect(actionsSrc).toMatch(/readBagState\.isPaused/);
+    expect(actionsSrc).toMatch(/Pause this bag with a shift-end counter before ending shift/);
+  });
+
+  it("operator UI routes active BLISTER/COMBINED end shift through a shift-end pause snapshot", () => {
+    expect(formSrc).toMatch(/pauseBagAction/);
+    expect(formSrc).toMatch(/reason", "shift_end"/);
+    expect(formSrc).toMatch(/counterSnapshotCount/);
+    expect(formSrc).toMatch(/Machine counter at shift end/);
+    expect(formSrc).toMatch(/Machines may reset when powered off/);
+  });
+
+  it("page passes current active bag pause state to the operator panel", () => {
+    const pageSrc = readFileSync(join(__dirname, "page.tsx"), "utf8");
+    expect(pageSrc).toMatch(/currentWorkflowBagId=\{currentAtStation\?\.bag\.id \?\? null\}/);
+    expect(pageSrc).toMatch(/currentBagIsPaused=\{currentAtStation\?\.state\?\.isPaused \?\? false\}/);
+  });
+});
+
 describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · openOperatorSessionAction behavior", () => {
   let callIdx: number;
   let selectResults: unknown[][];

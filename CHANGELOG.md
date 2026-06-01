@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.64] — 2026-06-01
+
+### Added (BLISTER-PAUSE-COUNT-SNAPSHOT-1)
+- **Machine-jam pause snapshots:** BLISTER and COMBINED machine-jam pauses now require a machine counter snapshot. Positive counts close a roll counter segment for active PVC/Foil rolls; zero is stored as an actual snapshot without emitting roll segments.
+- **Shift-end counter guard:** Ending shift with an active BLISTER/COMBINED bag now routes through a shift-end counter snapshot before closing the operator session, leaving the bag paused for the next shift.
+
+### Tests added (BLISTER-PAUSE-COUNT-SNAPSHOT-1)
+- Source and helper tests cover BLISTER/COMBINED pause requirements, zero-count handling, shift-end guard wiring, roll segment payload metadata, and exclusions for SEALING/PACKAGING.
+
 ## [0.4.63] — 2026-05-27
 
 ### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-B)

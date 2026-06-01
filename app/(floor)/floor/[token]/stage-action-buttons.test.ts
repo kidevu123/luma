@@ -87,6 +87,25 @@ describe("STATION-PAUSE-2 · pause reasons via helper", () => {
   });
 });
 
+describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause UI counter prompt", () => {
+  it("shows machine counter at pause only when the station/reason requires it", () => {
+    expect(src).toMatch(/stationRequiresBlisterCounterSnapshot/);
+    expect(src).toMatch(/pauseRequiresCounterSnapshot/);
+    expect(src).toMatch(/Machine counter at pause/);
+  });
+
+  it("uses floor copy that defines the snapshot as since last reset", () => {
+    expect(src).toMatch(/Enter good blisters\/cards made since the last reset/);
+    expect(src).toMatch(/Reset the\s+machine counter after saving/s);
+  });
+
+  it("submits counterSnapshotCount to pauseBagAction and allows zero", () => {
+    expect(src).toMatch(/fd\.set\("counterSnapshotCount", String\(counterSnapshot\)\)/);
+    expect(src).toMatch(/parseNonnegativeIntegerInput/);
+    expect(src).toMatch(/placeholder="0"/);
+  });
+});
+
 describe("PRODUCTION-OVERLAP-3 · completion gate at overlap stages", () => {
   it("EVENT_STAGE_PREREQ.SEALING_COMPLETE requires BLISTERED — button filter will hide it at STARTED", () => {
     // stages = allStages.filter(s => prereq.includes(currentStage))

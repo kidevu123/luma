@@ -15,10 +15,15 @@ import {
   endOperatorSessionAction,
   openOperatorSessionAction,
 } from "./operator-session-actions";
+import { pauseBagAction } from "./actions";
 import {
   FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS,
   sessionSatisfiesFirstOpCount,
 } from "@/lib/production/station-operator-session";
+import {
+  isBlisterCounterSnapshotStation,
+  parseNonnegativeIntegerInput,
+} from "@/lib/production/blister-counter-snapshot";
 
 type ActiveSession = {
   id: string;
@@ -40,12 +45,16 @@ export function OperatorSessionPanel({
   stationKind,
   activeSession,
   employeeOptions,
+  currentWorkflowBagId = null,
+  currentBagIsPaused = false,
 }: {
   token: string;
   stationId: string;
   stationKind: string;
   activeSession: ActiveSession | null;
   employeeOptions: EmployeeOption[];
+  currentWorkflowBagId?: string | null;
+  currentBagIsPaused?: boolean;
 }) {
   const requiresStableEmployee =
     FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS.has(stationKind);
@@ -55,8 +64,11 @@ export function OperatorSessionPanel({
       <ActiveSessionView
         token={token}
         stationId={stationId}
+        stationKind={stationKind}
         session={activeSession}
         requiresStableEmployee={requiresStableEmployee}
+        currentWorkflowBagId={currentWorkflowBagId}
+        currentBagIsPaused={currentBagIsPaused}
       />
     );
   }
@@ -73,29 +85,60 @@ export function OperatorSessionPanel({
 function ActiveSessionView({
   token,
   stationId,
+  stationKind,
   session,
   requiresStableEmployee,
+  currentWorkflowBagId,
+  currentBagIsPaused,
 }: {
   token: string;
   stationId: string;
+  stationKind: string;
   session: ActiveSession;
   requiresStableEmployee: boolean;
+  currentWorkflowBagId: string | null;
+  currentBagIsPaused: boolean;
 }) {
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [confirming, setConfirming] = React.useState(false);
+  const [shiftEndCounter, setShiftEndCounter] = React.useState("");
 
   const readyForFirstCount =
     !requiresStableEmployee || sessionSatisfiesFirstOpCount(session);
+  const shiftEndRequiresCounter =
+    isBlisterCounterSnapshotStation(stationKind) &&
+    currentWorkflowBagId != null &&
+    !currentBagIsPaused;
 
   async function endShift() {
     if (!confirming) {
       setConfirming(true);
       return;
     }
+    const parsedCounter = shiftEndRequiresCounter
+      ? parseNonnegativeIntegerInput(shiftEndCounter)
+      : null;
+    if (shiftEndRequiresCounter && parsedCounter == null) {
+      setError("Enter the machine counter at shift end before ending shift.");
+      return;
+    }
     setPending(true);
     setError(null);
     try {
+      if (shiftEndRequiresCounter && currentWorkflowBagId) {
+        const pauseFd = new FormData();
+        pauseFd.set("token", token);
+        pauseFd.set("stationId", stationId);
+        pauseFd.set("workflowBagId", currentWorkflowBagId);
+        pauseFd.set("reason", "shift_end");
+        pauseFd.set("counterSnapshotCount", String(parsedCounter));
+        const pauseResult = await pauseBagAction(pauseFd);
+        if (pauseResult?.error) {
+          setError(pauseResult.error);
+          return;
+        }
+      }
       const fd = new FormData();
       fd.set("token", token);
       fd.set("stationId", stationId);
@@ -154,6 +197,29 @@ function ActiveSessionView({
               : "End shift"}
         </button>
       </div>
+      {confirming && shiftEndRequiresCounter ? (
+        <label className="mt-3 block space-y-1 rounded-lg border border-rose-200 bg-white/80 px-3 py-2">
+          <span className="text-xs font-semibold text-rose-950">
+            Machine counter at shift end
+          </span>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={shiftEndCounter}
+            onChange={(e) =>
+              setShiftEndCounter(e.target.value.replace(/\D/g, ""))
+            }
+            disabled={pending}
+            className="w-full h-11 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
+            placeholder="0"
+          />
+          <span className="block text-xs leading-relaxed text-rose-900">
+            Machines may reset when powered off. Save this count before
+            ending shift.
+          </span>
+        </label>
+      ) : null}
       {!readyForFirstCount ? (
         <p className="mt-2 text-xs rounded border border-amber-400/60 bg-amber-100/80 text-amber-950 px-2 py-2">
           Low-confidence operator session. Pick an employee from the list or

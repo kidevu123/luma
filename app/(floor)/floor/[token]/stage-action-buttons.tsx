@@ -75,6 +75,10 @@ import {
   type PauseReasonValue,
 } from "@/lib/production/station-pause-reasons";
 import {
+  parseNonnegativeIntegerInput,
+  stationRequiresBlisterCounterSnapshot,
+} from "@/lib/production/blister-counter-snapshot";
+import {
   SEALING_COUNTER_CONFIG_ERROR,
   computeSealedCountFromCounter,
 } from "@/lib/production/sealing-counter";
@@ -161,6 +165,11 @@ export function StageActionButtons({
     getDefaultPauseReasonForStation(stationKind),
   );
   const [pauseOpen, setPauseOpen] = React.useState(false);
+  const [pauseCounterSnapshot, setPauseCounterSnapshot] = React.useState("");
+  const pauseRequiresCounterSnapshot = stationRequiresBlisterCounterSnapshot(
+    stationKind,
+    pauseReason,
+  );
 
   React.useEffect(() => {
     const options = getPauseReasonsForStation(stationKind);
@@ -356,11 +365,21 @@ export function StageActionButtons({
 
   async function pause() {
     if (!workflowBagId) return;
+    const counterSnapshot = pauseRequiresCounterSnapshot
+      ? parseNonnegativeIntegerInput(pauseCounterSnapshot)
+      : null;
+    if (pauseRequiresCounterSnapshot && counterSnapshot == null) {
+      setError("Enter the machine counter at pause before pausing for a machine jam.");
+      return;
+    }
     setPending("pause");
     setError(null);
     try {
       const fd = baseFd();
       fd.set("reason", pauseReason);
+      if (counterSnapshot != null) {
+        fd.set("counterSnapshotCount", String(counterSnapshot));
+      }
       const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
       if (badgeCode) fd.set("operatorCode", badgeCode);
       const r = await pauseBagAction(fd);
@@ -672,6 +691,28 @@ export function StageActionButtons({
               </option>
             ))}
           </select>
+          {pauseRequiresCounterSnapshot ? (
+            <label className="block space-y-1">
+              <span className="text-xs font-semibold text-amber-950">
+                Machine counter at pause
+              </span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={pauseCounterSnapshot}
+                onChange={(e) =>
+                  setPauseCounterSnapshot(e.target.value.replace(/\D/g, ""))
+                }
+                className="w-full h-12 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
+                placeholder="0"
+              />
+              <span className="block text-xs leading-relaxed text-amber-900">
+                Enter good blisters/cards made since the last reset. Reset the
+                machine counter after saving.
+              </span>
+            </label>
+          ) : null}
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"

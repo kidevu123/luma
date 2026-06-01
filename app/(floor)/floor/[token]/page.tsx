@@ -640,6 +640,8 @@ export default async function FloorStationPage({
         stationKind={station.station.kind}
         activeSession={activeSession}
         employeeOptions={employeeOptions}
+        currentWorkflowBagId={currentAtStation?.bag.id ?? null}
+        currentBagIsPaused={currentAtStation?.state?.isPaused ?? false}
       />
 
       {rollPanelData ? (

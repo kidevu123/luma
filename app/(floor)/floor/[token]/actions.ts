@@ -29,6 +29,7 @@ import {
 } from "@/lib/production/stage-progression";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
 import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
+import { rebuildRollUsage } from "@/lib/projector/roll-usage";
 import {
   buildPackagingConsumptionPayloadSummary,
   patchPackagingCompleteConsumptionSummary,
@@ -53,6 +54,11 @@ import {
   lookupInventoryBagByQrScanToken,
   resolveWorkflowBagTabletTypeId,
 } from "@/lib/production/workflow-bag-tablet-context";
+import {
+  parseNonnegativeIntegerInput,
+  stationRequiresBlisterCounterSnapshot,
+} from "@/lib/production/blister-counter-snapshot";
+import { recordBlisterCounterRollSegment } from "@/lib/production/blister-roll-segments";
 
 // First-op count submissions where accountability is mandatory (the
 // queue stop condition: refuse a fresh blister/handpack count when
@@ -952,6 +958,11 @@ const pauseSchema = z.object({
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
   reason: z.enum(["pvc_swap", "foil_swap", "shift_end", "machine_jam", "qa_check", "other"]),
+  counterSnapshotCount: z
+    .preprocess((value) => {
+      if (value == null || value === "") return undefined;
+      return parseNonnegativeIntegerInput(value);
+    }, z.number().int().nonnegative().optional()),
   operatorCode: z.string().max(40).optional(),
   notes: z.string().max(400).optional(),
   clientEventId: clientEventIdField,
@@ -965,6 +976,7 @@ export async function pauseBagAction(
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
     reason: formData.get("reason") || "other",
+    counterSnapshotCount: formData.get("counterSnapshotCount") || undefined,
     operatorCode: formData.get("operatorCode") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: pickClientEventId(formData),
@@ -972,7 +984,22 @@ export async function pauseBagAction(
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   try {
-    await authStation(parsed.data.token, parsed.data.stationId);
+    const station = await authStation(parsed.data.token, parsed.data.stationId);
+    const requiresCounterSnapshot = stationRequiresBlisterCounterSnapshot(
+      station.kind,
+      parsed.data.reason,
+    );
+    if (
+      requiresCounterSnapshot &&
+      parsed.data.counterSnapshotCount == null
+    ) {
+      return {
+        error:
+          parsed.data.reason === "shift_end"
+            ? "Enter the machine counter at shift end before ending shift."
+            : "Enter the machine counter at pause before pausing for a machine jam.",
+      };
+    }
     // Refuse double-pause — second BAG_PAUSED corrupts the
     // pause-time accumulation in the projector.
     const [state] = await db
@@ -987,12 +1014,25 @@ export async function pauseBagAction(
         stationId: parsed.data.stationId,
         overrideEmployeeCode: parsed.data.operatorCode ?? null,
       });
+      const segmentReason =
+        parsed.data.reason === "shift_end"
+          ? "SHIFT_END_SNAPSHOT"
+          : "PAUSE_SNAPSHOT";
+      const counterSnapshotCount = parsed.data.counterSnapshotCount ?? null;
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
         eventType: "BAG_PAUSED",
         payload: {
           reason: parsed.data.reason,
+          ...(requiresCounterSnapshot
+            ? {
+                counter_snapshot_count: counterSnapshotCount,
+                counter_snapshot_reason: segmentReason,
+                counter_snapshot_unit: "good_blisters_since_last_reset",
+                counter_snapshot_source: "operator_entry",
+              }
+            : {}),
           ...(parsed.data.operatorCode
             ? { operator_code: parsed.data.operatorCode }
             : {}),
@@ -1007,6 +1047,27 @@ export async function pauseBagAction(
         accountableEmployeeNameSnapshot:
           accountability.accountableEmployeeNameSnapshot,
       });
+      if (
+        requiresCounterSnapshot &&
+        counterSnapshotCount != null &&
+        counterSnapshotCount > 0
+      ) {
+        await recordBlisterCounterRollSegment(tx, {
+          workflowBagId: parsed.data.workflowBagId,
+          stationId: parsed.data.stationId,
+          counterSegmentCount: counterSnapshotCount,
+          segmentReason,
+          source: "floor.pause_snapshot",
+          sourceAction:
+            parsed.data.reason === "shift_end"
+              ? "shift_end_pause_snapshot"
+              : "machine_jam_pause_snapshot",
+          notes: parsed.data.notes ?? null,
+          formClientEventId: parsed.data.clientEventId ?? null,
+          accountability,
+        });
+        await rebuildRollUsage(tx);
+      }
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Pause failed." };
