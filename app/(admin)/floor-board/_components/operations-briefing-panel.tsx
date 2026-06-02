@@ -8,6 +8,10 @@ import {
   humanStage,
   receiptLabel,
 } from "@/lib/floor-command/floor-display";
+import {
+  groupWaitingByStage,
+  partitionWip,
+} from "@/lib/floor-command/wip-partition";
 import { FloorPanel, floorTokens } from "./floor-board-ui";
 
 type Props = {
@@ -38,27 +42,23 @@ function paceLabel(
 }
 
 export function OperationsBriefingPanel({ snapshot }: Props) {
-  const { plant, stations, inFlight, recentFinalized, wipByStage, stageCycles, products, machines } =
-    snapshot;
+  const {
+    plant,
+    inFlight,
+    recentFinalized,
+    wipByStage,
+    stageCycles,
+    products,
+    machines,
+  } = snapshot;
 
-  const activeReceipts = new Set(
-    stations
-      .map((s) => s.receiptNumber)
-      .filter((r): r is string => Boolean(r)),
+  const { onStation, waiting, staleStationScans } = partitionWip(snapshot);
+  const waitingGroups = groupWaitingByStage(waiting, humanStage);
+
+  const oldestWait = waiting.reduce(
+    (m, b) => Math.max(m, b.elapsedMinutes),
+    0,
   );
-
-  const onStationNow = stations.filter(
-    (s) => s.receiptNumber || s.workflowBagId,
-  );
-
-  const waitingAside = inFlight
-    .filter((b) => !b.receiptNumber || !activeReceipts.has(b.receiptNumber))
-    .sort((a, b) => b.elapsedMinutes - a.elapsedMinutes);
-
-  const oldestWait =
-    waitingAside[0]?.elapsedMinutes ??
-    wipByStage[0]?.oldestMinutes ??
-    0;
 
   const machinesWithPace = machines
     .filter((m) => m.avgCycleSec7d != null && m.avgCycleSecShift != null)
@@ -84,6 +84,12 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
     (p) => p.bagsFinalized > 0 || p.inputPills > 0 || p.unitsYielded > 0,
   );
 
+  const wipTotal = inFlight.length;
+  const countsLine =
+    onStation.length + waiting.length === wipTotal
+      ? `${wipTotal} in progress · ${onStation.length} at a station · ${waiting.length} between steps`
+      : `${plant.bagsInFlow} in progress · ${onStation.length} at a station · ${waiting.length} between steps`;
+
   return (
     <div className="flex flex-col gap-3 p-3 min-h-0">
       <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3">
@@ -91,14 +97,7 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
           Right now
         </p>
         <p className="mt-1 text-lg sm:text-xl font-semibold text-slate-50 leading-snug">
-          {plant.bagsInFlow} bag{plant.bagsInFlow === 1 ? "" : "s"} in the building
-          <span className="text-slate-500 font-normal">
-            {" "}
-            · {onStationNow.length} on a machine
-            {waitingAside.length > 0
-              ? ` · ${waitingAside.length} waiting aside`
-              : ""}
-          </span>
+          {countsLine}
         </p>
         <p className="mt-1 text-sm text-slate-400">
           This shift:{" "}
@@ -123,69 +122,99 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
             </>
           )}
         </p>
+        {staleStationScans.length > 0 && (
+          <p className="mt-2 text-xs text-amber-400/90">
+            {staleStationScans.length} station
+            {staleStationScans.length === 1 ? "" : "s"} show an old scan (not
+            counted as active):{" "}
+            {staleStationScans.map((s) => s.label).join(", ")}
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <FloorPanel
-          title="On a machine now"
-          subtitle="What is actively being worked — receipt, product, time on station"
+          title="At a station now"
+          subtitle="Scanned and actively tied to equipment"
         >
-          {onStationNow.length === 0 ? (
+          {onStation.length === 0 ? (
             <p className="text-sm text-slate-500 px-1 py-2">
-              Nothing scanned at a station. Check waiting list or start a bag.
+              No bag is scanned at a station right now.
             </p>
           ) : (
             <BriefTable
               headers={["Station", "Receipt", "Product", "Operator", "On station"]}
-              rows={onStationNow.map((s) => [
-                s.label,
-                receiptLabel(s.receiptNumber),
-                s.productName ?? "—",
-                s.operatorName ?? "—",
-                s.busyForSeconds != null
-                  ? formatWait(Math.floor(s.busyForSeconds / 60))
-                  : s.idleMinutes != null
-                    ? `idle ${formatWait(s.idleMinutes)}`
-                    : "—",
+              rows={onStation.map(({ station, bag }) => [
+                station.label,
+                receiptLabel(
+                  bag.receiptNumber ?? station.receiptNumber,
+                  bag.workflowBagId,
+                ),
+                bag.productName ?? station.productName ?? "—",
+                station.operatorName ?? "—",
+                station.busyForSeconds != null
+                  ? formatWait(Math.floor(station.busyForSeconds / 60))
+                  : formatWait(bag.elapsedMinutes),
               ])}
             />
           )}
         </FloorPanel>
 
         <FloorPanel
-          title="Waiting on the floor"
-          subtitle="In the building but not at a station — often the real bottleneck"
+          title="Waiting between steps"
+          subtitle="In the building but not at a station — grouped by stage"
         >
-          {waitingAside.length === 0 ? (
+          {waitingGroups.length === 0 ? (
             <p className="text-sm text-slate-500 px-1 py-2">
-              No bags sitting between steps (or all WIP is on a station).
+              Nothing waiting on the floor between stations.
             </p>
           ) : (
-            <BriefTable
-              headers={["Receipt", "Where", "Product", "Waiting", "Flags"]}
-              rows={waitingAside.slice(0, 12).map((b) => [
-                receiptLabel(b.receiptNumber, b.workflowBagId),
-                humanStage(b.stage),
-                b.productName ?? "—",
-                formatWait(b.elapsedMinutes),
-                [b.isPaused && "paused", b.isOnHold && "hold"]
-                  .filter(Boolean)
-                  .join(", ") || "—",
-              ])}
-              rowTone={(_, i) =>
-                (waitingAside[i]?.elapsedMinutes ?? 0) > 120 ? "warn" : undefined
-              }
-            />
+            <ul className="space-y-2 px-1 py-1">
+              {waitingGroups.map((g) => (
+                <li
+                  key={g.stage ?? "unknown"}
+                  className={[
+                    "rounded-lg border px-3 py-2",
+                    g.oldestMinutes > 120
+                      ? "border-red-500/30 bg-red-500/[0.06]"
+                      : "border-white/[0.08] bg-white/[0.02]",
+                  ].join(" ")}
+                >
+                  <div className="flex justify-between gap-2">
+                    <span className="text-sm text-slate-200 font-medium">
+                      {g.label}
+                    </span>
+                    <span className="text-sm tabular-nums text-slate-400 shrink-0">
+                      {g.count} bag{g.count === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Oldest {formatWait(g.oldestMinutes)}
+                    {g.bags[0]?.productName
+                      ? ` · ${g.bags[0].productName}`
+                      : ""}
+                  </p>
+                </li>
+              ))}
+              <li>
+                <Link
+                  href="/workflow-submissions"
+                  className="text-xs text-sky-500/90 hover:text-sky-400"
+                >
+                  Open all in-flight bags →
+                </Link>
+              </li>
+            </ul>
           )}
         </FloorPanel>
 
         <FloorPanel
           title="Last completed"
-          subtitle="Most recently finalized bags — what just came off the line"
+          subtitle="Most recently finalized bags"
         >
           {recentFinalized.length === 0 ? (
             <p className="text-sm text-slate-500 px-1 py-2">
-              No finalized bags in history yet today.
+              Nothing finalized yet — cycle times appear after bags complete.
             </p>
           ) : (
             <BriefTable
@@ -195,23 +224,23 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
                 b.productName ?? "—",
                 String(b.unitsYielded),
                 formatCycleSec(b.totalCycleSec),
-                formatWait(b.minutesAgo) + " ago",
+                `${formatWait(b.minutesAgo)} ago`,
               ])}
             />
           )}
         </FloorPanel>
 
         <FloorPanel
-          title="Time per step (this shift vs 7 days)"
-          subtitle="Average minutes per stage for bags finalized this shift"
+          title="Time per step (shift vs 7 days)"
+          subtitle="Average minutes for bags finalized this shift"
         >
           {stageCycles.every((s) => s.avgSecShift == null) ? (
             <p className="text-sm text-slate-500 px-1 py-2">
-              No finalized bags this shift — cycle benchmarks need completed bags.
+              No completed bags this shift yet.
             </p>
           ) : (
             <BriefTable
-              headers={["Step", "Shift avg", "7-day avg", "Bags this shift"]}
+              headers={["Step", "Shift", "7-day", "Bags", "Vs avg"]}
               rows={stageCycles.map((s) => {
                 const pace = paceLabel(s.avgSecShift, s.avgSec7d);
                 return [
@@ -222,36 +251,28 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
                   pace.text,
                 ];
               })}
-              extraColumn="Vs average"
             />
           )}
         </FloorPanel>
 
         <FloorPanel
           title="Machines vs normal"
-          subtitle="Shift cycle time compared to each machine’s 7-day average"
+          subtitle="Slower than each machine’s 7-day average"
         >
           {machinesWithPace.length === 0 ? (
             <p className="text-sm text-slate-500 px-1 py-2">
-              Not enough finalized data to compare machine pace yet.
+              Not enough history to compare machine pace.
             </p>
           ) : (
             <>
               {slowMachines.length > 0 && (
                 <p className="text-xs text-red-400/90 mb-2 px-1">
-                  Slower than usual:{" "}
-                  {slowMachines.map((m) => m.name).join(", ")}
+                  Slower than usual: {slowMachines.map((m) => m.name).join(", ")}
                 </p>
               )}
               <BriefTable
-                headers={[
-                  "Machine",
-                  "Now / last",
-                  "Shift avg",
-                  "7d avg",
-                  "Pace",
-                ]}
-                rows={machinesWithPace.slice(0, 10).map((m) => [
+                headers={["Machine", "Working on", "Shift", "7-day", "Pace"]}
+                rows={machinesWithPace.slice(0, 8).map((m) => [
                   m.name,
                   m.currentReceiptNumber
                     ? receiptLabel(m.currentReceiptNumber)
@@ -270,29 +291,21 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
 
         <FloorPanel
           title="Material → units (this shift)"
-          subtitle="Pills in, units out, yield — by product"
+          subtitle="Input pills and output units by product"
         >
           {materialRows.length === 0 ? (
             <p className="text-sm text-slate-500 px-1 py-2">
-              No material consumption recorded this shift.
+              No material usage recorded this shift.
             </p>
           ) : (
             <BriefTable
-              headers={[
-                "Product",
-                "Bags",
-                "Pills in",
-                "Units out",
-                "Yield",
-                "Damage",
-              ]}
+              headers={["Product", "Bags", "Pills in", "Units out", "Yield"]}
               rows={materialRows.map((p) => [
                 p.productName,
                 String(p.bagsFinalized),
                 p.inputPills > 0 ? String(p.inputPills) : "—",
                 String(p.unitsYielded),
                 p.yieldPct != null ? `${p.yieldPct}%` : "—",
-                p.damageRatePct != null ? `${p.damageRatePct}%` : "—",
               ])}
             />
           )}
@@ -300,13 +313,9 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
       </div>
 
       {wipByStage.length > 0 && (
-        <FloorPanel
-          title="WIP by stage"
-          subtitle="Count and oldest wait at each workflow stage"
-          className="xl:col-span-2"
-        >
+        <FloorPanel title="WIP totals by stage" subtitle="From live bag state">
           <BriefTable
-            headers={["Stage", "Bags", "Oldest wait"]}
+            headers={["Stage", "Bags", "Oldest"]}
             rows={wipByStage.map((w) => [
               w.label,
               String(w.count),
@@ -315,12 +324,6 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
           />
         </FloorPanel>
       )}
-
-      <p className="text-[10px] text-slate-600 text-center pb-1">
-        <Link href="/metrics?days=7" className="text-sky-500/80 hover:text-sky-400">
-          Full metrics & history →
-        </Link>
-      </p>
     </div>
   );
 }
@@ -328,21 +331,18 @@ export function OperationsBriefingPanel({ snapshot }: Props) {
 function BriefTable({
   headers,
   rows,
-  extraColumn,
   rowTone,
 }: {
   headers: string[];
   rows: string[][];
-  extraColumn?: string;
   rowTone?: (row: string[], index: number) => "warn" | undefined;
 }) {
-  const cols = extraColumn ? [...headers, extraColumn] : headers;
   return (
     <div className="overflow-x-auto -mx-1">
       <table className="w-full text-left text-[12px] border-collapse">
         <thead>
           <tr className="text-slate-500 border-b border-white/[0.06]">
-            {cols.map((h) => (
+            {headers.map((h) => (
               <th key={h} className="py-1.5 pr-3 font-medium whitespace-nowrap">
                 {h}
               </th>
@@ -352,10 +352,6 @@ function BriefTable({
         <tbody>
           {rows.map((cells, i) => {
             const tone = rowTone?.(cells, i);
-            const display =
-              extraColumn && cells.length > headers.length
-                ? cells
-                : cells.slice(0, cols.length);
             return (
               <tr
                 key={i}
@@ -364,17 +360,12 @@ function BriefTable({
                   tone === "warn" ? "bg-red-500/[0.06]" : "",
                 ].join(" ")}
               >
-                {display.map((cell, j) => (
+                {cells.map((cell, j) => (
                   <td
                     key={j}
                     className={[
                       "py-1.5 pr-3 tabular-nums",
                       j === 0 ? "text-slate-200 font-medium" : "text-slate-400",
-                      j === cols.length - 1 && extraColumn
-                        ? tone === "warn"
-                          ? "text-red-400"
-                          : "text-slate-500"
-                        : "",
                     ].join(" ")}
                   >
                     {cell}

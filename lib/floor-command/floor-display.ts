@@ -34,7 +34,11 @@ export function receiptLabel(
   receipt: string | null,
   fallbackId?: string | null,
 ): string {
-  if (receipt) return receipt;
-  if (fallbackId) return `Bag …${fallbackId.slice(-6)}`;
-  return "No receipt #";
+  const r = receipt?.trim();
+  if (r) return r;
+  if (fallbackId) {
+    const short = fallbackId.replace(/-/g, "").slice(-8).toUpperCase();
+    return `ID ${short}`;
+  }
+  return "Missing receipt";
 }

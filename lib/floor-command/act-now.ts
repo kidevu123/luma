@@ -11,6 +11,10 @@ import {
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import type { FloorProductionIntelligence } from "@/lib/production/floor-production-intelligence-types";
 import { humanStage, receiptLabel, formatWait } from "@/lib/floor-command/floor-display";
+import {
+  groupWaitingByStage,
+  partitionWip,
+} from "@/lib/floor-command/wip-partition";
 
 export type ActNowSeverity = "crit" | "warn" | "info";
 
@@ -39,42 +43,48 @@ export function buildActNowPanel(
   const items: ActNowItem[] = [];
   const { plant } = snapshot;
 
-  const seen = new Set<string>();
-  let inflightAdded = 0;
-  for (const bag of [...snapshot.inFlight].sort(
-    (a, b) => b.elapsedMinutes - a.elapsedMinutes,
-  )) {
-    if (inflightAdded >= 6) break;
-    const key = bag.receiptNumber ?? bag.workflowBagId;
-    if (seen.has(key)) continue;
-    seen.add(key);
+  const { waiting } = partitionWip(snapshot);
+  const needsAttention = waiting.filter(
+    (b) => b.elapsedMinutes >= 45 || b.isPaused || b.isOnHold,
+  );
+  const groups = groupWaitingByStage(needsAttention, humanStage);
 
+  for (const g of groups) {
     const sev: ActNowSeverity =
-      bag.elapsedMinutes > 180 || bag.isOnHold
+      g.oldestMinutes > 180 || g.bags.some((b) => b.isOnHold)
         ? "crit"
-        : bag.elapsedMinutes > 60 || bag.isPaused
+        : g.oldestMinutes > 60 || g.bags.some((b) => b.isPaused)
           ? "warn"
           : "info";
-    if (bag.elapsedMinutes < 45 && !bag.isPaused && !bag.isOnHold) continue;
 
+    if (g.count >= 2) {
+      items.push({
+        id: `waiting-group-${g.stage ?? "unknown"}`,
+        severity: sev,
+        title: `${g.count} bags stuck — ${g.label.split(" — ")[0] ?? g.label}`,
+        detail: `Oldest ${formatWait(g.oldestMinutes)} · between steps`,
+        href: "/workflow-submissions",
+      });
+      continue;
+    }
+
+    const bag = g.bags[0]!;
+    const label = receiptLabel(bag.receiptNumber, bag.workflowBagId);
     const flags = [
       bag.isPaused ? "paused" : null,
       bag.isOnHold ? "hold" : null,
     ]
       .filter(Boolean)
       .join(", ");
-
-    const label = receiptLabel(bag.receiptNumber, bag.workflowBagId);
     items.push({
-      id: `inflight-${key}`,
+      id: `waiting-${bag.workflowBagId}`,
       severity: sev,
-      title: `Waiting · ${label}`,
-      detail: `${humanStage(bag.stage)} · ${formatWait(bag.elapsedMinutes)}${flags ? ` · ${flags}` : ""}${bag.productName ? ` · ${bag.productName}` : ""}`,
+      title: label,
+      detail: `${g.label} · ${formatWait(bag.elapsedMinutes)}${flags ? ` · ${flags}` : ""}`,
       href: bag.receiptNumber
         ? `/workflow-submissions?receipt=${encodeURIComponent(bag.receiptNumber)}`
-        : `/workflow-submissions`,
+        : "/workflow-submissions",
     });
-    inflightAdded += 1;
   }
 
   const pausedMetric = intelligence.dashboard.pausedBagsOverThreshold;
@@ -179,5 +189,5 @@ export function buildActNowPanel(
   }
 
   const order: Record<ActNowSeverity, number> = { crit: 0, warn: 1, info: 2 };
-  return items.sort((a, b) => order[a.severity] - order[b.severity]);
+  return items.sort((a, b) => order[a.severity] - order[b.severity]).slice(0, 6);
 }
