@@ -43,6 +43,16 @@ describe("WORKFLOW-RECEIPT-DISPLAY-P1 · receipt lineage display", () => {
     expect(pageSrc).toMatch(/leftJoin\(inventoryBags,\s*eq\(inventoryBags\.id,\s*workflowBags\.inventoryBagId\)\)/);
   });
 
+  it("loads canonical bag identity context from received-bag lineage", () => {
+    expect(pageSrc).toMatch(/tabletTypes/);
+    expect(pageSrc).toMatch(/smallBoxes/);
+    expect(pageSrc).toMatch(/receives/);
+    expect(pageSrc).toMatch(/purchaseOrders/);
+    expect(pageSrc).toMatch(/inventoryBagNumber:\s*inventoryBags\.bagNumber/);
+    expect(pageSrc).toMatch(/tabletTypeName:\s*tabletTypes\.name/);
+    expect(pageSrc).toMatch(/poNumber:\s*purchaseOrders\.poNumber/);
+  });
+
   it("uses inventory_bags.internal_receipt_number as the canonical receipt display", () => {
     expect(pageSrc).toMatch(/inventoryBags\.internalReceiptNumber/);
     expect(pageSrc).toMatch(/COALESCE\(\$\{inventoryBags\.internalReceiptNumber\},\s*\$\{workflowBags\.receiptNumber\}\)/);
@@ -62,6 +72,15 @@ describe("WORKFLOW-RECEIPT-DISPLAY-P1 · receipt lineage display", () => {
     expect(searchBlock).toMatch(/ilike\(inventoryBags\.internalReceiptNumber/);
   });
 
+  it("searches human-readable bag label context without using UUID fragments", () => {
+    const searchBlockStart = pageSrc.indexOf("if (q !== null)");
+    const searchBlock = searchBlockStart >= 0 ? pageSrc.slice(searchBlockStart, searchBlockStart + 650) : "";
+    expect(searchBlock).toMatch(/ilike\(tabletTypes\.name/);
+    expect(searchBlock).toMatch(/ilike\(receives\.receiveName/);
+    expect(searchBlock).toMatch(/ilike\(purchaseOrders\.poNumber/);
+    expect(searchBlock).not.toMatch(/workflowBags\.id|workflowEvents|payload/);
+  });
+
   it("serializes the resolved receipt number without inventing a fallback", () => {
     const mapStart = pageSrc.indexOf("const bags: WorkflowBagRow[] = rows.map");
     const mapBlock = mapStart >= 0 ? pageSrc.slice(mapStart, mapStart + 700) : "";
@@ -75,5 +94,25 @@ describe("WORKFLOW-RECEIPT-DISPLAY-P1 · receipt lineage display", () => {
   it("table still renders an honest dash when receipt linkage is absent", () => {
     expect(tableSrc).toMatch(/bag\.receiptNumber/);
     expect(tableSrc).toMatch(/<span className="font-mono text-text-subtle">—<\/span>/);
+  });
+
+  it("table builds a human-readable bag label and keeps workflow id secondary", () => {
+    expect(tableSrc).toMatch(/function buildBagLabel/);
+    expect(tableSrc).toMatch(/bag\.inventoryBagNumber \?\? bag\.bagNumber/);
+    expect(tableSrc).toMatch(/bag\.tabletTypeName \?\? bag\.productName/);
+    expect(tableSrc).toMatch(/bag\.poNumber \? `PO \$\{bag\.poNumber\}` : null/);
+    expect(tableSrc).toMatch(/Workflow \$\{shortId\}/);
+  });
+
+  it("legacy/unlinked bag label is explicit and does not fabricate a bag number", () => {
+    const helperStart = tableSrc.indexOf("function buildBagLabel");
+    const helperEnd = tableSrc.indexOf("function extractSubmissionLines", helperStart);
+    const helperBlock =
+      helperStart >= 0 && helperEnd > helperStart
+        ? tableSrc.slice(helperStart, helperEnd)
+        : "";
+    expect(helperBlock).toMatch(/Legacy bag \$\{shortId\}/);
+    expect(helperBlock).toMatch(/Missing received-bag context/);
+    expect(helperBlock).not.toMatch(/row order|payload|event payload/);
   });
 });
