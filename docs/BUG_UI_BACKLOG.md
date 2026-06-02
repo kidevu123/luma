@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-06-02 (RAW-BAGS-READINESS-BADGES-1)
 
-**Live baseline:** v0.4.83 (verify via `/api/health` on shift day)
+**Live baseline:** v0.4.83 @ `e630b26` (verify via `/api/health` on shift day)
 
 ---
 
