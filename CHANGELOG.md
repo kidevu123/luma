@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.81] — 2026-06-02
+
+### Fixed (TEST-STABILIZATION-1)
+- **Floor action source guards:** Assert `refreshMaterialReadModelsAfterBlister` after pause roll segments instead of stale direct `rebuildRollUsage` in `actions.ts` (refactored in material-projection wiring).
+- **Bug/UI backlog:** Live baseline updated to v0.4.80 @ `ce258c5`.
+
+### Tests (TEST-STABILIZATION-1)
+- `app/(floor)/floor/[token]/actions.test.ts` — guards match current roll/material projection path.
+- `lib/projector/material-read-model-refresh.test.ts` — blister refresh contract includes `rebuildRollUsage`.
+
 ## [0.4.80] — 2026-06-02
 
 ### Changed (BUG-UI-FIX-BATCH-1)

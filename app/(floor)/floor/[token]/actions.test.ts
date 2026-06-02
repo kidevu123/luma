@@ -153,7 +153,9 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause counter snapshots", () => {
     expect(actionsSrc).toMatch(/segmentReason/);
     expect(actionsSrc).toMatch(/PAUSE_SNAPSHOT/);
     expect(actionsSrc).toMatch(/SHIFT_END_SNAPSHOT/);
-    expect(actionsSrc).toMatch(/rebuildRollUsage/);
+    // Roll usage rebuild moved to refreshMaterialReadModelsAfterBlister (53b6296).
+    expect(actionsSrc).toMatch(/refreshMaterialReadModelsAfterBlister/);
+    expect(actionsSrc).not.toMatch(/rebuildRollUsage/);
   });
 
   it("resume remains a plain BAG_RESUMED action without counter segment emission", () => {
@@ -175,8 +177,12 @@ describe("COUNTER-SNAPSHOT-GUARD-1 · server-side counter guards", () => {
   });
 
   it("does not replace recordBlisterCounterRollSegment for valid pause paths", () => {
-    expect(actionsSrc).toMatch(/recordBlisterCounterRollSegment/);
-    expect(actionsSrc).toMatch(/rebuildRollUsage/);
+    const pauseIdx = actionsSrc.indexOf("export async function pauseBagAction");
+    const resumeIdx = actionsSrc.indexOf("export async function resumeBagAction");
+    const pauseBlock = actionsSrc.slice(pauseIdx, resumeIdx);
+    expect(pauseBlock).toMatch(/recordBlisterCounterRollSegment/);
+    expect(pauseBlock).toMatch(/refreshMaterialReadModelsAfterBlister/);
+    expect(pauseBlock).not.toMatch(/rebuildRollUsage/);
   });
 });
 

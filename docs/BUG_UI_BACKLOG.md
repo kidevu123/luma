@@ -2,9 +2,9 @@
 
 **Purpose:** Prioritized, visible bug and UI-friction work — separate from launch hardening and recovery tooling.
 
-**Last updated:** 2026-06-02 (BUG-UI-BACKLOG-RESET-1)
+**Last updated:** 2026-06-02 (TEST-STABILIZATION-1)
 
-**Live baseline:** v0.4.79 @ `41864de` (verify via `/api/health` on shift day)
+**Live baseline:** v0.4.81 (verify via `/api/health` on shift day)
 
 ---
 
@@ -74,6 +74,7 @@
 
 | Version | Slice |
 |---------|--------|
+| 0.4.80 | BUG-UI-FIX-BATCH-1 |
 | 0.4.79 | PRODUCTION-DATA-ENTRY-HARDENING-1 |
 | 0.4.78 | SHIFT-REVIEW-1 |
 | 0.4.77 | Recovery dry-run CLI |

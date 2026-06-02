@@ -23,6 +23,16 @@ describe("material read model refresh wiring", () => {
     expect(src).toMatch(/rebuildMaterialRecommendations/);
   });
 
+  it("blister refresh rebuilds roll usage for active station lots", () => {
+    const src = readFileSync(
+      join(root, "lib/projector/material-read-model-refresh.ts"),
+      "utf8",
+    );
+    expect(src).toMatch(/refreshMaterialReadModelsAfterBlister/);
+    expect(src).toMatch(/rebuildRollUsage/);
+    expect(src).toMatch(/getActiveRollLotIdsForStation/);
+  });
+
   it("roll-actions use refreshMaterialReadModelsAfterConsumption", () => {
     const src = readFileSync(
       join(root, "app/(floor)/floor/[token]/roll-actions.ts"),
