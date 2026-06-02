@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.70] — 2026-06-02
+
+### Changed (WORKFLOW-SUBMISSIONS-DISPLAY-P1)
+- **Workflow submissions traceability display:** `Receipt #` now shows canonical internal receipt numbers from linked inventory bags first, with the legacy workflow receipt as fallback.
+- **Human-readable bag labels:** The `Bag` column now shows PO / tablet / bag context when available, with the internal workflow id kept as muted secondary debug text.
+- **Honest missing-context fallback:** Legacy or unlinked workflow rows now say `Legacy bag …` instead of fabricating receipt, PO, tablet, or bag lineage.
+
 ## [0.4.69] — 2026-06-02
 
 ### Added (STATION-MGMT-1)
