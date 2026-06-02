@@ -17,6 +17,7 @@ import {
   Webhook,
   Receipt,
   Scale,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   products as productsTable,
@@ -33,6 +34,7 @@ import { sql } from "drizzle-orm";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { signOutAction } from "@/components/admin/sign-out-action";
+import { getBuildFooterParts } from "@/lib/build-metadata";
 
 export const dynamic = "force-dynamic";
 
@@ -63,8 +65,7 @@ export default async function SettingsPage() {
     db.select({ n: sql<number>`count(*)::int` }).from(users),
   ]);
 
-  const sha = process.env.BUILD_GIT_SHA ?? "dev";
-  const branch = process.env.BUILD_GIT_BRANCH ?? "unknown";
+  const build = getBuildFooterParts();
 
   return (
     <div className="space-y-8">
@@ -143,6 +144,12 @@ export default async function SettingsPage() {
           hint="readiness board — verifies all floor workflows are configured"
         />
         <ConfigLink
+          href="/shift-review"
+          icon={ClipboardCheck}
+          label="Shift review"
+          hint="read-only post-shift blister counter review — flags only, no repair"
+        />
+        <ConfigLink
           href="/qr-cards"
           icon={QrCode}
           label="QR cards"
@@ -214,8 +221,9 @@ export default async function SettingsPage() {
           {/* System */}
           <div className="rounded-lg border border-border/70 bg-surface p-4 space-y-3">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">System</p>
-            <InfoRow label="Version" value={sha.slice(0, 7)} mono />
-            <InfoRow label="Branch" value={branch} mono />
+            <InfoRow label="Release" value={`v${build.version}`} mono />
+            <InfoRow label="Git SHA" value={build.shortSha} mono />
+            <InfoRow label="Branch" value={build.branch ?? "unknown"} mono />
             <InfoRow label="Machines" value={String(machineCount?.n ?? 0)} />
             <InfoRow label="Stations" value={String(stationCount?.n ?? 0)} />
             <div className="flex items-center gap-2 pt-2 border-t border-border/60">

@@ -2,7 +2,7 @@
 
 **Purpose:** Single source of truth for what is live on staging/production, what is intentionally not shipped, and what blocks blister-room launch. Updated by PM/QA passes — not by feature work.
 
-**Last verified:** 2026-05-27 (Launch Control Reset pass)
+**Last verified:** 2026-06-02 (BUG-UI-BACKLOG-RESET-1)
 
 ---
 
@@ -10,11 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | `0.4.73` |
-| **Git SHA** | `5c975ee9fced20a6b32e05ea72db79ce22afb8ae` |
+| **Version** | `0.4.79` (verify `package.json` on shift day) |
+| **Git SHA** | verify `/api/health` — expect `41864de…` after 0.4.79 deploy |
 | **Staging health** | `ok` (app + db) |
 | **Deploy verify** | `npm run verify:deploy` → exit 0, SHA match |
-| **Auth smoke** | PASS=51, REDIR=1, FAIL=0 (`/workflow-submissions` included) |
+| **Auth smoke** | PASS=52, REDIR=1, FAIL=0 (`/workflow-submissions`, `/shift-review`) |
 | **Latest migration** | `0053_zoho_production_output_commit_readiness` (journal idx 52) — applied on staging; no pending migrations detected |
 
 **Verify commands (read-only):**
@@ -31,7 +31,8 @@ docker compose exec -T -e ALLOW_STAGING_QA_DATA=true app node_modules/.bin/tsx s
 **Related docs:**
 
 - `docs/BLISTER_ROOM_READINESS_CHECKLIST.md` — operator/admin pre-shift and floor checklist
-- `docs/PRODUCTION_DATA_ENTRY_HARDENING_AUDIT.md` — receive → QR → floor lineage audit + proposed readiness gate (PRODUCTION-DATA-ENTRY-HARDENING-0)
+- `docs/PRODUCTION_DATA_ENTRY_HARDENING_AUDIT.md` — receive → QR → floor lineage audit
+- `docs/BUG_UI_BACKLOG.md` — prioritized bug/UI friction backlog
 - `docs/CURRENT_PHASE_STATUS.md` — append-only historical phase log (older entries); use *this* doc for launch truth
 
 ---
@@ -82,6 +83,7 @@ Prioritized for **blister-room launch**. "Active" = in flight or needs daily att
 - SEALING-PRODUCT-PERSIST-1 — Save product persists + locks `workflow_bags.product_id` at sealing
 - MATERIAL-CHANGE-RECOVERY-DRY-RUN-1 — planner + tests, no apply
 - SHIFT-REVIEW-1 — read-only post-shift blister review (`/shift-review`)
+- PRODUCTION-DATA-ENTRY-HARDENING-1 — ready-for-floor validation + inbound badges + floor scan block (0.4.79)
 - LAUNCH-CONTROL-RESET-P1 — this documentation pass
 
 ### Active
@@ -91,9 +93,10 @@ Prioritized for **blister-room launch**. "Active" = in flight or needs daily att
 
 ### Next (P1 — ranked)
 
-1. **PRODUCTION-DATA-ENTRY-HARDENING-1** — Ready-for-floor validation + receiving badges + block unsafe floor start (see `docs/PRODUCTION_DATA_ENTRY_HARDENING_AUDIT.md`)
+1. **Bug/UI fix batches** — see `docs/BUG_UI_BACKLOG.md` (visible friction, not more hardening by default)
 2. Pause/end-shift count workflow validation + operator training
-4. Script-backed recovery dry-run harness (CLI over real bag/roll IDs, still no apply)
+3. Raw-bags page floor-readiness badges (inbound detail already has them)
+4. Script-backed recovery dry-run harness (CLI — exists; document for supervisors)
 5. Admin recovery preview UI (read-only plan output, still no apply)
 6. Legacy/unlinked bag repair procedure (documented + scripted, PM-gated)
 7. Deploy timer overlap lock / Conflicts=fail hardening

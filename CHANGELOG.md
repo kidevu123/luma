@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.80] — 2026-06-02
+
+### Changed (BUG-UI-FIX-BATCH-1)
+- **Settings system panel:** Shows package release (`v0.4.x`) separately from git SHA; adds Shift review link under Workflow.
+- **Inbound receive detail:** Floor QR column labels `BAG-*` placeholders honestly; column renamed for clarity.
+- **Receive pills page:** Post-save note points admins to Inbound to confirm **Ready for floor** badges.
+- **Workflow submissions:** Description mentions Shift review for post-shift counter checks.
+- **Docs:** `docs/BUG_UI_BACKLOG.md` consolidates prioritized bug/UI work; LAUNCH_CONTROL and blister checklist baselines updated.
+
+### Tests added (BUG-UI-FIX-BATCH-1)
+- `lib/ui/format-bag-qr-display.test.ts`, settings page source guards.
+
 ## [0.4.79] — 2026-06-02
 
 ### Added (PRODUCTION-DATA-ENTRY-HARDENING-1)

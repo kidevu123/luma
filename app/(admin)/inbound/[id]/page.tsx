@@ -18,6 +18,7 @@ import { BagEditHistoryPanel } from "./bag-edit-history-panel";
 import { BagNotesCell } from "./bag-notes-cell";
 import { FloorReadinessBadge } from "@/components/admin/floor-readiness-badge";
 import { loadReceiveBagReadinessEvaluations } from "@/lib/production/floor-readiness-loaders";
+import { formatBagQrForDisplay } from "@/lib/ui/format-bag-qr-display";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -205,7 +206,7 @@ export default async function ReceiveDetailPage({
                     <TR>
                       <TH>Bag #</TH>
                       <TH>Receipt #</TH>
-                      <TH>QR token</TH>
+                      <TH>Floor QR / bag code</TH>
                       <TH>Supplier lot</TH>
                       <TH className="text-right">Declared</TH>
                       <TH className="text-right">Weight (kg)</TH>
@@ -227,8 +228,28 @@ export default async function ReceiveDetailPage({
                           <TD className="font-mono text-xs">
                             {bag.internalReceiptNumber ?? "—"}
                           </TD>
-                          <TD className="font-mono text-xs text-text-subtle">
-                            {bag.bagQrCode ?? "—"}
+                          <TD className="text-xs">
+                            {(() => {
+                              const qr = formatBagQrForDisplay(bag.bagQrCode);
+                              return (
+                                <div className="space-y-0.5">
+                                  <span
+                                    className={
+                                      qr.isPlaceholder
+                                        ? "text-warn-700 font-medium"
+                                        : "font-mono text-text-subtle"
+                                    }
+                                  >
+                                    {qr.primary}
+                                  </span>
+                                  {qr.secondary ? (
+                                    <span className="block font-mono text-[10px] text-text-subtle truncate max-w-[200px]">
+                                      {qr.secondary}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
                           </TD>
                           <TD className="font-mono text-xs">
                             {batch?.batchNumber ?? "—"}

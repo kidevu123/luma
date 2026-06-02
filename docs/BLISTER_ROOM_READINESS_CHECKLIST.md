@@ -2,7 +2,7 @@
 
 **Scope:** Blister Room + Blister Hand Pack Station only. Use before first scan each shift and as a floor reference.
 
-**Live app baseline:** v0.4.74 @ `ae8be60…` (verify on shift day — see §1).
+**Live app baseline:** v0.4.79 — verify on shift day via `curl http://192.168.1.134:3000/api/health` (see §1).
 
 **Companion:** `docs/LAUNCH_CONTROL.md` for shipped vs not-shipped features and PM task board. Counter snapshot detail: `docs/PAUSE_ENDSHIFT_COUNTER_PROCEDURE.md`.
 
@@ -13,7 +13,7 @@
 Complete **before** operators scan anything.
 
 - [ ] **App version / health** — `curl http://192.168.1.134:3000/api/health` → `status: ok`, `checks.app` + `checks.db` ok
-- [ ] **SHA matches main** — health `sha` equals expected release SHA (currently `5c975ee…`)
+- [ ] **SHA matches main** — health `sha` equals expected release SHA (check `package.json` version + health `sha`)
 - [ ] **Deploy verify** — from dev machine: `npm run verify:deploy` → exit 0
 - [ ] **Auth smoke** — on LXC: `FAIL=0`, `/workflow-submissions` PASS
 - [ ] **Active stations correct** — Admin → Machines: **Blister Room** and **Blister Hand Pack Station** active

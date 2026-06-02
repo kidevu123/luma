@@ -203,7 +203,7 @@ export default async function WorkflowSubmissionsPage({
     <div className="space-y-5">
       <PageHeader
         title="Workflow submissions"
-        description="Search all production bags — receipt grouping, stage, operator, counts, and inline event history."
+        description="Search all production bags — receipt grouping, stage, operator, counts, and inline event history. For blister counter segment review after a shift, use Shift review."
       />
 
       {/* Filter bar */}

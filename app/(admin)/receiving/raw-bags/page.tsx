@@ -19,6 +19,7 @@ import { RECEIVABLE_PO_STATUSES } from "@/lib/production/raw-bag-intake";
 import { requireLead } from "@/lib/auth-guards";
 import { listAvailableRawBagQrCards } from "@/lib/db/queries/qr-cards";
 import { listPoLineReceiveTotals } from "@/lib/db/queries/receives";
+import Link from "next/link";
 import { ShieldAlert, ShieldCheck, Info } from "lucide-react";
 import { RawBagIntakeForm } from "./raw-bag-intake-form";
 import { ReceivingTabs } from "@/components/ui/receiving-tabs";
@@ -87,6 +88,15 @@ export default async function ReceiveRawBagsPage() {
         title="Receive pills"
         description="Single-screen receiving for raw-pill bags. Pick the PO, capture supplier lot + bag count + receipt range. One save creates every inventory_bag in a single transaction."
       />
+
+      <p className="text-sm text-text-muted rounded-lg border border-border/60 bg-surface-2/40 px-4 py-3">
+        After saving, open the receive under{" "}
+        <Link href="/inbound" className="font-medium text-brand-700 hover:underline">
+          Inbound → Receiving
+        </Link>{" "}
+        and confirm each bag shows <span className="font-medium">Ready for floor</span>{" "}
+        before operators scan at a station.
+      </p>
 
       {/* Badge strip */}
       <div className="flex flex-wrap gap-2">
