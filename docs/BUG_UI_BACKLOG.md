@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-06-02 (TEST-STABILIZATION-1)
 
-**Live baseline:** v0.4.81 (verify via `/api/health` on shift day)
+**Live baseline:** v0.4.81 @ `65165e8` (verify via `/api/health` on shift day)
 
 ---
 
