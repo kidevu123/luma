@@ -1,7 +1,7 @@
 // Production-manager view model for /floor-board — aggregates every
 // metric a shift lead / plant manager needs in one server fetch.
 
-import { and, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   machines,
@@ -17,7 +17,12 @@ import {
 import { computeShiftProgress } from "@/lib/production/floor-command";
 import { deriveOperatorRows } from "@/lib/production/metrics";
 import { lastNDays } from "@/lib/production/time";
-import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
+import type {
+  FloorManagerSnapshot,
+  StageCycleBenchmarkRow,
+  WipStageRow,
+} from "@/lib/production/floor-manager-snapshot-types";
+import { humanStage } from "@/lib/floor-command/floor-display";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
@@ -46,6 +51,9 @@ export async function getFloorManagerSnapshot(
     plantRows,
     wipRow,
     inFlightRows,
+    recentFinalizedRows,
+    wipByStageRows,
+    stageCycleRows,
     downtimeRows,
     flavorRows,
     runwayRow,
@@ -62,6 +70,9 @@ export async function getFloorManagerSnapshot(
       .from(readBagState)
       .where(eq(readBagState.isFinalized, false)),
     loadInFlight(),
+    loadRecentFinalized(12),
+    loadWipByStage(),
+    loadStageCycles(shiftStartUtc, since7d),
     loadDowntimeToday(shiftStartIso),
     loadFlavorToday(shiftDayKey),
     loadMaterialRunway(),
@@ -106,6 +117,9 @@ export async function getFloorManagerSnapshot(
     })),
     downtimeToday: downtimeRows,
     inFlight: inFlightRows,
+    recentFinalized: recentFinalizedRows,
+    wipByStage: wipByStageRows,
+    stageCycles: stageCycleRows,
     flavorToday: flavorRows,
   };
 }
@@ -431,9 +445,9 @@ async function loadPlantShiftStats(shiftStartUtc: Date) {
 }
 
 async function loadInFlight() {
-  const since = new Date(Date.now() - 14 * ONE_DAY_MS);
   const rows = await db
     .select({
+      workflowBagId: workflowBags.id,
       receiptNumber: workflowBags.receiptNumber,
       productName: products.name,
       stage: readBagState.stage,
@@ -444,14 +458,13 @@ async function loadInFlight() {
     .from(workflowBags)
     .leftJoin(products, eq(products.id, workflowBags.productId))
     .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
-    .where(
-      and(isNull(workflowBags.finalizedAt), gte(workflowBags.startedAt, since)),
-    )
+    .where(isNull(workflowBags.finalizedAt))
     .orderBy(workflowBags.startedAt)
-    .limit(15);
+    .limit(24);
 
   const now = Date.now();
   return rows.map((r) => ({
+    workflowBagId: r.workflowBagId,
     receiptNumber: r.receiptNumber,
     productName: r.productName,
     stage: r.stage,
@@ -460,6 +473,101 @@ async function loadInFlight() {
     ),
     isPaused: r.isPaused ?? false,
     isOnHold: r.isOnHold ?? false,
+  }));
+}
+
+async function loadRecentFinalized(limit: number) {
+  const rows = await db
+    .select({
+      receiptNumber: workflowBags.receiptNumber,
+      productName: products.name,
+      finalizedAt: readBagMetrics.finalizedAt,
+      totalSeconds: readBagMetrics.totalSeconds,
+      unitsYielded: readBagMetrics.unitsYielded,
+    })
+    .from(readBagMetrics)
+    .innerJoin(workflowBags, eq(workflowBags.id, readBagMetrics.workflowBagId))
+    .leftJoin(products, eq(products.id, workflowBags.productId))
+    .where(isNotNull(readBagMetrics.finalizedAt))
+    .orderBy(desc(readBagMetrics.finalizedAt))
+    .limit(limit);
+
+  const now = Date.now();
+  return rows.map((r) => {
+    const at = r.finalizedAt as Date;
+    const minutesAgo = Math.floor((now - at.getTime()) / 60000);
+    return {
+      receiptNumber: r.receiptNumber,
+      productName: r.productName,
+      finalizedAt: iso(at) ?? "",
+      minutesAgo,
+      totalCycleSec: r.totalSeconds ?? 0,
+      unitsYielded: r.unitsYielded ?? 0,
+    };
+  });
+}
+
+async function loadWipByStage(): Promise<WipStageRow[]> {
+  const rows = (await db.execute(sql`
+    SELECT
+      COALESCE(rbs.stage::text, 'UNKNOWN') AS stage,
+      COUNT(*)::int AS cnt,
+      MIN(EXTRACT(EPOCH FROM (NOW() - wb.started_at)) / 60)::int AS oldest_min
+    FROM read_bag_state rbs
+    INNER JOIN workflow_bags wb ON wb.id = rbs.workflow_bag_id
+    WHERE rbs.is_finalized = false
+    GROUP BY rbs.stage
+    ORDER BY oldest_min DESC
+  `)) as unknown as Array<{
+    stage: string;
+    cnt: number;
+    oldest_min: number;
+  }>;
+
+  return rows.map((r) => ({
+    stage: r.stage,
+    label: humanStage(r.stage),
+    count: Number(r.cnt) || 0,
+    oldestMinutes: Number(r.oldest_min) || 0,
+  }));
+}
+
+async function loadStageCycles(
+  shiftStartUtc: Date,
+  since7d: Date,
+): Promise<StageCycleBenchmarkRow[]> {
+  const agg = async (since: Date) => {
+    const [row] = await db
+      .select({
+        blister: sql<number>`ROUND(AVG(${readBagMetrics.blisterSeconds}))::int`,
+        sealing: sql<number>`ROUND(AVG(${readBagMetrics.sealingSeconds}))::int`,
+        packaging: sql<number>`ROUND(AVG(${readBagMetrics.packagingSeconds}))::int`,
+        bags: sql<number>`COUNT(*)::int`,
+      })
+      .from(readBagMetrics)
+      .where(gte(readBagMetrics.finalizedAt, since));
+    return row;
+  };
+
+  const [shift, seven] = await Promise.all([agg(shiftStartUtc), agg(since7d)]);
+
+  const stages: Array<{
+    stage: string;
+    label: string;
+    shiftKey: "blister" | "sealing" | "packaging";
+    sevenKey: "blister" | "sealing" | "packaging";
+  }> = [
+    { stage: "blister", label: "Blister room", shiftKey: "blister", sevenKey: "blister" },
+    { stage: "sealing", label: "Sealing", shiftKey: "sealing", sevenKey: "sealing" },
+    { stage: "packaging", label: "Packaging", shiftKey: "packaging", sevenKey: "packaging" },
+  ];
+
+  return stages.map(({ stage, label, shiftKey, sevenKey }) => ({
+    stage,
+    label,
+    avgSecShift: shift?.[shiftKey] != null ? Number(shift[shiftKey]) : null,
+    avgSec7d: seven?.[sevenKey] != null ? Number(seven[sevenKey]) : null,
+    bagsShift: shift?.bags ?? 0,
   }));
 }
 

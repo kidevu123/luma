@@ -10,6 +10,7 @@ import {
 } from "@/lib/floor-command/metrics-links";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import type { FloorProductionIntelligence } from "@/lib/production/floor-production-intelligence-types";
+import { humanStage, receiptLabel, formatWait } from "@/lib/floor-command/floor-display";
 
 export type ActNowSeverity = "crit" | "warn" | "info";
 
@@ -20,11 +21,6 @@ export type ActNowItem = {
   detail: string;
   href?: string;
 };
-
-function formatStage(stage: string | null): string {
-  if (!stage) return "unknown stage";
-  return stage.replace(/_/g, " ").toLowerCase();
-}
 
 function bottleneckLabel(intelligence: FloorProductionIntelligence): string {
   const b = intelligence.bottleneck.stageKey;
@@ -43,7 +39,16 @@ export function buildActNowPanel(
   const items: ActNowItem[] = [];
   const { plant } = snapshot;
 
-  for (const bag of snapshot.inFlight.slice(0, 6)) {
+  const seen = new Set<string>();
+  let inflightAdded = 0;
+  for (const bag of [...snapshot.inFlight].sort(
+    (a, b) => b.elapsedMinutes - a.elapsedMinutes,
+  )) {
+    if (inflightAdded >= 6) break;
+    const key = bag.receiptNumber ?? bag.workflowBagId;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
     const sev: ActNowSeverity =
       bag.elapsedMinutes > 180 || bag.isOnHold
         ? "crit"
@@ -59,17 +64,17 @@ export function buildActNowPanel(
       .filter(Boolean)
       .join(", ");
 
+    const label = receiptLabel(bag.receiptNumber, bag.workflowBagId);
     items.push({
-      id: `inflight-${bag.receiptNumber ?? bag.elapsedMinutes}`,
+      id: `inflight-${key}`,
       severity: sev,
-      title: bag.receiptNumber ?? "Bag in flight",
-      detail: `${formatStage(bag.stage)} · ${bag.elapsedMinutes}m${flags ? ` · ${flags}` : ""}${bag.productName ? ` · ${bag.productName}` : ""}`,
-      ...(bag.receiptNumber
-        ? {
-            href: `/workflow-submissions?receipt=${encodeURIComponent(bag.receiptNumber)}`,
-          }
-        : {}),
+      title: `Waiting · ${label}`,
+      detail: `${humanStage(bag.stage)} · ${formatWait(bag.elapsedMinutes)}${flags ? ` · ${flags}` : ""}${bag.productName ? ` · ${bag.productName}` : ""}`,
+      href: bag.receiptNumber
+        ? `/workflow-submissions?receipt=${encodeURIComponent(bag.receiptNumber)}`
+        : `/workflow-submissions`,
     });
+    inflightAdded += 1;
   }
 
   const pausedMetric = intelligence.dashboard.pausedBagsOverThreshold;

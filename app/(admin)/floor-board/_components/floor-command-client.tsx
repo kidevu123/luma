@@ -27,6 +27,7 @@ import { ActNowPanel } from "./act-now-panel";
 import { MetricsQuickLinks } from "./metrics-quick-links";
 import { OwnerPulseStrip } from "./owner-pulse-strip";
 import { TvRotationPanel } from "./tv-rotation-panel";
+import { OperationsBriefingPanel } from "./operations-briefing-panel";
 
 type Props = {
   mode: FloorBoardMode;
@@ -66,10 +67,12 @@ export function FloorCommandClient({
   const [isEditing, setIsEditing] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(mode === "manager");
+  const [showMap, setShowMap] = useState(mode !== "lead");
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setDetailsOpen(mode === "manager");
+    setShowMap(mode !== "lead");
   }, [mode]);
 
   useEffect(() => {
@@ -209,15 +212,59 @@ export function FloorCommandClient({
         )}
       </div>
 
+      {!isTv && (
+        <div className="flex items-center gap-2 px-3 py-1 border-b border-white/[0.06] bg-slate-950/80 shrink-0">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">
+            Main view
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowMap(false)}
+            className={[
+              "text-[11px] px-2.5 py-1 rounded border transition-colors",
+              !showMap
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                : "border-white/10 text-slate-500 hover:text-slate-300",
+            ].join(" ")}
+          >
+            Operations briefing
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowMap(true)}
+            className={[
+              "text-[11px] px-2.5 py-1 rounded border transition-colors",
+              showMap
+                ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+                : "border-white/10 text-slate-500 hover:text-slate-300",
+            ].join(" ")}
+          >
+            Floor map & widgets
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <div className="flex-1 overflow-y-auto min-h-0">
-          <WidgetGrid
-            layout={layout}
-            onLayoutChange={handleLayoutChange}
-            data={widgetData}
-            isEditing={isEditing && !isTv}
-            onRemoveWidget={handleRemoveWidget}
-          />
+          {isTv ? (
+            <WidgetGrid
+              layout={layout}
+              onLayoutChange={handleLayoutChange}
+              data={widgetData}
+              isEditing={false}
+              onRemoveWidget={handleRemoveWidget}
+            />
+          ) : showMap ? (
+            <WidgetGrid
+              layout={layout}
+              onLayoutChange={handleLayoutChange}
+              data={widgetData}
+              isEditing={isEditing}
+              onRemoveWidget={handleRemoveWidget}
+            />
+          ) : (
+            <OperationsBriefingPanel snapshot={managerSnapshot} />
+          )}
         </div>
         {!isTv && <ActNowPanel items={actNowItems} />}
         {isTv && (
@@ -266,7 +313,9 @@ export function FloorCommandClient({
 
       {!isTv && <MetricsQuickLinks lane={metricsLane} />}
       <div className={isTv ? "scale-110 origin-bottom" : ""}>
-        <ProductionIntelligenceStrip data={productionIntelligence} />
+        {(isTv || showMap || mode === "manager") && (
+          <ProductionIntelligenceStrip data={productionIntelligence} />
+        )}
         {!isTv && <KpiStrip data={kpiData} />}
       </div>
     </div>

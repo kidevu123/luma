@@ -83,12 +83,37 @@ export type DowntimeReasonRow = {
 };
 
 export type InFlightBagRow = {
+  workflowBagId: string;
   receiptNumber: string | null;
   productName: string | null;
   stage: string | null;
   elapsedMinutes: number;
   isPaused: boolean;
   isOnHold: boolean;
+};
+
+export type RecentFinalizedRow = {
+  receiptNumber: string | null;
+  productName: string | null;
+  finalizedAt: string;
+  minutesAgo: number;
+  totalCycleSec: number;
+  unitsYielded: number;
+};
+
+export type StageCycleBenchmarkRow = {
+  stage: string;
+  label: string;
+  avgSecShift: number | null;
+  avgSec7d: number | null;
+  bagsShift: number;
+};
+
+export type WipStageRow = {
+  stage: string;
+  label: string;
+  count: number;
+  oldestMinutes: number;
 };
 
 export type FloorManagerSnapshot = {
@@ -112,6 +137,9 @@ export type FloorManagerSnapshot = {
   operators: OperatorLeaderRow[];
   downtimeToday: DowntimeReasonRow[];
   inFlight: InFlightBagRow[];
+  recentFinalized: RecentFinalizedRow[];
+  wipByStage: WipStageRow[];
+  stageCycles: StageCycleBenchmarkRow[];
   flavorToday: Array<{
     productName: string;
     units: number;
