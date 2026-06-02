@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-06-02 (SEALING-SEGMENT-UX-1)
 
-**Live baseline:** v0.4.82 (verify via `/api/health` on shift day)
+**Live baseline:** v0.4.82 @ `b36c499` (verify via `/api/health` on shift day)
 
 ---
 
