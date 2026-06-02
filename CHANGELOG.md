@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.74] — 2026-06-02
+
+### Added (SEALING-PRODUCT-PERSIST-1)
+- **Explicit Save product at sealing:** Operators choose a finished SKU and tap **Save product** before recording sealing segments or close-out. Selection is no longer browser-only state.
+- **Refresh-safe product lock:** Saved product persists on `workflow_bags.product_id`, survives page reload, and displays read-only with lock copy. Normal floor UI cannot casually change it.
+- **Server-side sealing guards:** Segment and sealing complete actions require a saved product and re-read the bag row server-side instead of trusting client-only `productId`.
+- **Read-model update:** `PRODUCT_MAPPED` now updates `read_bag_state` product columns immediately after save.
+
+### Tests added (SEALING-PRODUCT-PERSIST-1)
+- Floor action, UI, and projector source guards for save action, save-first gating, idempotent re-save, overwrite rejection, and segment without FormData productId.
+
 ## [0.4.73] — 2026-06-02
 
 ### Added (MATERIAL-CHANGE-RECOVERY-DRY-RUN-1)

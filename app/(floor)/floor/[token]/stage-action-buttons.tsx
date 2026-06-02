@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
   Flag,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import {
   fireStageEventAction,
+  saveSealingProductAction,
   finalizeBagAction,
   releaseBagAction,
   releaseSealingHandoffAction,
@@ -183,6 +185,7 @@ export function StageActionButtons({
         : getDefaultPauseReasonForStation(stationKind),
     );
   }, [stationKind]);
+  const router = useRouter();
   const [packagingOpen, setPackagingOpen] = React.useState(false);
   const [sealingOpen, setSealingOpen] = React.useState(false);
   const [sealingFinalOpen, setSealingFinalOpen] = React.useState(false);
@@ -247,8 +250,7 @@ export function StageActionButtons({
   const needsSealingProductMapping = !hasProductMapped;
   const showSealingProductPicker =
     needsSealingProductMapping && SEALING_STATION_KINDS.has(stationKind);
-  const sealingProductReady =
-    !showSealingProductPicker || selectedSealingProductId.trim().length > 0;
+  const sealingProductReady = hasProductMapped;
   const isHandpackBlister = stationKind === "HANDPACK_BLISTER";
   const handpackTabletMissing =
     isHandpackBlister && handpackTabletContext?.status !== "resolved";
@@ -451,7 +453,7 @@ export function StageActionButtons({
       {!isPaused && showSealingProductPicker && !sealingOpen && (
         <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
           <div className="font-semibold text-sm">
-            Select finished product before sealing close-out.
+            Select and save finished product before sealing close-out.
           </div>
           {sealingProductFilterHint ? (
             <p className="text-sm text-amber-800">{sealingProductFilterHint}</p>
@@ -462,21 +464,55 @@ export function StageActionButtons({
               Ask a supervisor to set up the product mapping.
             </p>
           ) : (
-            <select
-              required
-              value={selectedSealingProductId}
-              onChange={(e) => setSelectedSealingProductId(e.target.value)}
-              className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
-            >
-              <option value="" disabled>
-                — Select product —
-              </option>
-              {sealingProductOptions.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
+            <>
+              <select
+                required
+                value={selectedSealingProductId}
+                onChange={(e) => setSelectedSealingProductId(e.target.value)}
+                className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
+              >
+                <option value="" disabled>
+                  — Select product —
                 </option>
-              ))}
-            </select>
+                {sealingProductOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={
+                  pending !== null ||
+                  !selectedSealingProductId.trim()
+                }
+                onClick={async () => {
+                  setPending("save-product");
+                  setError(null);
+                  try {
+                    const fd = new FormData();
+                    fd.set("token", token);
+                    fd.set("workflowBagId", workflowBagId);
+                    fd.set("stationId", stationId);
+                    fd.set("productId", selectedSealingProductId);
+                    const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+                    if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
+                    fd.set("clientEventId", newClientEventId());
+                    const r = await saveSealingProductAction(fd);
+                    if (r?.error) {
+                      setError(r.error);
+                    } else {
+                      router.refresh();
+                    }
+                  } finally {
+                    setPending(null);
+                  }
+                }}
+                className="w-full h-12 rounded-xl bg-amber-700 text-white text-sm font-semibold disabled:opacity-60"
+              >
+                {pending === "save-product" ? "Saving…" : "Save product"}
+              </button>
+            </>
           )}
         </div>
       )}
@@ -768,11 +804,6 @@ export function StageActionButtons({
           stationId={stationId}
           operatorCode={operatorCode}
           sealingCardsPerPress={sealingCardsPerPress}
-          needsProductMapping={needsSealingProductMapping}
-          {...(selectedSealingProductId
-            ? { preselectedProductId: selectedSealingProductId }
-            : {})}
-          sealingProductOptions={sealingProductOptions}
           onClose={(success) => {
             setSealingOpen(false);
             if (success && error) setError(null);
@@ -804,11 +835,6 @@ export function StageActionButtons({
           stationId={stationId}
           operatorCode={operatorCode}
           sealingCardsPerPress={sealingCardsPerPress}
-          needsProductMapping={needsSealingProductMapping}
-          {...(selectedSealingProductId
-            ? { preselectedProductId: selectedSealingProductId }
-            : {})}
-          sealingProductOptions={sealingProductOptions}
           onClose={(success) => {
             setSealingOpen(false);
             if (success && error) setError(null);
@@ -1054,9 +1080,6 @@ function SealingSegmentForm({
   stationId,
   operatorCode,
   sealingCardsPerPress,
-  needsProductMapping = false,
-  preselectedProductId,
-  sealingProductOptions = [],
   onClose,
   onError,
 }: {
@@ -1065,17 +1088,11 @@ function SealingSegmentForm({
   stationId: string;
   operatorCode: string;
   sealingCardsPerPress: number | null;
-  needsProductMapping?: boolean;
-  preselectedProductId?: string;
-  sealingProductOptions?: SealingProductOption[];
   onClose: (success: boolean) => void;
   onError: (msg: string) => void;
 }) {
   const [pending, setPending] = React.useState(false);
   const [counterPresses, setCounterPresses] = React.useState("");
-  const [selectedProductId, setSelectedProductId] = React.useState(
-    preselectedProductId ?? "",
-  );
   const containerRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1090,12 +1107,6 @@ function SealingSegmentForm({
           sealingCardsPerPress,
         )
       : null;
-  const productIdForSubmit = needsProductMapping
-    ? selectedProductId.trim()
-    : undefined;
-  const productReady =
-    !needsProductMapping ||
-    (productIdForSubmit != null && productIdForSubmit.length > 0);
 
   return (
     <div
@@ -1103,36 +1114,6 @@ function SealingSegmentForm({
       className="rounded-lg border-2 border-sky-300 bg-sky-50/40 p-3 space-y-3"
     >
       <p className="text-sm font-semibold text-sky-900">Record sealing segment</p>
-      {needsProductMapping && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
-          <div className="font-semibold text-sm">What finished product is this?</div>
-          <div className="text-amber-900/80">
-            Pick the SKU that matches the packaging you are sealing into.
-          </div>
-          {sealingProductOptions.length === 0 ? (
-            <p className="text-sm text-red-800">
-              No active products are configured for this bag&apos;s tablet type.
-              Ask a supervisor to set up the product mapping.
-            </p>
-          ) : (
-            <select
-              required
-              value={selectedProductId}
-              onChange={(e) => setSelectedProductId(e.target.value)}
-              className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
-            >
-              <option value="" disabled>
-                — Select product —
-              </option>
-              {sealingProductOptions.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
       {!configReady ? (
         <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {SEALING_COUNTER_CONFIG_ERROR}
@@ -1170,7 +1151,7 @@ function SealingSegmentForm({
         </button>
         <button
           type="button"
-          disabled={pending || !configReady || !productReady}
+          disabled={pending || !configReady}
           onClick={async () => {
             setPending(true);
             try {
@@ -1180,9 +1161,6 @@ function SealingSegmentForm({
               fd.set("stationId", stationId);
               fd.set("eventType", "SEALING_SEGMENT_COMPLETE");
               fd.set("counterPresses", counterPresses || "0");
-              if (needsProductMapping && productIdForSubmit) {
-                fd.set("productId", productIdForSubmit);
-              }
               const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
               if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
               fd.set("clientEventId", newClientEventId());
@@ -1288,9 +1266,6 @@ function SealingCompleteForm({
   stationId,
   operatorCode,
   sealingCardsPerPress,
-  needsProductMapping = false,
-  preselectedProductId,
-  sealingProductOptions = [],
   onClose,
   onError,
 }: {
@@ -1299,18 +1274,11 @@ function SealingCompleteForm({
   stationId: string;
   operatorCode: string;
   sealingCardsPerPress: number | null;
-  needsProductMapping?: boolean;
-  /** When set from the inline picker, skip duplicate product UI. */
-  preselectedProductId?: string;
-  sealingProductOptions?: SealingProductOption[];
   onClose: (success: boolean) => void;
   onError: (msg: string) => void;
 }) {
   const [pending, setPending] = React.useState(false);
   const [counterPresses, setCounterPresses] = React.useState("");
-  const [selectedProductId, setSelectedProductId] = React.useState(
-    preselectedProductId ?? "",
-  );
   const containerRef = React.useRef<HTMLDivElement>(null);
   const configReady =
     sealingCardsPerPress != null && sealingCardsPerPress >= 1;
@@ -1318,11 +1286,6 @@ function SealingCompleteForm({
     configReady && counterPresses !== ""
       ? Number(counterPresses) * sealingCardsPerPress
       : null;
-  const productIdForSubmit = preselectedProductId || selectedProductId;
-  const showProductPickerInForm =
-    needsProductMapping && !preselectedProductId?.trim();
-  const productReady =
-    !needsProductMapping || productIdForSubmit.trim().length > 0;
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, []);
@@ -1330,36 +1293,6 @@ function SealingCompleteForm({
   return (
     <div ref={containerRef} className="rounded-lg border-2 border-sky-300 bg-sky-50/40 p-3 space-y-3">
       <p className="text-sm font-semibold text-sky-900">Sealing close-out</p>
-      {showProductPickerInForm && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
-          <div className="font-semibold text-sm">What finished product is this?</div>
-          <div className="text-amber-900/80">
-            Pick the SKU that matches the packaging you are sealing into.
-          </div>
-          {sealingProductOptions.length === 0 ? (
-            <p className="text-sm text-red-800">
-              No active products are configured for this bag&apos;s tablet type.
-              Ask a supervisor to set up the product mapping.
-            </p>
-          ) : (
-            <select
-              required
-              value={selectedProductId}
-              onChange={(e) => setSelectedProductId(e.target.value)}
-              className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
-            >
-              <option value="" disabled>
-                — Select product —
-              </option>
-              {sealingProductOptions.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
       {!configReady ? (
         <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {SEALING_COUNTER_CONFIG_ERROR}
@@ -1397,7 +1330,7 @@ function SealingCompleteForm({
         </button>
         <button
           type="button"
-          disabled={pending || !configReady || !productReady}
+          disabled={pending || !configReady}
           onClick={async () => {
             setPending(true);
             try {
@@ -1407,9 +1340,6 @@ function SealingCompleteForm({
               fd.set("stationId", stationId);
               fd.set("eventType", "SEALING_COMPLETE");
               fd.set("counterPresses", counterPresses || "0");
-              if (needsProductMapping && productIdForSubmit) {
-                fd.set("productId", productIdForSubmit);
-              }
               const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
               if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
               fd.set("clientEventId", newClientEventId());

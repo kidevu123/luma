@@ -327,6 +327,33 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
         .set({ currentOperatorCode: code, updatedAt: occurredAt })
         .where(eq(readBagState.workflowBagId, ev.workflowBagId));
     }
+  } else if (ev.eventType === "PRODUCT_MAPPED") {
+    const [bagRow] = await tx
+      .select({ productId: workflowBags.productId })
+      .from(workflowBags)
+      .where(eq(workflowBags.id, ev.workflowBagId));
+    let productName: string | null =
+      typeof ev.payload?.product_name === "string"
+        ? ev.payload.product_name
+        : null;
+    const productId = bagRow?.productId ?? null;
+    if (productId && !productName) {
+      const [p] = await tx
+        .select({ name: products.name })
+        .from(products)
+        .where(eq(products.id, productId));
+      productName = p?.name ?? null;
+    }
+    if (productId) {
+      await tx
+        .update(readBagState)
+        .set({
+          productId,
+          productName,
+          updatedAt: occurredAt,
+        })
+        .where(eq(readBagState.workflowBagId, ev.workflowBagId));
+    }
   }
 
   // 3. workflow_bags.finalizedAt + qr_cards release on BAG_FINALIZED +

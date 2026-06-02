@@ -317,6 +317,11 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
     expect(pageSrc).toMatch(/sealingProductOptions=\{sealingProductOptionsForForm\}/);
   });
 
+  it("shows product locked copy at sealing when product is mapped", () => {
+    expect(pageSrc).toMatch(/Product locked for this bag/);
+    expect(pageSrc).toMatch(/Contact admin if this is/);
+  });
+
   it("uses station-aware unmapped product banner, not legacy copy at SEALING", () => {
     expect(pageSrc).toMatch(/getUnmappedProductBanner/);
     expect(pageSrc).toMatch(/unmappedProductBanner/);

@@ -21,12 +21,20 @@ export type UnmappedProductBanner = {
   detail: string;
 };
 
+/** Floor error when segment/complete fires before explicit product save. */
+export const SEALING_SAVE_PRODUCT_FIRST_ERROR =
+  "Save the finished product before recording sealing output.";
+
+/** Floor error when operator tries to save a different product after one is locked. */
+export const SEALING_PRODUCT_ALREADY_SAVED_ERROR =
+  "Product is already saved for this bag and cannot be changed here.";
+
 /** Copy for the amber banner when workflow_bags.product_id is null. */
 export function getUnmappedProductBanner(stationKind: string): UnmappedProductBanner {
   if (SEALING_STATION_KINDS.has(stationKind)) {
     return {
       title: "No product selected yet.",
-      detail: "Select finished product before sealing close-out.",
+      detail: "Select and save finished product before sealing close-out.",
     };
   }
   if (stationKind === "PACKAGING") {

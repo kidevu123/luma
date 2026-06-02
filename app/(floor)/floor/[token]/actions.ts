@@ -580,8 +580,152 @@ import {
 } from "@/lib/production/first-op-product";
 import {
   SEALING_STATION_KINDS,
+  SEALING_PRODUCT_ALREADY_SAVED_ERROR,
+  SEALING_SAVE_PRODUCT_FIRST_ERROR,
   validateSealingProductPick,
 } from "@/lib/production/sealing-product";
+
+const saveSealingProductSchema = z.object({
+  token: z.string().uuid(),
+  workflowBagId: z.string().uuid(),
+  stationId: z.string().uuid(),
+  productId: z.string().uuid(),
+  clientEventId: clientEventIdField,
+  overrideEmployeeCode: z.string().max(40).optional().nullable(),
+});
+
+/** Persist finished product at sealing before segment/close-out work. */
+export async function saveSealingProductAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const parsed = saveSealingProductSchema.safeParse({
+    token: formData.get("token"),
+    workflowBagId: formData.get("workflowBagId"),
+    stationId: formData.get("stationId"),
+    productId: formData.get("productId"),
+    clientEventId: pickClientEventId(formData),
+    overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
+  });
+  if (!parsed.success) return { error: "Invalid input." };
+
+  try {
+    const station = await authStation(parsed.data.token, parsed.data.stationId);
+    if (!SEALING_STATION_KINDS.has(station.kind)) {
+      return {
+        error: `Station kind ${station.kind} cannot save product at sealing.`,
+      };
+    }
+
+    const [live] = await db
+      .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+      .from(readStationLive)
+      .where(eq(readStationLive.stationId, parsed.data.stationId));
+    if (live?.currentWorkflowBagId !== parsed.data.workflowBagId) {
+      return { error: "This bag is not active at this sealing station." };
+    }
+
+    const [bagProductRow] = await db
+      .select({ productId: workflowBags.productId })
+      .from(workflowBags)
+      .where(eq(workflowBags.id, parsed.data.workflowBagId));
+
+    if (bagProductRow?.productId) {
+      if (bagProductRow.productId === parsed.data.productId) {
+        return { ok: true };
+      }
+      return { error: SEALING_PRODUCT_ALREADY_SAVED_ERROR };
+    }
+
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+        overrideEmployeeCode: parsed.data.overrideEmployeeCode ?? null,
+      });
+
+      const [productLookup] = await tx
+        .select({
+          id: products.id,
+          sku: products.sku,
+          name: products.name,
+          kind: products.kind,
+          isActive: products.isActive,
+        })
+        .from(products)
+        .where(eq(products.id, parsed.data.productId));
+
+      const tabletTypeId = await resolveWorkflowBagTabletTypeId(
+        tx,
+        parsed.data.workflowBagId,
+      );
+
+      const tabletRows = await tx
+        .select({ tabletTypeId: productAllowedTablets.tabletTypeId })
+        .from(productAllowedTablets)
+        .where(eq(productAllowedTablets.productId, parsed.data.productId));
+
+      const sealingPick = validateSealingProductPick({
+        stationKind: station.kind,
+        pickedProductId: parsed.data.productId,
+        product: productLookup ?? null,
+        tabletTypeId,
+        allowedTabletTypeIds: tabletRows.map((r) => r.tabletTypeId),
+      });
+      if (!sealingPick.ok) {
+        throw new Error(sealingPick.reason);
+      }
+
+      await tx
+        .update(workflowBags)
+        .set({ productId: sealingPick.productId })
+        .where(eq(workflowBags.id, parsed.data.workflowBagId));
+
+      await projectEvent(tx, {
+        workflowBagId: parsed.data.workflowBagId,
+        stationId: parsed.data.stationId,
+        eventType: "PRODUCT_MAPPED",
+        payload: {
+          product_id: sealingPick.productId,
+          product_sku: productLookup?.sku ?? null,
+          product_name: productLookup?.name ?? null,
+          product_kind: productLookup?.kind ?? null,
+          station_kind: station.kind,
+          source: "SEALING_SELECTION",
+        },
+        clientEventId: parsed.data.clientEventId ?? null,
+        enteredByUserId: accountability.enteredByUserId,
+        accountableEmployeeId: accountability.accountableEmployeeId,
+        accountabilitySource: accountability.accountabilitySource,
+        accountableEmployeeNameSnapshot:
+          accountability.accountableEmployeeNameSnapshot,
+      });
+
+      await writeAudit(
+        {
+          actorId: accountability.enteredByUserId ?? null,
+          actorRole: null,
+          action: "floor.sealing_product_saved",
+          targetType: "WorkflowBag",
+          targetId: parsed.data.workflowBagId,
+          after: {
+            product_id: sealingPick.productId,
+            product_sku: productLookup?.sku ?? null,
+            station_id: parsed.data.stationId,
+            source: "SEALING_SELECTION",
+          },
+        },
+        tx,
+      );
+    });
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Could not save product.",
+    };
+  }
+
+  revalidatePath(`/floor/${parsed.data.token}`);
+  revalidatePath(`/floor-board`);
+  return { ok: true };
+}
 
 export async function fireStageEventAction(
   formData: FormData,
@@ -725,16 +869,10 @@ export async function fireStageEventAction(
           pickedSealingProductId &&
           pickedSealingProductId !== bagProductRow.productId
         ) {
-          return {
-            error:
-              "Product is already set on this bag and cannot be changed here.",
-          };
+          return { error: SEALING_PRODUCT_ALREADY_SAVED_ERROR };
         }
-      } else if (!pickedSealingProductId && !isSealingFinal) {
-        return {
-          error:
-            "Select the finished product before recording a sealing segment.",
-        };
+      } else {
+        return { error: SEALING_SAVE_PRODUCT_FIRST_ERROR };
       }
     }
 
@@ -759,69 +897,6 @@ export async function fireStageEventAction(
         throw new Error(
           "No operator on shift. Open a shift on this station before submitting the first count.",
         );
-      }
-
-      if (
-        (isSealingSegment || isSealingFinal) &&
-        SEALING_STATION_KINDS.has(station.kind) &&
-        !bagProductRow?.productId &&
-        pickedSealingProductId
-      ) {
-        const [productLookup] = await tx
-          .select({
-            id: products.id,
-            sku: products.sku,
-            name: products.name,
-            kind: products.kind,
-            isActive: products.isActive,
-          })
-          .from(products)
-          .where(eq(products.id, pickedSealingProductId));
-
-        const tabletTypeId = await resolveWorkflowBagTabletTypeId(
-          tx,
-          workflowBagId,
-        );
-
-        const tabletRows = await tx
-          .select({ tabletTypeId: productAllowedTablets.tabletTypeId })
-          .from(productAllowedTablets)
-          .where(eq(productAllowedTablets.productId, pickedSealingProductId));
-
-        const sealingPick = validateSealingProductPick({
-          stationKind: station.kind,
-          pickedProductId: pickedSealingProductId,
-          product: productLookup ?? null,
-          tabletTypeId,
-          allowedTabletTypeIds: tabletRows.map((r) => r.tabletTypeId),
-        });
-        if (!sealingPick.ok) {
-          throw new Error(sealingPick.reason);
-        }
-
-        await tx
-          .update(workflowBags)
-          .set({ productId: sealingPick.productId })
-          .where(eq(workflowBags.id, workflowBagId));
-
-        await projectEvent(tx, {
-          workflowBagId,
-          stationId,
-          eventType: "PRODUCT_MAPPED",
-          payload: {
-            product_id: sealingPick.productId,
-            product_sku: productLookup?.sku ?? null,
-            product_name: productLookup?.name ?? null,
-            product_kind: productLookup?.kind ?? null,
-            station_kind: station.kind,
-            source: "SEALING_SELECTION",
-          },
-          enteredByUserId: accountability.enteredByUserId,
-          accountableEmployeeId: accountability.accountableEmployeeId,
-          accountabilitySource: accountability.accountabilitySource,
-          accountableEmployeeNameSnapshot:
-            accountability.accountableEmployeeNameSnapshot,
-        });
       }
 
       let handpackBlisterLot: { id: string; qtyOnHand: number } | null = null;

@@ -761,6 +761,12 @@ export default async function FloorStationPage({
                   <div className="font-semibold">
                     Making: {currentAtStation.product.name}
                   </div>
+                  {SEALING_STATION_KINDS.has(station.station.kind) ? (
+                    <div className="text-emerald-900/80">
+                      Product locked for this bag. Contact admin if this is
+                      wrong.
+                    </div>
+                  ) : null}
                   {currentAtStation.product.unitsPerDisplay != null &&
                   currentAtStation.product.displaysPerCase != null ? (
                     <div className="text-emerald-900/70">

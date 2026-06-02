@@ -70,13 +70,13 @@ describe("filterSealingProductsByTabletType", () => {
 describe("getUnmappedProductBanner", () => {
   it("SEALING shows sealing close-out copy, not legacy warning", () => {
     const banner = getUnmappedProductBanner("SEALING");
-    expect(banner.detail).toMatch(/Select finished product before sealing close-out/);
+    expect(banner.detail).toMatch(/Select and save finished product before sealing close-out/);
     expect(banner.detail).not.toMatch(/started before the first-op product picker/);
   });
 
   it("COMBINED at sealing uses sealing close-out copy", () => {
     const banner = getUnmappedProductBanner("COMBINED");
-    expect(banner.detail).toMatch(/Select finished product before sealing close-out/);
+    expect(banner.detail).toMatch(/Select and save finished product before sealing close-out/);
   });
 
   it("HANDPACK_BLISTER defers to sealing without legacy warning", () => {

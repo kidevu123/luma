@@ -325,7 +325,7 @@ describe("SEALING-COUNTER-1 · sealing completion uses machine counter", () => {
 
   it("blocks completion when sealingCardsPerPress is missing", () => {
     expect(src).toMatch(/SEALING_COUNTER_CONFIG_ERROR/);
-    expect(src).toMatch(/disabled=\{pending \|\| !configReady \|\| !productReady\}/);
+    expect(src).toMatch(/disabled=\{pending \|\| !configReady\}/);
   });
 
   it("submits counterPresses for SEALING_SEGMENT_COMPLETE in SealingSegmentForm", () => {
@@ -556,25 +556,34 @@ describe("PACKAGING-AUTO-FINALIZE-1 · manual finalize fallback for legacy PACKA
 });
 
 describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging gate", () => {
-  it("SealingCompleteForm includes product picker when needsProductMapping", () => {
-    expect(src).toMatch(/needsProductMapping/);
-    expect(src).toMatch(/What finished product is this/);
-    expect(src).toMatch(/fd\.set\("productId", productIdForSubmit\)/);
+  it("Save product action persists selection before segment/close-out", () => {
+    expect(src).toMatch(/saveSealingProductAction/);
+    expect(src).toMatch(/Save product/);
+    expect(src).toMatch(/router\.refresh\(\)/);
   });
 
-  it("Complete sealing disabled until product selected when mapping required", () => {
-    expect(src).toMatch(/productReady/);
-    expect(src).toMatch(/disabled=\{pending \|\| !configReady \|\| !productReady\}/);
+  it("segment and close-out forms no longer send productId in FormData", () => {
+    const segmentIdx = src.indexOf("function SealingSegmentForm");
+    const segmentBlock = src.slice(segmentIdx, segmentIdx + 2500);
+    expect(segmentBlock).not.toMatch(/fd\.set\("productId"/);
+
+    const completeIdx = src.indexOf("function SealingCompleteForm");
+    const completeBlock = src.slice(completeIdx, completeIdx + 2500);
+    expect(completeBlock).not.toMatch(/fd\.set\("productId"/);
   });
 
-  it("inline sealing product picker shown before close-out when unmapped", () => {
+  it("Record sealing segment disabled until product saved on bag", () => {
+    expect(src).toMatch(/sealingProductReady = hasProductMapped/);
+    expect(src).toMatch(/disabled=\{pending !== null \|\| !sealingProductReady\}/);
+  });
+
+  it("inline sealing product picker with Save product when unmapped", () => {
     expect(src).toMatch(/showSealingProductPicker/);
     expect(src).toMatch(
-      /Select finished product before sealing close-out/,
+      /Select and save finished product before sealing close-out/,
     );
     expect(src).toMatch(/sealingProductFilterHint/);
     expect(src).toMatch(/\{sealingProductFilterHint\}/);
-    expect(src).toMatch(/sealingProductReady/);
     expect(src).toMatch(
       /s\.eventType === "SEALING_COMPLETE" && !sealingProductReady/,
     );

@@ -3,6 +3,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
+const projectorSrc = readFileSync(
+  join(__dirname, "../../../../lib/projector/index.ts"),
+  "utf8",
+);
 
 describe("SEALING-COUNTER-1 · fireStageEventAction sealing path", () => {
   it("imports sealing-counter helpers", () => {
@@ -266,9 +270,25 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
     expect(actionsSrc).toMatch(/from "@\/lib\/production\/sealing-product"/);
     expect(actionsSrc).toMatch(/validateSealingProductPick/);
     expect(actionsSrc).toMatch(/SEALING_STATION_KINDS/);
+    expect(actionsSrc).toMatch(/SEALING_SAVE_PRODUCT_FIRST_ERROR/);
   });
 
-  it("fireStageEventAction accepts optional productId for sealing mapping", () => {
+  it("saveSealingProductAction persists product before segment work", () => {
+    expect(actionsSrc).toMatch(/export async function saveSealingProductAction/);
+    expect(actionsSrc).toMatch(/floor\.sealing_product_saved/);
+    expect(actionsSrc).toMatch(/source: "SEALING_SELECTION"/);
+    expect(actionsSrc).toMatch(/SEALING_PRODUCT_ALREADY_SAVED_ERROR/);
+  });
+
+  it("saveSealingProductAction idempotently accepts same product re-save", () => {
+    const saveIdx = actionsSrc.indexOf("export async function saveSealingProductAction");
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const block = actionsSrc.slice(saveIdx, fireIdx);
+    expect(block).toMatch(/bagProductRow\.productId === parsed\.data\.productId/);
+    expect(block).toMatch(/return \{ ok: true \}/);
+  });
+
+  it("fireStageEventAction still accepts optional productId for legacy FormData only", () => {
     expect(actionsSrc).toMatch(/productId: z\.string\(\)\.uuid\(\)/);
     expect(actionsSrc).toMatch(/pickedSealingProductId/);
   });
@@ -290,16 +310,19 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
     expect(block).toMatch(/if \(productIdToSet && productLookup\)/);
   });
 
-  it("SEALING_COMPLETE maps product before SEALING_COMPLETE event", () => {
+  it("saveSealingProductAction emits PRODUCT_MAPPED before segment events", () => {
+    const saveIdx = actionsSrc.indexOf("export async function saveSealingProductAction");
     const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const saveBlock = actionsSrc.slice(saveIdx, fireIdx);
+    expect(saveBlock).toMatch(/eventType: "PRODUCT_MAPPED"/);
+    expect(saveBlock).toMatch(/source: "SEALING_SELECTION"/);
+
+    const fireIdx2 = actionsSrc.indexOf("export async function fireStageEventAction");
     const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).toMatch(/eventType: "PRODUCT_MAPPED"/);
-    expect(block).toMatch(/source: "SEALING_SELECTION"/);
-    const mapIdx = block.indexOf('eventType: "PRODUCT_MAPPED"');
-    const sealIdx = block.indexOf("await projectEvent(tx, {", mapIdx + 1);
-    expect(mapIdx).toBeGreaterThan(-1);
-    expect(sealIdx).toBeGreaterThan(mapIdx);
+    const fireBlock = actionsSrc.slice(fireIdx2, pauseIdx);
+    expect(fireBlock).not.toMatch(
+      /!bagProductRow\?\.productId &&\s*pickedSealingProductId/,
+    );
   });
 
   it("handpack lot lookup runs inside transaction after product map", () => {
@@ -310,24 +333,27 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
   });
 
   it("rejects routine remapping when product already set", () => {
-    expect(actionsSrc).toMatch(
-      /Product is already set on this bag and cannot be changed here/,
-    );
+    expect(actionsSrc).toMatch(/SEALING_PRODUCT_ALREADY_SAVED_ERROR/);
   });
 
-  it("requires product before sealing segment when bag has no product", () => {
-    expect(actionsSrc).toMatch(
-      /Select the finished product before recording a sealing segment/,
-    );
+  it("requires saved product before sealing segment or close-out", () => {
+    expect(actionsSrc).toMatch(/SEALING_SAVE_PRODUCT_FIRST_ERROR/);
   });
 
   it("resolves tablet type via shared workflow bag resolver for sealing pick", () => {
+    const saveIdx = actionsSrc.indexOf("export async function saveSealingProductAction");
     const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    const block = actionsSrc.slice(saveIdx, fireIdx);
     expect(block).toMatch(/resolveWorkflowBagTabletTypeId/);
-    const mapBlock = block.slice(block.indexOf('eventType: "PRODUCT_MAPPED"') - 400);
-    expect(mapBlock).not.toMatch(/bagQrCode/);
+    expect(block).not.toMatch(/bagQrCode/);
+  });
+});
+
+describe("SEALING-PRODUCT-PERSIST-1 · projector read model", () => {
+  it("PRODUCT_MAPPED updates read_bag_state product columns", () => {
+    expect(projectorSrc).toMatch(/ev\.eventType === "PRODUCT_MAPPED"/);
+    expect(projectorSrc).toMatch(/productId,/);
+    expect(projectorSrc).toMatch(/productName,/);
   });
 });
 
