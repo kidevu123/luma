@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.73] — 2026-06-02
+
+### Added (MATERIAL-CHANGE-RECOVERY-DRY-RUN-1)
+- **Material-change recovery dry-run foundation:** Pure planning helpers and tests preview roll-change recovery events, blockers, warnings, before/after state, and read-model impact without querying or mutating production data.
+- **Safety guardrails:** Dry-run planning blocks finalized/finished-lot boundaries, duplicate segment risk, ambiguous active rolls, missing requester/reason, and replacement-roll prior-count attribution.
+- **No apply path:** This slice adds no admin UI, no confirm/apply action, no event writes, no roll-lot updates, and no read-model rebuilds.
+
 ## [0.4.72] — 2026-06-02
 
 ### Changed (HANDPACK-TABLET-CONTEXT-1)
