@@ -16,6 +16,8 @@ import { getFloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot
 import { db } from "@/lib/db";
 import { companies, userDashboardConfig } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
+import { buildActNowPanel } from "@/lib/floor-command/act-now";
+import { parseFloorBoardMode } from "@/lib/floor-command/floor-board-mode";
 import { FloorCommandClient } from "./_components/floor-command-client";
 import type { WidgetLayout } from "@/lib/floor-command/types";
 import { DEFAULT_LAYOUT } from "@/lib/floor-command/types";
@@ -40,8 +42,15 @@ async function safe<T>(name: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export default async function FloorBoardPage() {
-  console.log("[floor-board] PAGE START");
+export default async function FloorBoardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ mode?: string }>;
+}) {
+  const { mode: modeParam } = await searchParams;
+  const mode = parseFloorBoardMode(modeParam);
+
+  console.log("[floor-board] PAGE START mode=", mode);
   const user = await requireSession();
   const tz = await getCompanyTimezone();
   console.log("[floor-board] tz:", tz);
@@ -105,14 +114,22 @@ export default async function FloorBoardPage() {
     managerSnapshot,
   };
 
+  const actNowItems = buildActNowPanel(
+    managerSnapshot,
+    attentionItems,
+    productionIntelligence,
+  );
+
   console.log("[floor-board] rendering FloorCommandClient");
 
   return (
     <FloorCommandClient
+      mode={mode}
       shiftStatus={shiftStatus}
       kpiData={kpiData}
       productionIntelligence={productionIntelligence}
       managerSnapshot={managerSnapshot}
+      actNowItems={actNowItems}
       savedLayout={savedLayout}
       widgetData={widgetData}
     />
