@@ -1,13 +1,20 @@
 # Changelog
 
-## [0.4.68] — 2026-06-01
+## [0.4.69] — 2026-06-02
 
 ### Added (STATION-MGMT-1)
 - **Machines & stations admin slice:** Edit machine/station display names, deactivate/reactivate (no hard delete), active vs inactive lists on `/machines`. Uses existing `is_active` columns — no migration.
-- **Floor guard:** Inactive stations show a clear block message on `/floor/[token]` and reject new floor actions while preserving scan tokens and historical data.
+- **Floor guard:** Inactive stations show a clear block message on `/floor/[token]` and reject new floor actions while preserving scan tokens and historical data. End shift / close session remains allowed so operators can exit cleanly.
 
 ### Tests added (STATION-MGMT-1)
 - Station management helper and admin/floor wiring tests (access, edit-without-token-rotation, deactivate guards, no hard delete, inactive floor block).
+
+### Changed (PARTIAL-ROLL-SWAP-LAUNCH-P1)
+- **Mid-bag material changes now require old-roll status:** Operators choose whether the removed PVC/Foil roll is finished/depleted or removed with material remaining.
+- **Partial roll removal:** Choosing “Removed with material remaining” records the same bag/roll counter segment, emits `ROLL_UNMOUNTED` instead of `ROLL_DEPLETED`, returns the old roll to `AVAILABLE`, and mounts the replacement roll without assigning it the prior count.
+
+### Tests added (PARTIAL-ROLL-SWAP-LAUNCH-P1)
+- Source/wiring tests cover old-roll status UI, server event branching, depleted-path compatibility, partial-removal payloads, and event ordering.
 
 ## [0.4.67] — 2026-06-01
 

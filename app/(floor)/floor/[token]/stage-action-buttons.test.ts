@@ -675,7 +675,7 @@ describe("BLISTER-MACHINE-COUNTER-1 · blister close-out uses machine counter", 
 
 describe("ROLL-CHANGE-WORKFLOW-1 · inline roll-change card on pause", () => {
   const rollCardIdx = src.indexOf("function RollChangeCard");
-  const rollCardBlock = rollCardIdx >= 0 ? src.slice(rollCardIdx, rollCardIdx + 3000) : "";
+  const rollCardBlock = rollCardIdx >= 0 ? src.slice(rollCardIdx, rollCardIdx + 5200) : "";
 
   it("changeRollAction is imported from ./roll-actions", () => {
     expect(src).toMatch(/import.*changeRollAction.*from.*\.\/roll-actions/);
@@ -706,6 +706,13 @@ describe("ROLL-CHANGE-WORKFLOW-1 · inline roll-change card on pause", () => {
 
   it("counterSegmentCount is submitted in RollChangeCard form data", () => {
     expect(rollCardBlock).toMatch(/fd\.set\(["']counterSegmentCount["']/);
+  });
+
+  it("oldRollEndState is required and submitted in RollChangeCard form data", () => {
+    expect(rollCardBlock).toMatch(/oldRollEndState/);
+    expect(rollCardBlock).toMatch(/removed_partial/);
+    expect(rollCardBlock).toMatch(/fd\.set\(["']oldRollEndState["']/);
+    expect(rollCardBlock).toMatch(/disabled.*oldRollEndState/s);
   });
 
   it("newRollNumber is submitted in RollChangeCard form data", () => {

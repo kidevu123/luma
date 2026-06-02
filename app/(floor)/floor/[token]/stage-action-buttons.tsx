@@ -1516,6 +1516,9 @@ function RollChangeCard({
   const [counterSegment, setCounterSegment] = React.useState("");
   const [newRollNumber, setNewRollNumber] = React.useState("");
   const [newStartingWeight, setNewStartingWeight] = React.useState("");
+  const [oldRollEndState, setOldRollEndState] = React.useState<
+    "depleted" | "removed_partial" | ""
+  >("");
   const [done, setDone] = React.useState(false);
   const [localError, setLocalError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
@@ -1550,6 +1553,47 @@ function RollChangeCard({
         scrollSafe
       />
 
+      <fieldset className="space-y-2">
+        <legend className="block text-xs font-medium text-text-muted">
+          Old {label} roll status
+        </legend>
+        <label className="flex items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+          <input
+            type="radio"
+            name="oldRollEndState"
+            value="depleted"
+            checked={oldRollEndState === "depleted"}
+            onChange={() => setOldRollEndState("depleted")}
+            className="mt-1"
+          />
+          <span>
+            <span className="block font-medium">Finished / depleted</span>
+            <span className="block text-xs text-text-muted">
+              Mark the old roll depleted after assigning this count.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+          <input
+            type="radio"
+            name="oldRollEndState"
+            value="removed_partial"
+            checked={oldRollEndState === "removed_partial"}
+            onChange={() => setOldRollEndState("removed_partial")}
+            className="mt-1"
+          />
+          <span>
+            <span className="block font-medium">
+              Removed with material remaining
+            </span>
+            <span className="block text-xs text-text-muted">
+              The old roll will be removed and can be mounted again later. It
+              will not be marked depleted.
+            </span>
+          </span>
+        </label>
+      </fieldset>
+
       <label className="block text-sm">
         <span className="block text-xs font-medium text-text-muted mb-1">
           New {label} roll number
@@ -1579,7 +1623,7 @@ function RollChangeCard({
 
       <button
         type="button"
-        disabled={pending || !counterSegment || !newRollNumber}
+        disabled={pending || !counterSegment || !oldRollEndState || !newRollNumber}
         onClick={async () => {
           setPending(true);
           setLocalError(null);
@@ -1590,6 +1634,7 @@ function RollChangeCard({
             fd.set("workflowBagId", workflowBagId);
             fd.set("role", role);
             fd.set("counterSegmentCount", counterSegment);
+            fd.set("oldRollEndState", oldRollEndState);
             fd.set("newRollNumber", newRollNumber);
             if (newStartingWeight)
               fd.set("newStartingWeightGrams", newStartingWeight);
