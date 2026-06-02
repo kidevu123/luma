@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.77] — 2026-06-02
+
+### Added (RECOVERY-DRY-RUN-HARNESS-1)
+- **Read-only recovery CLI:** `scripts/material-change-recovery-dry-run.ts` loads real bag/station/roll context and runs `planMaterialChangeRecovery` without writing data.
+- **Clear dry-run reporting:** Human and `--json` output include eligibility, blockers, warnings, before/after preview, proposed preview events (NOT PERSISTED), and affected read models.
+- **Exit codes:** `0` for OK/WARNING preview, `2` for BLOCKED planner result, `1` for invalid input/runtime failure.
+- **No apply path:** No admin UI, no server actions, no event writes, no read-model rebuilds.
+
+### Tests added (RECOVERY-DRY-RUN-HARNESS-1)
+- CLI parsing, exit-code, report, loader mapping, and mutation source guards.
+
 ## [0.4.76] — 2026-06-02
 
 ### Added (COUNTER-SNAPSHOT-GUARD-1)
