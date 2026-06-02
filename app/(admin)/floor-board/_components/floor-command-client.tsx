@@ -22,8 +22,11 @@ import { ProductionManagerWidget } from "./widgets/production-manager-widget";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import { WidgetGrid, type WidgetGridData } from "./widget-grid";
 import { WidgetPicker } from "./widget-picker";
+import { stageKeyToMetricsLane } from "@/lib/floor-command/metrics-links";
 import { ActNowPanel } from "./act-now-panel";
+import { MetricsQuickLinks } from "./metrics-quick-links";
 import { OwnerPulseStrip } from "./owner-pulse-strip";
+import { TvRotationPanel } from "./tv-rotation-panel";
 
 type Props = {
   mode: FloorBoardMode;
@@ -137,6 +140,12 @@ export function FloorCommandClient({
     [isTv],
   );
 
+  const metricsLane = useMemo(() => {
+    const sk = productionIntelligence.bottleneck.stageKey;
+    if (sk.confidence === "MISSING" || typeof sk.value !== "string") return null;
+    return stageKeyToMetricsLane(sk.value);
+  }, [productionIntelligence.bottleneck.stageKey]);
+
   return (
     <div className={rootClass}>
       <div className="flex items-center gap-2 flex-shrink-0 border-b border-white/10">
@@ -212,8 +221,13 @@ export function FloorCommandClient({
         </div>
         {!isTv && <ActNowPanel items={actNowItems} />}
         {isTv && (
-          <div className="w-[min(40%,360px)] border-l border-white/10 p-2 overflow-y-auto">
-            <ActNowPanel items={actNowItems} compact />
+          <div className="w-[min(42%,400px)] shrink-0 min-h-0">
+            <TvRotationPanel
+              shiftStatus={shiftStatus}
+              actNowItems={actNowItems}
+              intelligence={productionIntelligence}
+              throughputPoints={widgetData.throughputPoints}
+            />
           </div>
         )}
       </div>
@@ -250,6 +264,7 @@ export function FloorCommandClient({
         </div>
       )}
 
+      {!isTv && <MetricsQuickLinks lane={metricsLane} />}
       <div className={isTv ? "scale-110 origin-bottom" : ""}>
         <ProductionIntelligenceStrip data={productionIntelligence} />
         {!isTv && <KpiStrip data={kpiData} />}

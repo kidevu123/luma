@@ -44,6 +44,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
+import { MetricsHashScroll } from "@/components/metrics/metrics-hash-scroll";
 
 export const dynamic = "force-dynamic";
 
@@ -457,6 +458,7 @@ export default async function MetricsPage({
 
   return (
     <div className="space-y-5">
+      <MetricsHashScroll />
       <MetricsTabs />
       <PageHeader
         title="Metrics"
@@ -542,6 +544,7 @@ export default async function MetricsPage({
       </div>
 
       {/* Cycle time deep dive */}
+      <section id="cycle-time" className="scroll-mt-20">
       <Card>
         <CardHeader>
           <CardTitle>Cycle time (across {totalBags} bags)</CardTitle>
@@ -577,8 +580,10 @@ export default async function MetricsPage({
           </DataTable>
         </CardContent>
       </Card>
+      </section>
 
       {/* Per-product (flavor) */}
+      <section id="by-product" className="scroll-mt-20">
       <Card>
         <CardHeader>
           <CardTitle>By product / flavor</CardTitle>
@@ -620,8 +625,10 @@ export default async function MetricsPage({
           )}
         </CardContent>
       </Card>
+      </section>
 
       {/* Per-machine */}
+      <section id="by-machine" className="scroll-mt-20">
       <Card>
         <CardHeader>
           <CardTitle>By machine</CardTitle>
@@ -671,8 +678,10 @@ export default async function MetricsPage({
           )}
         </CardContent>
       </Card>
+      </section>
 
       {/* Per-station activity */}
+      <section id="by-station" className="scroll-mt-20">
       <Card>
         <CardHeader>
           <CardTitle>By station</CardTitle>
@@ -710,8 +719,10 @@ export default async function MetricsPage({
           )}
         </CardContent>
       </Card>
+      </section>
 
       {/* Operator leaderboard */}
+      <section id="operators" className="scroll-mt-20">
       <Card>
         <CardHeader>
           <CardTitle>Operator leaderboard</CardTitle>
@@ -754,8 +765,10 @@ export default async function MetricsPage({
           )}
         </CardContent>
       </Card>
+      </section>
 
       {/* Downtime breakdown */}
+      <section id="downtime" className="scroll-mt-20">
       <Card>
         <CardHeader>
           <CardTitle>Downtime by reason</CardTitle>
@@ -799,8 +812,10 @@ export default async function MetricsPage({
           )}
         </CardContent>
       </Card>
+      </section>
 
       {/* Daily throughput chart */}
+      <section id="daily-throughput" className="scroll-mt-20">
       <Card>
         <CardHeader>
           <CardTitle>Daily throughput ({days}d)</CardTitle>
@@ -847,8 +862,10 @@ export default async function MetricsPage({
           )}
         </CardContent>
       </Card>
+      </section>
 
       {/* Material burn */}
+      <section id="material-burn" className="scroll-mt-20">
       <Card>
         <CardHeader>
           <CardTitle>Material burn ({days}d)</CardTitle>
@@ -886,6 +903,7 @@ export default async function MetricsPage({
           )}
         </CardContent>
       </Card>
+      </section>
     </div>
   );
 }

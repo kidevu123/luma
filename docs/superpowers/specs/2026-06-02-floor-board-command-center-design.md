@@ -92,7 +92,7 @@ Each row: title, detail, link to bag/station/`/metrics` where applicable.
 | 1 | Layout: map + Act Now sidebar; remove duplicate heroes; modes query param |
 | 2 | Owner pulse strip; manager drawer default by mode |
 | 3 | TV mode styling |
-| 4 | TV rotation; top-20 metrics links on `/metrics` |
+| 4 | TV rotation; deep links on `/metrics` — **shipped** |
 
 ## Testing
 

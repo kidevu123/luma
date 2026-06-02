@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { metricsUrl } from "@/lib/floor-command/metrics-links";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 
 export function OwnerPulseStrip({
@@ -62,7 +63,7 @@ export function OwnerPulseStrip({
           Dashboard →
         </Link>
         <Link
-          href="/metrics"
+          href={metricsUrl("daily-throughput", 30)}
           className="text-[10px] text-sky-400 hover:text-sky-300"
         >
           Metrics →

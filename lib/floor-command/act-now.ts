@@ -2,6 +2,12 @@
 // composition from existing server bundles (no extra DB).
 
 import type { AttentionItem } from "@/lib/floor-command/types";
+import {
+  bottleneckMetricsHref,
+  metricsLaneUrl,
+  metricsUrl,
+  stageKeyToMetricsLane,
+} from "@/lib/floor-command/metrics-links";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import type { FloorProductionIntelligence } from "@/lib/production/floor-production-intelligence-types";
 
@@ -77,6 +83,7 @@ export function buildActNowPanel(
       severity: pausedCount > 2 ? "crit" : "warn",
       title: `${pausedCount} bag${pausedCount === 1 ? "" : "s"} paused >30m`,
       detail: "Check floor for forgotten work",
+      href: metricsUrl("downtime", 7),
     });
   }
 
@@ -87,6 +94,7 @@ export function buildActNowPanel(
         severity: "warn",
         title: a.label,
         detail: a.detail,
+        href: metricsUrl("by-station", 7),
       });
     }
     if (a.type === "rework_pending") {
@@ -100,11 +108,17 @@ export function buildActNowPanel(
   }
 
   if (plant.laneImbalanceLabel) {
+    const lane = stageKeyToMetricsLane(
+      typeof intelligence.bottleneck.stageKey.value === "string"
+        ? intelligence.bottleneck.stageKey.value
+        : null,
+    );
     items.push({
       id: "lane-imbalance",
       severity: "warn",
       title: "Lane imbalance",
       detail: plant.laneImbalanceLabel,
+      href: lane ? metricsLaneUrl(lane, 7) : metricsUrl("cycle-time", 7),
     });
   }
 
@@ -114,7 +128,7 @@ export function buildActNowPanel(
       severity: "crit",
       title: "Damage cluster",
       detail: "Elevated damage this hour — check packaging QC",
-      href: "/metrics",
+      href: metricsUrl("by-product", 7),
     });
   }
 
@@ -124,11 +138,16 @@ export function buildActNowPanel(
       severity: plant.materialRunwayDays < 1 ? "crit" : "warn",
       title: "Material runway low",
       detail: `${plant.materialRunwayDays.toFixed(1)} days remaining`,
-      href: "/material-alerts",
+      href: metricsUrl("material-burn", 30),
     });
   }
 
   const bn = bottleneckLabel(intelligence);
+  const stageRaw =
+    intelligence.bottleneck.stageKey.confidence !== "MISSING" &&
+    typeof intelligence.bottleneck.stageKey.value === "string"
+      ? intelligence.bottleneck.stageKey.value
+      : null;
   const oldest = intelligence.bottleneck.oldestAgeMinutes.value;
   const wip = intelligence.bottleneck.wip.value;
   if (bn && bn !== "—" && bn !== "no bottleneck — queues clear") {
@@ -150,7 +169,7 @@ export function buildActNowPanel(
       ]
         .filter(Boolean)
         .join(" · "),
-      href: "/metrics",
+      href: bottleneckMetricsHref(stageRaw),
     });
   }
 
