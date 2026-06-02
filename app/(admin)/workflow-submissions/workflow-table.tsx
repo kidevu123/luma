@@ -19,6 +19,10 @@ export type WorkflowBagRow = {
   id: string;
   receiptNumber: string | null;
   bagNumber: number | null;
+  inventoryBagNumber: number | null;
+  tabletTypeName: string | null;
+  receiveName: string | null;
+  poNumber: string | null;
   /** ISO string — serialized at the RSC boundary. */
   startedAt: string;
   finalizedAt: string | null;
@@ -95,6 +99,35 @@ function fmtSeconds(s: number | null): string {
   const m = Math.floor((s % 3600) / 60);
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+function buildBagLabel(bag: WorkflowBagRow): {
+  primary: string;
+  secondary: string;
+  isLegacyFallback: boolean;
+} {
+  const shortId = `${bag.id.slice(0, 8)}…`;
+  const bagNumber = bag.inventoryBagNumber ?? bag.bagNumber;
+  const context = bag.tabletTypeName ?? bag.productName;
+  const parts = [
+    bag.poNumber ? `PO ${bag.poNumber}` : null,
+    context,
+    bagNumber != null ? `Bag ${bagNumber}` : null,
+  ].filter((part): part is string => part != null && part.trim() !== "");
+
+  if (parts.length > 0) {
+    return {
+      primary: parts.join(" · "),
+      secondary: `Workflow ${shortId}`,
+      isLegacyFallback: false,
+    };
+  }
+
+  return {
+    primary: `Legacy bag ${shortId}`,
+    secondary: "Missing received-bag context",
+    isLegacyFallback: true,
+  };
 }
 
 function extractSubmissionLines(
@@ -332,6 +365,7 @@ function BagRow({ bag }: { bag: WorkflowBagRow }) {
     : "border-border bg-surface-2 text-text-subtle";
 
   const shortId = bag.id.slice(0, 8);
+  const bagLabel = buildBagLabel(bag);
 
   return (
     <>
@@ -364,11 +398,19 @@ function BagRow({ bag }: { bag: WorkflowBagRow }) {
           )}
         </TD>
 
-        <TD className="text-[12px] font-mono">
-          <span className="text-text-muted">{shortId}…</span>
-          {bag.bagNumber !== null && (
-            <span className="ml-1 text-text-subtle">#{bag.bagNumber}</span>
-          )}
+        <TD className="text-[12px]">
+          <div
+            className={cn(
+              "font-medium",
+              bagLabel.isLegacyFallback ? "font-mono text-text-muted" : "text-text-strong",
+            )}
+            title={`Workflow bag ${shortId}`}
+          >
+            {bagLabel.primary}
+          </div>
+          <div className="mt-0.5 font-mono text-[10px] text-text-subtle">
+            {bagLabel.secondary}
+          </div>
         </TD>
 
         <TD>

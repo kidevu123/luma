@@ -6,12 +6,17 @@
 import { db } from "@/lib/db";
 import {
   workflowBags,
+  inventoryBags,
+  tabletTypes,
+  smallBoxes,
+  receives,
+  purchaseOrders,
   products,
   readBagState,
   readBagMetrics,
   workflowEvents,
 } from "@/lib/db/schema";
-import { eq, desc, and, or, ilike, gte, lte, count } from "drizzle-orm";
+import { eq, desc, and, or, ilike, gte, lte, count, sql } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { PageHeader, EmptyState } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -52,6 +57,10 @@ export default async function WorkflowSubmissionsPage({
     conditions.push(
       or(
         ilike(workflowBags.receiptNumber, `%${q}%`),
+        ilike(inventoryBags.internalReceiptNumber, `%${q}%`),
+        ilike(tabletTypes.name, `%${q}%`),
+        ilike(receives.receiveName, `%${q}%`),
+        ilike(purchaseOrders.poNumber, `%${q}%`),
         ilike(products.name, `%${q}%`),
       ),
     );
@@ -78,8 +87,12 @@ export default async function WorkflowSubmissionsPage({
   const rows = await db
     .select({
       id: workflowBags.id,
-      receiptNumber: workflowBags.receiptNumber,
+      receiptNumber: sql<string | null>`COALESCE(${inventoryBags.internalReceiptNumber}, ${workflowBags.receiptNumber})`,
       bagNumber: workflowBags.bagNumber,
+      inventoryBagNumber: inventoryBags.bagNumber,
+      tabletTypeName: tabletTypes.name,
+      receiveName: receives.receiveName,
+      poNumber: purchaseOrders.poNumber,
       startedAt: workflowBags.startedAt,
       finalizedAt: workflowBags.finalizedAt,
       productName: products.name,
@@ -104,6 +117,11 @@ export default async function WorkflowSubmissionsPage({
       eventCount: count(workflowEvents.id),
     })
     .from(workflowBags)
+    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+    .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+    .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+    .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+    .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
     .leftJoin(products, eq(products.id, workflowBags.productId))
     .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
     .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
@@ -112,7 +130,12 @@ export default async function WorkflowSubmissionsPage({
     .groupBy(
       workflowBags.id,
       workflowBags.receiptNumber,
+      inventoryBags.internalReceiptNumber,
       workflowBags.bagNumber,
+      inventoryBags.bagNumber,
+      tabletTypes.name,
+      receives.receiveName,
+      purchaseOrders.poNumber,
       workflowBags.startedAt,
       workflowBags.finalizedAt,
       products.name,
@@ -142,6 +165,10 @@ export default async function WorkflowSubmissionsPage({
     id: r.id,
     receiptNumber: r.receiptNumber ?? null,
     bagNumber: r.bagNumber ?? null,
+    inventoryBagNumber: r.inventoryBagNumber ?? null,
+    tabletTypeName: r.tabletTypeName ?? null,
+    receiveName: r.receiveName ?? null,
+    poNumber: r.poNumber ?? null,
     startedAt: r.startedAt.toISOString(),
     finalizedAt: r.finalizedAt?.toISOString() ?? null,
     productName: r.productName ?? null,
