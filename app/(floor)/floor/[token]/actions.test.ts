@@ -319,6 +319,16 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
     expect(block).toMatch(/tablet_type_id: inventoryLink\.tabletTypeId/);
   });
 
+  it("scanCardAction blocks fresh start when floor readiness is BLOCKED", () => {
+    const scanIdx = actionsSrc.indexOf("export async function scanCardAction");
+    const stageIdx = actionsSrc.indexOf("// ── stage events");
+    const block = actionsSrc.slice(scanIdx, stageIdx);
+    expect(block).toMatch(/evaluateQrCardReadinessById/);
+    expect(block).toMatch(/floorReadinessOperatorMessage/);
+    expect(block).not.toMatch(/override.*lineage/i);
+    expect(block).not.toMatch(/guess/i);
+  });
+
   it("does not emit PRODUCT_MAPPED at scan when first-op returns null product", () => {
     const scanIdx = actionsSrc.indexOf("export async function scanCardAction");
     const stageIdx = actionsSrc.indexOf("// ── stage events");

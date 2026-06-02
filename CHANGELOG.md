@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.79] — 2026-06-02
+
+### Added (PRODUCTION-DATA-ENTRY-HARDENING-1)
+- **Ready for floor validation:** Pure helpers evaluate inventory-bag and QR-card lineage (receipt, tablet, physical QR link, receive/PO context) before production start.
+- **Receiving visibility:** Inbound receive detail shows per-bag floor-readiness badges with admin guidance.
+- **Floor/admin blocks:** Fresh-bag floor scan and admin Start production refuse `BLOCKED` lineage with operator-safe copy — no guessing or override.
+- **No migrations:** Readiness is computed from existing tables; product remains deferred to sealing (`saveSealingProductAction`).
+
+### Tests added (PRODUCTION-DATA-ENTRY-HARDENING-1)
+- `lib/production/floor-readiness.test.ts` plus source guards on floor scan and admin start paths.
+
 ## [0.4.78] — 2026-06-02
 
 ### Added (SHIFT-REVIEW-1)

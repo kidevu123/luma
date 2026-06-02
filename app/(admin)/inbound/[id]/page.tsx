@@ -16,6 +16,8 @@ import { batches, tabletTypes } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { BagEditHistoryPanel } from "./bag-edit-history-panel";
 import { BagNotesCell } from "./bag-notes-cell";
+import { FloorReadinessBadge } from "@/components/admin/floor-readiness-badge";
+import { loadReceiveBagReadinessEvaluations } from "@/lib/production/floor-readiness-loaders";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -76,6 +78,8 @@ export default async function ReceiveDetailPage({
   const batchLabels = new Map(
     batchRows.map((b) => [b.id, b.batchNumber ?? b.id.slice(0, 8)]),
   );
+  const readinessByBag = await loadReceiveBagReadinessEvaluations(db, bagIds);
+
   const bagEditHistories = groupBagEditHistories({
     bags: r.bags.map((b) => ({
       id: b.id,
@@ -207,6 +211,7 @@ export default async function ReceiveDetailPage({
                       <TH className="text-right">Weight (kg)</TH>
                       <TH>Notes</TH>
                       <TH>Status</TH>
+                      <TH>Floor ready</TH>
                       <TH>Edits</TH>
                       <TH className="text-right">Actions</TH>
                     </TR>
@@ -241,6 +246,16 @@ export default async function ReceiveDetailPage({
                           </TD>
                           <TD>
                             <BagStatus status={bag.status} />
+                          </TD>
+                          <TD>
+                            {readinessByBag.get(bag.id) ? (
+                              <FloorReadinessBadge
+                                evaluation={readinessByBag.get(bag.id)!}
+                                showAction
+                              />
+                            ) : (
+                              <span className="text-xs text-text-muted">—</span>
+                            )}
                           </TD>
                           <TD className="text-xs text-text-muted">
                             {editCount === 0 ? (

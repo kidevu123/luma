@@ -39,6 +39,7 @@ import {
 } from "@/lib/db/queries/raw-bag-intake";
 import { validateRawBagQrForStart } from "@/lib/production/start-production";
 import { FIRST_OP_STATION_KINDS } from "@/lib/production/first-op-product";
+import { evaluateInventoryBagReadinessById } from "@/lib/production/floor-readiness-loaders";
 
 export type StartProductionResult =
   | {
@@ -84,6 +85,17 @@ export async function startProductionForRawBagAction(
     .where(eq(inventoryBags.id, input.inventoryBagId))
     .limit(1);
   if (!bag) return { ok: false, error: "Raw bag not found." };
+
+  const readiness = await evaluateInventoryBagReadinessById(db, bag.id);
+  if (readiness?.level === "BLOCKED") {
+    return {
+      ok: false,
+      error:
+        readiness.adminAction ??
+        "This bag is not ready for the floor. Complete receiving before starting production.",
+    };
+  }
+
   if (bag.status !== "AVAILABLE") {
     return {
       ok: false,

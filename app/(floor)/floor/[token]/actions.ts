@@ -20,6 +20,8 @@ import {
 } from "@/lib/db/schema";
 import { isPartialBagResume } from "@/lib/production/bag-allocation";
 import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
+import { floorReadinessOperatorMessage } from "@/lib/production/floor-readiness";
+import { evaluateQrCardReadinessById } from "@/lib/production/floor-readiness-loaders";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
 import {
@@ -253,18 +255,25 @@ export async function scanCardAction(
         });
         if (!firstOp.ok) throw new Error(firstOp.reason);
 
+        const readiness = await evaluateQrCardReadinessById(tx, cardId);
+        if (!readiness) throw new Error("Card not found.");
+        if (readiness.level === "BLOCKED") {
+          throw new Error(floorReadinessOperatorMessage(readiness));
+        }
+
         const productIdToSet = firstOp.productId; // null when not first-op
         const inventoryLink = await lookupInventoryBagByQrScanToken(
           tx,
           card.scanToken,
         );
+        if (!inventoryLink?.inventoryBagId) {
+          throw new Error(floorReadinessOperatorMessage(readiness));
+        }
         const [bag] = await tx
           .insert(workflowBags)
           .values({
             ...(productIdToSet ? { productId: productIdToSet } : {}),
-            ...(inventoryLink
-              ? { inventoryBagId: inventoryLink.inventoryBagId }
-              : {}),
+            inventoryBagId: inventoryLink.inventoryBagId,
           })
           .returning();
         if (!bag) throw new Error("Could not create workflow bag.");
@@ -279,12 +288,8 @@ export async function scanCardAction(
           payload: {
             qr_card_id: cardId,
             station_kind: station.kind,
-            ...(inventoryLink
-              ? {
-                  inventory_bag_id: inventoryLink.inventoryBagId,
-                  tablet_type_id: inventoryLink.tabletTypeId,
-                }
-              : {}),
+            inventory_bag_id: inventoryLink.inventoryBagId,
+            tablet_type_id: inventoryLink.tabletTypeId,
           },
           enteredByUserId: accountability.enteredByUserId,
           accountableEmployeeId: accountability.accountableEmployeeId,
@@ -402,18 +407,25 @@ export async function scanCardAction(
           });
           if (!firstOp.ok) throw new Error(firstOp.reason);
 
+          const resumeReadiness = await evaluateQrCardReadinessById(tx, cardId);
+          if (!resumeReadiness) throw new Error("Card not found.");
+          if (resumeReadiness.level === "BLOCKED") {
+            throw new Error(floorReadinessOperatorMessage(resumeReadiness));
+          }
+
           const productIdToSet = firstOp.productId;
           const inventoryLink = await lookupInventoryBagByQrScanToken(
             tx,
             card.scanToken,
           );
+          if (!inventoryLink?.inventoryBagId) {
+            throw new Error(floorReadinessOperatorMessage(resumeReadiness));
+          }
           const [resumeBag] = await tx
             .insert(workflowBags)
             .values({
               ...(productIdToSet ? { productId: productIdToSet } : {}),
-              ...(inventoryLink
-                ? { inventoryBagId: inventoryLink.inventoryBagId }
-                : {}),
+              inventoryBagId: inventoryLink.inventoryBagId,
             })
             .returning();
           if (!resumeBag) throw new Error("Could not create workflow bag for partial-bag resume.");
@@ -430,12 +442,8 @@ export async function scanCardAction(
             payload: {
               qr_card_id: cardId,
               station_kind: station.kind,
-              ...(inventoryLink
-                ? {
-                    inventory_bag_id: inventoryLink.inventoryBagId,
-                    tablet_type_id: inventoryLink.tabletTypeId,
-                  }
-                : {}),
+              inventory_bag_id: inventoryLink.inventoryBagId,
+              tablet_type_id: inventoryLink.tabletTypeId,
             },
             enteredByUserId: accountability.enteredByUserId,
             accountableEmployeeId: accountability.accountableEmployeeId,

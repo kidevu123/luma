@@ -1,0 +1,174 @@
+import { describe, expect, it } from "vitest";
+import {
+  evaluateInventoryBagReadiness,
+  evaluateQrCardReadiness,
+  evaluateWorkflowBagReadiness,
+  floorReadinessOperatorMessage,
+  isBagQrPlaceholder,
+  type InventoryBagReadinessInput,
+  type QrCardReadinessInput,
+} from "./floor-readiness";
+
+const readyBag = (): InventoryBagReadinessInput => ({
+  internalReceiptNumber: "PO1-1-B1-1",
+  tabletTypeId: "tablet-1",
+  bagQrCode: "bag-card-100",
+  hasReceiveContext: true,
+  receivePoId: "po-1",
+  qrCard: {
+    cardType: "RAW_BAG",
+    status: "ASSIGNED",
+    assignedWorkflowBagId: null,
+    scanToken: "bag-card-100",
+  },
+});
+
+const readyCard = (): QrCardReadinessInput => ({
+  cardType: "RAW_BAG",
+  status: "ASSIGNED",
+  assignedWorkflowBagId: null,
+  scanToken: "bag-card-100",
+});
+
+describe("evaluateInventoryBagReadiness", () => {
+  it("returns READY_FOR_FLOOR when receipt, tablet, physical QR, and receive context exist", () => {
+    const r = evaluateInventoryBagReadiness(readyBag());
+    expect(r.level).toBe("READY_FOR_FLOOR");
+    expect(r.codes).toEqual([]);
+  });
+
+  it("blocks missing receipt", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      internalReceiptNumber: null,
+    });
+    expect(r.level).toBe("BLOCKED");
+    expect(r.codes).toContain("BLOCKED_MISSING_RECEIPT");
+  });
+
+  it("blocks missing tablet", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      tabletTypeId: null,
+    });
+    expect(r.level).toBe("BLOCKED");
+    expect(r.codes).toContain("BLOCKED_MISSING_TABLET");
+  });
+
+  it("blocks missing physical QR link", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      bagQrCode: null,
+      qrCard: null,
+    });
+    expect(r.codes).toContain("BLOCKED_MISSING_QR_LINK");
+  });
+
+  it("blocks BAG- placeholder without matching qr_cards row", () => {
+    expect(isBagQrPlaceholder("BAG-uuid")).toBe(true);
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      bagQrCode: "BAG-11111111-1111-1111-1111-111111111111",
+      qrCard: null,
+    });
+    expect(r.codes).toContain("WARNING_BAG_QR_PLACEHOLDER_ONLY");
+    expect(r.codes).toContain("BLOCKED_MISSING_QR_LINK");
+  });
+
+  it("warns when receive has no PO but does not block if otherwise ready", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      receivePoId: null,
+    });
+    expect(r.codes).toContain("WARNING_INCOMPLETE_OPTIONAL_CONTEXT");
+    expect(r.level).toBe("WARNING");
+  });
+
+  it("blocks broken receive chain", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      hasReceiveContext: false,
+    });
+    expect(r.codes).toContain("BLOCKED_MISSING_PO_OR_RECEIVE_CONTEXT");
+    expect(r.level).toBe("BLOCKED");
+  });
+});
+
+describe("evaluateQrCardReadiness", () => {
+  it("blocks QR with no inventory bag", () => {
+    const r = evaluateQrCardReadiness({
+      ...readyCard(),
+      inventoryBag: null,
+    });
+    expect(r.codes).toContain("BLOCKED_MISSING_INVENTORY_BAG_LINK");
+    expect(floorReadinessOperatorMessage(r)).toMatch(/not linked to a received bag/i);
+  });
+
+  it("blocks IDLE QR", () => {
+    const r = evaluateQrCardReadiness({
+      cardType: "RAW_BAG",
+      status: "IDLE",
+      assignedWorkflowBagId: null,
+      scanToken: "bag-card-200",
+      inventoryBag: null,
+    });
+    expect(r.codes).toContain("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED");
+  });
+
+  it("blocks active workflow assignment on fresh scan", () => {
+    const r = evaluateQrCardReadiness({
+      ...readyCard(),
+      assignedWorkflowBagId: "wf-active",
+      inventoryBag: readyBag(),
+    });
+    expect(r.codes).toContain("BLOCKED_QR_ALREADY_ACTIVE");
+  });
+
+  it("allows intake-reserved ready card + bag", () => {
+    const r = evaluateQrCardReadiness({
+      ...readyCard(),
+      inventoryBag: readyBag(),
+    });
+    expect(r.level).toBe("READY_FOR_FLOOR");
+  });
+});
+
+describe("evaluateWorkflowBagReadiness", () => {
+  it("legacy receipt alone does not make bag ready", () => {
+    const r = evaluateWorkflowBagReadiness({
+      inventoryBagId: null,
+      legacyReceiptNumber: "OLD-99",
+      productId: null,
+      inventoryBag: null,
+      qrCard: null,
+    });
+    expect(r.codes).toContain("BLOCKED_MISSING_INVENTORY_BAG_LINK");
+    expect(r.codes).toContain("WARNING_LEGACY_BAG");
+    expect(r.level).toBe("BLOCKED");
+  });
+
+  it("missing product is warning only (deferred to sealing)", () => {
+    const r = evaluateWorkflowBagReadiness({
+      inventoryBagId: "inv-1",
+      legacyReceiptNumber: null,
+      productId: null,
+      inventoryBag: readyBag(),
+      qrCard: readyCard(),
+    });
+    expect(r.codes).toContain("WARNING_PRODUCT_DEFERRED_TO_SEALING");
+    expect(r.level).not.toBe("BLOCKED");
+  });
+});
+
+describe("floorReadinessOperatorMessage", () => {
+  it("never includes internal ids", () => {
+    const msg = floorReadinessOperatorMessage({
+      level: "BLOCKED",
+      codes: ["BLOCKED_MISSING_RECEIPT"],
+      adminAction: null,
+    });
+    expect(msg).toMatch(/not ready for the floor/i);
+    expect(msg).not.toMatch(/uuid/i);
+    expect(msg).not.toMatch(/[0-9a-f]{8}-/i);
+  });
+});
