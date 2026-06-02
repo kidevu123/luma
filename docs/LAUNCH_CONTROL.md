@@ -31,6 +31,7 @@ docker compose exec -T -e ALLOW_STAGING_QA_DATA=true app node_modules/.bin/tsx s
 **Related docs:**
 
 - `docs/BLISTER_ROOM_READINESS_CHECKLIST.md` — operator/admin pre-shift and floor checklist
+- `docs/PRODUCTION_DATA_ENTRY_HARDENING_AUDIT.md` — receive → QR → floor lineage audit + proposed readiness gate (PRODUCTION-DATA-ENTRY-HARDENING-0)
 - `docs/CURRENT_PHASE_STATUS.md` — append-only historical phase log (older entries); use *this* doc for launch truth
 
 ---
