@@ -2,9 +2,9 @@
 
 **Scope:** Blister Room + Blister Hand Pack Station only. Use before first scan each shift and as a floor reference.
 
-**Live app baseline:** v0.4.73 @ `5c975ee9fced20a6b32e05ea72db79ce22afb8ae` (verify on shift day — see §1).
+**Live app baseline:** v0.4.74 @ `ae8be60…` (verify on shift day — see §1).
 
-**Companion:** `docs/LAUNCH_CONTROL.md` for shipped vs not-shipped features and PM task board.
+**Companion:** `docs/LAUNCH_CONTROL.md` for shipped vs not-shipped features and PM task board. Counter snapshot detail: `docs/PAUSE_ENDSHIFT_COUNTER_PROCEDURE.md`.
 
 ---
 
@@ -82,10 +82,13 @@ Complete **before** operators scan anything.
 
 ### Pause / end-shift counter snapshot
 
-- [ ] On machine jam or pause requiring snapshot: enter **machine counter** when prompted
-- [ ] Positive count closes roll counter segment for active PVC/foil
-- [ ] Zero is allowed as an explicit snapshot (no segment)
-- [ ] **After snapshot:** if current floor procedure requires it, **reset physical machine counter** to match training — snapshot is the system record; physical reset prevents double-counting on resume
+Full procedure: **`docs/PAUSE_ENDSHIFT_COUNTER_PROCEDURE.md`**
+
+- [ ] On machine jam or shift end: enter **good blisters since last reset** (segment count, not lifetime machine total)
+- [ ] Positive count records roll counter segment for active PVC/foil
+- [ ] Zero is allowed as an explicit snapshot (no segment emitted)
+- [ ] **After snapshot:** reset physical machine counter before resuming (trained procedure)
+- [ ] End shift with active bag: use operator panel **End shift** flow (captures counter + closes session)
 
 ### During-shift — call Sahil if
 
