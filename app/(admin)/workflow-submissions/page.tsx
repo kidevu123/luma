@@ -6,12 +6,13 @@
 import { db } from "@/lib/db";
 import {
   workflowBags,
+  inventoryBags,
   products,
   readBagState,
   readBagMetrics,
   workflowEvents,
 } from "@/lib/db/schema";
-import { eq, desc, and, or, ilike, gte, lte, count } from "drizzle-orm";
+import { eq, desc, and, or, ilike, gte, lte, count, sql } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { PageHeader, EmptyState } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ export default async function WorkflowSubmissionsPage({
     conditions.push(
       or(
         ilike(workflowBags.receiptNumber, `%${q}%`),
+        ilike(inventoryBags.internalReceiptNumber, `%${q}%`),
         ilike(products.name, `%${q}%`),
       ),
     );
@@ -78,7 +80,7 @@ export default async function WorkflowSubmissionsPage({
   const rows = await db
     .select({
       id: workflowBags.id,
-      receiptNumber: workflowBags.receiptNumber,
+      receiptNumber: sql<string | null>`COALESCE(${inventoryBags.internalReceiptNumber}, ${workflowBags.receiptNumber})`,
       bagNumber: workflowBags.bagNumber,
       startedAt: workflowBags.startedAt,
       finalizedAt: workflowBags.finalizedAt,
@@ -104,6 +106,7 @@ export default async function WorkflowSubmissionsPage({
       eventCount: count(workflowEvents.id),
     })
     .from(workflowBags)
+    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
     .leftJoin(products, eq(products.id, workflowBags.productId))
     .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
     .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
@@ -112,6 +115,7 @@ export default async function WorkflowSubmissionsPage({
     .groupBy(
       workflowBags.id,
       workflowBags.receiptNumber,
+      inventoryBags.internalReceiptNumber,
       workflowBags.bagNumber,
       workflowBags.startedAt,
       workflowBags.finalizedAt,
