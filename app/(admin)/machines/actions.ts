@@ -7,7 +7,11 @@ import {
   createMachine,
   createStation,
   rotateStationToken,
+  setMachineActive,
+  setStationActive,
   updateMachineCardsPerTurn,
+  updateMachineName,
+  updateStationLabel,
 } from "@/lib/db/queries/machines";
 
 const machineSchema = z.object({
@@ -118,4 +122,107 @@ export async function rotateTokenAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Rotate failed." };
   }
+}
+
+const updateMachineNameSchema = z.object({
+  machineId: z.string().uuid(),
+  name: z.string().min(1).max(60),
+});
+
+export async function updateMachineNameAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const actor = await requireAdmin();
+  const parsed = updateMachineNameSchema.safeParse({
+    machineId: formData.get("machineId"),
+    name: formData.get("name"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  try {
+    await updateMachineName(parsed.data.machineId, parsed.data.name, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Save failed." };
+  }
+  revalidatePath("/machines");
+  return { ok: true };
+}
+
+const updateStationLabelSchema = z.object({
+  stationId: z.string().uuid(),
+  label: z.string().min(1).max(60),
+});
+
+export async function updateStationLabelAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const actor = await requireAdmin();
+  const parsed = updateStationLabelSchema.safeParse({
+    stationId: formData.get("stationId"),
+    label: formData.get("label"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  try {
+    await updateStationLabel(parsed.data.stationId, parsed.data.label, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Save failed." };
+  }
+  revalidatePath("/machines");
+  return { ok: true };
+}
+
+const setActiveSchema = z.object({
+  id: z.string().uuid(),
+  active: z.enum(["true", "false"]),
+});
+
+export async function setMachineActiveAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const actor = await requireAdmin();
+  const parsed = setActiveSchema.safeParse({
+    id: formData.get("id"),
+    active: formData.get("active"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  try {
+    await setMachineActive(
+      parsed.data.id,
+      parsed.data.active === "true",
+      actor,
+    );
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Update failed." };
+  }
+  revalidatePath("/machines");
+  return { ok: true };
+}
+
+export async function setStationActiveAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: true } | void> {
+  const actor = await requireAdmin();
+  const parsed = setActiveSchema.safeParse({
+    id: formData.get("id"),
+    active: formData.get("active"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  try {
+    await setStationActive(
+      parsed.data.id,
+      parsed.data.active === "true",
+      actor,
+    );
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Update failed." };
+  }
+  revalidatePath("/machines");
+  return { ok: true };
 }

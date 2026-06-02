@@ -28,8 +28,8 @@ describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · open session action schema", () => {
     );
   });
 
-  it("refuses session insert when stable employee required but unresolved", () => {
-    expect(actionsSrc).toMatch(/requiresStableEmployee && !r\.accountableEmployeeId/);
+  it("blocks floor open session on inactive stations", () => {
+    expect(actionsSrc).toMatch(/assertStationActiveForFloorActions/);
   });
 });
 
@@ -145,6 +145,7 @@ describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · openOperatorSessionAction behavior", 
     id: "12492e4b-dac7-46fb-b860-b7ea483fbd9e",
     scanToken: "5dfdb0ee-b9a5-442a-9d1c-309895fa24f7",
     kind: "BLISTER",
+    isActive: true,
   };
   const EMPLOYEE = {
     id: "303761de-e2c8-4474-b548-f2396f02a281",

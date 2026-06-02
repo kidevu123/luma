@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.68] — 2026-06-01
+
+### Added (STATION-MGMT-1)
+- **Machines & stations admin slice:** Edit machine/station display names, deactivate/reactivate (no hard delete), active vs inactive lists on `/machines`. Uses existing `is_active` columns — no migration.
+- **Floor guard:** Inactive stations show a clear block message on `/floor/[token]` and reject new floor actions while preserving scan tokens and historical data.
+
+### Tests added (STATION-MGMT-1)
+- Station management helper and admin/floor wiring tests (access, edit-without-token-rotation, deactivate guards, no hard delete, inactive floor block).
+
 ## [0.4.67] — 2026-06-01
 
 ### Added (ZOHO-PRODUCTION-OUTPUT-SLICE-C3A)

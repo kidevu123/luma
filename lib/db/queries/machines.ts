@@ -4,6 +4,10 @@ import { machines, stations } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { compact } from "@/lib/db/compact";
 import type { CurrentUser } from "@/lib/auth";
+import {
+  getMachineDeactivateBlockers,
+  getStationDeactivateBlockers,
+} from "@/lib/production/station-management";
 
 export async function listMachines() {
   return db.select().from(machines).orderBy(asc(machines.name));
@@ -15,6 +19,22 @@ export async function listStations() {
     .from(stations)
     .leftJoin(machines, eq(stations.machineId, machines.id))
     .orderBy(asc(stations.label));
+}
+
+export async function listStationsGrouped() {
+  const rows = await listStations();
+  return {
+    active: rows.filter((r) => r.station.isActive),
+    inactive: rows.filter((r) => !r.station.isActive),
+  };
+}
+
+export async function listMachinesGrouped() {
+  const rows = await listMachines();
+  return {
+    active: rows.filter((m) => m.isActive),
+    inactive: rows.filter((m) => !m.isActive),
+  };
 }
 
 export async function createMachine(
@@ -126,6 +146,158 @@ export async function createStation(
         targetType: "Station",
         targetId: row.id,
         after: row,
+      },
+      tx,
+    );
+    return row;
+  });
+}
+
+export async function updateMachineName(
+  machineId: string,
+  name: string,
+  actor: CurrentUser,
+) {
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(machines)
+      .where(eq(machines.id, machineId));
+    if (!before) throw new Error("updateMachineName: not found");
+    const [row] = await tx
+      .update(machines)
+      .set({ name })
+      .where(eq(machines.id, machineId))
+      .returning();
+    if (!row) throw new Error("updateMachineName: update empty");
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "machine.update",
+        targetType: "Machine",
+        targetId: machineId,
+        before: { name: before.name },
+        after: { name: row.name },
+      },
+      tx,
+    );
+    return row;
+  });
+}
+
+export async function setMachineActive(
+  machineId: string,
+  isActive: boolean,
+  actor: CurrentUser,
+) {
+  if (!isActive) {
+    const blockers = await getMachineDeactivateBlockers(machineId);
+    if (blockers.length > 0) {
+      throw new Error(blockers.join(" "));
+    }
+  }
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(machines)
+      .where(eq(machines.id, machineId));
+    if (!before) throw new Error("setMachineActive: not found");
+    const [row] = await tx
+      .update(machines)
+      .set({ isActive })
+      .where(eq(machines.id, machineId))
+      .returning();
+    if (!row) throw new Error("setMachineActive: update empty");
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: isActive ? "machine.reactivate" : "machine.deactivate",
+        targetType: "Machine",
+        targetId: machineId,
+        before: { isActive: before.isActive, name: before.name },
+        after: { isActive: row.isActive, name: row.name },
+      },
+      tx,
+    );
+    return row;
+  });
+}
+
+export async function updateStationLabel(
+  stationId: string,
+  label: string,
+  actor: CurrentUser,
+) {
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(stations)
+      .where(eq(stations.id, stationId));
+    if (!before) throw new Error("updateStationLabel: not found");
+    const [row] = await tx
+      .update(stations)
+      .set({ label })
+      .where(eq(stations.id, stationId))
+      .returning();
+    if (!row) throw new Error("updateStationLabel: update empty");
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: "station.update",
+        targetType: "Station",
+        targetId: stationId,
+        before: { label: before.label, scanToken: before.scanToken },
+        after: { label: row.label, scanToken: row.scanToken },
+      },
+      tx,
+    );
+    return row;
+  });
+}
+
+export async function setStationActive(
+  stationId: string,
+  isActive: boolean,
+  actor: CurrentUser,
+) {
+  if (!isActive) {
+    const blockers = await getStationDeactivateBlockers(stationId);
+    if (blockers.length > 0) {
+      throw new Error(blockers.join(" "));
+    }
+  }
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(stations)
+      .where(eq(stations.id, stationId));
+    if (!before) throw new Error("setStationActive: not found");
+    const [row] = await tx
+      .update(stations)
+      .set({ isActive })
+      .where(eq(stations.id, stationId))
+      .returning();
+    if (!row) throw new Error("setStationActive: update empty");
+    await writeAudit(
+      {
+        actorId: actor.id,
+        actorRole: actor.role,
+        action: isActive ? "station.reactivate" : "station.deactivate",
+        targetType: "Station",
+        targetId: stationId,
+        before: {
+          isActive: before.isActive,
+          label: before.label,
+          scanToken: before.scanToken,
+        },
+        after: {
+          isActive: row.isActive,
+          label: row.label,
+          scanToken: row.scanToken,
+        },
       },
       tx,
     );

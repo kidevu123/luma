@@ -36,6 +36,7 @@ import { stations, workflowEvents } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
+import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
 import {
   validateQcPayload,
   type PackagingDamageReturnPayload,
@@ -66,6 +67,7 @@ async function authStation(
   const station = await resolveStation(token);
   if (!station) throw new Error("Invalid station token.");
   if (station.id !== stationIdFromForm) throw new Error("Station mismatch.");
+  assertStationActiveForFloorActions(station);
   return station;
 }
 

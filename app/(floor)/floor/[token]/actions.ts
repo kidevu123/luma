@@ -35,6 +35,7 @@ import {
   patchPackagingCompleteConsumptionSummary,
 } from "@/lib/production/packaging-consumption-summary";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
+import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
 import {
   computeSealedCountFromCounter,
   resolveSealingCardsPerPress,
@@ -112,6 +113,7 @@ async function authStation(
     // Token doesn't own the station the form is targeting — block.
     throw new Error("Station mismatch.");
   }
+  assertStationActiveForFloorActions(station);
   return station;
 }
 

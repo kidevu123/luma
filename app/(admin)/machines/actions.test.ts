@@ -13,7 +13,7 @@ describe("SEALING-COUNTER-1 · admin machine cards per press", () => {
 
   it("create machine form labels cards per press for sealing config", () => {
     expect(formsSrc).toMatch(/Cards per press/);
-    expect(formsSrc).toMatch(/sealing machines/i);
+    expect(formsSrc).toMatch(/sealing machine can seal per press/i);
   });
 
   it("EditCardsPerPressForm allows inline update", () => {

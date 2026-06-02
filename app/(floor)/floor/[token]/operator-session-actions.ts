@@ -21,6 +21,7 @@ import {
 import { writeAudit } from "@/lib/db/audit";
 import { resolveAccountableEmployee } from "@/lib/production/accountability";
 import { FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS } from "@/lib/production/station-operator-session";
+import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
 import { isBlisterCounterSnapshotStation } from "@/lib/production/blister-counter-snapshot";
 
 const UUID_RE =
@@ -81,6 +82,7 @@ export async function openOperatorSessionAction(
   if (!station || station.id !== stationId) {
     return { error: "Invalid station token." };
   }
+  assertStationActiveForFloorActions(station);
 
   const requiresStableEmployee =
     FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS.has(station.kind);

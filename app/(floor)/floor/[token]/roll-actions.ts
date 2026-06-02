@@ -38,6 +38,7 @@ import {
   resolveStationAccountability,
   withAccountabilityPayload,
 } from "@/lib/production/station-operator-session";
+import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
 
 // Same UUID-v4-ish pattern used in actions.ts. The floor PWA passes
 // a clientEventId so a network retry doesn't double-fire. We persist
@@ -66,6 +67,7 @@ async function authStation(token: string, stationIdFromForm: string): Promise<St
     .where(eq(stations.scanToken, token));
   if (!station) throw new Error("Invalid station token.");
   if (station.id !== stationIdFromForm) throw new Error("Station mismatch.");
+  assertStationActiveForFloorActions(station);
   return station;
 }
 

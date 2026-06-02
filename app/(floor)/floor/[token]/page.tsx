@@ -71,6 +71,7 @@ import { filterSelectableIdleRollLots } from "@/lib/production/idle-roll-lots";
 import { StationRollPanel } from "./station-roll-panel";
 import { ElapsedTimer } from "./elapsed-timer";
 import { formatFloorTimeEastern } from "@/lib/floor-time";
+import { STATION_INACTIVE_FLOOR_MESSAGE } from "@/lib/production/station-management";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +89,19 @@ export default async function FloorStationPage({
     .where(eq(stations.scanToken, token));
   if (!station) notFound();
 
-  // OP-1C: active operator session + the picker options for opening
+  if (!station.station.isActive) {
+    return (
+      <main className="min-h-dvh bg-surface flex flex-col items-center justify-center p-6 text-center">
+        <h1 className="text-xl font-semibold text-text mb-2">
+          {station.station.label}
+        </h1>
+        <p className="text-sm text-text-muted max-w-md">{STATION_INACTIVE_FLOOR_MESSAGE}</p>
+        <p className="text-xs text-text-subtle mt-4">{station.station.kind}</p>
+      </main>
+    );
+  }
+
+  // OP-1C: active operator session
   // a new one. activeSession is null until someone runs Open shift;
   // the panel below handles both states.
   const [activeSession, employeeOptions] = await Promise.all([

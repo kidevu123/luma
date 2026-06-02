@@ -9,7 +9,11 @@ import {
   createMachineAction,
   createStationAction,
   rotateTokenAction,
+  setMachineActiveAction,
+  setStationActiveAction,
   updateMachineCardsPerTurnAction,
+  updateMachineNameAction,
+  updateStationLabelAction,
 } from "./actions";
 
 const STATION_KINDS = [
@@ -87,10 +91,6 @@ export function CreateMachineForm() {
             defaultValue={1}
             title="How many cards this machine seals per counter press"
           />
-          <p className="text-[10px] text-text-subtle mt-0.5 leading-snug">
-            Required for sealing machines — used to compute sealed cards from the
-            physical counter.
-          </p>
         </div>
       </div>
       {error && (
@@ -101,6 +101,50 @@ export function CreateMachineForm() {
       <Button type="submit" size="sm" disabled={pending}>
         <Plus className="h-3.5 w-3.5" /> Add
       </Button>
+    </form>
+  );
+}
+
+export function EditMachineNameForm({
+  machineId,
+  currentName,
+}: {
+  machineId: string;
+  currentName: string;
+}) {
+  const [error, setError] = React.useState<string | null>(null);
+  const [pending, setPending] = React.useState(false);
+  return (
+    <form
+      action={async (form) => {
+        setPending(true);
+        setError(null);
+        try {
+          const r = await updateMachineNameAction(form);
+          if (r?.error) setError(r.error);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Save failed.");
+        } finally {
+          setPending(false);
+        }
+      }}
+      className="inline-flex items-center gap-1.5 min-w-0"
+    >
+      <input type="hidden" name="machineId" value={machineId} />
+      <Input
+        name="name"
+        defaultValue={currentName}
+        className="h-8 min-w-[8rem] max-w-[14rem]"
+        required
+      />
+      <Button type="submit" variant="ghost" size="sm" disabled={pending}>
+        {pending ? "…" : "Save"}
+      </Button>
+      {error ? (
+        <span className="text-[10px] text-red-700 truncate max-w-[8rem]" title={error}>
+          {error}
+        </span>
+      ) : null}
     </form>
   );
 }
@@ -159,10 +203,149 @@ export function EditCardsPerPressForm({
   );
 }
 
+function SetActiveButton({
+  id,
+  active,
+  action,
+  label,
+}: {
+  id: string;
+  active: boolean;
+  action: (form: FormData) => Promise<{ error?: string; ok?: true } | void>;
+  label: string;
+}) {
+  const [error, setError] = React.useState<string | null>(null);
+  const [pending, setPending] = React.useState(false);
+  return (
+    <form
+      action={async (form) => {
+        if (
+          !active &&
+          !window.confirm(
+            "Deactivate this item? It will be hidden from active floor lists. Scan URLs stay the same but will block new work.",
+          )
+        ) {
+          return;
+        }
+        setPending(true);
+        setError(null);
+        try {
+          const r = await action(form);
+          if (r?.error) setError(r.error);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Update failed.");
+        } finally {
+          setPending(false);
+        }
+      }}
+    >
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="active" value={active ? "true" : "false"} />
+      <Button type="submit" variant="ghost" size="sm" disabled={pending}>
+        {label}
+      </Button>
+      {error ? (
+        <p className="text-[10px] text-red-700 mt-1 max-w-[12rem]" title={error}>
+          {error}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
+export function DeactivateMachineButton({ machineId }: { machineId: string }) {
+  return (
+    <SetActiveButton
+      id={machineId}
+      active={false}
+      action={setMachineActiveAction}
+      label="Deactivate"
+    />
+  );
+}
+
+export function ReactivateMachineButton({ machineId }: { machineId: string }) {
+  return (
+    <SetActiveButton
+      id={machineId}
+      active={true}
+      action={setMachineActiveAction}
+      label="Reactivate"
+    />
+  );
+}
+
+export function DeactivateStationButton({ stationId }: { stationId: string }) {
+  return (
+    <SetActiveButton
+      id={stationId}
+      active={false}
+      action={setStationActiveAction}
+      label="Deactivate"
+    />
+  );
+}
+
+export function ReactivateStationButton({ stationId }: { stationId: string }) {
+  return (
+    <SetActiveButton
+      id={stationId}
+      active={true}
+      action={setStationActiveAction}
+      label="Reactivate"
+    />
+  );
+}
+
+export function EditStationLabelForm({
+  stationId,
+  currentLabel,
+}: {
+  stationId: string;
+  currentLabel: string;
+}) {
+  const [error, setError] = React.useState<string | null>(null);
+  const [pending, setPending] = React.useState(false);
+  return (
+    <form
+      action={async (form) => {
+        setPending(true);
+        setError(null);
+        try {
+          const r = await updateStationLabelAction(form);
+          if (r?.error) setError(r.error);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Save failed.");
+        } finally {
+          setPending(false);
+        }
+      }}
+      className="flex items-center gap-1.5 flex-wrap"
+    >
+      <input type="hidden" name="stationId" value={stationId} />
+      <Input
+        name="label"
+        defaultValue={currentLabel}
+        className="h-8 flex-1 min-w-[8rem]"
+        required
+      />
+      <Button type="submit" variant="ghost" size="sm" disabled={pending}>
+        {pending ? "…" : "Save name"}
+      </Button>
+      {error ? (
+        <span className="text-[10px] text-red-700 w-full" title={error}>
+          {error}
+        </span>
+      ) : null}
+    </form>
+  );
+}
+
 export function CreateStationForm({ machines }: { machines: Machine[] }) {
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
   const formRef = React.useRef<HTMLFormElement>(null);
+  const activeMachines = machines.filter((m) => m.isActive);
   return (
     <form
       ref={formRef}
@@ -206,7 +389,7 @@ export function CreateStationForm({ machines }: { machines: Machine[] }) {
           <Label htmlFor="s_machine">Machine</Label>
           <Select id="s_machine" name="machineId" defaultValue="">
             <option value="">— none —</option>
-            {machines.map((m) => (
+            {activeMachines.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
