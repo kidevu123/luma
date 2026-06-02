@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.78] — 2026-06-02
+
+### Added (SHIFT-REVIEW-1)
+- **Admin post-shift review:** `/shift-review` read-only page for blister counter segments, pause/end-shift snapshots, roll changes, and close-outs.
+- **Conservative flags:** Missing shift-end snapshot, duplicate-looking segments, close-out matching prior pause, missing paired PVC/foil, missing lineage, finalized/finished-lot suspicious patterns.
+- **Recovery guidance:** Links flagged findings to the read-only recovery dry-run harness — no apply path and no data mutation.
+
+### Tests added (SHIFT-REVIEW-1)
+- Shift review helper, flag detection, admin page source guards, auth smoke route.
+
 ## [0.4.77] — 2026-06-02
 
 ### Added (RECOVERY-DRY-RUN-HARNESS-1)

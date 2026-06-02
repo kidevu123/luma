@@ -20,6 +20,7 @@ import {
   Activity,
   ShieldCheck,
   ClipboardList,
+  ClipboardCheck,
   Archive,
   ScrollText,
   Wrench,
@@ -43,6 +44,7 @@ const SECTIONS: Section[] = [
       { href: "/inbound",            label: "Receiving",             icon: Inbox },
       { href: "/packaging-output",   label: "Production output",     icon: Package },
       { href: "/qc-review",          label: "QC review",             icon: ShieldAlert },
+      { href: "/shift-review",       label: "Shift review",          icon: ClipboardCheck },
     ],
   },
   {

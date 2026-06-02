@@ -246,6 +246,8 @@ Same as roll change but select **Removed with material remaining**. Old roll ret
 
 ### Post-shift review
 
+**Admin page:** `/shift-review` (SHIFT-REVIEW-1) — read-only summary of blister counter segments in a date/time window. Flags suspicious patterns conservatively; does not repair data. For deeper investigation use `scripts/material-change-recovery-dry-run.ts`.
+
 Inspect for each active bag / roll:
 
 | Check | Where |
