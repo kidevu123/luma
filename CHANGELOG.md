@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.71] — 2026-06-02
+
+### Changed (DEPLOY-VERIFY-1)
+- **Deploy drift guard:** `deploy/lxc/luma-deploy.sh` rebuilds when git HEAD changes, when `/api/health` or `/app/.git-sha` disagrees with checkout, or when the running SHA cannot be read; waits for health to confirm the new SHA after build.
+- **`npm run verify:deploy`:** Exits non-zero on SHA mismatch or unhealthy `/api/health` (compares local HEAD to the **running** container, not disk checkout alone).
+- **Auth smoke:** `/workflow-submissions` added to authenticated route coverage.
+
+### Tests added (DEPLOY-VERIFY-1)
+- Deploy SHA compare unit tests and source guards for deploy script, verify-deploy, and workflow-submissions smoke route.
+
 ## [0.4.70] — 2026-06-02
 
 ### Changed (WORKFLOW-SUBMISSIONS-DISPLAY-P1)

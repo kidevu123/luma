@@ -7,27 +7,9 @@ After=network-online.target docker.service
 Type=oneshot
 Environment=LUMA_DIR=/opt/luma
 Environment=LUMA_BRANCH=main
+Environment=APP_PORT=3000
 WorkingDirectory=/opt/luma
-ExecStart=/bin/bash -c '\
-  set -euo pipefail; \
-  cd "$LUMA_DIR"; \
-  git fetch --quiet origin "$LUMA_BRANCH"; \
-  before=$(git rev-parse HEAD); \
-  git reset --hard --quiet "origin/$LUMA_BRANCH"; \
-  after=$(git rev-parse HEAD); \
-  export BUILD_GIT_SHA="$after"; \
-  export BUILD_GIT_BRANCH="$LUMA_BRANCH"; \
-  running=$(/usr/bin/docker compose exec -T app cat /app/.git-sha 2>/dev/null | tr -d "[:space:]" || true); \
-  if [ "$before" != "$after" ]; then \
-    echo "deploying $before -> $after"; \
-    /usr/bin/docker compose up -d --build; \
-  elif [ -n "$running" ] && [ "$running" != "$after" ]; then \
-    echo "container drift detected (running=$running, head=$after) — rebuilding"; \
-    /usr/bin/docker compose up -d --build; \
-  else \
-    echo "no changes ($after); ensuring services are up"; \
-    /usr/bin/docker compose up -d; \
-  fi'
+ExecStart=/bin/bash /opt/luma/deploy/lxc/luma-deploy.sh
 
 [Install]
 WantedBy=multi-user.target

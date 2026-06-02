@@ -30,15 +30,17 @@ npm run verify:deploy
 LUMA_HOST=http://192.168.1.134:3000 npm run verify:deploy
 ```
 
-The script calls `/api/health`, which returns the `sha` baked into the image at build time, and compares it against `git rev-parse HEAD`. A SHA mismatch means the deploy is still in progress (normal — allow up to 5 minutes for the timer to fire and `docker compose build` to complete).
+The script calls `/api/health`, which returns the **running container** SHA baked at image build time, and compares it against `git rev-parse HEAD`. **Exit code 1** on mismatch — a passing checkout on `/opt/luma` is not enough if the app container is still serving an old image.
 
 ## How the deploy works
 
 1. **systemd timer** (`luma-deploy.timer`) fires every 60 s on LXC 122 (`192.168.1.134`).
-2. `luma-deploy.service` runs `git pull` on `/opt/luma`.
-3. It compares the new HEAD (`$after`) against the SHA baked into the running container (`docker exec app cat /app/.git-sha`).
-4. If they differ (or if the stamp file drifted), it exports `BUILD_GIT_SHA` and `BUILD_GIT_BRANCH` then runs `docker compose up -d --build`.
-5. The Dockerfile bakes `BUILD_GIT_SHA`, `BUILD_GIT_BRANCH`, and `BUILD_AT` into the image via `ENV` statements in the run stage. These values surface in `/api/health` (sha field) and the admin footer.
+2. `luma-deploy.service` runs `deploy/lxc/luma-deploy.sh` on `/opt/luma`.
+3. The script `git fetch` + `reset --hard origin/main`, then compares HEAD (`$after`) to the **running** SHA from `/app/.git-sha` or `/api/health`.
+4. It runs `docker compose up -d --build` when git changed, when running SHA ≠ HEAD, or when the running SHA cannot be read (avoids silent drift).
+5. **`docker compose up -d` without `--build` is not sufficient** for Next.js code changes — the image must rebuild so `BUILD_GIT_SHA` and compiled routes update.
+6. After a rebuild, the script waits until `/api/health` reports the new SHA (unit fails if not).
+7. The Dockerfile bakes `BUILD_GIT_SHA`, `BUILD_GIT_BRANCH`, and `BUILD_AT` into the image. These surface in `/api/health` and the admin footer.
 
 ## Build metadata in the footer
 

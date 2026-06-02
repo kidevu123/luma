@@ -1,11 +1,14 @@
-// Deployment verification: compare local git HEAD against the running container.
+// Deployment verification: compare local git HEAD against the running container
+// via /api/health (runtime SHA), not the LXC checkout alone.
 //
 // Run from the repo root:
 //   npm run verify:deploy
-//   # or with a custom host
 //   LUMA_HOST=http://192.168.1.134:3000 npm run verify:deploy
+//
+// Exits 1 when health is not ok or when the running SHA does not match local HEAD.
 
 import { execSync } from "node:child_process";
+import { evaluateDeployShaMatch } from "@/lib/deploy/verify-deploy-sha";
 
 const host = process.env.LUMA_HOST ?? "http://192.168.1.134:3000";
 const url = `${host}/api/health`;
@@ -21,6 +24,9 @@ async function main() {
 
   console.log(`Local HEAD : ${localSha.slice(0, 12)}`);
   console.log(`Health URL : ${url}`);
+  console.log(
+    "Note: compares git HEAD to the running app SHA from /api/health (not /opt/luma checkout alone).",
+  );
 
   let data: { status: string; sha?: string; checks?: Record<string, string> };
   try {
@@ -44,16 +50,26 @@ async function main() {
     }
   }
 
-  const shaShort = (s: string) => s.slice(0, 12);
-  if (remoteSha === "dev" || remoteSha === "local") {
-    console.log("Remote is running a dev build — no SHA to compare.");
-  } else if (shaShort(remoteSha) === shaShort(localSha)) {
-    console.log("Deployed SHA matches local HEAD.");
-  } else {
-    console.log("SHA mismatch — deploy may be in progress or branch diverged.");
-    console.log(`  local : ${localSha}`);
-    console.log(`  remote: ${remoteSha}`);
+  const verdict = evaluateDeployShaMatch(localSha, remoteSha, data.status);
+  if (!verdict.ok) {
+    if (verdict.reason === "health_not_ok") {
+      console.error(`Health status is not ok (${verdict.status}).`);
+      process.exit(1);
+    }
+    console.error("DEPLOY DRIFT: running container SHA does not match local HEAD.");
+    console.error(`  local HEAD (expected): ${localSha}`);
+    console.error(`  /api/health (running):  ${remoteSha}`);
+    console.error(
+      "  On LXC: systemctl start luma-deploy.service (rebuilds when drift is detected).",
+    );
+    process.exit(1);
   }
+  if (!verdict.comparable) {
+    console.log("Remote is running a dev/local build — SHA compare skipped.");
+    return;
+  }
+
+  console.log("Deployed SHA matches local HEAD.");
 }
 
 main().catch((err) => {

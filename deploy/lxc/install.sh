@@ -41,6 +41,7 @@ fi
 ln -sf /etc/luma/.env "${DIR}/.env"
 
 echo "[install] enabling deploy timer…"
+chmod +x "${DIR}/deploy/lxc/luma-deploy.sh"
 cp "${DIR}/deploy/lxc/luma-deploy.service" /etc/systemd/system/luma-deploy.service
 cp "${DIR}/deploy/lxc/luma-deploy.timer"   /etc/systemd/system/luma-deploy.timer
 systemctl daemon-reload
