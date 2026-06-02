@@ -3,6 +3,7 @@
 import type { db as Db } from "@/lib/db";
 import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
 import { rebuildMaterialConsumptionDaily } from "@/lib/projector/material-consumption-daily";
+import { refreshRollDerivedReadModels } from "@/lib/projector/roll-derived-read-models";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -12,4 +13,5 @@ export async function refreshMaterialReadModelsAfterConsumption(
 ): Promise<void> {
   await rebuildMaterialLotState(tx);
   await rebuildMaterialConsumptionDaily(tx);
+  await refreshRollDerivedReadModels(tx);
 }

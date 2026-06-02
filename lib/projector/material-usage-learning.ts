@@ -4,14 +4,14 @@
 // the empirical grams-per-blister samples drawn from rolls that
 // have been weighed back. Source rules:
 //
-//   • A "sample" is a single roll lot with:
-//       - a ROLL_MOUNTED event (start of mount window)
-//       - a most-recent ROLL_WEIGHED OR ROLL_UNMOUNTED with quantity_grams
-//         (end-of-mount weight)
-//       - net_weight_grams (or mount payload starting_weight_grams)
-//       - SUM(BLISTER_COMPLETE.machine_count) > 0 during the
-//         mount window on the mounted machine
-//   • grams_per_blister = (starting - ending) / blisters
+//   • Weigh-back sample (partial roll removal):
+//       - ROLL_MOUNTED + ROLL_WEIGHED/ROLL_UNMOUNTED with quantity_grams
+//       - blisters from BLISTER_COMPLETE during mount window
+//   • Depletion sample (full roll used — normal floor flow):
+//       - ROLL_DEPLETED on the lot
+//       - blisters from SUM(ROLL_COUNTER_SEGMENT_RECORDED) or
+//         payload.final_roll_yield_blisters
+//       - grams_per_blister = net_weight / blisters (full roll consumed)
 //   • The product is taken from the workflow_bag the mount referenced;
 //     when no bag, the row aggregates as product_id NULL (cross-product
 //     fallback).
@@ -85,6 +85,59 @@ export async function rebuildMaterialUsageLearning(tx: Tx): Promise<void> {
           AND (weighed.occurred_at IS NULL OR we.occurred_at <= weighed.occurred_at)
       ) blister_count ON TRUE
       WHERE pm.kind::text IN ('PVC_ROLL','FOIL_ROLL','BLISTER_FOIL')
+        AND NOT EXISTS (
+          SELECT 1 FROM material_inventory_events dep
+          WHERE dep.packaging_lot_id = rl.id
+            AND dep.event_type = 'ROLL_DEPLETED'
+        )
+    ),
+    depleted_samples AS (
+      SELECT
+        rl.id                                 AS lot_id,
+        rl.packaging_material_id              AS packaging_material_id,
+        pm.kind::text                         AS kind,
+        bag.product_id                        AS product_id,
+        dep.machine_id                        AS machine_id,
+        rl.net_weight_grams                   AS starting_grams,
+        0                                     AS ending_grams,
+        COALESCE(
+          NULLIF((dep.payload->>'final_roll_yield_blisters'),'')::bigint,
+          seg.total_blisters
+        )                                     AS total_blisters,
+        dep.occurred_at                       AS sample_at,
+        COALESCE(
+          NULLIF((dep.payload->>'grams_per_blister'),'')::numeric,
+          rl.net_weight_grams::numeric
+            / NULLIF(
+              COALESCE(
+                NULLIF((dep.payload->>'final_roll_yield_blisters'),'')::bigint,
+                seg.total_blisters
+              ),
+              0
+            )
+        )                                     AS grams_per_blister
+      FROM packaging_lots rl
+      JOIN packaging_materials pm ON pm.id = rl.packaging_material_id
+      JOIN LATERAL (
+        SELECT ev.machine_id, ev.workflow_bag_id, ev.occurred_at, ev.payload
+        FROM material_inventory_events ev
+        WHERE ev.packaging_lot_id = rl.id
+          AND ev.event_type = 'ROLL_DEPLETED'
+        ORDER BY ev.occurred_at DESC, ev.id DESC
+        LIMIT 1
+      ) dep ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT SUM(NULLIF((ev.payload->>'counter_segment_count'),'')::int)::bigint AS total_blisters
+        FROM material_inventory_events ev
+        WHERE ev.packaging_lot_id = rl.id
+          AND ev.event_type = 'ROLL_COUNTER_SEGMENT_RECORDED'
+      ) seg ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT b.product_id
+        FROM workflow_bags b
+        WHERE b.id = dep.workflow_bag_id
+      ) bag ON TRUE
+      WHERE pm.kind::text IN ('PVC_ROLL','FOIL_ROLL','BLISTER_FOIL')
     ),
     qualified AS (
       SELECT
@@ -103,6 +156,24 @@ export async function rebuildMaterialUsageLearning(tx: Tx): Promise<void> {
         AND total_blisters IS NOT NULL
         AND total_blisters > 0
         AND starting_grams > ending_grams
+      UNION ALL
+      SELECT
+        product_id, packaging_material_id, machine_id,
+        CASE kind
+          WHEN 'PVC_ROLL'  THEN 'PVC'
+          WHEN 'FOIL_ROLL' THEN 'FOIL'
+          WHEN 'BLISTER_FOIL' THEN 'FOIL'
+        END AS material_role,
+        starting_grams, ending_grams, total_blisters, sample_at,
+        starting_grams::numeric                                           AS used_grams,
+        grams_per_blister
+      FROM depleted_samples
+      WHERE starting_grams IS NOT NULL
+        AND starting_grams > 0
+        AND total_blisters IS NOT NULL
+        AND total_blisters > 0
+        AND grams_per_blister IS NOT NULL
+        AND grams_per_blister > 0
     ),
     -- Per (product, material, role, machine) row.
     by_product_machine AS (

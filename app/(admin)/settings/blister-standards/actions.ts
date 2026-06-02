@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { refreshRollDerivedReadModels } from "@/lib/projector/roll-derived-read-models";
 import { compact } from "@/lib/db/compact";
 import { requireAdmin } from "@/lib/auth-guards";
 import {
@@ -111,4 +112,23 @@ export async function deleteBlisterStandardAction(id: string) {
     .delete(blisterMaterialStandards)
     .where(eq(blisterMaterialStandards.id, id));
   revalidatePath("/settings/blister-standards");
+}
+
+/** Recompute learned g/blister from roll mount / segment / deplete history. */
+export async function rebuildBlisterLearningAction(): Promise<{
+  ok?: true;
+  error?: string;
+}> {
+  await requireAdmin();
+  try {
+    await db.transaction(async (tx) => {
+      await refreshRollDerivedReadModels(tx);
+    });
+    revalidatePath("/settings/blister-standards");
+    return { ok: true };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Rebuild failed.",
+    };
+  }
 }

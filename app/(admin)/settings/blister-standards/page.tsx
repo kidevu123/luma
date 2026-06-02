@@ -11,6 +11,7 @@ import {
   packagingMaterials,
   packagingLots,
   readMaterialUsageLearning,
+  readRollUsage,
   products,
 } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
@@ -26,6 +27,7 @@ import {
 import {
   saveBlisterStandardAction,
   deleteBlisterStandardAction,
+  rebuildBlisterLearningAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -33,8 +35,14 @@ export const dynamic = "force-dynamic";
 export default async function BlisterStandardsPage() {
   await requireAdmin();
 
-  const [learnedRows, configuredRows, rollInventory, productList, rollMaterials] =
-    await Promise.all([
+  const [
+    learnedRows,
+    configuredRows,
+    rollInventory,
+    completedRollCycles,
+    productList,
+    rollMaterials,
+  ] = await Promise.all([
       // Learned standards from completed rolls
       db
         .select({
@@ -108,6 +116,22 @@ export default async function BlisterStandardsPage() {
         .limit(20),
 
       db
+        .select({
+          rollNumber: readRollUsage.rollNumber,
+          materialKind: readRollUsage.materialKind,
+          materialRole: readRollUsage.materialRole,
+          blistersProduced: readRollUsage.blistersProduced,
+          actualUsedGrams: readRollUsage.actualUsedGrams,
+          startingWeightGrams: readRollUsage.startingWeightGrams,
+          unmountedAt: readRollUsage.unmountedAt,
+          confidence: readRollUsage.confidence,
+        })
+        .from(readRollUsage)
+        .where(sql`${readRollUsage.blistersProduced} > 0`)
+        .orderBy(desc(readRollUsage.unmountedAt))
+        .limit(12),
+
+      db
         .select({ id: products.id, sku: products.sku, name: products.name })
         .from(products)
         .where(eq(products.isActive, true))
@@ -129,6 +153,8 @@ export default async function BlisterStandardsPage() {
 
   const hasLearnedData = learnedRows.length > 0;
   const hasRolls = rollInventory.length > 0;
+  const depletedRollCount = rollInventory.filter((r) => r.status === "DEPLETED").length;
+  const hasRecordedCycles = completedRollCycles.length > 0;
 
   return (
     <div className="space-y-6">
@@ -177,19 +203,114 @@ export default async function BlisterStandardsPage() {
         <CardContent>
           {!hasLearnedData ? (
             <div className="space-y-3">
-              <p className="text-sm text-text-muted">
-                No roll data yet. The system will compute yield automatically after your first complete roll cycle:
-                receive → mount → produce → deplete.
-              </p>
-              <div className="rounded-md border border-border/60 bg-surface-2/40 px-4 py-3 text-xs text-text-subtle space-y-1">
-                <div className="font-medium text-text-muted">What you need to do first:</div>
-                <ul className="list-disc pl-4 space-y-0.5">
-                  <li>Receive PVC and foil rolls at <strong>/inbound/packaging-materials</strong> — enter the gross weight, tare weight, and roll number</li>
-                  <li>When production starts, the floor operator selects which roll they loaded at the blister machine</li>
-                  <li>When the roll runs out, the floor operator marks it depleted</li>
-                  <li>Luma computes the yield — this table fills in automatically</li>
-                </ul>
-              </div>
+              {hasRecordedCycles || depletedRollCount > 0 ? (
+                <>
+                  <p className="text-sm text-text-muted">
+                    Rolls have been used on the floor
+                    {depletedRollCount > 0
+                      ? ` (${depletedRollCount} marked depleted)`
+                      : ""}
+                    , but the learned summary has not been built yet. Use{" "}
+                    <strong>Rebuild learned yield</strong> below to pull in
+                    existing roll history.
+                  </p>
+                  {hasRecordedCycles && (
+                    <DataTable>
+                      <THead>
+                        <TR>
+                          <TH>Roll</TH>
+                          <TH>Role</TH>
+                          <TH className="text-right">Blisters</TH>
+                          <TH className="text-right">g/blister</TH>
+                          <TH>Ended</TH>
+                        </TR>
+                      </THead>
+                      <tbody>
+                        {completedRollCycles.map((r, i) => {
+                          const used =
+                            r.actualUsedGrams ??
+                            (r.startingWeightGrams != null &&
+                            r.blistersProduced != null &&
+                            r.blistersProduced > 0
+                              ? r.startingWeightGrams
+                              : null);
+                          const gpb =
+                            used != null &&
+                            r.blistersProduced != null &&
+                            r.blistersProduced > 0
+                              ? used / r.blistersProduced
+                              : null;
+                          return (
+                            <TR key={`${r.rollNumber}-${i}`}>
+                              <TD className="font-mono text-xs">
+                                {r.rollNumber ?? "—"}
+                              </TD>
+                              <TD>{r.materialRole ?? r.materialKind}</TD>
+                              <TD className="text-right tabular-nums">
+                                {r.blistersProduced?.toLocaleString() ?? "—"}
+                              </TD>
+                              <TD className="text-right font-mono tabular-nums">
+                                {gpb != null ? `${gpb.toFixed(4)} g` : "—"}
+                              </TD>
+                              <TD className="text-xs text-text-muted">
+                                {r.unmountedAt
+                                  ? new Date(r.unmountedAt).toLocaleString()
+                                  : "—"}
+                              </TD>
+                            </TR>
+                          );
+                        })}
+                      </tbody>
+                    </DataTable>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-text-muted">
+                    No complete roll cycle recorded yet: receive → mount →
+                    produce (counter segments) → mark roll{" "}
+                    <strong>depleted</strong> on the floor.
+                  </p>
+                  <div className="rounded-md border border-border/60 bg-surface-2/40 px-4 py-3 text-xs text-text-subtle space-y-1">
+                    <div className="font-medium text-text-muted">
+                      Checklist:
+                    </div>
+                    <ul className="list-disc pl-4 space-y-0.5">
+                      <li>
+                        Receive rolls at{" "}
+                        <strong>/inbound/packaging-materials</strong> with gross
+                        + tare (net weight is computed)
+                      </li>
+                      <li>
+                        Floor: mount PVC + foil at the blister machine when
+                        production starts
+                      </li>
+                      <li>
+                        Floor: enter counter segments at each blister complete
+                        / roll change
+                      </li>
+                      <li>
+                        Floor: when the roll is finished, choose{" "}
+                        <strong>Depleted</strong> (not “removed with material
+                        remaining” unless you weigh the leftover roll)
+                      </li>
+                    </ul>
+                  </div>
+                </>
+              )}
+              <form
+                action={async () => {
+                  "use server";
+                  await rebuildBlisterLearningAction();
+                }}
+              >
+                <button
+                  type="submit"
+                  className="text-sm px-3 py-1.5 rounded border border-brand-accent/40 text-brand-accent hover:bg-brand-accent/10"
+                >
+                  Rebuild learned yield from roll history
+                </button>
+              </form>
             </div>
           ) : (
             <DataTable>

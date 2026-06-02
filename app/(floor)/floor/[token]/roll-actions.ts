@@ -30,7 +30,7 @@ import {
   workflowBags,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
-import { rebuildRollUsage } from "@/lib/projector/roll-usage";
+import { refreshRollDerivedReadModels } from "@/lib/projector/roll-derived-read-models";
 import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
 import { nextLotStatusForUnmount } from "@/lib/production/active-rolls";
 import { kgToGrams } from "@/lib/inbound/roll-weight";
@@ -256,7 +256,7 @@ export async function mountRollAction(
         .set({ status: "IN_USE" })
         .where(eq(packagingLots.id, lot.id));
       await rebuildMaterialLotState(tx);
-      await rebuildRollUsage(tx);
+      await refreshRollDerivedReadModels(tx);
       try {
         await writeAudit(
           {
@@ -423,7 +423,7 @@ export async function unmountRollAction(
         )
         .where(eq(packagingLots.id, lot.id));
       await rebuildMaterialLotState(tx);
-      await rebuildRollUsage(tx);
+      await refreshRollDerivedReadModels(tx);
       try {
         await writeAudit(
           {
@@ -548,7 +548,7 @@ export async function weighRollAction(
         .update(packagingLots)
         .set({ currentWeightGramsEstimate: currentWeightGrams })
         .where(eq(packagingLots.id, lot.id));
-      await rebuildRollUsage(tx);
+      await refreshRollDerivedReadModels(tx);
       try {
         await writeAudit(
           {
@@ -987,7 +987,7 @@ export async function changeRollAction(
 
       // 4. Refresh read models.
       await rebuildMaterialLotState(tx);
-      await rebuildRollUsage(tx);
+      await refreshRollDerivedReadModels(tx);
 
       // 5. Audit (best-effort).
       try {
