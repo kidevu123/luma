@@ -457,9 +457,11 @@ export function StageActionButtons({
 
       {!isPaused && showSealingProductPicker && !sealingOpen && (
         <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
-          <div className="font-semibold text-sm">
-            Select and save finished product before sealing close-out.
-          </div>
+          <div className="font-semibold text-sm">Step 1: Save product</div>
+          <p className="text-sm text-amber-900/90 leading-relaxed">
+            Save the finished product first. This locks product identity for the
+            bag. Segment and complete stay blocked until product is saved.
+          </p>
           {sealingProductFilterHint ? (
             <p className="text-sm text-amber-800">{sealingProductFilterHint}</p>
           ) : null}
@@ -559,11 +561,44 @@ export function StageActionButtons({
 
       {!isPaused && isSealingStation && sealingStageReady && (
         <div className="space-y-2">
+          <div className="rounded-lg border border-border/80 bg-surface-2/50 px-3 py-2 text-xs text-text-muted space-y-1">
+            <p className="font-semibold text-text">Sealing workflow</p>
+            <ol className="list-decimal list-inside space-y-0.5 leading-relaxed">
+              <li
+                className={
+                  sealingProductReady
+                    ? "text-emerald-800"
+                    : "font-medium text-amber-900"
+                }
+              >
+                Save product{sealingProductReady ? " — done" : " — required first"}
+              </li>
+              <li className={sealingProductReady ? "" : "opacity-60"}>
+                Record sealing segment — partial progress at this machine
+              </li>
+              <li className={sealingProductReady ? "" : "opacity-60"}>
+                Complete sealing — only when every machine is done
+              </li>
+            </ol>
+          </div>
+          {sealingProductReady ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900">
+              <p className="font-semibold text-sm">Product locked for this bag</p>
+              <p className="text-sm text-emerald-900/85">
+                Contact admin if this is wrong. You can record segments and
+                complete sealing.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-amber-900 font-medium">
+              Save product before recording sealing work.
+            </p>
+          )}
           <p className="text-xs text-text-muted leading-relaxed">
-            Use <span className="font-medium">Record sealing segment</span> for
-            this machine&apos;s output. Use{" "}
-            <span className="font-medium">Sealing complete</span> only when all
-            sealing machines are done with this bag.
+            <span className="font-medium">Record sealing segment</span> = partial
+            progress (pause, hand off, or finish later).{" "}
+            <span className="font-medium">Sealing complete</span> = final
+            close-out when all sealers are done — not the same as a segment.
           </p>
           {hasSealingSegments && sealingSegmentProgress ? (
             <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
@@ -589,18 +624,22 @@ export function StageActionButtons({
             <CheckCircle2 className="h-5 w-5" />
             {pending === "SEALING_SEGMENT_COMPLETE"
               ? "Saving…"
-              : "Record sealing segment"}
+              : "Step 2: Record sealing segment"}
           </button>
           <button
             type="button"
-            disabled={pending !== null || !hasSealingSegments}
+            disabled={
+              pending !== null ||
+              !sealingProductReady ||
+              !hasSealingSegments
+            }
             onClick={() => setSealingFinalOpen(true)}
             className="w-full h-12 inline-flex items-center justify-center gap-2 rounded-xl border-2 border-sky-400 bg-surface text-sky-900 text-sm font-semibold disabled:opacity-60 transition-colors"
           >
             <CheckCircle2 className="h-4 w-4" />
             {pending === "SEALING_COMPLETE"
               ? "Saving…"
-              : "Sealing complete — all machines done"}
+              : "Step 3: Sealing complete — all machines done"}
           </button>
           {hasSealingSegments ? (
             <button
@@ -1117,7 +1156,13 @@ function SealingSegmentForm({
       ref={containerRef}
       className="rounded-lg border-2 border-sky-300 bg-sky-50/40 p-3 space-y-3"
     >
-      <p className="text-sm font-semibold text-sky-900">Record sealing segment</p>
+      <p className="text-sm font-semibold text-sky-900">
+        Step 2: Record sealing segment
+      </p>
+      <p className="text-xs text-sky-900/90 leading-relaxed">
+        Partial progress at this machine — not final close-out. Use when pausing,
+        handing off to another sealer, or stopping before the bag is fully sealed.
+      </p>
       {!configReady ? (
         <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
           {SEALING_COUNTER_CONFIG_ERROR}
@@ -1125,12 +1170,12 @@ function SealingSegmentForm({
       ) : (
         <>
           <p className="text-xs text-sky-900">
-            Cards per press:{" "}
+            Cards per press (from machine setup):{" "}
             <span className="font-semibold tabular-nums">{sealingCardsPerPress}</span>
           </p>
           <div className="space-y-2">
             <NumField
-              label="Counter presses"
+              label="Presses completed (machine counter)"
               value={counterPresses}
               onChange={setCounterPresses}
               scrollSafe
@@ -1215,11 +1260,12 @@ function SealingFinalConfirmForm({
       className="rounded-lg border-2 border-sky-400 bg-sky-50/60 p-3 space-y-3"
     >
       <p className="text-sm font-semibold text-sky-900">
-        Mark sealing complete for this bag?
+        Step 3: Complete sealing for this bag?
       </p>
       <p className="text-xs text-sky-900/90 leading-relaxed">
-        Confirm only when every sealing machine has recorded its segment.
-        Packaging close-out unlocks after this step.
+        Use only when this bag is done at sealing — every machine has recorded
+        its segment. This is final close-out, not another segment. Packaging
+        unlocks after this step.
       </p>
       <div className="grid grid-cols-2 gap-2">
         <button

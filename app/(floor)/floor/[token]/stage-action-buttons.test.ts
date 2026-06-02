@@ -598,9 +598,7 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging g
 
   it("inline sealing product picker with Save product when unmapped", () => {
     expect(src).toMatch(/showSealingProductPicker/);
-    expect(src).toMatch(
-      /Select and save finished product before sealing close-out/,
-    );
+    expect(src).toMatch(/Step 1: Save product/);
     expect(src).toMatch(/sealingProductFilterHint/);
     expect(src).toMatch(/\{sealingProductFilterHint\}/);
     expect(src).toMatch(
@@ -845,6 +843,58 @@ describe("MULTI-SEALING-SAME-BAG-1 · dual sealing actions", () => {
     expect(src).toMatch(/releaseSealingHandoffAction/);
     expect(src).toMatch(/Done at this machine — hand off to next sealer/);
     expect(src).toMatch(/sealingHandoff/);
+  });
+});
+
+describe("SEALING-SEGMENT-UX-1 · sealing step layout and copy", () => {
+  it("shows three-step sealing workflow when product is not saved yet", () => {
+    expect(src).toMatch(/Sealing workflow/);
+    expect(src).toMatch(/Save product/);
+    expect(src).toMatch(/Record sealing segment — partial progress/);
+    expect(src).toMatch(/Complete sealing — only when every machine is done/);
+  });
+
+  it("Step 1 save product copy blocks segment and complete until saved", () => {
+    expect(src).toMatch(/Step 1: Save product/);
+    expect(src).toMatch(/locks product identity[\s\S]{0,24}bag/);
+    expect(src).toMatch(/Segment and complete stay blocked until product is saved/);
+    expect(src).toMatch(/Save product before recording sealing work/);
+  });
+
+  it("shows product locked badge after product is saved on sealing station", () => {
+    expect(src).toMatch(/Product locked for this bag/);
+    expect(src).toMatch(/Contact admin if this is wrong/);
+    expect(src).toMatch(/sealingProductReady \?/);
+  });
+
+  it("segment form explains partial progress, not close-out", () => {
+    const formIdx = src.indexOf("function SealingSegmentForm");
+    const formBlock = src.slice(formIdx, formIdx + 2200);
+    expect(formBlock).toMatch(/Step 2: Record sealing segment/);
+    expect(formBlock).toMatch(/Partial progress at this machine — not final close-out/);
+    expect(formBlock).toMatch(/Presses completed \(machine counter\)/);
+    expect(formBlock).not.toMatch(/final close-out when all sealers/);
+  });
+
+  it("complete sealing form says use only when bag is done", () => {
+    const formIdx = src.indexOf("function SealingFinalConfirmForm");
+    const formBlock = src.slice(formIdx, formIdx + 1200);
+    expect(formBlock).toMatch(/Step 3: Complete sealing for this bag/);
+    expect(formBlock).toMatch(/Use only when this bag is done at sealing/);
+    expect(formBlock).toMatch(/not another segment/);
+  });
+
+  it("complete sealing button requires product saved and prior segments", () => {
+    expect(src).toMatch(/!sealingProductReady/);
+    expect(src).toMatch(/!hasSealingSegments/);
+    expect(src).toMatch(/Step 3: Sealing complete — all machines done/);
+  });
+
+  it("does not add product reassignment UI", () => {
+    expect(src).not.toMatch(/Change product/);
+    expect(src).not.toMatch(/Reassign product/);
+    expect(src).toMatch(/saveSealingProductAction/);
+    expect(src).not.toMatch(/productId.*onChange.*reassign/i);
   });
 });
 

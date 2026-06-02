@@ -68,15 +68,17 @@ describe("filterSealingProductsByTabletType", () => {
 });
 
 describe("getUnmappedProductBanner", () => {
-  it("SEALING shows sealing close-out copy, not legacy warning", () => {
+  it("SEALING shows save-product-first copy, not legacy warning", () => {
     const banner = getUnmappedProductBanner("SEALING");
-    expect(banner.detail).toMatch(/Select and save finished product before sealing close-out/);
+    expect(banner.title).toMatch(/Step 1: Save product/);
+    expect(banner.detail).toMatch(/locks product identity for the bag/);
     expect(banner.detail).not.toMatch(/started before the first-op product picker/);
   });
 
-  it("COMBINED at sealing uses sealing close-out copy", () => {
+  it("COMBINED at sealing uses save-product-first copy", () => {
     const banner = getUnmappedProductBanner("COMBINED");
-    expect(banner.detail).toMatch(/Select and save finished product before sealing close-out/);
+    expect(banner.title).toMatch(/Step 1: Save product/);
+    expect(banner.detail).toMatch(/locks product identity for the bag/);
   });
 
   it("HANDPACK_BLISTER defers to sealing without legacy warning", () => {

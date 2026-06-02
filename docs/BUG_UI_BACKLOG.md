@@ -2,9 +2,9 @@
 
 **Purpose:** Prioritized, visible bug and UI-friction work — separate from launch hardening and recovery tooling.
 
-**Last updated:** 2026-06-02 (TEST-STABILIZATION-1)
+**Last updated:** 2026-06-02 (SEALING-SEGMENT-UX-1)
 
-**Live baseline:** v0.4.81 @ `65165e8` (verify via `/api/health` on shift day)
+**Live baseline:** v0.4.82 (verify via `/api/health` on shift day)
 
 ---
 
@@ -29,7 +29,7 @@
 | Recovery apply path missing | Production / rolls | Cannot fix bad roll state in-app | Not built — dry-run only | L | High | Deferred |
 | Admin recovery preview UI | Admin | Supervisors need read-only plan without CLI | Not built | M | Med | Deferred |
 | Floor employee UX (multi-page, pickers) | Floor PWA | Validation UI not production-simple | Future phase | L | Med | See `FLOOR_UI_POLISH_REQUIREMENTS.md` |
-| Sealing segment UX clarity | Floor sealing | Operators unsure segment vs final close | Open | M | Med | Plan: sealing-flow-clarity |
+| Sealing segment UX clarity | Floor sealing | Operators unsure segment vs final close | **Improved** SEALING-SEGMENT-UX-1 (0.4.82) | M | Med | Shipped |
 | Op # / override vs open shift | Floor | Confusing dual accountability | Open | S | Med | Plan: station-behavior-audit |
 
 ---
@@ -74,6 +74,8 @@
 
 | Version | Slice |
 |---------|--------|
+| 0.4.82 | SEALING-SEGMENT-UX-1 |
+| 0.4.81 | TEST-STABILIZATION-1 |
 | 0.4.80 | BUG-UI-FIX-BATCH-1 |
 | 0.4.79 | PRODUCTION-DATA-ENTRY-HARDENING-1 |
 | 0.4.78 | SHIFT-REVIEW-1 |

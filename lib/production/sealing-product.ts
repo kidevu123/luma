@@ -23,7 +23,7 @@ export type UnmappedProductBanner = {
 
 /** Floor error when segment/complete fires before explicit product save. */
 export const SEALING_SAVE_PRODUCT_FIRST_ERROR =
-  "Save the finished product before recording sealing output.";
+  "Save product before recording sealing work.";
 
 /** Floor error when operator tries to save a different product after one is locked. */
 export const SEALING_PRODUCT_ALREADY_SAVED_ERROR =
@@ -33,8 +33,9 @@ export const SEALING_PRODUCT_ALREADY_SAVED_ERROR =
 export function getUnmappedProductBanner(stationKind: string): UnmappedProductBanner {
   if (SEALING_STATION_KINDS.has(stationKind)) {
     return {
-      title: "No product selected yet.",
-      detail: "Select and save finished product before sealing close-out.",
+      title: "Step 1: Save product",
+      detail:
+        "Save the finished product first. This locks product identity for the bag.",
     };
   }
   if (stationKind === "PACKAGING") {

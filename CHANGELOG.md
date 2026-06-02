@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.82] — 2026-06-02
+
+### Changed (SEALING-SEGMENT-UX-1)
+- **Sealing floor workflow:** Three-step layout (save product → record segment → complete sealing) with clearer segment-vs-close-out copy.
+- **Product lock:** Locked-product badge and blocked-work messaging before product save; complete sealing also gated until product is saved.
+- **Segment form:** Labels presses/cards per press; explains partial progress vs final close-out.
+- **No behavior change** to product persistence, accounting, roll/counter logic, or product reassignment.
+
+### Tests (SEALING-SEGMENT-UX-1)
+- `stage-action-buttons.test.ts`, `sealing-product.test.ts` — step layout and copy guards.
+
 ## [0.4.81] — 2026-06-02
 
 ### Fixed (TEST-STABILIZATION-1)
