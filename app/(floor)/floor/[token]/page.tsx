@@ -48,6 +48,7 @@ import {
 } from "@/lib/production/sealing-product";
 import {
   getSealingProductFilterHint,
+  resolveWorkflowBagReceivedTabletContext,
   resolveWorkflowBagTabletTypeId,
 } from "@/lib/production/workflow-bag-tablet-context";
 import {
@@ -520,18 +521,26 @@ export default async function FloorStationPage({
       )
     : null;
 
-  // HANDPACK-TABLET-TYPE-SOURCE-1: load active tablet types for HANDPACK_BLISTER
-  // stations so the operator can select which tablet type they hand-packed.
-  // Selection is submitted with HANDPACK_BLISTER_COMPLETE and stored in the
-  // event payload so sealing can filter the product dropdown.
-  const handpackTabletTypeOptions =
+  const handpackTabletContext =
     station.station.kind === "HANDPACK_BLISTER" && currentAtStation
-      ? await db
-          .select({ id: tabletTypes.id, name: tabletTypes.name })
-          .from(tabletTypes)
-          .where(eq(tabletTypes.isActive, true))
-          .orderBy(tabletTypes.name)
-      : [];
+      ? await resolveWorkflowBagReceivedTabletContext(
+          db,
+          currentAtStation.bag.id,
+        )
+      : null;
+  const handpackTabletContextForForm =
+    station.station.kind === "HANDPACK_BLISTER" && currentAtStation
+      ? handpackTabletContext
+        ? {
+            status: "resolved" as const,
+            tabletTypeId: handpackTabletContext.tabletTypeId,
+            tabletTypeName: handpackTabletContext.tabletTypeName,
+            source: handpackTabletContext.source,
+            receiptNumber: handpackTabletContext.receiptNumber,
+            bagNumber: handpackTabletContext.bagNumber,
+          }
+        : { status: "missing" as const }
+      : null;
 
   const showRollPanel = FLOOR_ROLL_STATION_KINDS.has(station.station.kind);
   type RollChangeRole = "PVC" | "FOIL";
@@ -828,7 +837,7 @@ export default async function FloorStationPage({
               sealingProductOptions={sealingProductOptionsForForm}
               sealingProductFilterHint={sealingProductFilterHint}
               rollChangeRole={requiredRollChangeRole}
-              handpackTabletTypeOptions={handpackTabletTypeOptions}
+              handpackTabletContext={handpackTabletContextForForm}
               sealingSegmentProgress={sealingSegmentProgressForForm}
             />
             {/* Help operator pick the next action when the bag has

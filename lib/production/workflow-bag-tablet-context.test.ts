@@ -14,11 +14,23 @@ describe("getSealingProductFilterHint", () => {
     const hint = getSealingProductFilterHint(null);
     expect(hint).toMatch(/Tablet type is unknown/);
     expect(hint).toMatch(/all active card products/);
+    expect(hint).toMatch(/fix received-bag lineage/);
+    expect(hint).not.toMatch(/hand-pack completion/);
   });
 });
 
-describe("HANDPACK-TABLET-TYPE-SOURCE-1 · resolveWorkflowBagTabletTypeId paths", () => {
-  it("Path 3: reads HANDPACK_BLISTER_COMPLETE event payload.tablet_type_id", () => {
+describe("HANDPACK-TABLET-CONTEXT-1 · resolveWorkflowBagTabletTypeId paths", () => {
+  it("received-lineage resolver uses inventory bag and CARD_ASSIGNED paths only", () => {
+    expect(src).toMatch(/resolveWorkflowBagReceivedTabletContext/);
+    const receivedIdx = src.indexOf("export async function resolveWorkflowBagReceivedTabletContext");
+    const hintIdx = src.indexOf("/** UI copy", receivedIdx);
+    const receivedBlock = src.slice(receivedIdx, hintIdx);
+    expect(receivedBlock).toMatch(/workflowBags\.inventoryBagId/);
+    expect(receivedBlock).toMatch(/CARD_ASSIGNED/);
+    expect(receivedBlock).not.toMatch(/fromHandpack/);
+  });
+
+  it("legacy sealing fallback still reads HANDPACK_BLISTER_COMPLETE payload.tablet_type_id", () => {
     expect(src).toMatch(/HANDPACK_BLISTER_COMPLETE/);
     expect(src).toMatch(/'tablet_type_id'/);
     expect(src).toMatch(/fromHandpack/);
@@ -33,8 +45,8 @@ describe("HANDPACK-TABLET-TYPE-SOURCE-1 · resolveWorkflowBagTabletTypeId paths"
     expect(p3Idx).toBeGreaterThan(p2Idx);
   });
 
-  it("hint text updated to mention hand-pack completion", () => {
-    const hint = getSealingProductFilterHint(null);
-    expect(hint).toMatch(/hand-pack completion/);
+  it("completion guard comments do not endorse operator tablet selection", () => {
+    expect(src).toMatch(/HANDPACK_BLISTER completion must use paths 1\/2 only/);
+    expect(src).not.toMatch(/operator selects tablet type before submitting/);
   });
 });

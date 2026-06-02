@@ -343,21 +343,20 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
   });
 });
 
-describe("HANDPACK-TABLET-TYPE-SOURCE-1 · page wiring", () => {
-  it("loads active tablet types for HANDPACK_BLISTER stations with current bag", () => {
-    expect(pageSrc).toMatch(/handpackTabletTypeOptions/);
+describe("HANDPACK-TABLET-CONTEXT-1 · page wiring", () => {
+  it("resolves hand-pack tablet context from received bag lineage", () => {
+    expect(pageSrc).toMatch(/resolveWorkflowBagReceivedTabletContext/);
+    expect(pageSrc).toMatch(/handpackTabletContextForForm/);
     expect(pageSrc).toMatch(/HANDPACK_BLISTER.*currentAtStation/s);
   });
 
-  it("passes handpackTabletTypeOptions to StageActionButtons", () => {
-    expect(pageSrc).toMatch(/handpackTabletTypeOptions=\{handpackTabletTypeOptions\}/);
+  it("passes handpackTabletContext to StageActionButtons", () => {
+    expect(pageSrc).toMatch(/handpackTabletContext=\{handpackTabletContextForForm\}/);
   });
 
-  it("handpackTabletTypeOptions is empty for non-HANDPACK_BLISTER stations", () => {
-    const hpIdx = pageSrc.indexOf("const handpackTabletTypeOptions");
-    const block = pageSrc.slice(hpIdx, hpIdx + 500);
-    expect(block).toMatch(/HANDPACK_BLISTER/);
-    expect(block).toMatch(/: \[\]/);
+  it("does not load all active tablet types for normal hand-pack operator selection", () => {
+    expect(pageSrc).not.toMatch(/handpackTabletTypeOptions/);
+    expect(pageSrc).not.toMatch(/tabletTypes\.isActive[\s\S]{0,160}orderBy\(tabletTypes\.name\)/);
   });
 
   it("scan-card-form.tsx is not modified for this feature", () => {

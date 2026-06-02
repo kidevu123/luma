@@ -97,10 +97,16 @@ type SealingProductOption = {
   name: string;
 };
 
-type TabletTypeOption = {
-  id: string;
-  name: string;
-};
+type HandpackTabletContext =
+  | {
+      status: "resolved";
+      tabletTypeId: string;
+      tabletTypeName: string;
+      source: "inventory_bag" | "card_assigned";
+      receiptNumber: string | null;
+      bagNumber: number | null;
+    }
+  | { status: "missing" };
 
 type SealingSegmentProgress = {
   segmentCount: number;
@@ -124,7 +130,7 @@ export function StageActionButtons({
   sealingProductOptions = [],
   sealingProductFilterHint = null,
   rollChangeRole = null,
-  handpackTabletTypeOptions = [],
+  handpackTabletContext = null,
   sealingSegmentProgress = null,
 }: {
   token: string;
@@ -149,10 +155,8 @@ export function StageActionButtons({
   sealingProductFilterHint?: string | null;
   /** When the bag was paused for a roll swap, drives the inline RollChangeCard. */
   rollChangeRole?: "PVC" | "FOIL" | null;
-  /** Active tablet types for HANDPACK_BLISTER stations. Operator selects
-   *  one before completing; stored in HANDPACK_BLISTER_COMPLETE payload so
-   *  sealing can filter the product dropdown. Empty = no gate applied. */
-  handpackTabletTypeOptions?: TabletTypeOption[];
+  /** Received-bag tablet lineage for HANDPACK_BLISTER completion. */
+  handpackTabletContext?: HandpackTabletContext | null;
   /** Bag-level sealing segment totals (all stations). */
   sealingSegmentProgress?: SealingSegmentProgress | null;
 }) {
@@ -184,8 +188,6 @@ export function StageActionButtons({
   const [sealingFinalOpen, setSealingFinalOpen] = React.useState(false);
   const [blisterOpen, setBlisterOpen] = React.useState(false);
   const [selectedSealingProductId, setSelectedSealingProductId] =
-    React.useState("");
-  const [selectedHandpackTabletTypeId, setSelectedHandpackTabletTypeId] =
     React.useState("");
 
   // Operator code persists per-station for the browser session so an
@@ -247,14 +249,11 @@ export function StageActionButtons({
     needsSealingProductMapping && SEALING_STATION_KINDS.has(stationKind);
   const sealingProductReady =
     !showSealingProductPicker || selectedSealingProductId.trim().length > 0;
-  // Handpack tablet type selector: shown at HANDPACK_BLISTER stations when
-  // tablet type options are available. Gate only applies when options exist —
-  // legacy bags with no options still allow completion without selection.
-  const showHandpackTabletTypePicker =
-    stationKind === "HANDPACK_BLISTER" && handpackTabletTypeOptions.length > 0;
+  const isHandpackBlister = stationKind === "HANDPACK_BLISTER";
+  const handpackTabletMissing =
+    isHandpackBlister && handpackTabletContext?.status !== "resolved";
   const handpackTabletTypeReady =
-    !showHandpackTabletTypePicker ||
-    selectedHandpackTabletTypeId.trim().length > 0;
+    !isHandpackBlister || handpackTabletContext?.status === "resolved";
   const packagingBlockedNoProduct =
     isPackaging && packagingReady && !hasProductMapped;
 
@@ -306,9 +305,6 @@ export function StageActionButtons({
       const fd = baseFd();
       fd.set("eventType", eventType);
       if (count) fd.set("countTotal", count);
-      if (eventType === "HANDPACK_BLISTER_COMPLETE" && selectedHandpackTabletTypeId) {
-        fd.set("tabletTypeId", selectedHandpackTabletTypeId);
-      }
       const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
       if (badgeCode) {
         // OPERATOR_CHANGE doesn't get an idempotency key — re-firing
@@ -485,26 +481,38 @@ export function StageActionButtons({
         </div>
       )}
 
-      {!isPaused && showHandpackTabletTypePicker && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 space-y-2">
-          <div className="font-semibold text-sm">
-            Select tablet type before completing hand-pack.
+      {!isPaused &&
+        isHandpackBlister &&
+        handpackTabletContext?.status === "resolved" && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900 space-y-1">
+            <div className="font-semibold text-sm">
+              Tablet: {handpackTabletContext.tabletTypeName}
+            </div>
+            <p className="text-sm text-emerald-900/80">
+              Finished product will be chosen at sealing.
+            </p>
+            {handpackTabletContext.receiptNumber || handpackTabletContext.bagNumber != null ? (
+              <p className="text-xs text-emerald-900/70">
+                {handpackTabletContext.receiptNumber
+                  ? `Receipt ${handpackTabletContext.receiptNumber}`
+                  : "Received bag"}
+                {handpackTabletContext.bagNumber != null
+                  ? ` · Bag ${handpackTabletContext.bagNumber}`
+                  : ""}
+              </p>
+            ) : null}
           </div>
-          <select
-            required
-            value={selectedHandpackTabletTypeId}
-            onChange={(e) => setSelectedHandpackTabletTypeId(e.target.value)}
-            className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base text-text"
-          >
-            <option value="" disabled>
-              — Select tablet type —
-            </option>
-            {handpackTabletTypeOptions.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+        )}
+
+      {!isPaused && handpackTabletMissing && (
+        <div className="rounded-lg border border-red-300 bg-red-50/80 px-3 py-2 text-sm text-red-900 space-y-1">
+          <div className="font-semibold">
+            Missing received tablet context.
+          </div>
+          <p>
+            This bag must be fixed in receiving/admin before hand-pack can be
+            completed.
+          </p>
         </div>
       )}
 

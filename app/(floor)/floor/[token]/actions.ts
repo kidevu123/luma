@@ -53,6 +53,7 @@ import {
 } from "@/lib/production/handpack-seal-material";
 import {
   lookupInventoryBagByQrScanToken,
+  resolveWorkflowBagReceivedTabletContext,
   resolveWorkflowBagTabletTypeId,
 } from "@/lib/production/workflow-bag-tablet-context";
 import {
@@ -564,10 +565,6 @@ const eventSchema = z.object({
   /** PRODUCT-SELECTION-AT-SEALING-1: required on SEALING_COMPLETE when
    *  workflow_bags.product_id is still null. Ignored when product exists. */
   productId: z.string().uuid().optional().nullable().or(z.literal("")),
-  /** HANDPACK-TABLET-TYPE-SOURCE-1: operator-selected tablet type at
-   *  HANDPACK_BLISTER_COMPLETE. Stored in event payload so sealing resolver
-   *  can read it. Optional — legacy bags omit it; sealing shows all products. */
-  tabletTypeId: z.string().uuid().optional().nullable().or(z.literal("")),
   clientEventId: clientEventIdField,
   /** OP-1C per-form supervisor override. Resolved by the
    *  station-operator-session helper; falls back to the active
@@ -600,7 +597,6 @@ export async function fireStageEventAction(
     cardsReopened: formData.get("cardsReopened") || 0,
     clientEventId: pickClientEventId(formData),
     productId: formData.get("productId") || undefined,
-    tabletTypeId: formData.get("tabletTypeId") || undefined,
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
   });
   if (!parsed.success) return { error: "Invalid input." };
@@ -616,10 +612,6 @@ export async function fireStageEventAction(
     clientEventId,
     overrideEmployeeCode,
   } = parsed.data;
-  const pickedHandpackTabletTypeId =
-    parsed.data.tabletTypeId && parsed.data.tabletTypeId !== ""
-      ? parsed.data.tabletTypeId
-      : null;
   const pickedSealingProductId =
     parsed.data.productId && parsed.data.productId !== ""
       ? parsed.data.productId
@@ -838,6 +830,15 @@ export async function fireStageEventAction(
       let handpackLotLookup: Awaited<
         ReturnType<typeof lookupProductMatchedBlisterCardLot>
       > | null = null;
+      const handpackTabletContext =
+        eventType === "HANDPACK_BLISTER_COMPLETE"
+          ? await resolveWorkflowBagReceivedTabletContext(tx, workflowBagId)
+          : null;
+      if (eventType === "HANDPACK_BLISTER_COMPLETE" && !handpackTabletContext) {
+        throw new Error(
+          "This bag is missing received tablet context. Ask a supervisor to fix receiving/admin lineage before completing hand-pack.",
+        );
+      }
       if (
         needsHandpackBlisterMaterial &&
         (resolvedCountTotal ?? 0) > 0
@@ -878,8 +879,12 @@ export async function fireStageEventAction(
                 : {}),
           ...(packsRemaining ? { packs_remaining: packsRemaining } : {}),
           ...(cardsReopened ? { cards_reopened: cardsReopened } : {}),
-          ...(eventType === "HANDPACK_BLISTER_COMPLETE" && pickedHandpackTabletTypeId
-            ? { tablet_type_id: pickedHandpackTabletTypeId }
+          ...(eventType === "HANDPACK_BLISTER_COMPLETE" && handpackTabletContext
+            ? {
+                tablet_type_id: handpackTabletContext.tabletTypeId,
+                tablet_type_source: handpackTabletContext.source,
+                inventory_bag_id: handpackTabletContext.inventoryBagId,
+              }
             : {}),
         },
         ...(clientEventId ? { clientEventId } : {}),

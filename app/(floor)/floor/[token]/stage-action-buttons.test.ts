@@ -750,34 +750,38 @@ describe("ROLL-CHANGE-WORKFLOW-1 · inline roll-change card on pause", () => {
   });
 });
 
-describe("HANDPACK-TABLET-TYPE-SOURCE-1 · tablet type selector in stage-action-buttons", () => {
-  it("accepts handpackTabletTypeOptions prop defaulting to empty array", () => {
-    expect(src).toMatch(/handpackTabletTypeOptions.*TabletTypeOption\[\]/s);
-    expect(src).toMatch(/handpackTabletTypeOptions = \[\]/);
+describe("HANDPACK-TABLET-CONTEXT-1 · lineage context in stage-action-buttons", () => {
+  it("accepts handpackTabletContext instead of tablet options", () => {
+    expect(src).toMatch(/type HandpackTabletContext/);
+    expect(src).toMatch(/handpackTabletContext = null/);
+    expect(src).not.toMatch(/handpackTabletTypeOptions/);
   });
 
-  it("shows tablet type selector for HANDPACK_BLISTER when options present", () => {
-    expect(src).toMatch(/showHandpackTabletTypePicker/);
-    expect(src).toMatch(/stationKind === "HANDPACK_BLISTER" && handpackTabletTypeOptions\.length > 0/);
+  it("shows read-only tablet context for resolved HANDPACK_BLISTER lineage", () => {
+    expect(src).toMatch(/Tablet: \{handpackTabletContext\.tabletTypeName\}/);
+    expect(src).toMatch(/Finished product will be chosen at sealing/);
+    expect(src).toMatch(/Receipt \$\{handpackTabletContext\.receiptNumber\}/);
   });
 
-  it("gate blocks hand-pack complete until tablet type is selected", () => {
+  it("missing lineage blocks hand-pack completion without a tablet dropdown", () => {
+    expect(src).toMatch(/handpackTabletMissing/);
+    expect(src).toMatch(/Missing received tablet context/);
+    expect(src).toMatch(/fixed in receiving\/admin before hand-pack can be\s+completed/s);
+    expect(src).not.toMatch(/Select tablet type before completing hand-pack/);
+    expect(src).not.toMatch(/— Select tablet type —/);
+  });
+
+  it("gate blocks hand-pack complete until received lineage is resolved", () => {
     expect(src).toMatch(/handpackTabletTypeReady/);
+    expect(src).toMatch(/handpackTabletContext\?\.status === "resolved"/);
     expect(src).toMatch(/HANDPACK_BLISTER_COMPLETE.*handpackTabletTypeReady/s);
   });
 
-  it("tablet type ID is included in fire() FormData for HANDPACK_BLISTER_COMPLETE", () => {
+  it("fire() never submits tabletTypeId for normal hand-pack operators", () => {
     const fireIdx = src.indexOf("async function fire(eventType");
-    const fireBlock = src.slice(fireIdx, fireIdx + 600);
-    expect(fireBlock).toMatch(/HANDPACK_BLISTER_COMPLETE.*tabletTypeId/s);
-    expect(fireBlock).toMatch(/fd\.set\("tabletTypeId"/);
-  });
-
-  it("tablet type selector is separate from product selection — fire() sets tabletTypeId not productId", () => {
-    // fire() for HANDPACK_BLISTER_COMPLETE sets tabletTypeId, not productId
-    const fireIdx = src.indexOf("async function fire(eventType");
-    const fireBlock = src.slice(fireIdx, fireIdx + 600);
-    expect(fireBlock).toMatch(/tabletTypeId/);
+    const fireBlock = src.slice(fireIdx, fireIdx + 700);
+    expect(fireBlock).not.toMatch(/tabletTypeId/);
+    expect(fireBlock).not.toMatch(/fd\.set\("tabletTypeId"/);
     expect(fireBlock).not.toMatch(/fd\.set\("productId"/);
   });
 

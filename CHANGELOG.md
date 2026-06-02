@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.72] — 2026-06-02
+
+### Changed (HANDPACK-TABLET-CONTEXT-1)
+- **Hand-pack tablet lineage:** Blister hand-pack now resolves tablet context from the scanned bag's received inventory lineage instead of normal-operator tablet selection.
+- **Read-only floor context:** Linked hand-pack bags show the resolved tablet type and keep finished product selection deferred to sealing.
+- **Honest missing-lineage block:** Bags missing received tablet context block hand-pack completion with receiving/admin repair copy instead of allowing guessed tablet selection.
+
 ## [0.4.71] — 2026-06-02
 
 ### Changed (DEPLOY-VERIFY-1)

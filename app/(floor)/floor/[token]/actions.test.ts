@@ -331,25 +331,36 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
   });
 });
 
-describe("HANDPACK-TABLET-TYPE-SOURCE-1 · floor actions", () => {
-  it("eventSchema accepts optional tabletTypeId", () => {
-    expect(actionsSrc).toMatch(/tabletTypeId: z\.string\(\)\.uuid\(\)/);
+describe("HANDPACK-TABLET-CONTEXT-1 · floor actions", () => {
+  it("eventSchema no longer accepts normal-operator tabletTypeId", () => {
+    expect(actionsSrc).not.toMatch(/tabletTypeId: z\.string\(\)\.uuid\(\)/);
   });
 
-  it("fireStageEventAction reads tabletTypeId from FormData", () => {
+  it("fireStageEventAction does not read tabletTypeId from FormData", () => {
     const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
     const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
     const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).toMatch(/formData\.get\("tabletTypeId"\)/);
-    expect(block).toMatch(/pickedHandpackTabletTypeId/);
+    expect(block).not.toMatch(/formData\.get\("tabletTypeId"\)/);
+    expect(block).not.toMatch(/pickedHandpackTabletTypeId/);
   });
 
-  it("HANDPACK_BLISTER_COMPLETE payload includes tablet_type_id when provided", () => {
+  it("HANDPACK_BLISTER_COMPLETE re-resolves received tablet context server-side", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    expect(block).toMatch(/resolveWorkflowBagReceivedTabletContext/);
+    expect(block).toMatch(/missing received tablet context/);
+    expect(block).toMatch(/fix receiving\/admin lineage/);
+  });
+
+  it("HANDPACK_BLISTER_COMPLETE payload records resolved lineage, not client-supplied tablet", () => {
     const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
     const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
     const block = actionsSrc.slice(fireIdx, pauseIdx);
     expect(block).toMatch(/HANDPACK_BLISTER_COMPLETE.*tablet_type_id/s);
-    expect(block).toMatch(/pickedHandpackTabletTypeId/);
+    expect(block).toMatch(/handpackTabletContext\.tabletTypeId/);
+    expect(block).toMatch(/tablet_type_source/);
+    expect(block).toMatch(/inventory_bag_id/);
   });
 
   it("product selection still happens at sealing, not hand-pack", () => {
