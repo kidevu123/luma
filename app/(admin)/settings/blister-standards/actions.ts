@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { refreshRollDerivedReadModels } from "@/lib/projector/roll-derived-read-models";
+import { rebuildAllMaterialProjectionsAction } from "@/lib/admin/rebuild-material-projections-action";
 import { compact } from "@/lib/db/compact";
 import { requireAdmin } from "@/lib/auth-guards";
 import {
@@ -132,3 +133,5 @@ export async function rebuildBlisterLearningAction(): Promise<{
     };
   }
 }
+
+export { rebuildAllMaterialProjectionsAction };

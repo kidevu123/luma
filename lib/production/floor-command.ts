@@ -12,6 +12,7 @@ import {
   stations,
   workflowEvents,
   workflowBags,
+  dueTargets,
 } from "@/lib/db/schema";
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import type {
@@ -169,6 +170,22 @@ export async function getShiftTargetStatus(tz: string): Promise<ShiftTargetStatu
       .where(eq(products.id, throughputRows[0].productId))
       .limit(1);
     dailyGoal = productRow[0]?.dailyUnitGoal ?? null;
+  }
+
+  if (dailyGoal == null) {
+    const [dueSum] = await db
+      .select({
+        total: sql<number>`COALESCE(SUM(${dueTargets.targetQuantity}), 0)::int`,
+      })
+      .from(dueTargets)
+      .where(
+        and(
+          isNull(dueTargets.completedAt),
+          sql`(${dueTargets.dueAt} AT TIME ZONE ${tz})::date = ${todayStr}::date`,
+        ),
+      );
+    const dueTotal = Number(dueSum?.total ?? 0);
+    if (dueTotal > 0) dailyGoal = dueTotal;
   }
 
   const projectedTotal =
@@ -424,7 +441,8 @@ export function buildShiftStatusData(
     targetCell = {
       label: "Target",
       value: `${target.unitsProduced.toLocaleString()} units`,
-      detail: "no daily goal set",
+      detail:
+        "no goal — set product daily goal or open due targets for today",
       level: "neutral",
     };
   } else {

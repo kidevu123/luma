@@ -22,6 +22,7 @@ import { rebuildMaterialReconciliation } from "@/lib/projector/material-reconcil
 import { rebuildMaterialReconciliationV2 } from "@/lib/projector/material-reconciliation-v2";
 import { rebuildStationQualityDaily } from "@/lib/projector/station-daily";
 import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
+import { rebuildMaterialBurn } from "@/lib/projector/material-burn";
 import { rebuildMaterialConsumptionDaily } from "@/lib/projector/material-consumption-daily";
 import { rebuildRollUsage } from "@/lib/projector/roll-usage";
 import { rebuildMaterialUsageLearning } from "@/lib/projector/material-usage-learning";
@@ -47,6 +48,7 @@ async function main() {
     "read_station_quality_daily",
     "read_material_lot_state",
     "read_material_consumption_daily",
+    "read_material_burn",
     "read_roll_usage",
     "read_material_usage_learning",
     "read_material_recommendations",
@@ -91,6 +93,8 @@ async function main() {
     await rebuildMaterialLotState(tx);
     console.log("[rebuild-read-models] rebuilding read_material_consumption_daily…");
     await rebuildMaterialConsumptionDaily(tx);
+    console.log("[rebuild-read-models] rebuilding read_material_burn…");
+    await rebuildMaterialBurn(tx);
     console.log("[rebuild-read-models] rebuilding read_roll_usage…");
     await rebuildRollUsage(tx);
     console.log("[rebuild-read-models] rebuilding read_material_usage_learning…");

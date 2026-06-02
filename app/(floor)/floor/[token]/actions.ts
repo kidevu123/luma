@@ -31,7 +31,7 @@ import {
 } from "@/lib/production/stage-progression";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
 import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
-import { rebuildRollUsage } from "@/lib/projector/roll-usage";
+import { refreshMaterialReadModelsAfterBlister } from "@/lib/projector/material-read-model-refresh";
 import {
   buildPackagingConsumptionPayloadSummary,
   patchPackagingCompleteConsumptionSummary,
@@ -1030,7 +1030,9 @@ export async function fireStageEventAction(
               skipReason: handpackMaterialSkip,
               occurredAt: new Date(),
             });
-            await refreshMaterialReadModelsAfterConsumption(tx);
+            await refreshMaterialReadModelsAfterConsumption(tx, {
+              refreshRecommendations: true,
+            });
           }
         }
       }
@@ -1182,7 +1184,10 @@ export async function pauseBagAction(
           formClientEventId: parsed.data.clientEventId ?? null,
           accountability,
         });
-        await rebuildRollUsage(tx);
+        await refreshMaterialReadModelsAfterBlister(
+          tx,
+          parsed.data.stationId,
+        );
       }
     });
   } catch (err) {
@@ -1550,7 +1555,9 @@ export async function packagingCompleteAction(
         summary: buildPackagingConsumptionPayloadSummary(consumption),
         clientEventId: parsed.data.clientEventId ?? null,
       });
-      await refreshMaterialReadModelsAfterConsumption(tx);
+      await refreshMaterialReadModelsAfterConsumption(tx, {
+        refreshRecommendations: true,
+      });
       if (station.kind === "PACKAGING") {
         await maybeAutoFinalizeAfterPackagingComplete(tx, {
           workflowBagId: parsed.data.workflowBagId,

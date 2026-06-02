@@ -28,6 +28,7 @@ import type {
   VarianceKind,
   VarianceSeverity,
 } from "@/lib/production/reconciliation-v2";
+import { rebuildAllMaterialProjectionsAction } from "@/lib/admin/rebuild-material-projections-action";
 
 export const dynamic = "force-dynamic";
 
@@ -252,13 +253,23 @@ function EmptyState({ hasAny }: { hasAny: boolean }) {
             No 8-bucket reconciliation rows yet.
           </p>
           <p className="mt-1">
-            Run{" "}
-            <code className="font-mono bg-page px-1 py-0.5 rounded text-xs">
-              tsx scripts/rebuild-read-models.ts
-            </code>{" "}
-            to populate <code className="font-mono">read_material_reconciliation_v2</code>{" "}
-            from the existing event ledger.
+            Rebuild from the event ledger (roll changes and packaging now
+            refresh automatically; use this once to backfill history).
           </p>
+          <form
+            action={async () => {
+              "use server";
+              await rebuildAllMaterialProjectionsAction();
+            }}
+            className="mt-3"
+          >
+            <button
+              type="submit"
+              className="text-sm px-3 py-1.5 rounded border border-brand-accent/40 text-brand-accent hover:bg-brand-accent/10"
+            >
+              Rebuild material projections
+            </button>
+          </form>
         </>
       ) : (
         <p>No rows match the current filters.</p>

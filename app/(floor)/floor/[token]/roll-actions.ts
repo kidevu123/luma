@@ -30,8 +30,7 @@ import {
   workflowBags,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
-import { refreshRollDerivedReadModels } from "@/lib/projector/roll-derived-read-models";
-import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
+import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
 import { nextLotStatusForUnmount } from "@/lib/production/active-rolls";
 import { kgToGrams } from "@/lib/inbound/roll-weight";
 import {
@@ -256,8 +255,10 @@ export async function mountRollAction(
         .update(packagingLots)
         .set({ status: "IN_USE" })
         .where(eq(packagingLots.id, lot.id));
-      await rebuildMaterialLotState(tx);
-      await refreshRollDerivedReadModels(tx);
+      await refreshMaterialReadModelsAfterConsumption(tx, {
+        packagingLotIds: [lot.id],
+        refreshRecommendations: true,
+      });
       try {
         await writeAudit(
           {
@@ -423,8 +424,10 @@ export async function unmountRollAction(
             : { status: nextStatus },
         )
         .where(eq(packagingLots.id, lot.id));
-      await rebuildMaterialLotState(tx);
-      await refreshRollDerivedReadModels(tx);
+      await refreshMaterialReadModelsAfterConsumption(tx, {
+        packagingLotIds: [lot.id],
+        refreshRecommendations: true,
+      });
       try {
         await writeAudit(
           {
@@ -549,7 +552,9 @@ export async function weighRollAction(
         .update(packagingLots)
         .set({ currentWeightGramsEstimate: currentWeightGrams })
         .where(eq(packagingLots.id, lot.id));
-      await refreshRollDerivedReadModels(tx);
+      await refreshMaterialReadModelsAfterConsumption(tx, {
+        packagingLotIds: [lot.id],
+      });
       try {
         await writeAudit(
           {
@@ -1000,8 +1005,10 @@ export async function changeRollAction(
         .where(eq(packagingLots.id, newLot.id));
 
       // 4. Refresh read models.
-      await rebuildMaterialLotState(tx);
-      await refreshRollDerivedReadModels(tx);
+      await refreshMaterialReadModelsAfterConsumption(tx, {
+        packagingLotIds: [oldLot.packaging_lot_id, newLot.id],
+        refreshRecommendations: true,
+      });
 
       // 5. Audit (best-effort).
       try {

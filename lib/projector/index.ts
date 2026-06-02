@@ -40,6 +40,7 @@ import { refreshSkuDailyForBag } from "./sku-daily";
 import { refreshMaterialReconciliationForBag } from "./material-reconciliation";
 import { refreshStationDailyForBag } from "./station-daily";
 import { emitMaterialConsumedFromBlister } from "./material-consumption-hook";
+import { refreshMaterialReadModelsAfterBlister } from "./material-read-model-refresh";
 import { attributeFinalizedBag } from "./operator-daily-attribution";
 import { projectQcEvent, isQcEventType } from "./qc-events";
 import { projectFinishedLotForFinalizedBag } from "./finished-lot-passport";
@@ -474,6 +475,7 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       occurredAt,
       upstreamClientEventId: ev.clientEventId ?? null,
     });
+    await refreshMaterialReadModelsAfterBlister(tx, ev.stationId);
   }
 
   // 4. pg_notify on a single channel — the SSE relay LISTENs on this

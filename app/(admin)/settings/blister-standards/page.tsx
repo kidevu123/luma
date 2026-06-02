@@ -28,6 +28,7 @@ import {
   saveBlisterStandardAction,
   deleteBlisterStandardAction,
   rebuildBlisterLearningAction,
+  rebuildAllMaterialProjectionsAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -298,19 +299,34 @@ export default async function BlisterStandardsPage() {
                   </div>
                 </>
               )}
-              <form
-                action={async () => {
-                  "use server";
-                  await rebuildBlisterLearningAction();
-                }}
-              >
-                <button
-                  type="submit"
-                  className="text-sm px-3 py-1.5 rounded border border-brand-accent/40 text-brand-accent hover:bg-brand-accent/10"
+              <div className="flex flex-wrap gap-2">
+                <form
+                  action={async () => {
+                    "use server";
+                    await rebuildBlisterLearningAction();
+                  }}
                 >
-                  Rebuild learned yield from roll history
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    className="text-sm px-3 py-1.5 rounded border border-brand-accent/40 text-brand-accent hover:bg-brand-accent/10"
+                  >
+                    Rebuild learned yield
+                  </button>
+                </form>
+                <form
+                  action={async () => {
+                    "use server";
+                    await rebuildAllMaterialProjectionsAction();
+                  }}
+                >
+                  <button
+                    type="submit"
+                    className="text-sm px-3 py-1.5 rounded border border-white/15 text-slate-300 hover:bg-white/5"
+                  >
+                    Rebuild all material metrics
+                  </button>
+                </form>
+              </div>
             </div>
           ) : (
             <DataTable>

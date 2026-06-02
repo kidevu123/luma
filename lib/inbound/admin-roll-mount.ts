@@ -3,8 +3,7 @@
 
 import { eq, sql } from "drizzle-orm";
 import { packagingLots, materialInventoryEvents } from "@/lib/db/schema";
-import { refreshRollDerivedReadModels } from "@/lib/projector/roll-derived-read-models";
-import { rebuildMaterialLotState } from "@/lib/projector/material-lot-state";
+import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
 import {
   withAccountabilityPayload,
   type AccountabilityForEvent,
@@ -95,6 +94,8 @@ export async function adminMountRollLot(
     .update(packagingLots)
     .set({ status: "IN_USE" })
     .where(eq(packagingLots.id, args.lotId));
-  await rebuildMaterialLotState(tx);
-  await refreshRollDerivedReadModels(tx);
+  await refreshMaterialReadModelsAfterConsumption(tx, {
+    packagingLotIds: [args.lotId],
+    refreshRecommendations: true,
+  });
 }
