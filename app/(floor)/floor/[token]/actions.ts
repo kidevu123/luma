@@ -58,6 +58,7 @@ import {
 } from "@/lib/production/workflow-bag-tablet-context";
 import {
   parseNonnegativeIntegerInput,
+  pauseCounterSnapshotMissingError,
   stationRequiresBlisterCounterSnapshot,
 } from "@/lib/production/blister-counter-snapshot";
 import { recordBlisterCounterRollSegment } from "@/lib/production/blister-roll-segments";
@@ -1076,10 +1077,7 @@ export async function pauseBagAction(
       parsed.data.counterSnapshotCount == null
     ) {
       return {
-        error:
-          parsed.data.reason === "shift_end"
-            ? "Enter the machine counter at shift end before ending shift."
-            : "Enter the machine counter at pause before pausing for a machine jam.",
+        error: pauseCounterSnapshotMissingError(parsed.data.reason),
       };
     }
     // Refuse double-pause — second BAG_PAUSED corrupts the

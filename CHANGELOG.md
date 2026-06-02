@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.75] — 2026-06-02
+
+### Changed (PAUSE-ENDSHIFT-COPY-1)
+- **Blister counter snapshot copy:** Pause, end-shift, roll change, and blister close-out UI now describe counts as good blisters/cards since the last physical machine counter reset — not lifetime machine totals.
+- **Save-before-reset reminders:** Roll change and blister close-out forms include explicit guidance to save the snapshot before resetting the physical counter and to stop for a supervisor if the counter was reset too early.
+- **Reason-aware pause errors:** Client and server validation for missing counter snapshots use machine-jam vs end-shift wording instead of always referencing a machine jam.
+- **No accounting changes:** Event emission, `ROLL_COUNTER_SEGMENT_RECORDED` behavior, and roll-swap logic are unchanged in this slice.
+
+### Tests added (PAUSE-ENDSHIFT-COPY-1)
+- Copy and error-message source guards for pause, end-shift, roll change, and blister close-out helper text.
+
 ## [0.4.74] — 2026-06-02
 
 ### Added (SEALING-PRODUCT-PERSIST-1)

@@ -23,6 +23,8 @@ import {
 import {
   isBlisterCounterSnapshotStation,
   parseNonnegativeIntegerInput,
+  shiftEndCounterSnapshotHelperText,
+  shiftEndCounterSnapshotMissingError,
 } from "@/lib/production/blister-counter-snapshot";
 
 type ActiveSession = {
@@ -120,7 +122,7 @@ function ActiveSessionView({
       ? parseNonnegativeIntegerInput(shiftEndCounter)
       : null;
     if (shiftEndRequiresCounter && parsedCounter == null) {
-      setError("Enter the machine counter at shift end before ending shift.");
+      setError(shiftEndCounterSnapshotMissingError());
       return;
     }
     setPending(true);
@@ -200,7 +202,7 @@ function ActiveSessionView({
       {confirming && shiftEndRequiresCounter ? (
         <label className="mt-3 block space-y-1 rounded-lg border border-rose-200 bg-white/80 px-3 py-2">
           <span className="text-xs font-semibold text-rose-950">
-            Machine counter at shift end
+            Counter snapshot at shift end
           </span>
           <input
             type="text"
@@ -215,8 +217,7 @@ function ActiveSessionView({
             placeholder="0"
           />
           <span className="block text-xs leading-relaxed text-rose-900">
-            Machines may reset when powered off. Save this count before
-            ending shift.
+            {shiftEndCounterSnapshotHelperText()}
           </span>
         </label>
       ) : null}

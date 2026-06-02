@@ -32,3 +32,30 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · counter snapshot station rules", () 
     expect(parseNonnegativeIntegerInput("abc")).toBeNull();
   });
 });
+
+describe("PAUSE-ENDSHIFT-COPY-1 · counter snapshot copy helpers", () => {
+  it("pause errors are reason-aware and do not always reference machine jam", async () => {
+    const {
+      pauseCounterSnapshotMissingError,
+      pauseCounterSnapshotHelperText,
+    } = await import("./blister-counter-snapshot");
+    expect(pauseCounterSnapshotMissingError("shift_end")).toMatch(/end-shift/);
+    expect(pauseCounterSnapshotMissingError("shift_end")).not.toMatch(/machine jam/i);
+    expect(pauseCounterSnapshotMissingError("machine_jam")).toMatch(/machine-jam/);
+    expect(pauseCounterSnapshotHelperText("shift_end")).toMatch(
+      /physical machine counter reset/,
+    );
+  });
+
+  it("roll change and blister close-out copy mention save-before-reset", async () => {
+    const {
+      rollChangeCounterHelperText,
+      blisterCloseOutCounterHelperText,
+    } = await import("./blister-counter-snapshot");
+    expect(rollChangeCounterHelperText("PVC")).toMatch(/replacement roll starts after you save/);
+    expect(rollChangeCounterHelperText("FOIL")).toMatch(/both active rolls \(PVC \+ foil\)/);
+    expect(blisterCloseOutCounterHelperText()).toMatch(
+      /Save before resetting the physical machine counter/,
+    );
+  });
+});

@@ -88,21 +88,40 @@ describe("STATION-PAUSE-2 · pause reasons via helper", () => {
 });
 
 describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause UI counter prompt", () => {
-  it("shows machine counter at pause only when the station/reason requires it", () => {
+  it("shows counter snapshot field only when the station/reason requires it", () => {
     expect(src).toMatch(/stationRequiresBlisterCounterSnapshot/);
     expect(src).toMatch(/pauseRequiresCounterSnapshot/);
-    expect(src).toMatch(/Machine counter at pause/);
+    expect(src).toMatch(/pauseCounterSnapshotFieldLabel/);
   });
 
-  it("uses floor copy that defines the snapshot as since last reset", () => {
-    expect(src).toMatch(/Enter good blisters\/cards made since the last reset/);
-    expect(src).toMatch(/Reset the\s+machine counter after saving/s);
+  it("uses reason-aware helper text for segment counts since last reset", () => {
+    expect(src).toMatch(/pauseCounterSnapshotHelperText/);
+    expect(src).toMatch(/pauseCounterSnapshotMissingError/);
+    expect(src).toMatch(/pauseCounterSnapshotFieldLabel/);
+  });
+
+  it("shift-end pause error does not always reference machine jam", () => {
+    expect(src).toMatch(/pauseCounterSnapshotMissingError\(pauseReason\)/);
+    expect(src).not.toMatch(
+      /Enter the machine counter at pause before pausing for a machine jam/,
+    );
   });
 
   it("submits counterSnapshotCount to pauseBagAction and allows zero", () => {
     expect(src).toMatch(/fd\.set\("counterSnapshotCount", String\(counterSnapshot\)\)/);
     expect(src).toMatch(/parseNonnegativeIntegerInput/);
     expect(src).toMatch(/placeholder="0"/);
+  });
+});
+
+describe("PAUSE-ENDSHIFT-COPY-1 · roll change and blister close-out copy", () => {
+  it("roll change uses shared helper for removed roll / paired roll / bag copy", () => {
+    expect(src).toMatch(/rollChangeCounterHelperText\(role\)/);
+  });
+
+  it("blister close-out uses shared helper for save-before-reset reminder", () => {
+    expect(src).toMatch(/blisterCloseOutCounterHelperText\(\)/);
+    expect(src).toMatch(/Counter snapshot at blister close-out/);
   });
 });
 
@@ -262,12 +281,12 @@ describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
     expect(actionsSrc).toMatch(/AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*"BLISTER"/);
   });
 
-  it("BlisterCompleteForm still uses Machine counter only", () => {
+  it("BlisterCompleteForm still uses counter snapshot field only", () => {
     const blisterBlock = src.slice(
       src.indexOf("function BlisterCompleteForm"),
       src.indexOf("function RollChangeCard"),
     );
-    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).toMatch(/Counter snapshot at blister close-out/);
     expect(blisterBlock).not.toMatch(/Blister count/);
     expect(blisterBlock).not.toMatch(/Packs remaining/);
   });
@@ -336,10 +355,10 @@ describe("SEALING-COUNTER-1 · sealing completion uses machine counter", () => {
     expect(formBlock).not.toMatch(/fd\.set\("countTotal"/);
   });
 
-  it("BlisterCompleteForm uses Machine counter — countTotal payload preserved", () => {
+  it("BlisterCompleteForm uses counter snapshot — countTotal payload preserved", () => {
     const blisterIdx = src.indexOf("function BlisterCompleteForm");
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
-    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).toMatch(/Counter snapshot at blister close-out/);
     expect(blisterBlock).toMatch(/countTotal/);
   });
 
@@ -400,10 +419,10 @@ describe("SEALING-COUNTER-UI-2 · counter-only sealing close-out", () => {
     expect(block).not.toMatch(/fd\.set\("cardsReopened"/);
   });
 
-  it("BlisterCompleteForm uses Machine counter — packs remaining removed", () => {
+  it("BlisterCompleteForm uses counter snapshot — packs remaining removed", () => {
     const blisterIdx = src.indexOf("function BlisterCompleteForm");
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
-    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).toMatch(/Counter snapshot at blister close-out/);
     expect(blisterBlock).not.toMatch(/Packs remaining/);
   });
 });
@@ -455,10 +474,10 @@ describe("PACKAGING-CLOSEOUT-UX-1 · scroll-safe inputs and clearer labels", () 
     expect(block).not.toMatch(/Packs remaining/);
   });
 
-  it("BlisterCompleteForm uses Machine counter — blister count and packs remaining removed", () => {
+  it("BlisterCompleteForm uses counter snapshot — blister count and packs remaining removed", () => {
     const blisterIdx = src.indexOf("function BlisterCompleteForm");
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
-    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).toMatch(/Counter snapshot at blister close-out/);
     expect(blisterBlock).not.toMatch(/Blister count/);
     expect(blisterBlock).not.toMatch(/Packs remaining/);
   });
@@ -549,7 +568,7 @@ describe("PACKAGING-AUTO-FINALIZE-1 · manual finalize fallback for legacy PACKA
   it("blister close-out uses machine counter — blister count and packs remaining removed", () => {
     const blisterIdx = src.indexOf("function BlisterCompleteForm");
     const blisterBlock = src.slice(blisterIdx, blisterIdx + 2500);
-    expect(blisterBlock).toMatch(/Machine counter/);
+    expect(blisterBlock).toMatch(/Counter snapshot at blister close-out/);
     expect(blisterBlock).not.toMatch(/Blister count/);
     expect(blisterBlock).not.toMatch(/Packs remaining/);
   });
@@ -626,8 +645,8 @@ describe("BLISTER-MACHINE-COUNTER-1 · blister close-out uses machine counter", 
     return src.slice(formIdx, formIdx + 2500);
   }
 
-  it("BlisterCompleteForm renders Machine counter field", () => {
-    expect(blisterFormBlock()).toMatch(/Machine counter/);
+  it("BlisterCompleteForm renders counter snapshot field", () => {
+    expect(blisterFormBlock()).toMatch(/Counter snapshot at blister close-out/);
   });
 
   it("BlisterCompleteForm does not render Blister count", () => {
@@ -659,20 +678,20 @@ describe("BLISTER-MACHINE-COUNTER-1 · blister close-out uses machine counter", 
     const sealBlock = src.slice(sealIdx, blisterIdx);
     expect(sealBlock).toMatch(/Counter presses/);
     expect(sealBlock).toMatch(/counterPresses/);
-    expect(sealBlock).not.toMatch(/Machine counter/);
+    expect(sealBlock).not.toMatch(/Counter snapshot at blister close-out/);
   });
 
-  it("packaging close-out unchanged — no Machine counter field there", () => {
+  it("packaging close-out unchanged — no counter snapshot field there", () => {
     const pkgIdx = src.indexOf("function PackagingCompleteForm");
     const numFieldIdx = src.indexOf("function NumField");
     const pkgBlock = src.slice(pkgIdx, numFieldIdx);
-    expect(pkgBlock).not.toMatch(/Machine counter/);
+    expect(pkgBlock).not.toMatch(/Counter snapshot at blister close-out/);
     expect(pkgBlock).toMatch(/Master cases/);
   });
 
   it("scan-card-form not touched", () => {
     const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
-    expect(scanSrc).not.toMatch(/Machine counter/);
+    expect(scanSrc).not.toMatch(/Counter snapshot at blister close-out/);
     expect(scanSrc).not.toMatch(/machineCounter/);
   });
 

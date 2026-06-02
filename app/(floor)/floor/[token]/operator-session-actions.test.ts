@@ -69,8 +69,9 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · end-shift counter guard", () => {
     expect(formSrc).toMatch(/pauseBagAction/);
     expect(formSrc).toMatch(/reason", "shift_end"/);
     expect(formSrc).toMatch(/counterSnapshotCount/);
-    expect(formSrc).toMatch(/Machine counter at shift end/);
-    expect(formSrc).toMatch(/Machines may reset when powered off/);
+    expect(formSrc).toMatch(/Counter snapshot at shift end/);
+    expect(formSrc).toMatch(/shiftEndCounterSnapshotHelperText/);
+    expect(formSrc).toMatch(/shiftEndCounterSnapshotMissingError/);
   });
 
   it("page passes current active bag pause state to the operator panel", () => {

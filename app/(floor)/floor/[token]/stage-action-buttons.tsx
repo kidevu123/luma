@@ -77,7 +77,12 @@ import {
   type PauseReasonValue,
 } from "@/lib/production/station-pause-reasons";
 import {
+  blisterCloseOutCounterHelperText,
   parseNonnegativeIntegerInput,
+  pauseCounterSnapshotFieldLabel,
+  pauseCounterSnapshotHelperText,
+  pauseCounterSnapshotMissingError,
+  rollChangeCounterHelperText,
   stationRequiresBlisterCounterSnapshot,
 } from "@/lib/production/blister-counter-snapshot";
 import {
@@ -367,7 +372,7 @@ export function StageActionButtons({
       ? parseNonnegativeIntegerInput(pauseCounterSnapshot)
       : null;
     if (pauseRequiresCounterSnapshot && counterSnapshot == null) {
-      setError("Enter the machine counter at pause before pausing for a machine jam.");
+      setError(pauseCounterSnapshotMissingError(pauseReason));
       return;
     }
     setPending("pause");
@@ -738,7 +743,7 @@ export function StageActionButtons({
           {pauseRequiresCounterSnapshot ? (
             <label className="block space-y-1">
               <span className="text-xs font-semibold text-amber-950">
-                Machine counter at pause
+                {pauseCounterSnapshotFieldLabel(pauseReason)}
               </span>
               <input
                 type="text"
@@ -752,8 +757,7 @@ export function StageActionButtons({
                 placeholder="0"
               />
               <span className="block text-xs leading-relaxed text-amber-900">
-                Enter good blisters/cards made since the last reset. Reset the
-                machine counter after saving.
+                {pauseCounterSnapshotHelperText(pauseReason)}
               </span>
             </label>
           ) : null}
@@ -1389,11 +1393,14 @@ function BlisterCompleteForm({
     <div ref={containerRef} className="rounded-lg border-2 border-violet-300 bg-violet-50/40 p-3 space-y-3">
       <p className="text-sm font-semibold text-violet-900">Blister close-out</p>
       <NumField
-        label="Machine counter"
+        label="Counter snapshot at blister close-out"
         value={machineCounter}
         onChange={setMachineCounter}
         scrollSafe
       />
+      <p className="text-xs leading-relaxed text-violet-900">
+        {blisterCloseOutCounterHelperText()}
+      </p>
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
@@ -1478,14 +1485,13 @@ function RollChangeCard({
         <p className="text-sm font-semibold text-orange-900">
           {label} roll change required
         </p>
-        <p className="text-xs text-orange-800/80">
-          Enter the machine counter reading when the old roll stopped, then
-          scan or type the new roll number.
+        <p className="text-xs text-orange-800/80 leading-relaxed">
+          {rollChangeCounterHelperText(role)}
         </p>
       </div>
 
       <NumField
-        label="Machine counter when roll stopped"
+        label={`Counter snapshot when ${label} roll stopped`}
         value={counterSegment}
         onChange={setCounterSegment}
         scrollSafe

@@ -127,6 +127,7 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause counter snapshots", () => {
     expect(actionsSrc).toMatch(/stationRequiresBlisterCounterSnapshot/);
     expect(actionsSrc).toMatch(/parseNonnegativeIntegerInput/);
     expect(actionsSrc).toMatch(/recordBlisterCounterRollSegment/);
+    expect(actionsSrc).toMatch(/pauseCounterSnapshotMissingError/);
   });
 
   it("pauseSchema accepts counterSnapshotCount as a nonnegative integer", () => {
@@ -134,9 +135,9 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause counter snapshots", () => {
     expect(actionsSrc).toMatch(/z\.number\(\)\.int\(\)\.nonnegative\(\)\.optional/);
   });
 
-  it("BLISTER and COMBINED machine-jam pauses require a counter snapshot server-side", () => {
+  it("BLISTER and COMBINED pauses require reason-aware counter snapshot errors server-side", () => {
     expect(actionsSrc).toMatch(/stationRequiresBlisterCounterSnapshot\(\s*station\.kind/);
-    expect(actionsSrc).toMatch(/Enter the machine counter at pause before pausing for a machine jam/);
+    expect(actionsSrc).toMatch(/pauseCounterSnapshotMissingError\(parsed\.data\.reason\)/);
   });
 
   it("pause payload stores the actual counter snapshot, including zero", () => {
