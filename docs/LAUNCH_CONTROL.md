@@ -62,7 +62,7 @@ Do not assume these exist on the floor or in admin UI.
 | Admin recovery UI | Not built | No preview screen, no confirm/apply |
 | Live Zoho production output writes | Paused | Queue/readiness/mock commit state only; no live HTTP to Zoho |
 | Legacy/unlinked hand-pack tablet override | Removed/blocked | Missing lineage blocks; repair is admin/PM procedure, not operator override |
-| **Sealing finished-product persistence + lock** | Not built | Product dropdown is browser-only state today; refresh loses selection — unsafe for lineage |
+| **Sealing finished-product persistence + lock** | Shipped (v0.4.74+) | `saveSealingProductAction` writes `workflow_bags.product_id`; Save product is refresh-safe; segment/close-out re-read server-side |
 | Finished-lot / finalized bag auto-repair | Not built | Any correction needs PM approval + scripted repair |
 | DB repair scripts on production | Out of scope for operators | Exist for one-off ops; never run without Sahil |
 
@@ -79,7 +79,9 @@ Prioritized for **blister-room launch**. "Active" = in flight or needs daily att
 - WORKFLOW-SUBMISSIONS-DISPLAY-P1 — receipt + bag labels
 - DEPLOY-VERIFY-1 — drift guard + verify:deploy + workflow-submissions smoke
 - HANDPACK-TABLET-CONTEXT-1 — lineage-based tablet on hand-pack
+- SEALING-PRODUCT-PERSIST-1 — Save product persists + locks `workflow_bags.product_id` at sealing
 - MATERIAL-CHANGE-RECOVERY-DRY-RUN-1 — planner + tests, no apply
+- SHIFT-REVIEW-1 — read-only post-shift blister review (`/shift-review`)
 - LAUNCH-CONTROL-RESET-P1 — this documentation pass
 
 ### Active
@@ -89,9 +91,8 @@ Prioritized for **blister-room launch**. "Active" = in flight or needs daily att
 
 ### Next (P1 — ranked)
 
-1. **SEALING-PRODUCT-PERSIST-1** — Persist and lock finished product selection at sealing (narrow slice: save durably, show after refresh, lock by default; explicit change flow with warning/audit; server must not trust client-only selection when a saved product exists; no silent overwrite)
+1. **PRODUCTION-DATA-ENTRY-HARDENING-1** — Ready-for-floor validation + receiving badges + block unsafe floor start (see `docs/PRODUCTION_DATA_ENTRY_HARDENING_AUDIT.md`)
 2. Pause/end-shift count workflow validation + operator training
-3. Production data-entry hardening (receive → QR link → lineage before floor start)
 4. Script-backed recovery dry-run harness (CLI over real bag/roll IDs, still no apply)
 5. Admin recovery preview UI (read-only plan output, still no apply)
 6. Legacy/unlinked bag repair procedure (documented + scripted, PM-gated)
@@ -124,7 +125,7 @@ Prioritized for **blister-room launch**. "Active" = in flight or needs daily att
 | Zoho live writes intentionally paused | Finished-lot Zoho path is preview/queue/readiness only |
 | Counter snapshot confusion | Pause/end-shift requires snapshot; physical machine reset after snapshot is operator procedure (see checklist) |
 | Inactive station misconfiguration | Only `Hand Pack Blister Smoke` inactive on staging; real hand-pack station active |
-| **Sealing finished product depends on browser state** | Dropdown selection is temporary UI state — page refresh clears it. Product identity is production lineage and must not rely on client-only state. **Not safe for sealing close-out until SEALING-PRODUCT-PERSIST-1 ships.** |
+| Incomplete receive/QR lineage before floor | HARDENING-1 adds readiness gate; hand-pack already blocks missing tablet lineage |
 
 ---
 

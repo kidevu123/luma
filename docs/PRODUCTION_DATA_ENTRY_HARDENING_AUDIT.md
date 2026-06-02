@@ -64,7 +64,7 @@ flowchart LR
 | Admin start production | `app/(admin)/production/start/actions.ts` | **Always** (requires `inventoryBagId` input + `bag.bagQrCode` → `qr_cards`) |
 | Legacy TT import | `lib/legacy/tt-importer.ts` | Often populated; may lack modern intake link |
 
-After `CARD_ASSIGNED`, the projector updates `read_bag_state` (stage, COALESCE product/receipt from `workflow_bags`). Product may be set at first-op (`PRODUCT_MAPPED`) or deferred to sealing (`PRODUCT-SELECTION-AT-SEALING-1`).
+After `CARD_ASSIGNED`, the projector updates `read_bag_state` (stage, COALESCE product/receipt from `workflow_bags`). Product may be set at first-op (`PRODUCT_MAPPED`) or deferred to sealing, where `saveSealingProductAction` persists it before segment/close-out (SEALING-PRODUCT-PERSIST-1, live on main).
 
 ---
 
@@ -78,7 +78,7 @@ After `CARD_ASSIGNED`, the projector updates `read_bag_state` (stage, COALESCE p
 | **Raw bag QR (sticky)** | `inventory_bags.bag_qr_code` | Distinct from `qr_cards.scan_token` when wizard used `BAG-*` | Data-honesty: raw bag QR ≠ workflow QR card unless explicitly linked |
 | **Floor QR card** | `qr_cards` (`card_type = RAW_BAG`) | `qr_cards.scan_token` must equal `inventory_bags.bag_qr_code` for floor scan lookup | Intake-reserved: `status = ASSIGNED`, `assigned_workflow_bag_id IS NULL` |
 | **Workflow bag link** | `workflow_bags.inventory_bag_id` | Also in `CARD_ASSIGNED` payload `inventory_bag_id` | Nullable in schema; nullable bags are launch risk |
-| **Product timing** | `workflow_bags.product_id` | First-op stations: required via `checkFirstOpProductSelection`; blister/hand-pack defer; sealing: `validateSealingProductPick` | Sealing product **not persisted** in DB today (browser-only) — see LAUNCH_CONTROL |
+| **Product timing** | `workflow_bags.product_id` | First-op blister/combined may map product at start; hand-pack defers; **sealing** uses explicit **Save product** → `saveSealingProductAction` persists `product_id` + `PRODUCT_MAPPED` (v0.4.74+, refresh-safe, locked) | Product is **not** required at receiving or floor start |
 
 ---
 
@@ -121,8 +121,8 @@ After `CARD_ASSIGNED`, the projector updates `read_bag_state` (stage, COALESCE p
 |-------|----------|
 | First-op blister / bottle handpack / combined | Operator or admin picks product → `PRODUCT_MAPPED` |
 | Hand-pack blister | Product deferred; tablet from received bag |
-| Sealing | Product pick required for `SEALING_COMPLETE` if `product_id` null; **UI state not durable** |
-| Packaging | Expects product set at sealing |
+| Sealing | `saveSealingProductAction` persists product before segment/close-out; server re-reads `workflow_bags.product_id` |
+| Packaging | Expects product saved at sealing |
 
 ### 3.8 Fields required before blister / hand-pack / sealing
 
@@ -133,7 +133,7 @@ After `CARD_ASSIGNED`, the projector updates `read_bag_state` (stage, COALESCE p
 | `inventory_bags.tablet_type_id` | Hand-pack complete; sealing product filter (warn-only if missing) |
 | `internal_receipt_number` | Submissions label; shift-review display |
 | `workflow_bags.inventory_bag_id` | Hand-pack complete; shift-review `MISSING_LINEAGE` |
-| `workflow_bags.product_id` | First-op blister close-out; sealing close-out |
+| `workflow_bags.product_id` | First-op blister close-out when station requires it; sealing close-out after Save product |
 | Batch `RELEASED` | Vendor barcode verify path only (`verifyVendorBarcodeAction`) |
 
 ### 3.9 Legacy / unlinked paths still in use
@@ -216,7 +216,7 @@ For a **QR card** (floor scan picker):
 |----------|------|
 | Start at blister? | `READY_FOR_FLOOR` + product mapping exists for tablet (`product_allowed_tablets`) + QR intake-reserved |
 | Start at hand-pack blister? | Same + tablet resolvable (no manual picker) |
-| Reach sealing safely? | `inventory_bag_id` set + tablet resolvable + product persisted (future: SEALING-PRODUCT-PERSIST-1) |
+| Reach sealing safely? | `inventory_bag_id` set + tablet resolvable; product saved at sealing via `saveSealingProductAction` |
 | Workflow submissions identity? | `internal_receipt_number` present |
 | Shift review genealogy? | `inventory_bag_id` on workflow bag |
 | If blocked, admin action? | Map status → concrete route (see §6) |
@@ -270,7 +270,7 @@ For a **QR card** (floor scan picker):
 - No silent backfill of `inventory_bag_id`  
 - No migration / `floor_readiness` column  
 - No recovery apply UI  
-- No sealing product persistence (separate SEALING-PRODUCT-PERSIST-1)
+- No changes to sealing product persistence (already live in v0.4.74+)
 
 ---
 
@@ -374,7 +374,7 @@ Record counts in PM ticket when run; compare QA_TEST_* vs production-like rows u
 | **Build next** | PRODUCTION-DATA-ENTRY-HARDENING-1 — evaluator + receiving badges + floor/admin block on not-ready |
 | **Run before pilot** | Staging SQL §9 on production-like rows |
 | **Wait** | Recovery preview UI, apply path, large receiving rebuild |
-| **Parallel track** | SEALING-PRODUCT-PERSIST-1 (product durability, not lineage) |
+| **Already shipped** | SEALING-PRODUCT-PERSIST-1 (v0.4.74+) — product deferred to sealing, persisted on Save product |
 
 **Pilot gate:** No blister production on bags unless intake shows **Ready for floor** (green badge) and floor scan returns linked receipt + tablet context.
 
