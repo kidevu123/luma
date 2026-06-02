@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.76] — 2026-06-02
+
+### Added (COUNTER-SNAPSHOT-GUARD-1)
+- **Server-side counter snapshot guards:** Blocks obvious duplicate or impossible blister counter submissions before `ROLL_COUNTER_SEGMENT_RECORDED` rows are written.
+- **Protected paths:** Pause machine-jam/shift-end snapshots, roll-change counter segments, and blister close-out on BLISTER/COMBINED stations.
+- **Actionable floor errors:** Duplicate, invalid count, missing active roll, and close-out double-count cases return operator-facing messages without exposing internal IDs.
+- **No accounting change for valid paths:** Valid pause, roll-change, partial/depleted swap, and blister close-out behavior is unchanged when counts pass validation.
+- **No recovery apply:** This slice adds guards only — no admin repair UI or dry-run apply tooling.
+
+### Tests added (COUNTER-SNAPSHOT-GUARD-1)
+- Pure guard unit tests plus source guards on pause, roll-change, and blister close-out write paths.
+
 ## [0.4.75] — 2026-06-02
 
 ### Changed (PAUSE-ENDSHIFT-COPY-1)

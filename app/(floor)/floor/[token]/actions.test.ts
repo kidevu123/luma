@@ -149,6 +149,7 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause counter snapshots", () => {
 
   it("positive pause snapshots emit roll segments and zero snapshots do not", () => {
     expect(actionsSrc).toMatch(/counterSnapshotCount > 0/);
+    expect(actionsSrc).toMatch(/assertCounterSnapshotAllowed/);
     expect(actionsSrc).toMatch(/segmentReason/);
     expect(actionsSrc).toMatch(/PAUSE_SNAPSHOT/);
     expect(actionsSrc).toMatch(/SHIFT_END_SNAPSHOT/);
@@ -162,6 +163,20 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause counter snapshots", () => {
     expect(block).toMatch(/eventType: "BAG_RESUMED"/);
     expect(block).not.toMatch(/recordBlisterCounterRollSegment/);
     expect(block).not.toMatch(/counterSnapshotCount/);
+  });
+});
+
+describe("COUNTER-SNAPSHOT-GUARD-1 · server-side counter guards", () => {
+  it("pause and blister close-out call assertCounterSnapshotAllowed before segments", () => {
+    expect(actionsSrc).toMatch(/assertCounterSnapshotAllowed/);
+    expect(actionsSrc).toMatch(/"blister_close_out"/);
+    expect(actionsSrc).toMatch(/"pause_shift_end"/);
+    expect(actionsSrc).toMatch(/"pause_machine_jam"/);
+  });
+
+  it("does not replace recordBlisterCounterRollSegment for valid pause paths", () => {
+    expect(actionsSrc).toMatch(/recordBlisterCounterRollSegment/);
+    expect(actionsSrc).toMatch(/rebuildRollUsage/);
   });
 });
 

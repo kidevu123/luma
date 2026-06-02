@@ -30,10 +30,13 @@ describe("PARTIAL-ROLL-SWAP-1 · changeRollAction contract", () => {
   });
 
   it("records the old-roll segment before ending the old roll and mounting replacement", () => {
+    const guardIdx = changeBlock.indexOf("assertCounterSnapshotAllowed");
     const segmentIdx = changeBlock.indexOf('eventType: "ROLL_COUNTER_SEGMENT_RECORDED"');
     const depletedIdx = changeBlock.indexOf('eventType: "ROLL_DEPLETED"');
     const unmountedIdx = changeBlock.indexOf('eventType: "ROLL_UNMOUNTED"');
     const mountedIdx = changeBlock.lastIndexOf('eventType: "ROLL_MOUNTED"');
+    expect(guardIdx).toBeGreaterThan(0);
+    expect(guardIdx).toBeLessThan(segmentIdx);
     expect(segmentIdx).toBeGreaterThan(0);
     expect(segmentIdx).toBeLessThan(depletedIdx);
     expect(segmentIdx).toBeLessThan(unmountedIdx);
@@ -46,5 +49,10 @@ describe("PARTIAL-ROLL-SWAP-1 · changeRollAction contract", () => {
     expect(changeBlock).toMatch(/old_lot_id:\s*oldLot\.packaging_lot_id/);
     expect(changeBlock).toMatch(/new_lot_id:\s*newLot\.id/);
     expect(changeBlock).toMatch(/segment_group_id:\s*segmentGroupId/);
+  });
+
+  it("validates counter snapshot before recording roll-change segments", () => {
+    expect(changeBlock).toMatch(/assertCounterSnapshotAllowed/);
+    expect(changeBlock).toMatch(/context:\s*"roll_change"/);
   });
 });

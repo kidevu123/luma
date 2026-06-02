@@ -57,11 +57,13 @@ import {
   resolveWorkflowBagTabletTypeId,
 } from "@/lib/production/workflow-bag-tablet-context";
 import {
+  isBlisterCounterSnapshotStation,
   parseNonnegativeIntegerInput,
   pauseCounterSnapshotMissingError,
   stationRequiresBlisterCounterSnapshot,
 } from "@/lib/production/blister-counter-snapshot";
 import { recordBlisterCounterRollSegment } from "@/lib/production/blister-roll-segments";
+import { assertCounterSnapshotAllowed } from "@/lib/production/counter-snapshot-guard-loader";
 
 // First-op count submissions where accountability is mandatory (the
 // queue stop condition: refuse a fresh blister/handpack count when
@@ -930,6 +932,21 @@ export async function fireStageEventAction(
         }
       }
 
+      if (
+        eventType === "BLISTER_COMPLETE" &&
+        isBlisterCounterSnapshotStation(station.kind) &&
+        (resolvedCountTotal ?? 0) > 0
+      ) {
+        await assertCounterSnapshotAllowed(tx, {
+          workflowBagId,
+          stationId,
+          context: "blister_close_out",
+          submittedCount: resolvedCountTotal,
+          allowZero: false,
+          requirePositive: false,
+        });
+      }
+
       await projectEvent(tx, {
         workflowBagId,
         stationId,
@@ -1132,6 +1149,17 @@ export async function pauseBagAction(
         counterSnapshotCount != null &&
         counterSnapshotCount > 0
       ) {
+        await assertCounterSnapshotAllowed(tx, {
+          workflowBagId: parsed.data.workflowBagId,
+          stationId: parsed.data.stationId,
+          context:
+            parsed.data.reason === "shift_end"
+              ? "pause_shift_end"
+              : "pause_machine_jam",
+          submittedCount: counterSnapshotCount,
+          allowZero: false,
+          requirePositive: false,
+        });
         await recordBlisterCounterRollSegment(tx, {
           workflowBagId: parsed.data.workflowBagId,
           stationId: parsed.data.stationId,

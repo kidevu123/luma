@@ -39,6 +39,7 @@ import {
   withAccountabilityPayload,
 } from "@/lib/production/station-operator-session";
 import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
+import { assertCounterSnapshotAllowed } from "@/lib/production/counter-snapshot-guard-loader";
 
 // Same UUID-v4-ish pattern used in actions.ts. The floor PWA passes
 // a clientEventId so a network retry doesn't double-fire. We persist
@@ -769,6 +770,19 @@ export async function changeRollAction(
       const accountability = await resolveStationAccountability(tx, {
         stationId: station.id,
         overrideEmployeeCode: d.overrideEmployeeCode ?? null,
+      });
+      await assertCounterSnapshotAllowed(tx, {
+        workflowBagId,
+        stationId: station.id,
+        context: "roll_change",
+        submittedCount: d.counterSegmentCount,
+        allowZero: false,
+        requirePositive: true,
+        rollChange: {
+          changedRole: d.role,
+          oldLotId: activeForRole.packaging_lot_id,
+          newLotId: newLot.id,
+        },
       });
       // 1. Emit ROLL_COUNTER_SEGMENT_RECORDED for EACH active roll
       //    (PVC + FOIL). Both rolls produced this segment.
