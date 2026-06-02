@@ -90,12 +90,13 @@ export default async function ReceiveRawBagsPage() {
       />
 
       <p className="text-sm text-text-muted rounded-lg border border-border/60 bg-surface-2/40 px-4 py-3">
-        After saving, open the receive under{" "}
+        Each bag row shows a <span className="font-medium">Ready for floor</span>{" "}
+        badge before save. After save, fix any <span className="font-medium">Blocked</span>{" "}
+        bags before operators scan. You can also confirm on{" "}
         <Link href="/inbound" className="font-medium text-brand-700 hover:underline">
           Inbound → Receiving
-        </Link>{" "}
-        and confirm each bag shows <span className="font-medium">Ready for floor</span>{" "}
-        before operators scan at a station.
+        </Link>
+        .
       </p>
 
       {/* Badge strip */}

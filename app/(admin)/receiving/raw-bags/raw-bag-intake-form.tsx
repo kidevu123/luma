@@ -36,8 +36,11 @@ import {
   verificationStatusLabel,
 } from "@/lib/production/raw-bag-intake";
 import { cn } from "@/lib/utils";
+import { FloorReadinessCell } from "@/components/admin/floor-readiness-cell";
+import { evaluateRawBagIntakeDraftReadiness } from "@/lib/production/floor-readiness";
 import {
   createRawBagIntakeAction,
+  loadIntakeBagReadinessAction,
   lookupRawBagAction,
 } from "./actions";
 
@@ -226,6 +229,17 @@ export function RawBagIntakeForm({
     [qrStates],
   );
 
+  const intakeReceiveContext = React.useMemo(
+    () => ({
+      hasReceiveContext:
+        poMode === "LOCAL_PO"
+          ? poId.trim().length > 0
+          : poNumberManual.trim().length > 0 && vendorNameManual.trim().length > 0,
+      receivePoId: poMode === "LOCAL_PO" && poId ? poId : null,
+    }),
+    [poMode, poId, poNumberManual, vendorNameManual],
+  );
+
   if (result?.ok) {
     return <SaveResultPanel result={result} onAnother={handleAnother} />;
   }
@@ -391,7 +405,7 @@ export function RawBagIntakeForm({
       {rows.length > 0 ? (
         <ProductionSection
           title={`3. Bag rows (${rows.length})`}
-          subtitle="Edit any field. Receipt numbers can be overridden. Every row needs a QR before save."
+          subtitle="Edit any field. Check Ready for floor before save — blocked bags must be fixed before operators scan."
         >
           {rows.length > availableQrCards.length ? (
             <div className="mb-3 text-sm text-amber-700 inline-flex items-center gap-1.5">
@@ -412,12 +426,20 @@ export function RawBagIntakeForm({
                   <th className="text-right px-2 py-1.5">Weight (kg)</th>
                   <th className="text-left px-2 py-1.5">Supplier lot #</th>
                   <th className="text-left px-2 py-1.5">Notes</th>
+                  <th className="text-left px-2 py-1.5">Ready for floor</th>
                   <th className="text-left px-2 py-1.5 w-8"></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r, i) => {
                   const qrState: QrTokenState = qrStates.get(r.bagSequence) ?? "empty";
+                  const readiness = evaluateRawBagIntakeDraftReadiness({
+                    receiptNumber: r.receiptNumber,
+                    tabletTypeId: tabletTypeId || null,
+                    bagQrCode: r.bagQrCode ?? null,
+                    hasReceiveContext: intakeReceiveContext.hasReceiveContext,
+                    receivePoId: intakeReceiveContext.receivePoId,
+                  });
                   return (
                   <tr key={r.bagSequence} className="border-t border-border/40">
                     <td className="px-2 py-1.5 font-mono text-xs">{r.bagSequence}</td>
@@ -499,6 +521,9 @@ export function RawBagIntakeForm({
                         onChange={(e) => patchRow(i, { notes: e.target.value })}
                         className="text-xs"
                       />
+                    </td>
+                    <td className="px-2 py-1.5 align-top">
+                      <FloorReadinessCell evaluation={readiness} />
                     </td>
                     <td className="px-2 py-1.5">
                       <button
@@ -785,28 +810,51 @@ function LookupCard() {
           </Button>
         </div>
         {result?.found ? (
-          <div className="space-y-1 font-mono text-xs">
-            <div>
-              <span className="text-text-muted">PO:</span> {result.po.poNumber ?? "—"} ·{" "}
-              <span className="text-text-muted">Vendor:</span> {result.po.vendorName ?? "—"}
+          <div className="space-y-3 text-sm">
+            <div className="space-y-1 font-mono text-xs">
+              <div>
+                <span className="text-text-muted">PO:</span> {result.po.poNumber ?? "—"} ·{" "}
+                <span className="text-text-muted">Vendor:</span> {result.po.vendorName ?? "—"}
+              </div>
+              <div>
+                <span className="text-text-muted">Product:</span>{" "}
+                {result.product.tabletTypeName}
+              </div>
+              <div>
+                <span className="text-text-muted">Supplier lot:</span>{" "}
+                {result.supplierLot.batchNumber || "—"}
+              </div>
+              <div>
+                <span className="text-text-muted">Receipt:</span>{" "}
+                {result.bag.internalReceiptNumber ?? "—"}
+                {result.bag.bagQrCode ? (
+                  <>
+                    {" "}
+                    <span className="text-text-muted">· QR:</span>{" "}
+                    <span className="font-mono">{result.bag.bagQrCode}</span>
+                  </>
+                ) : null}
+              </div>
+              <div>
+                <span className="text-text-muted">Declared:</span>{" "}
+                {result.bag.declaredCount?.toLocaleString() ?? "—"}
+              </div>
             </div>
-            <div>
-              <span className="text-text-muted">Product:</span> {result.product.tabletTypeName}
-            </div>
-            <div>
-              <span className="text-text-muted">Supplier lot:</span> {result.supplierLot.batchNumber || "—"}
-            </div>
-            <div>
-              <span className="text-text-muted">Bag:</span> {result.bag.bagSequence} of —{" "}
-              <span className="text-text-muted">receipt:</span> {result.bag.internalReceiptNumber ?? "—"} ·{" "}
-              <span className="text-text-muted">qr:</span> {result.bag.bagQrCode ?? "—"}
-            </div>
-            <div>
-              <span className="text-text-muted">Declared:</span>{" "}
-              {result.bag.declaredCount?.toLocaleString() ?? "—"}
-            </div>
+            {result.readiness ? (
+              <div>
+                <p className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-1">
+                  Ready for floor
+                </p>
+                <FloorReadinessCell
+                  evaluation={result.readiness}
+                  showAdminAction
+                />
+              </div>
+            ) : null}
             {result.warnings.length > 0 ? (
-              <div className="text-amber-700">⚠ {result.warnings.join(" · ")}</div>
+              <div className="text-amber-700 text-xs">
+                {result.warnings.join(" · ")}
+              </div>
             ) : null}
           </div>
         ) : result && !result.found ? (
@@ -824,6 +872,25 @@ function SaveResultPanel({
   result: Extract<Awaited<ReturnType<typeof createRawBagIntakeAction>>, { ok: true }>;
   onAnother: () => void;
 }) {
+  const [readinessRows, setReadinessRows] = React.useState<
+    Awaited<ReturnType<typeof loadIntakeBagReadinessAction>>
+  >([]);
+  const [readinessPending, setReadinessPending] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setReadinessPending(true);
+    void loadIntakeBagReadinessAction(result.bagIds).then((rows) => {
+      if (!cancelled) {
+        setReadinessRows(rows);
+        setReadinessPending(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [result.bagIds.join(",")]);
+
   return (
     <ProductionSection
       title="Receive saved"
@@ -870,6 +937,45 @@ function SaveResultPanel({
           }
         />
       </div>
+
+      <div className="mt-4 space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Ready for floor — per bag
+        </p>
+        <p className="text-xs text-text-muted">
+          Ready means enough lineage to start production. Blocked bags must be
+          fixed in receiving before floor scan.
+        </p>
+        {readinessPending ? (
+          <p className="text-sm text-text-muted">Loading readiness…</p>
+        ) : readinessRows.length === 0 ? (
+          <p className="text-sm text-text-muted">No bag readiness loaded.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-border/60">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase text-text-muted bg-surface-2">
+                <tr>
+                  <th className="text-left px-2 py-1.5">Receipt</th>
+                  <th className="text-left px-2 py-1.5">Ready for floor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {readinessRows.map((row) => (
+                  <tr key={row.bagId} className="border-t border-border/40">
+                    <td className="px-2 py-2 font-mono text-xs">
+                      {row.receiptNumber ?? "—"}
+                    </td>
+                    <td className="px-2 py-2">
+                      <FloorReadinessCell evaluation={row.evaluation} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="mt-4 flex flex-wrap gap-2">
         <Button asChild size="sm">
           <Link href={`/inbound/${result.receiveId}`}>

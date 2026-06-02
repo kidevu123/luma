@@ -127,6 +127,40 @@ export function evaluateInventoryBagReadiness(
   return buildResult(codes, adminActionForCodes(codes));
 }
 
+/** Preview readiness for a not-yet-saved intake row (Receive pills form). */
+export type RawBagIntakeDraftReadinessInput = {
+  receiptNumber: string;
+  tabletTypeId: string | null;
+  bagQrCode: string | null;
+  hasReceiveContext: boolean;
+  receivePoId: string | null;
+};
+
+/** Same rules as saved bags; treats a entered physical QR as reserved on save. */
+export function evaluateRawBagIntakeDraftReadiness(
+  input: RawBagIntakeDraftReadinessInput,
+): FloorReadinessEvaluation {
+  const qr = input.bagQrCode?.trim() ?? "";
+  const qrCard: QrCardReadinessInput | null =
+    qr.length > 0 && !isBagQrPlaceholder(qr)
+      ? {
+          cardType: "RAW_BAG",
+          status: "ASSIGNED",
+          assignedWorkflowBagId: null,
+          scanToken: qr,
+        }
+      : null;
+
+  return evaluateInventoryBagReadiness({
+    internalReceiptNumber: input.receiptNumber.trim() || null,
+    tabletTypeId: input.tabletTypeId,
+    bagQrCode: qr || null,
+    hasReceiveContext: input.hasReceiveContext,
+    receivePoId: input.receivePoId,
+    qrCard,
+  });
+}
+
 /** Evaluate a floor QR card before fresh-bag scan. */
 export function evaluateQrCardReadiness(
   input: QrCardReadinessInput & {
@@ -335,6 +369,85 @@ export function floorReadinessLabel(
   if (evaluation.level === "READY_FOR_FLOOR") return "Ready for floor";
   if (evaluation.level === "BLOCKED") return "Not ready for floor";
   return "Review before floor";
+}
+
+/** Receiving/admin copy — Blocked / Warning instead of longer labels. */
+export function floorReadinessAdminLabel(
+  evaluation: FloorReadinessEvaluation,
+): string {
+  if (evaluation.level === "READY_FOR_FLOOR") return "Ready for floor";
+  if (evaluation.level === "BLOCKED") return "Blocked";
+  return "Warning";
+}
+
+export type FloorReadinessDetailLines = {
+  readyDetail: string | null;
+  blocked: string[];
+  warnings: string[];
+};
+
+/** Human-language checklist lines for admin tables (no internal codes). */
+export function floorReadinessDetailLines(
+  evaluation: FloorReadinessEvaluation,
+  maxEach = 3,
+): FloorReadinessDetailLines {
+  if (evaluation.level === "READY_FOR_FLOOR") {
+    return {
+      readyDetail:
+        "Receipt, tablet type, and physical QR are linked for floor start.",
+      blocked: [],
+      warnings: [],
+    };
+  }
+  const blocked: string[] = [];
+  const warnings: string[] = [];
+  for (const code of evaluation.codes) {
+    const line = readinessReasonLineForCode(code);
+    if (!line) continue;
+    if (code.startsWith("BLOCKED_")) {
+      if (blocked.length < maxEach && !blocked.includes(line)) {
+        blocked.push(line);
+      }
+    } else if (code.startsWith("WARNING_")) {
+      if (warnings.length < maxEach && !warnings.includes(line)) {
+        warnings.push(line);
+      }
+    }
+  }
+  return { readyDetail: null, blocked, warnings };
+}
+
+function readinessReasonLineForCode(code: FloorReadinessCode): string | null {
+  switch (code) {
+    case "BLOCKED_MISSING_RECEIPT":
+      return "Missing receipt number";
+    case "BLOCKED_MISSING_TABLET":
+      return "Missing tablet type";
+    case "BLOCKED_MISSING_QR_LINK":
+      return "Missing physical QR card on this bag";
+    case "BLOCKED_MISSING_PO_OR_RECEIVE_CONTEXT":
+      return "Missing receive or PO context";
+    case "BLOCKED_MISSING_INVENTORY_BAG_LINK":
+      return "QR not linked to a received bag";
+    case "BLOCKED_QR_NOT_RAW_BAG":
+      return "Not a raw-bag floor card";
+    case "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED":
+      return "QR not reserved for this receive yet";
+    case "BLOCKED_QR_ALREADY_ACTIVE":
+      return "QR already in an active production run";
+    case "WARNING_BAG_QR_PLACEHOLDER_ONLY":
+      return "System BAG- placeholder only — assign a physical QR";
+    case "WARNING_LEGACY_BAG":
+      return "Legacy bag — supervisor repair only";
+    case "WARNING_PRODUCT_DEFERRED_TO_SEALING":
+      return "Finished product chosen at sealing (expected)";
+    case "WARNING_ALREADY_ASSIGNED_OR_ACTIVE":
+      return "QR reserved or already active — confirm bag state";
+    case "WARNING_INCOMPLETE_OPTIONAL_CONTEXT":
+      return "Receive has no linked PO (manual reference)";
+    default:
+      return null;
+  }
 }
 
 export function floorReadinessBadgeClass(

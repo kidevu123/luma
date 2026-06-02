@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.83] — 2026-06-02
+
+### Added (RAW-BAGS-READINESS-BADGES-1)
+- **Receive pills page:** Per-bag Ready for floor badges on draft rows, post-save summary, and quick lookup — reuses `floor-readiness` helpers (no duplicated rules).
+- **Admin labels:** Blocked / Warning / Ready for floor with human checklist lines (not internal codes).
+
+### Tests (RAW-BAGS-READINESS-BADGES-1)
+- `lib/production/floor-readiness.test.ts`, `app/(admin)/receiving/raw-bags/page.test.ts`.
+
 ## [0.4.82] — 2026-06-02
 
 ### Changed (SEALING-SEGMENT-UX-1)

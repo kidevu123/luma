@@ -2,9 +2,9 @@
 
 **Purpose:** Prioritized, visible bug and UI-friction work — separate from launch hardening and recovery tooling.
 
-**Last updated:** 2026-06-02 (SEALING-SEGMENT-UX-1)
+**Last updated:** 2026-06-02 (RAW-BAGS-READINESS-BADGES-1)
 
-**Live baseline:** v0.4.82 @ `b36c499` (verify via `/api/health` on shift day)
+**Live baseline:** v0.4.83 (verify via `/api/health` on shift day)
 
 ---
 
@@ -40,7 +40,7 @@
 |-------|------|----------------|--------|------|------|-------|
 | Workflow submissions 200-row cap notice | Admin | Users may think list is complete | **Exists** — limit message when 200 | — | — | OK |
 | Link workflow submissions ↔ shift review | Admin | Supervisors search bags vs counter review | **Improved** batch-1 cross-links | XS | Low | Shipped |
-| Raw-bags page per-bag readiness badges | Receiving | Only inbound detail has badges today | Open | S | Low | Next batch |
+| Raw-bags page per-bag readiness badges | Receiving | Only inbound detail has badges today | **Shipped** RAW-BAGS-READINESS-BADGES-1 (0.4.83) | S | Low | Shipped |
 | QR cards list: emphasize label over token | Admin / QR | Tokens are internal; label is what operators see | Open | S | Low | Next batch |
 | Shift review default window copy | Admin | First visit clarity | Open | XS | Low | Next batch |
 | Floor board command center | Admin | No single at-a-glance floor view | Deferred | L | Med | Post-pilot |
@@ -74,6 +74,7 @@
 
 | Version | Slice |
 |---------|--------|
+| 0.4.83 | RAW-BAGS-READINESS-BADGES-1 |
 | 0.4.82 | SEALING-SEGMENT-UX-1 |
 | 0.4.81 | TEST-STABILIZATION-1 |
 | 0.4.80 | BUG-UI-FIX-BATCH-1 |

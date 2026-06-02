@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateInventoryBagReadiness,
   evaluateQrCardReadiness,
+  evaluateRawBagIntakeDraftReadiness,
   evaluateWorkflowBagReadiness,
+  floorReadinessAdminLabel,
+  floorReadinessDetailLines,
   floorReadinessOperatorMessage,
   isBagQrPlaceholder,
   type InventoryBagReadinessInput,
@@ -170,5 +173,67 @@ describe("floorReadinessOperatorMessage", () => {
     expect(msg).toMatch(/not ready for the floor/i);
     expect(msg).not.toMatch(/uuid/i);
     expect(msg).not.toMatch(/[0-9a-f]{8}-/i);
+  });
+});
+
+describe("evaluateRawBagIntakeDraftReadiness", () => {
+  it("ready when receipt, tablet, physical QR, and receive context are present", () => {
+    const r = evaluateRawBagIntakeDraftReadiness({
+      receiptNumber: "PO1-1-B1-1",
+      tabletTypeId: "tablet-1",
+      bagQrCode: "bag-card-100",
+      hasReceiveContext: true,
+      receivePoId: "po-1",
+    });
+    expect(r.level).toBe("READY_FOR_FLOOR");
+  });
+
+  it("blocked when tablet type missing", () => {
+    const r = evaluateRawBagIntakeDraftReadiness({
+      receiptNumber: "PO1-1-B1-1",
+      tabletTypeId: null,
+      bagQrCode: "bag-card-100",
+      hasReceiveContext: true,
+      receivePoId: "po-1",
+    });
+    expect(r.level).toBe("BLOCKED");
+    const lines = floorReadinessDetailLines(r);
+    expect(lines.blocked.some((l) => /tablet/i.test(l))).toBe(true);
+    expect(lines.blocked.join(" ")).not.toMatch(/BLOCKED_/);
+  });
+
+  it("blocked when physical QR missing", () => {
+    const r = evaluateRawBagIntakeDraftReadiness({
+      receiptNumber: "PO1-1-B1-1",
+      tabletTypeId: "tablet-1",
+      bagQrCode: null,
+      hasReceiveContext: true,
+      receivePoId: "po-1",
+    });
+    expect(r.codes).toContain("BLOCKED_MISSING_QR_LINK");
+    const lines = floorReadinessDetailLines(r);
+    expect(lines.blocked.some((l) => /QR/i.test(l))).toBe(true);
+  });
+});
+
+describe("floorReadinessDetailLines", () => {
+  it("separates warnings from blockers", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      receivePoId: null,
+    });
+    const lines = floorReadinessDetailLines(r);
+    expect(lines.warnings.length).toBeGreaterThan(0);
+    expect(lines.blocked).toHaveLength(0);
+  });
+
+  it("uses admin Blocked label for blocked level", () => {
+    expect(
+      floorReadinessAdminLabel({
+        level: "BLOCKED",
+        codes: ["BLOCKED_MISSING_TABLET"],
+        adminAction: null,
+      }),
+    ).toBe("Blocked");
   });
 });
