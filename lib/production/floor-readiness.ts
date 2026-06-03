@@ -165,6 +165,8 @@ export function evaluateRawBagIntakeDraftReadiness(
 export function evaluateQrCardReadiness(
   input: QrCardReadinessInput & {
     inventoryBag: InventoryBagReadinessInput | null;
+    /** Ready partial restart — stale ASSIGNED/IDLE card state must not block. */
+    allowPartialBagRestart?: boolean;
   },
 ): FloorReadinessEvaluation {
   const codes: FloorReadinessCode[] = [];
@@ -174,7 +176,12 @@ export function evaluateQrCardReadiness(
     return buildResult(codes, adminActionForCodes(codes));
   }
 
-  appendQrCardCodes(codes, input, { forInventoryBag: false });
+  appendQrCardCodes(codes, input, {
+    forInventoryBag: false,
+    ...(input.allowPartialBagRestart
+      ? { allowPartialBagRestart: true }
+      : {}),
+  });
 
   if (!input.inventoryBag) {
     codes.push("BLOCKED_MISSING_INVENTORY_BAG_LINK");
@@ -232,7 +239,7 @@ export function evaluateWorkflowBagReadiness(
 function appendQrCardCodes(
   codes: FloorReadinessCode[],
   card: QrCardReadinessInput,
-  opts: { forInventoryBag: boolean },
+  opts: { forInventoryBag: boolean; allowPartialBagRestart?: boolean },
 ): void {
   if (card.cardType !== "RAW_BAG") {
     if (!codes.includes("BLOCKED_QR_NOT_RAW_BAG")) {
@@ -242,7 +249,10 @@ function appendQrCardCodes(
   }
 
   if (card.status === "IDLE") {
-    if (!codes.includes("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED")) {
+    if (
+      !opts.allowPartialBagRestart &&
+      !codes.includes("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED")
+    ) {
       codes.push("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED");
     }
     return;
@@ -256,6 +266,9 @@ function appendQrCardCodes(
   }
 
   if (card.assignedWorkflowBagId) {
+    if (opts.allowPartialBagRestart) {
+      return;
+    }
     if (opts.forInventoryBag) {
       if (!codes.includes("WARNING_ALREADY_ASSIGNED_OR_ACTIVE")) {
         codes.push("WARNING_ALREADY_ASSIGNED_OR_ACTIVE");

@@ -291,7 +291,11 @@ export async function scanCardAction(
         });
         if (!firstOp.ok) throw new Error(firstOp.reason);
 
-        const readiness = await evaluateQrCardReadinessById(tx, cardId);
+        const partialRestart =
+          idleLinkedStart?.status === "PARTIAL_READY";
+        const readiness = await evaluateQrCardReadinessById(tx, cardId, {
+          allowPartialBagRestart: partialRestart,
+        });
         if (!readiness) throw new Error("Card not found.");
         if (readiness.level === "BLOCKED") {
           throw new Error(floorReadinessOperatorMessage(readiness));
@@ -326,9 +330,7 @@ export async function scanCardAction(
             station_kind: station.kind,
             inventory_bag_id: inventoryLink.inventoryBagId,
             tablet_type_id: inventoryLink.tabletTypeId,
-            ...(idleLinkedStart?.status === "PARTIAL_READY"
-              ? { partial_bag_restart: true }
-              : {}),
+            ...(partialRestart ? { partial_bag_restart: true } : {}),
           },
           enteredByUserId: accountability.enteredByUserId,
           accountableEmployeeId: accountability.accountableEmployeeId,
@@ -432,7 +434,9 @@ export async function scanCardAction(
           });
           if (!firstOp.ok) throw new Error(firstOp.reason);
 
-          const restartReadiness = await evaluateQrCardReadinessById(tx, cardId);
+          const restartReadiness = await evaluateQrCardReadinessById(tx, cardId, {
+            allowPartialBagRestart: true,
+          });
           if (!restartReadiness) throw new Error("Card not found.");
           if (restartReadiness.level === "BLOCKED") {
             throw new Error(floorReadinessOperatorMessage(restartReadiness));

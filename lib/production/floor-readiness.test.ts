@@ -127,6 +127,30 @@ describe("evaluateQrCardReadiness", () => {
     expect(r.codes).toContain("BLOCKED_QR_ALREADY_ACTIVE");
   });
 
+  it("allows stale ASSIGNED workflow when allowPartialBagRestart (bag-card-104 restart)", () => {
+    const r = evaluateQrCardReadiness({
+      ...readyCard(),
+      assignedWorkflowBagId: "3d026c01-4521-4825-9c08-3e8e9bd87196",
+      inventoryBag: readyBag(),
+      allowPartialBagRestart: true,
+    });
+    expect(r.codes).not.toContain("BLOCKED_QR_ALREADY_ACTIVE");
+    expect(r.level).toBe("READY_FOR_FLOOR");
+  });
+
+  it("allows IDLE card when allowPartialBagRestart for partial floor start", () => {
+    const r = evaluateQrCardReadiness({
+      cardType: "RAW_BAG",
+      status: "IDLE",
+      assignedWorkflowBagId: null,
+      scanToken: "bag-card-104",
+      inventoryBag: readyBag(),
+      allowPartialBagRestart: true,
+    });
+    expect(r.codes).not.toContain("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED");
+    expect(r.level).toBe("READY_FOR_FLOOR");
+  });
+
   it("allows intake-reserved ready card + bag", () => {
     const r = evaluateQrCardReadiness({
       ...readyCard(),

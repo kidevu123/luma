@@ -47,8 +47,8 @@ function main(): void {
     "floor restart records prior workflow bag",
   );
   assert(
-    floorActions.includes("PARTIAL_READY_WRONG_STATION"),
-    "wrong-station message for Ready partial at downstream station",
+    floorActions.includes("allowPartialBagRestart: true"),
+    "floor partial restart bypasses stale ASSIGNED readiness block",
   );
   assert(
     !floorActions.includes("not ready for this station yet") ||

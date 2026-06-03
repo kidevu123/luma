@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.102] — 2026-06-03
+
+### Fixed (READY PARTIAL FLOOR READINESS)
+- **Partial restart readiness:** Ready partial bags with stale ASSIGNED workflow (e.g. `bag-card-104`) no longer fail floor start with “This bag is already in production.” Floor restart passes `allowPartialBagRestart` through readiness evaluation, matching admin Start run.
+
 ## [0.4.101] — 2026-06-03
 
 ### Fixed (READY PARTIAL FLOOR START)

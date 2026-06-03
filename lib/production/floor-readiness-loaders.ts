@@ -126,12 +126,16 @@ export async function loadQrCardReadinessInput(
 export async function evaluateQrCardReadinessById(
   dbOrTx: DbOrTx,
   cardId: string,
+  options?: { allowPartialBagRestart?: boolean },
 ): Promise<FloorReadinessEvaluation | null> {
   const loaded = await loadQrCardReadinessInput(dbOrTx, cardId);
   if (!loaded) return null;
   return evaluateQrCardReadiness({
     ...loaded.card,
     inventoryBag: loaded.inventoryBag,
+    ...(options?.allowPartialBagRestart
+      ? { allowPartialBagRestart: true }
+      : {}),
   });
 }
 
