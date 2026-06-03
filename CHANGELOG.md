@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.85] — 2026-06-02
+
+### Fixed (PARTIAL-BAG-RESTART-PRODUCT-SELECTION-1)
+- **Available partial raw bags:** Admin `/production/start?inventoryBagId=` restarts a partial bag with a **new** workflow bag; finished product is chosen for this run (filtered by `product_allowed_tablets`), not copied from the prior run.
+- **Partial-bags page:** “Start run” links to the start form; “Last product” remains reference-only.
+- **Floor partial resume:** Allocation sessions load by `inventory_bag_id` (not the finalized workflow bag); resume eligibility uses `canResumeFinalizedWorkflowOnInventoryBag`.
+- **QR validation:** `validateRawBagQrForStart` allows `ASSIGNED` + prior workflow bag id when partial restart is eligible.
+
+### Unchanged
+- **Active partial-sealed packaging:** Product stays locked on the current workflow run (`SEALING_PRODUCT_ALREADY_SAVED` / partial close-out path).
+
+### Tests
+- `lib/production/partial-bag-restart.test.ts`, `app/(admin)/production/start/actions.partial-restart.test.ts`, `scripts/verify-partial-bag-restart.ts`.
+
 ## [0.4.84] — 2026-06-02
 
 ### Added (SEALING-PARTIAL-CLOSEOUT-1)

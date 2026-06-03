@@ -20,10 +20,11 @@
 // still come from the floor PWA. This action is the on-ramp only.
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   inventoryBags,
+  productAllowedTablets,
   products,
   qrCards,
   rawBagAllocationSessions,
@@ -40,6 +41,10 @@ import {
 import { validateRawBagQrForStart } from "@/lib/production/start-production";
 import { FIRST_OP_STATION_KINDS } from "@/lib/production/first-op-product";
 import { evaluateInventoryBagReadinessById } from "@/lib/production/floor-readiness-loaders";
+import {
+  canRestartAvailablePartialRawBag,
+  type PartialBagSession,
+} from "@/lib/production/partial-bag-restart";
 
 export type StartProductionResult =
   | {
@@ -65,6 +70,44 @@ export type StartProductionInput = {
 export async function lookupRawBagForStartAction(value: string): Promise<RawBagLookupResult> {
   await requireLead();
   return findRawBagByReceiptOrQr(value);
+}
+
+export async function lookupRawBagByIdForStartAction(
+  inventoryBagId: string,
+): Promise<RawBagLookupResult> {
+  await requireLead();
+  const [bag] = await db
+    .select({
+      internalReceiptNumber: inventoryBags.internalReceiptNumber,
+      bagQrCode: inventoryBags.bagQrCode,
+    })
+    .from(inventoryBags)
+    .where(eq(inventoryBags.id, inventoryBagId))
+    .limit(1);
+  if (!bag) return { found: false, warnings: ["Raw bag not found."] };
+  const token = bag.internalReceiptNumber ?? bag.bagQrCode;
+  if (!token) {
+    return {
+      found: false,
+      warnings: ["Bag has no receipt number or QR token to look up."],
+    };
+  }
+  return findRawBagByReceiptOrQr(token);
+}
+
+async function loadPartialBagSessionsForInventory(
+  inventoryBagId: string,
+): Promise<PartialBagSession[]> {
+  const rows = await db
+    .select({
+      allocationStatus: rawBagAllocationSessions.allocationStatus,
+      endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+      closedAt: rawBagAllocationSessions.closedAt,
+    })
+    .from(rawBagAllocationSessions)
+    .where(eq(rawBagAllocationSessions.inventoryBagId, inventoryBagId))
+    .orderBy(asc(rawBagAllocationSessions.openedAt));
+  return rows as PartialBagSession[];
 }
 
 export async function startProductionForRawBagAction(
@@ -126,17 +169,37 @@ export async function startProductionForRawBagAction(
   if (!bag.bagQrCode) {
     return { ok: false, error: "This raw bag has no QR card assigned. Assign a QR card at receiving before starting production." };
   }
+  const partialSessions = await loadPartialBagSessionsForInventory(bag.id);
+  const partialBagRestart = canRestartAvailablePartialRawBag({
+    inventoryStatus: bag.status,
+    sessions: partialSessions,
+  });
+
   const [cardRow] = await db
     .select({ id: qrCards.id, status: qrCards.status, assignedWorkflowBagId: qrCards.assignedWorkflowBagId, cardType: qrCards.cardType })
     .from(qrCards)
     .where(eq(qrCards.scanToken, bag.bagQrCode))
     .limit(1);
-  const qrValidation = validateRawBagQrForStart(cardRow ?? null, bag.bagQrCode);
+  const qrValidation = validateRawBagQrForStart(cardRow ?? null, bag.bagQrCode, {
+    allowPartialBagRestart: partialBagRestart,
+  });
   if (!qrValidation.ok) {
     return { ok: false, error: qrValidation.error };
   }
   // cardRow is guaranteed non-null here: validateRawBagQrForStart returned ok only if card exists.
   const card = cardRow!;
+
+  if (
+    card.status === "ASSIGNED" &&
+    card.assignedWorkflowBagId !== null &&
+    !partialBagRestart
+  ) {
+    return {
+      ok: false,
+      error:
+        "The QR card for this bag is already assigned to a production workflow. Close the prior run before starting again.",
+    };
+  }
 
   const [station] = await db
     .select({
@@ -166,6 +229,24 @@ export async function startProductionForRawBagAction(
     .limit(1);
   if (!product) return { ok: false, error: "Product not found." };
 
+  const [productAllowed] = await db
+    .select({ productId: productAllowedTablets.productId })
+    .from(productAllowedTablets)
+    .where(
+      and(
+        eq(productAllowedTablets.productId, product.id),
+        eq(productAllowedTablets.tabletTypeId, bag.tabletTypeId),
+      ),
+    )
+    .limit(1);
+  if (!productAllowed) {
+    return {
+      ok: false,
+      error:
+        "Selected product is not allowed for this bag's tablet type. Pick a product mapped in Settings.",
+    };
+  }
+
   // ── Atomic: insert workflow_bag, flip qr_card, fire CARD_ASSIGNED.
   return db.transaction(async (tx) => {
     const [wfBag] = await tx
@@ -191,6 +272,7 @@ export async function startProductionForRawBagAction(
         station_kind: station.kind,
         inventory_bag_id: bag.id,
         started_from_admin: true,
+        partial_bag_restart: partialBagRestart,
         bag_qr_code: bag.bagQrCode,
         internal_receipt_number: bag.internalReceiptNumber,
       },
@@ -232,6 +314,7 @@ export async function startProductionForRawBagAction(
           qrCardId: card.id,
           stationId: station.id,
           productId: product.id,
+          partialBagRestart,
         },
       },
       tx,

@@ -18,7 +18,8 @@ import {
   rawBagAllocationSessions,
   workflowEvents,
 } from "@/lib/db/schema";
-import { isPartialBagResume } from "@/lib/production/bag-allocation";
+import { canResumeFinalizedWorkflowOnInventoryBag } from "@/lib/production/partial-bag-restart";
+import type { PartialBagSession } from "@/lib/production/partial-bags";
 import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
 import { floorReadinessOperatorMessage } from "@/lib/production/floor-readiness";
 import { evaluateQrCardReadinessById } from "@/lib/production/floor-readiness-loaders";
@@ -363,28 +364,48 @@ export async function scanCardAction(
           .from(readBagState)
           .where(eq(readBagState.workflowBagId, bagId));
         if (state?.isFinalized) {
-          // Check for a partial-bag resume: QR was held because the prior
-          // allocation session closed with remaining tablets.
-          const [heldSession] = await tx
+          const inventoryLinkForResume = await lookupInventoryBagByQrScanToken(
+            tx,
+            card.scanToken,
+          );
+          if (!inventoryLinkForResume?.inventoryBagId) {
+            throw new Error(
+              "Bag is already finalized — this QR is not linked to received inventory.",
+            );
+          }
+          const [invRow] = await tx
+            .select({ status: inventoryBags.status })
+            .from(inventoryBags)
+            .where(eq(inventoryBags.id, inventoryLinkForResume.inventoryBagId))
+            .limit(1);
+          const sessionRows = await tx
             .select({
               allocationStatus: rawBagAllocationSessions.allocationStatus,
               endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+              closedAt: rawBagAllocationSessions.closedAt,
             })
             .from(rawBagAllocationSessions)
-            .where(eq(rawBagAllocationSessions.workflowBagId, bagId))
-            .orderBy(desc(rawBagAllocationSessions.openedAt))
-            .limit(1);
+            .where(
+              eq(
+                rawBagAllocationSessions.inventoryBagId,
+                inventoryLinkForResume.inventoryBagId,
+              ),
+            )
+            .orderBy(desc(rawBagAllocationSessions.openedAt));
 
-          if (!isPartialBagResume(heldSession ?? null)) {
+          if (
+            !canResumeFinalizedWorkflowOnInventoryBag({
+              inventoryStatus: invRow?.status ?? "",
+              sessions: sessionRows as PartialBagSession[],
+            })
+          ) {
             throw new Error(
               "Bag is already finalized — scan a fresh card to start a new bag.",
             );
           }
 
-          // Partial-bag resume: same as a fresh IDLE scan — create a new
-          // workflow_bag and reassign the QR to it. The prior allocation
-          // session's endingBalanceQty becomes the starting balance for the
-          // next openAllocationSessionAction call.
+          // Partial-bag resume: new workflow_bag; never copy product_id from
+          // the finalized bag. Product is chosen at first-op or sealing.
           const productLookup = pickedProductId
             ? (
                 await tx

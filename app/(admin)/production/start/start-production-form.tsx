@@ -19,6 +19,7 @@ import {
 } from "@/components/production/ui";
 import {
   lookupRawBagForStartAction,
+  lookupRawBagByIdForStartAction,
   startProductionForRawBagAction,
   type StartProductionResult,
 } from "./actions";
@@ -33,9 +34,12 @@ type StationOpt = { id: string; label: string; kind: string };
 export function StartProductionForm({
   stations,
   allowedProductsByTabletType,
+  initialInventoryBagId,
 }: {
   stations: StationOpt[];
   allowedProductsByTabletType: Record<string, CandidateProduct[]>;
+  /** When set (e.g. from /partial-bags), pre-load this bag without auto-selecting product. */
+  initialInventoryBagId?: string;
 }) {
   const [scanValue, setScanValue] = useState("");
   const [lookup, setLookup] = useState<RawBagLookupResult | null>(null);
@@ -77,6 +81,27 @@ export function StartProductionForm({
       setProductId("");
     }
   }, [resolution]);
+
+  useEffect(() => {
+    if (!initialInventoryBagId) return;
+    setError(null);
+    setResult(null);
+    startTransition(async () => {
+      try {
+        const r = await lookupRawBagByIdForStartAction(initialInventoryBagId);
+        setLookup(r);
+        if (r.found) {
+          setScanValue(
+            r.bag.internalReceiptNumber ?? r.bag.bagQrCode ?? initialInventoryBagId,
+          );
+        } else {
+          setError(r.warnings[0] ?? "Raw bag not found.");
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Lookup failed.");
+      }
+    });
+  }, [initialInventoryBagId]);
 
   function handleLookup() {
     if (!scanValue.trim()) return;

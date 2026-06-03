@@ -270,4 +270,23 @@ describe("validateRawBagQrForStart", () => {
   it("ok:true for ASSIGNED RAW_BAG card with null assignedWorkflowBagId (intake-reserved)", () => {
     expect(validateRawBagQrForStart(baseCard, "tok").ok).toBe(true);
   });
+
+  it("ok:true for ASSIGNED card on prior workflow when partialBagRestart allowed", () => {
+    expect(
+      validateRawBagQrForStart(
+        { status: "ASSIGNED", cardType: "RAW_BAG", assignedWorkflowBagId: "wf-old" },
+        "tok",
+        { allowPartialBagRestart: true },
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("ok:false for ASSIGNED card on prior workflow without partialBagRestart", () => {
+    expect(
+      validateRawBagQrForStart(
+        { status: "ASSIGNED", cardType: "RAW_BAG", assignedWorkflowBagId: "wf-old" },
+        "tok",
+      ).ok,
+    ).toBe(false);
+  });
 });

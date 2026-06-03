@@ -110,10 +110,16 @@ export default async function PartialBagsPage() {
                             ? row.lastUsedAt.toLocaleDateString("en-CA")
                             : "—"}
                         </td>
-                        <td className="py-2">
+                        <td className="py-2 flex flex-wrap gap-1">
+                          <Link
+                            href={`/production/start?inventoryBagId=${row.bagId}`}
+                            className="inline-flex items-center px-2 py-1 rounded border border-brand-300 bg-brand-50 text-brand-700 text-[11px] font-medium hover:bg-brand-100 transition-colors"
+                          >
+                            Start run
+                          </Link>
                           <Link
                             href="/floor-board"
-                            className="inline-flex items-center px-2 py-1 rounded border border-brand-300 bg-brand-50 text-brand-700 text-[11px] font-medium hover:bg-brand-100 transition-colors"
+                            className="inline-flex items-center px-2 py-1 rounded border border-border bg-surface text-[11px] font-medium hover:bg-surface-2 transition-colors"
                           >
                             Live floor
                           </Link>
