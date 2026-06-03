@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.90] — 2026-06-03
+
+### Fixed (PARTIAL-BAG-NOT-LISTED-AFTER-PARTIAL-PACKAGING-1)
+- **Partial bag admin visibility:** `/partial-bags` now lists ready partial bags plus honest review rows for partial-packaged workflows that lack allocation closeout or inventory linkage (no silent hide).
+- **Safe inventory return:** Partial `PACKAGING_COMPLETE` may `RETURNED_TO_STOCK` when an OPEN allocation session has manual consumption or weigh-back ledger evidence — never from sealed card counts.
+- **Audit script:** `scripts/audit-partial-bag-visibility.ts` for read-only DB diagnosis.
+
+### Tests
+- `partial-bag-inventory-lifecycle.test.ts`, extended `partial-bags.test.ts`, `scripts/verify-available-partial-bag-after-partial-packaging.ts`.
+
 ## [0.4.89] — 2026-06-03
 
 ### Fixed (PARTIAL-PACKAGING-MUST-NOT-TERMINATE-CARD-ASSIGNMENT-1)

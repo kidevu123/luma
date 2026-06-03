@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyPartialBagInventoryEligibility,
   deriveRemainingEstimate,
   hasOpenAllocationSession,
   isAvailablePartialBag,
@@ -125,5 +126,35 @@ describe("deriveRemainingEstimate", () => {
     const newerNull = closed(null, new Date("2026-01-20T00:00:00Z"));
     const olderKnown = closed(55, new Date("2026-01-01T00:00:00Z"));
     expect(deriveRemainingEstimate([olderKnown, newerNull])).toBe(55);
+  });
+});
+
+describe("classifyPartialBagInventoryEligibility", () => {
+  it("flags missing linkage when no allocation sessions exist", () => {
+    const r = classifyPartialBagInventoryEligibility({
+      inventoryStatus: "IN_USE",
+      sessions: [],
+      hasPartialPackagingWorkflow: true,
+    });
+    expect(r.eligibility).toBe("missing_linkage");
+    expect(r.note).toMatch(/no raw-bag allocation session/i);
+  });
+
+  it("flags needs_allocation_closeout when OPEN session remains", () => {
+    const r = classifyPartialBagInventoryEligibility({
+      inventoryStatus: "IN_USE",
+      sessions: [open_(), closed(100)],
+      hasPartialPackagingWorkflow: true,
+    });
+    expect(r.eligibility).toBe("needs_allocation_closeout");
+  });
+
+  it("marks ready when AVAILABLE with closed returned session", () => {
+    const r = classifyPartialBagInventoryEligibility({
+      inventoryStatus: "AVAILABLE",
+      sessions: [returned(8_000)],
+      hasPartialPackagingWorkflow: true,
+    });
+    expect(r.eligibility).toBe("ready");
   });
 });

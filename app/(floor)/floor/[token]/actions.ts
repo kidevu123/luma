@@ -67,6 +67,7 @@ import {
   readLatestPartialSealedCount,
   shouldEmitPartialPackagingComplete,
 } from "@/lib/production/sealing-partial-closeout";
+import { maybeReturnInventoryAfterPartialPackaging } from "@/lib/production/partial-bag-inventory-lifecycle";
 import {
   lookupProductMatchedBlisterCardLot,
   issueHandpackBlisterCardMaterial,
@@ -1730,7 +1731,11 @@ export async function packagingCompleteAction(
     // lookup returns nothing), which corrupts PO reconciliation,
     // supplier settlement, and finished-goods inventory.
     const [bagRow] = await db
-      .select({ id: workflowBags.id, productId: workflowBags.productId })
+      .select({
+        id: workflowBags.id,
+        productId: workflowBags.productId,
+        inventoryBagId: workflowBags.inventoryBagId,
+      })
       .from(workflowBags)
       .where(eq(workflowBags.id, parsed.data.workflowBagId));
     if (!bagRow) {
@@ -1818,6 +1823,15 @@ export async function packagingCompleteAction(
       await refreshMaterialReadModelsAfterConsumption(tx, {
         refreshRecommendations: true,
       });
+      if (emitPartialPackaging && bagRow.inventoryBagId) {
+        await maybeReturnInventoryAfterPartialPackaging(tx, {
+          workflowBagId: parsed.data.workflowBagId,
+          inventoryBagId: bagRow.inventoryBagId,
+          stationId: parsed.data.stationId,
+          accountability,
+          clientEventId: parsed.data.clientEventId ?? null,
+        });
+      }
       if (station.kind === "PACKAGING" && !emitPartialPackaging) {
         await maybeAutoFinalizeAfterPackagingComplete(tx, {
           workflowBagId: parsed.data.workflowBagId,
@@ -1835,6 +1849,7 @@ export async function packagingCompleteAction(
   }
   revalidatePath(`/floor/${parsed.data.token}`);
   revalidatePath(`/floor-board`);
+  revalidatePath("/partial-bags");
   return { ok: true };
 }
 

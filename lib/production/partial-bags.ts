@@ -4,16 +4,24 @@
 // closed/returned allocation session. No new DB status needed — derived
 // from existing rawBagAllocationSessions ledger.
 
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray, isNotNull, and, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   batches,
   inventoryBags,
   products,
   rawBagAllocationSessions,
+  readBagState,
   smallBoxes,
   tabletTypes,
+  workflowBags,
+  workflowEvents,
 } from "@/lib/db/schema";
+import {
+  hasPartialPackagingComplete,
+  isWorkflowBagResumableAtSealingAfterPartialPackaging,
+} from "@/lib/production/sealing-partial-closeout";
+import { canRestartAvailablePartialRawBag } from "@/lib/production/partial-bag-restart";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -40,6 +48,18 @@ export interface AvailablePartialBagRow {
   lastUsedProductName: string | null;
   lastUsedAt: Date | null;
   lastSessionStatus: AllocationStatus | null;
+}
+
+export type PartialBagEligibility =
+  | "ready"
+  | "needs_allocation_closeout"
+  | "missing_linkage";
+
+export interface PartialBagAdminRow extends AvailablePartialBagRow {
+  eligibility: PartialBagEligibility;
+  eligibilityNote: string;
+  activeWorkflowBagId: string | null;
+  inventoryStatus: string;
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────
@@ -71,6 +91,53 @@ export function deriveRemainingEstimate(sessions: readonly PartialBagSession[]):
     )
     .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0));
   return relevant[0]?.endingBalanceQty ?? null;
+}
+
+/** Classify why a partial-packaged inventory bag may or may not restart. */
+export function classifyPartialBagInventoryEligibility(args: {
+  inventoryStatus: string;
+  sessions: readonly PartialBagSession[];
+  hasPartialPackagingWorkflow: boolean;
+}): { eligibility: PartialBagEligibility; note: string } {
+  if (!args.hasPartialPackagingWorkflow) {
+    return {
+      eligibility: "missing_linkage",
+      note: "No partial-packaging workflow evidence.",
+    };
+  }
+  if (args.sessions.length === 0) {
+    return {
+      eligibility: "missing_linkage",
+      note:
+        "Partial production recorded, but no raw-bag allocation session exists. Close allocation at the floor when tablet use is known.",
+    };
+  }
+  if (hasOpenAllocationSession(args.sessions)) {
+    return {
+      eligibility: "needs_allocation_closeout",
+      note:
+        "Allocation session still open. Record tablet consumption or weigh-back, then close or return remaining quantity at the floor.",
+    };
+  }
+  if (
+    canRestartAvailablePartialRawBag({
+      inventoryStatus: args.inventoryStatus,
+      sessions: args.sessions,
+    })
+  ) {
+    return { eligibility: "ready", note: "Ready for a new production run." };
+  }
+  if (isAvailablePartialBag(args.sessions)) {
+    return {
+      eligibility: "needs_allocation_closeout",
+      note:
+        "Prior allocation closed without a reusable remaining balance. Confirm tablets remaining before restarting.",
+    };
+  }
+  return {
+    eligibility: "missing_linkage",
+    note: "Partial workflow exists but inventory allocation history is incomplete.",
+  };
 }
 
 // ─── DB query ───────────────────────────────────────────────────────
@@ -171,4 +238,189 @@ export async function loadAvailablePartialBags(): Promise<AvailablePartialBagRow
   result.sort((a, b) => (b.lastUsedAt?.getTime() ?? 0) - (a.lastUsedAt?.getTime() ?? 0));
 
   return result;
+}
+
+/** Admin view: ready partial bags plus honest blocked/review rows for
+ *  partial-packaged workflows that would otherwise disappear from the page. */
+export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
+  const readyRows = await loadAvailablePartialBags();
+  const adminRows: PartialBagAdminRow[] = readyRows.map((row) => ({
+    ...row,
+    eligibility: "ready" as const,
+    eligibilityNote: "Ready for a new production run.",
+    activeWorkflowBagId: null,
+    inventoryStatus: "AVAILABLE",
+  }));
+  const listedBagIds = new Set(adminRows.map((r) => r.bagId));
+
+  const partialWorkflowCandidates = await db
+    .select({
+      inventoryBagId: workflowBags.inventoryBagId,
+      workflowBagId: workflowBags.id,
+      inventoryStatus: inventoryBags.status,
+      bagNumber: inventoryBags.bagNumber,
+      bagQrCode: inventoryBags.bagQrCode,
+      internalReceiptNumber: inventoryBags.internalReceiptNumber,
+      declaredPillCount: inventoryBags.declaredPillCount,
+      pillCount: inventoryBags.pillCount,
+      tabletTypeName: tabletTypes.name,
+      batchNumber: batches.batchNumber,
+      receiveId: smallBoxes.receiveId,
+      bagStage: readBagState.stage,
+      isFinalized: readBagState.isFinalized,
+      productName: products.name,
+    })
+    .from(workflowBags)
+    .innerJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .innerJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+    .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+    .leftJoin(batches, eq(batches.id, inventoryBags.batchId))
+    .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+    .leftJoin(products, eq(products.id, workflowBags.productId))
+    .where(
+      and(
+        isNotNull(workflowBags.inventoryBagId),
+        eq(readBagState.isFinalized, false),
+        notInArray(inventoryBags.status, ["EMPTIED", "VOID", "QUARANTINED"]),
+      ),
+    );
+
+  if (partialWorkflowCandidates.length === 0) {
+    return adminRows;
+  }
+
+  const wfBagIds = partialWorkflowCandidates.map((c) => c.workflowBagId);
+  const invBagIds = [
+    ...new Set(
+      partialWorkflowCandidates
+        .map((c) => c.inventoryBagId)
+        .filter((id): id is string => id != null),
+    ),
+  ];
+
+  const wfEventRows = await db
+    .select({
+      workflowBagId: workflowEvents.workflowBagId,
+      eventType: workflowEvents.eventType,
+      payload: workflowEvents.payload,
+    })
+    .from(workflowEvents)
+    .where(inArray(workflowEvents.workflowBagId, wfBagIds));
+
+  const eventsByWfBag = new Map<
+    string,
+    Array<{ eventType: string; payload: Record<string, unknown> | null }>
+  >();
+  for (const row of wfEventRows) {
+    const list = eventsByWfBag.get(row.workflowBagId) ?? [];
+    list.push({
+      eventType: row.eventType,
+      payload: (row.payload as Record<string, unknown> | null) ?? null,
+    });
+    eventsByWfBag.set(row.workflowBagId, list);
+  }
+
+  const sessionRows = await db
+    .select({
+      inventoryBagId: rawBagAllocationSessions.inventoryBagId,
+      allocationStatus: rawBagAllocationSessions.allocationStatus,
+      endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+      closedAt: rawBagAllocationSessions.closedAt,
+      consumedQty: rawBagAllocationSessions.consumedQty,
+      productName: products.name,
+    })
+    .from(rawBagAllocationSessions)
+    .leftJoin(products, eq(products.id, rawBagAllocationSessions.productId))
+    .where(inArray(rawBagAllocationSessions.inventoryBagId, invBagIds))
+    .orderBy(asc(rawBagAllocationSessions.openedAt));
+
+  type SessionRow = Omit<(typeof sessionRows)[number], "allocationStatus"> & {
+    allocationStatus: AllocationStatus;
+  };
+  const typedSessionRows = sessionRows as SessionRow[];
+  const sessionsByInvBag = new Map<string, SessionRow[]>();
+  for (const s of typedSessionRows) {
+    const list = sessionsByInvBag.get(s.inventoryBagId) ?? [];
+    list.push(s);
+    sessionsByInvBag.set(s.inventoryBagId, list);
+  }
+
+  for (const candidate of partialWorkflowCandidates) {
+    if (!candidate.inventoryBagId || listedBagIds.has(candidate.inventoryBagId)) {
+      continue;
+    }
+    const wfEvents = eventsByWfBag.get(candidate.workflowBagId) ?? [];
+    const hasPartialPackagingWorkflow =
+      hasPartialPackagingComplete(wfEvents) ||
+      isWorkflowBagResumableAtSealingAfterPartialPackaging(wfEvents, {
+        stage: candidate.bagStage,
+        isFinalized: candidate.isFinalized,
+      });
+    if (!hasPartialPackagingWorkflow) continue;
+
+    const sessions = sessionsByBagToPartial(
+      sessionsByInvBag.get(candidate.inventoryBagId) ?? [],
+    );
+    const { eligibility, note } = classifyPartialBagInventoryEligibility({
+      inventoryStatus: candidate.inventoryStatus,
+      sessions,
+      hasPartialPackagingWorkflow: true,
+    });
+    if (eligibility === "ready") continue;
+
+    const lastClosed = [...(sessionsByInvBag.get(candidate.inventoryBagId) ?? [])]
+      .filter(
+        (s) =>
+          s.allocationStatus === "CLOSED" ||
+          s.allocationStatus === "RETURNED_TO_STOCK",
+      )
+      .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0))[0];
+
+    adminRows.push({
+      bagId: candidate.inventoryBagId,
+      bagNumber: candidate.bagNumber,
+      bagQrCode: candidate.bagQrCode,
+      internalReceiptNumber: candidate.internalReceiptNumber,
+      tabletTypeName: candidate.tabletTypeName ?? null,
+      supplierLot: candidate.batchNumber ?? null,
+      receiveId: candidate.receiveId ?? null,
+      declaredPillCount: candidate.declaredPillCount,
+      pillCount: candidate.pillCount,
+      remainingEstimate: deriveRemainingEstimate(sessions),
+      lastConsumedQty: lastClosed?.consumedQty ?? null,
+      lastUsedProductName:
+        lastClosed?.productName ?? candidate.productName ?? null,
+      lastUsedAt: lastClosed?.closedAt ?? null,
+      lastSessionStatus: lastClosed?.allocationStatus ?? null,
+      eligibility,
+      eligibilityNote: note,
+      activeWorkflowBagId: candidate.workflowBagId,
+      inventoryStatus: candidate.inventoryStatus,
+    });
+    listedBagIds.add(candidate.inventoryBagId);
+  }
+
+  adminRows.sort((a, b) => {
+    const rank = (e: PartialBagEligibility) =>
+      e === "ready" ? 0 : e === "needs_allocation_closeout" ? 1 : 2;
+    const d = rank(a.eligibility) - rank(b.eligibility);
+    if (d !== 0) return d;
+    return (b.lastUsedAt?.getTime() ?? 0) - (a.lastUsedAt?.getTime() ?? 0);
+  });
+
+  return adminRows;
+}
+
+function sessionsByBagToPartial(
+  sessions: Array<{
+    allocationStatus: AllocationStatus;
+    endingBalanceQty: number | null;
+    closedAt: Date | null;
+  }>,
+): PartialBagSession[] {
+  return sessions.map((s) => ({
+    allocationStatus: s.allocationStatus,
+    endingBalanceQty: s.endingBalanceQty,
+    closedAt: s.closedAt,
+  }));
 }

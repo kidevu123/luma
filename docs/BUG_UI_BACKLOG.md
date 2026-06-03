@@ -2,9 +2,9 @@
 
 **Purpose:** Prioritized, visible bug and UI-friction work — separate from launch hardening and recovery tooling.
 
-**Last updated:** 2026-06-03 (PARTIAL-BAG-RESTART-PRODUCT-SELECTION-1 closeout)
+**Last updated:** 2026-06-03 (PARTIAL-BAG-NOT-LISTED-AFTER-PARTIAL-PACKAGING-1 closeout)
 
-**Live baseline:** v0.4.85 @ `9e0d464` (verify via `/api/health` on shift day)
+**Live baseline:** v0.4.88 @ `4e335aa` (verify via `/api/health` — deploy drift expected until v0.4.90 lands)
 
 ---
 
@@ -13,6 +13,7 @@
 | Title | Area | Why it matters | Status | Size | Risk | Owner |
 |-------|------|----------------|--------|------|------|-------|
 | Incomplete receive/QR before floor start | Receiving / floor | Operators hit confusing blocks mid-shift | **Mitigated** — HARDENING-1 (0.4.79) badges + scan block | S | Low | Shipped |
+| Partial bags vanish after partial packaging | Admin / inventory | `/partial-bags` empty while workflow partial path active | **Fixed** 0.4.90 — admin review rows + safe ledger return | M | Med | Shipped |
 | Legacy workflow bags without inventory link | Data / admin | `Legacy bag …` in submissions; hand-pack blocks | Open — PM-gated repair only | L | High | PM + Sahil |
 | Live Zoho production output writes | Output | Business gate | **Paused** by design | — | — | PM |
 
