@@ -108,6 +108,7 @@ export default async function PartialBagsPage() {
                     );
 
                     const canStart = row.eligibility === "ready";
+                    const canResolve = row.eligibility === "missing_linkage";
 
                     return (
                       <tr
@@ -163,6 +164,14 @@ export default async function PartialBagsPage() {
                               Start run blocked
                             </span>
                           )}
+                          {canResolve ? (
+                            <Link
+                              href={`/partial-bags/${row.bagId}/resolve`}
+                              className="inline-flex items-center px-2 py-1 rounded border border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-medium hover:bg-amber-100 transition-colors"
+                            >
+                              Resolve inventory
+                            </Link>
+                          ) : null}
                           <Link
                             href="/floor-board"
                             className="inline-flex items-center px-2 py-1 rounded border border-border bg-surface text-[11px] font-medium hover:bg-surface-2 transition-colors"

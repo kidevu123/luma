@@ -2,9 +2,9 @@
 
 **Purpose:** Prioritized, visible bug and UI-friction work — separate from launch hardening and recovery tooling.
 
-**Last updated:** 2026-06-03 (PARTIAL-BAG-NOT-LISTED-AFTER-PARTIAL-PACKAGING-1 closeout)
+**Last updated:** 2026-06-03 (PARTIAL-BAG-REVIEW-CLOSEOUT-WORKFLOW-1 + PARTIAL-SUBMIT-MUST-NOT-FINALIZE-WORKFLOW-1)
 
-**Live baseline:** v0.4.88 @ `4e335aa` (verify via `/api/health` — deploy drift expected until v0.4.90 lands)
+**Live baseline:** v0.4.92 @ verify via `/api/health`
 
 ---
 
@@ -13,7 +13,9 @@
 | Title | Area | Why it matters | Status | Size | Risk | Owner |
 |-------|------|----------------|--------|------|------|-------|
 | Incomplete receive/QR before floor start | Receiving / floor | Operators hit confusing blocks mid-shift | **Mitigated** — HARDENING-1 (0.4.79) badges + scan block | S | Low | Shipped |
-| Partial bags vanish after partial packaging | Admin / inventory | `/partial-bags` empty while workflow partial path active | **Fixed** 0.4.90 — admin review rows + safe ledger return | M | Med | Shipped |
+| Partial bags vanish after partial packaging | Admin / inventory | `/partial-bags` empty while workflow partial path active | **Fixed** 0.4.90–0.4.91 — review rows + legacy visibility | M | Med | Shipped |
+| Needs review partial bags — no admin closeout path | Admin / inventory | Honest blocked row but no way to record remaining tablets | **Fixed** 0.4.92 — Resolve inventory workflow | M | Med | Shipped |
+| Partial submit finalizes workflow (legacy) | Floor / sealing | Partial bag submit → FINALIZED before v0.4.89 | **Fixed** 0.4.89+ runtime; historical rows Need review | M | Med | Shipped (runtime) |
 | Legacy workflow bags without inventory link | Data / admin | `Legacy bag …` in submissions; hand-pack blocks | Open — PM-gated repair only | L | High | PM + Sahil |
 | Live Zoho production output writes | Output | Business gate | **Paused** by design | — | — | PM |
 

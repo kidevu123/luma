@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.92] — 2026-06-03
+
+### Added (PARTIAL-BAG-REVIEW-CLOSEOUT-WORKFLOW-1)
+- **Admin partial bag resolution:** `/partial-bags` Needs review rows get **Resolve inventory** — lead+ can record physically verified remaining tablets (count / weigh-back / supervisor estimate) and create a closed allocation session without DB scripts.
+- **Audit:** `partial_bag.inventory_resolution` with prior state, method, remaining count, workflow bag id.
+- **Verify script:** `scripts/verify-partial-bag-review-closeout.ts`.
+
+### Fixed (PARTIAL-SUBMIT-MUST-NOT-FINALIZE-WORKFLOW-1 — regression guard)
+- **Partial packaging must not finalize:** Confirmed v0.4.89+ floor path emits `partial_packaging: true`, skips `BAG_FINALIZED`, keeps QR assigned, and stays resumable at sealing; added `scripts/verify-partial-submit-does-not-finalize.ts`.
+- **Historical note:** Production workflow `3d026c01…` (bag-card-104) finalized before v0.4.89; not mutated — remains Needs review until admin resolution.
+
 ## [0.4.91] — 2026-06-03
 
 ### Fixed (PARTIAL-BAG-NOT-LISTED-AFTER-PARTIAL-PACKAGING-1 follow-up)
