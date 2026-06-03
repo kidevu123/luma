@@ -1316,7 +1316,15 @@ const pauseSchema = z.object({
   token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
-  reason: z.enum(["pvc_swap", "foil_swap", "shift_end", "machine_jam", "qa_check", "other"]),
+  reason: z.enum([
+    "pvc_swap",
+    "foil_swap",
+    "shift_end",
+    "shift_break",
+    "machine_jam",
+    "qa_check",
+    "other",
+  ]),
   counterSnapshotCount: z
     .preprocess((value) => {
       if (value == null || value === "") return undefined;

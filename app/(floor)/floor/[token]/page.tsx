@@ -74,6 +74,7 @@ import { StationRollPanel } from "./station-roll-panel";
 import { ElapsedTimer } from "./elapsed-timer";
 import { formatFloorTimeEastern } from "@/lib/floor-time";
 import { STATION_INACTIVE_FLOOR_MESSAGE } from "@/lib/production/station-management";
+import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
 
 export const dynamic = "force-dynamic";
 
@@ -123,13 +124,32 @@ export default async function FloorStationPage({
       card: qrCards,
       state: readBagState,
       product: products,
+      inventoryBagNumber: inventoryBags.bagNumber,
+      tabletTypeName: tabletTypes.name,
+      poNumber: purchaseOrders.poNumber,
     })
     .from(readStationLive)
     .innerJoin(workflowBags, eq(readStationLive.currentWorkflowBagId, workflowBags.id))
     .leftJoin(qrCards, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
     .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
     .leftJoin(products, eq(products.id, workflowBags.productId))
+    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+    .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+    .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+    .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+    .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
     .where(eq(readStationLive.stationId, station.station.id));
+
+  const currentBagDisplayLabel = currentAtStation
+    ? buildCurrentBagDisplayLabel({
+        cardLabel: currentAtStation.card?.label ?? null,
+        poNumber: currentAtStation.poNumber,
+        tabletTypeName: currentAtStation.tabletTypeName,
+        productName: currentAtStation.product?.name ?? null,
+        inventoryBagNumber: currentAtStation.inventoryBagNumber,
+        workflowBagNumber: currentAtStation.bag.bagNumber,
+      })
+    : null;
 
   // RAW_BAG cards available to scan: ASSIGNED with no workflow bag
   // (intake-reserved only). Filtered to RAW_BAG type only — VARIETY_PACK and
@@ -765,7 +785,7 @@ export default async function FloorStationPage({
       currentAtStation && !currentAtStation.state?.isFinalized
         ? {
             id: currentAtStation.bag.id,
-            label: currentAtStation.card?.label ?? "Active bag",
+            label: currentBagDisplayLabel?.primary ?? currentAtStation.card?.label ?? "Active bag",
             startedAt: currentAtStation.bag.startedAt,
           }
         : null;
@@ -904,8 +924,13 @@ export default async function FloorStationPage({
           <div className="space-y-3">
             <div className="rounded-xl border border-border/70 bg-surface-2/40 p-3 sm:p-4">
               <p className="text-base font-semibold tracking-tight mb-2">
-                {currentAtStation.card?.label ?? "—"}
+                {currentBagDisplayLabel?.primary ?? "—"}
               </p>
+              {currentBagDisplayLabel?.secondary ? (
+                <p className="text-[11px] text-text-subtle -mt-1 mb-2">
+                  {currentBagDisplayLabel.secondary}
+                </p>
+              ) : null}
               {currentAtStation.product ? (
                 <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900 space-y-0.5">
                   <div className="font-semibold">

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.97] — 2026-06-03
+
+### Changed (FLOOR-CURRENT-BAG-CONTEXT-1)
+- **Floor current bag label:** Station pages now show PO / tablet / bag context as the primary current-bag label when received-bag lineage is available, with the QR card label kept as secondary text.
+- **Pause reasons:** Added **Shift break** as a pause reason on all station pause dropdowns and server pause validation.
+- **Counter snapshots:** `shift_break` does not require a BLISTER/COMBINED counter snapshot; `shift_end` and `machine_jam` snapshot rules unchanged.
+
 ## [0.4.96] — 2026-06-03
 
 ### Fixed (LEGACY PARTIAL STATUS + SUPERVISOR ESTIMATE)

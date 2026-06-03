@@ -4,6 +4,7 @@ export type PauseReasonValue =
   | "pvc_swap"
   | "foil_swap"
   | "shift_end"
+  | "shift_break"
   | "machine_jam"
   | "qa_check"
   | "other";
@@ -16,6 +17,7 @@ export type PauseReason = {
 const PVC_SWAP: PauseReason = { value: "pvc_swap", label: "PVC roll swap" };
 const FOIL_SWAP: PauseReason = { value: "foil_swap", label: "Foil roll swap" };
 const SHIFT_END: PauseReason = { value: "shift_end", label: "Shift ending" };
+const SHIFT_BREAK: PauseReason = { value: "shift_break", label: "Shift break" };
 const MACHINE_JAM: PauseReason = {
   value: "machine_jam",
   label: "Machine jam",
@@ -26,6 +28,7 @@ const OTHER: PauseReason = { value: "other", label: "Other" };
 /** Blister press stations — roll swap pauses surface a roll-change card. */
 const BLISTER_MACHINE_REASONS: readonly PauseReason[] = [
   SHIFT_END,
+  SHIFT_BREAK,
   PVC_SWAP,
   FOIL_SWAP,
   MACHINE_JAM,
@@ -36,6 +39,7 @@ const BLISTER_MACHINE_REASONS: readonly PauseReason[] = [
 /** Sealing machines: jams yes, PVC roll swap no. */
 const SEALING_MACHINE_REASONS: readonly PauseReason[] = [
   SHIFT_END,
+  SHIFT_BREAK,
   MACHINE_JAM,
   QA_CHECK,
   OTHER,
@@ -44,6 +48,7 @@ const SEALING_MACHINE_REASONS: readonly PauseReason[] = [
 /** Hand-work stations: no roll materials, no machine in the station model. */
 const HAND_WORK_REASONS: readonly PauseReason[] = [
   SHIFT_END,
+  SHIFT_BREAK,
   QA_CHECK,
   OTHER,
 ];

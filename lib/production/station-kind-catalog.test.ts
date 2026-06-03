@@ -76,7 +76,7 @@ describe("STATION-KIND-FIX-1 · HANDPACK_BLISTER floor expectations (regression)
     const values = getPauseReasonsForStation("HANDPACK_BLISTER").map(
       (r) => r.value,
     );
-    expect(values).toEqual(["shift_end", "qa_check", "other"]);
+    expect(values).toEqual(["shift_end", "shift_break", "qa_check", "other"]);
     expect(values).not.toContain("pvc_swap");
     expect(values).not.toContain("machine_jam");
   });

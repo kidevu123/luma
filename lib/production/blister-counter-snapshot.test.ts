@@ -16,6 +16,11 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · counter snapshot station rules", () 
     expect(stationRequiresBlisterCounterSnapshot("COMBINED", "shift_end")).toBe(true);
   });
 
+  it("does not require snapshots for shift breaks", () => {
+    expect(stationRequiresBlisterCounterSnapshot("BLISTER", "shift_break")).toBe(false);
+    expect(stationRequiresBlisterCounterSnapshot("COMBINED", "shift_break")).toBe(false);
+  });
+
   it("does not require snapshots for SEALING or PACKAGING in this slice", () => {
     expect(isBlisterCounterSnapshotStation("SEALING")).toBe(false);
     expect(isBlisterCounterSnapshotStation("PACKAGING")).toBe(false);

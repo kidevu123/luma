@@ -59,6 +59,21 @@ describe("STATION-MOBILE-UX-2 · mobile-first station page", () => {
     expect(pageSrc).not.toMatch(/bag\.id\.slice\(0, 8\)/);
   });
 
+  it("uses received-bag lineage for the Current bag label", () => {
+    expect(pageSrc).toMatch(/buildCurrentBagDisplayLabel/);
+    expect(pageSrc).toMatch(/poNumber:\s*purchaseOrders\.poNumber/);
+    expect(pageSrc).toMatch(/tabletTypeName:\s*tabletTypes\.name/);
+    expect(pageSrc).toMatch(/inventoryBagNumber:\s*inventoryBags\.bagNumber/);
+    expect(pageSrc).toMatch(/leftJoin\(inventoryBags,\s*eq\(inventoryBags\.id,\s*workflowBags\.inventoryBagId\)\)/);
+    expect(pageSrc).toMatch(/leftJoin\(purchaseOrders,\s*eq\(purchaseOrders\.id,\s*receives\.poId\)\)/);
+  });
+
+  it("keeps the QR card label as secondary text instead of the primary Current bag label", () => {
+    expect(pageSrc).toMatch(/currentBagDisplayLabel\?\.primary/);
+    expect(pageSrc).toMatch(/currentBagDisplayLabel\?\.secondary/);
+    expect(pageSrc).not.toMatch(/currentAtStation\.card\?\.label \?\? "—"/);
+  });
+
   it("keeps ScanCardForm for backup dropdown path", () => {
     expect(pageSrc).toMatch(/ScanCardForm/);
   });

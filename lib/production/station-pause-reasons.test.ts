@@ -33,6 +33,7 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
       expect(values, kind).toContain("machine_jam");
       expect(values, kind).toEqual([
         "shift_end",
+        "shift_break",
         "pvc_swap",
         "foil_swap",
         "machine_jam",
@@ -47,7 +48,7 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
     expect(values).not.toContain("pvc_swap");
     expect(values).not.toContain("foil_swap");
     expect(values).toContain("machine_jam");
-    expect(values).toEqual(["shift_end", "machine_jam", "qa_check", "other"]);
+    expect(values).toEqual(["shift_end", "shift_break", "machine_jam", "qa_check", "other"]);
   });
 
   it("hand-work stations do not include pvc_swap, foil_swap, or machine_jam", () => {
@@ -67,14 +68,16 @@ describe("STATION-PAUSE-2 · pause reason matrix", () => {
     expect(values).not.toContain("foil_swap");
     expect(values).not.toContain("machine_jam");
     expect(values).toContain("shift_end");
+    expect(values).toContain("shift_break");
     expect(values).toContain("qa_check");
     expect(values).toContain("other");
   });
 
-  it("shift_end, qa_check, and other are present for all station kinds", () => {
+  it("shift_end, shift_break, qa_check, and other are present for all station kinds", () => {
     for (const kind of ALL_KINDS) {
       const values = getPauseReasonsForStation(kind).map((r) => r.value);
       expect(values, `${kind}: shift_end`).toContain("shift_end");
+      expect(values, `${kind}: shift_break`).toContain("shift_break");
       expect(values, `${kind}: qa_check`).toContain("qa_check");
       expect(values, `${kind}: other`).toContain("other");
     }
