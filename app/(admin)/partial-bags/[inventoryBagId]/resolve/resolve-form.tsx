@@ -9,12 +9,17 @@ import {
   PARTIAL_BAG_RESOLUTION_METHOD_LABELS,
   type PartialBagResolutionMethod,
 } from "@/lib/production/partial-bag-resolution-constants";
-import type { PartialBagReviewContext } from "@/lib/production/partial-bag-review-closeout";
+
+/** Serializable props for the client resolve form — no Date fields. */
+export type ResolvePartialBagFormContext = {
+  inventoryBagId: string;
+  declaredPillCount: number | null;
+};
 
 export function ResolvePartialBagForm({
   context,
 }: {
-  context: PartialBagReviewContext;
+  context: ResolvePartialBagFormContext;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();

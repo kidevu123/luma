@@ -148,7 +148,12 @@ export default async function ResolvePartialBagPage({
             <CardTitle>Record remaining tablets</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResolvePartialBagForm context={context} />
+            <ResolvePartialBagForm
+              context={{
+                inventoryBagId: context.inventoryBagId,
+                declaredPillCount: context.declaredPillCount,
+              }}
+            />
           </CardContent>
         </Card>
       ) : (

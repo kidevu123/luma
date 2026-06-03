@@ -36,6 +36,8 @@ describe("partial-bags admin resolve workflow", () => {
     expect(lib).toContain("Never infers remaining from sealed cards");
     expect(lib).toContain("admin_partial_bag_review_closeout");
     expect(lib).toContain("endingBalanceQty: args.remainingTabletCount");
+    expect(lib).not.toMatch(/clientEventId: `\$\{clientEventId\}-/);
+    expect(lib).toMatch(/clientEventId: randomUUID\(\)/);
   });
 
   it("resolve form requires remaining count, method, and note", () => {

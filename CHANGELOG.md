@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.99] — 2026-06-03
+
+### Fixed (PARTIAL-BAGS RESOLVE RENDER HOTFIX)
+- **Resolve page crash:** Stop passing `PartialBagReviewContext` Date fields into the client resolve form; only serializable `inventoryBagId` and `declaredPillCount` cross the RSC boundary.
+- **Resolve submit crash:** Allocation ledger events now use valid UUID `clientEventId` values instead of `{uuid}-open` suffix strings rejected by Postgres.
+
 ## [0.4.98] — 2026-06-03
 
 ### Fixed (FLOOR-CURRENT-BAG-PO-PREFIX-1)

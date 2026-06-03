@@ -439,7 +439,6 @@ export async function resolvePartialBagInventoryLedger(
   const confidence = confidenceForResolutionMethod(args.resolutionMethod);
   const endingSource = args.resolutionMethod;
   const now = new Date();
-  const clientEventId = randomUUID();
 
   const bagPoRows = (await db.execute(sql`
     SELECT po.id::text AS po_id
@@ -515,7 +514,6 @@ export async function resolvePartialBagInventoryLedger(
         prior_eligibility: eligibility,
       },
       confidence,
-      clientEventId,
     };
 
     if (declaredStarting != null) {
@@ -524,7 +522,7 @@ export async function resolvePartialBagInventoryLedger(
         eventType: "RAW_BAG_OPENED",
         quantity: String(declaredStarting),
         quantitySource: "VENDOR_DECLARED",
-        clientEventId: `${clientEventId}-open`,
+        clientEventId: randomUUID(),
       });
     }
 
@@ -534,7 +532,7 @@ export async function resolvePartialBagInventoryLedger(
         eventType: "RAW_BAG_PARTIAL_CONSUMED",
         quantity: String(consumedQty),
         quantitySource: args.resolutionMethod,
-        clientEventId: `${clientEventId}-consumed`,
+        clientEventId: randomUUID(),
       });
     }
 
@@ -544,7 +542,7 @@ export async function resolvePartialBagInventoryLedger(
         eventType: "RAW_BAG_REWEIGHED",
         quantity: String(args.remainingTabletCount),
         quantitySource: "WEIGH_BACK",
-        clientEventId: `${clientEventId}-reweigh`,
+        clientEventId: randomUUID(),
       });
     } else {
       await tx.insert(rawBagAllocationEvents).values({
@@ -552,7 +550,7 @@ export async function resolvePartialBagInventoryLedger(
         eventType: "RAW_BAG_RETURNED_TO_STOCK",
         quantity: String(args.remainingTabletCount),
         quantitySource: args.resolutionMethod,
-        clientEventId: `${clientEventId}-return`,
+        clientEventId: randomUUID(),
       });
     }
 
