@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.91] — 2026-06-03
+
+### Fixed (PARTIAL-BAG-NOT-LISTED-AFTER-PARTIAL-PACKAGING-1 follow-up)
+- **`/partial-bags` legacy partial rows:** Surfaces finalized partial-close + packaging workflows missing allocation sessions (e.g. bag-card-104 legacy auto-finalize path) as **Needs review**, not hidden.
+- **Audit script:** `--card`, `--workflow-bag-id`, `--recent`, `--limit` read-only filters; packaging timestamp includes legacy partial-close downstream packaging.
+
 ## [0.4.90] — 2026-06-03
 
 ### Fixed (PARTIAL-BAG-NOT-LISTED-AFTER-PARTIAL-PACKAGING-1)

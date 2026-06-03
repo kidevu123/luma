@@ -19,6 +19,8 @@ import {
 } from "@/lib/db/schema";
 import {
   hasPartialPackagingComplete,
+  hasPartialSealingCloseout,
+  hasFullSealingLaneClose,
   isWorkflowBagResumableAtSealingAfterPartialPackaging,
 } from "@/lib/production/sealing-partial-closeout";
 import { canRestartAvailablePartialRawBag } from "@/lib/production/partial-bag-restart";
@@ -54,6 +56,24 @@ export type PartialBagEligibility =
   | "ready"
   | "needs_allocation_closeout"
   | "missing_linkage";
+
+type WorkflowEventSlice = {
+  eventType: string;
+  payload?: Record<string, unknown> | null;
+};
+
+/** Partial close + downstream packaging (incl. legacy whole-bag packaging path). */
+export function hasPartialClosePackagingWorkflowEvidence(
+  events: readonly WorkflowEventSlice[],
+): boolean {
+  if (!hasPartialSealingCloseout(events) || hasFullSealingLaneClose(events)) {
+    return false;
+  }
+  return (
+    hasPartialPackagingComplete(events) ||
+    events.some((ev) => ev.eventType === "PACKAGING_COMPLETE")
+  );
+}
 
 export interface PartialBagAdminRow extends AvailablePartialBagRow {
   eligibility: PartialBagEligibility;
@@ -280,7 +300,6 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
     .where(
       and(
         isNotNull(workflowBags.inventoryBagId),
-        eq(readBagState.isFinalized, false),
         notInArray(inventoryBags.status, ["EMPTIED", "VOID", "QUARANTINED"]),
       ),
     );
@@ -351,7 +370,7 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
     }
     const wfEvents = eventsByWfBag.get(candidate.workflowBagId) ?? [];
     const hasPartialPackagingWorkflow =
-      hasPartialPackagingComplete(wfEvents) ||
+      hasPartialClosePackagingWorkflowEvidence(wfEvents) ||
       isWorkflowBagResumableAtSealingAfterPartialPackaging(wfEvents, {
         stage: candidate.bagStage,
         isFinalized: candidate.isFinalized,
@@ -361,11 +380,20 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
     const sessions = sessionsByBagToPartial(
       sessionsByInvBag.get(candidate.inventoryBagId) ?? [],
     );
-    const { eligibility, note } = classifyPartialBagInventoryEligibility({
+    let { eligibility, note } = classifyPartialBagInventoryEligibility({
       inventoryStatus: candidate.inventoryStatus,
       sessions,
       hasPartialPackagingWorkflow: true,
     });
+    if (
+      candidate.isFinalized &&
+      eligibility === "missing_linkage" &&
+      hasPartialSealingCloseout(wfEvents) &&
+      !hasPartialPackagingComplete(wfEvents)
+    ) {
+      note =
+        "Partial close and packaging ran on a legacy terminal path (workflow finalized). No allocation session exists — record tablet use and close allocation before restart.";
+    }
     if (eligibility === "ready") continue;
 
     const lastClosed = [...(sessionsByInvBag.get(candidate.inventoryBagId) ?? [])]

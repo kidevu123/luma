@@ -2,13 +2,25 @@
 //
 //   DATABASE_URL=postgres://... npx tsx scripts/audit-partial-bag-visibility.ts
 //
-// Optional limit (default 10):
-//   AUDIT_LIMIT=5 DATABASE_URL=... npx tsx scripts/audit-partial-bag-visibility.ts
+// Optional filters:
+//   AUDIT_LIMIT=5 npx tsx scripts/audit-partial-bag-visibility.ts
+//   npx tsx scripts/audit-partial-bag-visibility.ts --card "Bag Card 104"
+//   npx tsx scripts/audit-partial-bag-visibility.ts --workflow-bag-id <uuid>
+//   npx tsx scripts/audit-partial-bag-visibility.ts --recent
 
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 
-const limit = Number(process.env.AUDIT_LIMIT ?? "10");
+function readArg(flag: string): string | null {
+  const idx = process.argv.indexOf(flag);
+  if (idx === -1) return null;
+  return process.argv[idx + 1] ?? null;
+}
+
+const limit = Number(readArg("--limit") ?? process.env.AUDIT_LIMIT ?? "10");
+const cardFilter = readArg("--card");
+const workflowBagFilter = readArg("--workflow-bag-id");
+const recentOnly = process.argv.includes("--recent");
 
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {
@@ -45,7 +57,15 @@ async function main(): Promise<void> {
       FROM workflow_bags wb
       JOIN workflow_events we ON we.workflow_bag_id = wb.id
       WHERE we.event_type = 'PACKAGING_COMPLETE'
-        AND (we.payload->>'partial_packaging')::boolean IS TRUE
+        AND (
+          (we.payload->>'partial_packaging')::boolean IS TRUE
+          OR EXISTS (
+            SELECT 1 FROM workflow_events pc
+            WHERE pc.workflow_bag_id = wb.id
+              AND pc.event_type = 'SEALING_COMPLETE'
+              AND (pc.payload->>'partial_close')::boolean IS TRUE
+          )
+        )
     ),
     candidates AS (
       SELECT pw.workflow_bag_id
@@ -74,7 +94,6 @@ async function main(): Promise<void> {
         FROM workflow_events we
         WHERE we.workflow_bag_id = c.workflow_bag_id
           AND we.event_type = 'PACKAGING_COMPLETE'
-          AND (we.payload->>'partial_packaging')::boolean IS TRUE
       ) AS partial_packaging_at,
       (
         SELECT COUNT(*)::int FROM raw_bag_allocation_sessions s
@@ -104,11 +123,22 @@ async function main(): Promise<void> {
     LEFT JOIN inventory_bags ib ON ib.id = wb.inventory_bag_id
     LEFT JOIN read_bag_state rbs ON rbs.workflow_bag_id = wb.id
     LEFT JOIN qr_cards qc ON qc.assigned_workflow_bag_id = wb.id
+    WHERE 1=1
+      ${workflowBagFilter ? sql`AND c.workflow_bag_id = ${workflowBagFilter}::uuid` : sql``}
+      ${cardFilter ? sql`AND (ib.bag_qr_code ILIKE ${"%" + cardFilter + "%"} OR qc.label ILIKE ${"%" + cardFilter + "%"})` : sql``}
     ORDER BY partial_close_at DESC NULLS LAST
   `)) as unknown as Row[];
 
-  console.log(`[audit-partial-bag-visibility] ${rows.length} partial-close workflow bag(s)`);
-  for (const row of rows) {
+  let filtered = rows;
+  if (recentOnly) {
+    filtered = [...rows].sort(
+      (a, b) =>
+        (b.partial_close_at ?? "").localeCompare(a.partial_close_at ?? ""),
+    );
+  }
+
+  console.log(`[audit-partial-bag-visibility] ${filtered.length} partial-close workflow bag(s)`);
+  for (const row of filtered) {
     console.log("---");
     console.log(`workflow_bag_id     : ${row.workflow_bag_id}`);
     console.log(`inventory_bag_id    : ${row.inventory_bag_id ?? "NULL"}`);

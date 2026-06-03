@@ -3,8 +3,10 @@ import {
   classifyPartialBagInventoryEligibility,
   deriveRemainingEstimate,
   hasOpenAllocationSession,
+  hasPartialClosePackagingWorkflowEvidence,
   isAvailablePartialBag,
 } from "./partial-bags";
+import { buildPartialSealingClosePayload } from "./sealing-partial-closeout";
 
 type AllocationStatus = "OPEN" | "CLOSED" | "RETURNED_TO_STOCK" | "DEPLETED" | "VOIDED";
 
@@ -156,5 +158,32 @@ describe("classifyPartialBagInventoryEligibility", () => {
       hasPartialPackagingWorkflow: true,
     });
     expect(r.eligibility).toBe("ready");
+  });
+});
+
+describe("hasPartialClosePackagingWorkflowEvidence", () => {
+  it("detects legacy partial close + PACKAGING_COMPLETE without partial_packaging flag", () => {
+    expect(
+      hasPartialClosePackagingWorkflowEvidence([
+        {
+          eventType: "SEALING_COMPLETE",
+          payload: buildPartialSealingClosePayload({
+            sealedPartialCount: 100,
+            reason: "END_OF_SHIFT",
+          }),
+        },
+        { eventType: "PACKAGING_COMPLETE", payload: { master_cases: 1 } },
+        { eventType: "BAG_FINALIZED", payload: {} },
+      ]),
+    ).toBe(true);
+  });
+
+  it("returns false for whole-bag sealing lane close", () => {
+    expect(
+      hasPartialClosePackagingWorkflowEvidence([
+        { eventType: "SEALING_COMPLETE", payload: { lane_close: true } },
+        { eventType: "PACKAGING_COMPLETE", payload: { master_cases: 1 } },
+      ]),
+    ).toBe(false);
   });
 });
