@@ -84,6 +84,7 @@ const ROUTES: ReadonlyArray<{ path: string; group: string }> = [
   { group: "Production",   path: "/material-reconciliation" },
   { group: "Production",   path: "/operator-productivity" },
   { group: "Production",   path: "/packaging-output" },
+  { group: "Production",   path: "/partial-bags" },
   { group: "Production",   path: "/standards" },
   { group: "Production",   path: "/standards/calendars" },
   { group: "Production",   path: "/standards/due-targets" },
@@ -142,14 +143,30 @@ async function main() {
     process.exit(1);
   }
   const u = rows[0]!;
+  const partialBagRows = (await db.execute(sql`
+    SELECT id::text AS id
+    FROM inventory_bags
+    WHERE bag_qr_code = 'bag-card-104'
+    LIMIT 1
+  `)) as unknown as Array<{ id: string }>;
   await client.end();
+
+  const extraRoutes: Array<{ path: string; group: string }> = [];
+  const partialBagId = partialBagRows[0]?.id;
+  if (partialBagId) {
+    extraRoutes.push({
+      group: "Production",
+      path: `/partial-bags/${partialBagId}/resolve`,
+    });
+  }
+  const allRoutes = [...ROUTES, ...extraRoutes];
 
   const secret = new TextEncoder().encode(authSecret);
   const exp = Math.floor(Date.now() / 1000) + 60 * 5; // 5 min
   const token = await signToken({ uid: u.id, role: u.role, email: u.email, exp }, secret);
   const cookie = `luma.session=${token}`;
 
-  console.log(`[smoke-auth] running ${ROUTES.length} routes as ${u.email} (${u.role})`);
+  console.log(`[smoke-auth] running ${allRoutes.length} routes as ${u.email} (${u.role})`);
   console.log(`[smoke-auth] target http://${HOST}:${PORT}\n`);
 
   type Result = {
@@ -161,7 +178,7 @@ async function main() {
   };
   const results: Result[] = [];
 
-  for (const r of ROUTES) {
+  for (const r of allRoutes) {
     const url = `http://${HOST}:${PORT}${r.path}`;
     let status = -1;
     let body = "";
