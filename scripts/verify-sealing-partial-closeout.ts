@@ -26,6 +26,16 @@ function assert(cond: boolean, msg: string): void {
 }
 
 function runStaticContracts(): void {
+  const actionsPath = resolve(root, "app/(floor)/floor/[token]/actions.ts");
+  try {
+    readFileSync(actionsPath);
+  } catch {
+    console.log(
+      "[verify-sealing-partial-closeout] SKIP static contracts (no source tree — run from repo checkout)",
+    );
+    return;
+  }
+
   const actions = read("app/(floor)/floor/[token]/actions.ts");
   const buttons = read("app/(floor)/floor/[token]/stage-action-buttons.tsx");
   const projector = read("lib/projector/index.ts");
@@ -101,6 +111,7 @@ async function runStagingQa(): Promise<void> {
     return;
   }
 
+  const { isNotNull } = await import("drizzle-orm");
   const [productRow] = await db
     .select({
       id: products.id,
@@ -108,7 +119,13 @@ async function runStagingQa(): Promise<void> {
       displaysPerCase: products.displaysPerCase,
     })
     .from(products)
-    .where(eq(products.isActive, true))
+    .where(
+      and(
+        eq(products.isActive, true),
+        isNotNull(products.unitsPerDisplay),
+        isNotNull(products.displaysPerCase),
+      ),
+    )
     .limit(1);
   if (
     !productRow?.id ||
@@ -300,7 +317,12 @@ async function runStagingQa(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  runStaticContracts();
+  const stagingOnly =
+    process.env.VERIFY_SEALING_PARTIAL_STAGING_ONLY === "true" ||
+    process.env.VERIFY_SEALING_PARTIAL_STAGING_ONLY === "1";
+  if (!stagingOnly) {
+    runStaticContracts();
+  }
   await runStagingQa();
 }
 
