@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.95] — 2026-06-03
+
+### Added (BAG-CARD-104 LEGACY PARTIAL FINALIZATION VOID SUPPORT)
+- **Append-only void correction:** Projector and read-model synthesizer honor `SUBMISSION_CORRECTED` with `correction_kind: VOID_ERRONEOUS_BAG_FINALIZATION` — erroneous legacy `BAG_FINALIZED` after partial packaging is voided without deleting events or rewriting payloads.
+- **One-off repair script:** `scripts/repair-bag-card-104-legacy-partial-finalization.ts` — dry-run by default; apply gated by `ALLOW_PRODUCTION_REPAIR`, `CONFIRM_WORKFLOW_BAG_ID`, and `CONFIRM_BAG_CARD`. **No production repair is applied by this release.**
+- **Honest inventory:** No remaining-tablet fabrication, no allocation session repair, no inventory readiness changes.
+
 ## [0.4.94] — 2026-06-03
 
 ### Fixed (PARTIAL-SEAL-DISPLAY-1)

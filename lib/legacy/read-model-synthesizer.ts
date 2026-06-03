@@ -74,6 +74,14 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
     SELECT
       wb.id,
       COALESCE((
+        SELECT vr.payload->'corrected_value'->>'resume_stage'
+        FROM workflow_events vr
+        WHERE vr.workflow_bag_id = wb.id
+          AND vr.event_type::text = 'SUBMISSION_CORRECTED'
+          AND vr.payload->>'correction_kind' = 'VOID_ERRONEOUS_BAG_FINALIZATION'
+        ORDER BY vr.occurred_at DESC, vr.id DESC
+        LIMIT 1
+      ), (
         SELECT
           CASE we.event_type::text
             WHEN 'CARD_ASSIGNED'              THEN 'STARTED'
@@ -94,6 +102,26 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
             'BOTTLE_HANDPACK_COMPLETE','BOTTLE_CAP_SEAL_COMPLETE',
             'BOTTLE_STICKER_COMPLETE','BAG_FINALIZED'
           )
+          -- voided_bag_finalized: ignore erroneous terminal events repaired in prod
+          AND NOT (
+            we.event_type::text = 'BAG_FINALIZED'
+            AND EXISTS (
+              SELECT 1
+              FROM workflow_events vc
+              WHERE vc.workflow_bag_id = wb.id
+                AND vc.event_type::text = 'SUBMISSION_CORRECTED'
+                AND vc.payload->>'correction_kind' = 'VOID_ERRONEOUS_BAG_FINALIZATION'
+                AND vc.payload->>'corrected_event_id' = we.id::text
+            )
+          )
+          AND NOT (
+            we.event_type::text = 'SEALING_COMPLETE'
+            AND (we.payload->>'partial_close')::boolean IS TRUE
+          )
+          AND NOT (
+            we.event_type::text = 'PACKAGING_COMPLETE'
+            AND (we.payload->>'partial_packaging')::boolean IS TRUE
+          )
         ORDER BY we.occurred_at DESC, we.id DESC
         LIMIT 1
       ), 'STARTED') AS stage,
@@ -101,7 +129,16 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
       p.name AS product_name,
       ib.batch_id AS inventory_bag_batch_id,
       wb.receipt_number,
-      wb.finalized_at IS NOT NULL AS is_finalized,
+      (
+        wb.finalized_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM workflow_events vc
+          WHERE vc.workflow_bag_id = wb.id
+            AND vc.event_type::text = 'SUBMISSION_CORRECTED'
+            AND vc.payload->>'correction_kind' = 'VOID_ERRONEOUS_BAG_FINALIZATION'
+        )
+      ) AS is_finalized,
       -- is_paused: true when last BAG_PAUSED is more recent than last
       -- BAG_RESUMED AND the bag isn't finalized.
       (

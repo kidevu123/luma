@@ -48,6 +48,11 @@ import { refreshMaterialReadModelsAfterBlister } from "./material-read-model-ref
 import { attributeFinalizedBag } from "./operator-daily-attribution";
 import { projectQcEvent, isQcEventType } from "./qc-events";
 import { projectFinishedLotForFinalizedBag } from "./finished-lot-passport";
+import {
+  applyVoidErroneousBagFinalizationRepair,
+  readResumeStageFromVoidCorrection,
+  shouldApplyVoidErroneousBagFinalizationRepair,
+} from "./bag-finalization-void-repair";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -181,6 +186,43 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
     .onConflictDoNothing()
     .returning({ id: workflowEvents.id });
   if (inserted.length === 0) return;
+  const insertedEventId = inserted[0]!.id;
+
+  if (
+    ev.eventType === "SUBMISSION_CORRECTED" &&
+    shouldApplyVoidErroneousBagFinalizationRepair(mergedPayload as Record<string, unknown>)
+  ) {
+    const resumeStage = readResumeStageFromVoidCorrection(
+      mergedPayload as Record<string, unknown>,
+    );
+    const bagCardScanToken =
+      typeof mergedPayload.bag_card_token === "string"
+        ? mergedPayload.bag_card_token
+        : null;
+    await applyVoidErroneousBagFinalizationRepair(tx, {
+      workflowBagId: ev.workflowBagId,
+      resumeStage,
+      bagCardScanToken,
+      occurredAt,
+    });
+  }
+
+  // Skip terminal projection for BAG_FINALIZED events voided by repair.
+  if (ev.eventType === "BAG_FINALIZED") {
+    const correctedId = insertedEventId;
+    const voided = await tx.execute(sql`
+      SELECT 1
+      FROM workflow_events
+      WHERE workflow_bag_id = ${ev.workflowBagId}::uuid
+        AND event_type = 'SUBMISSION_CORRECTED'
+        AND payload->>'correction_kind' = 'VOID_ERRONEOUS_BAG_FINALIZATION'
+        AND payload->>'corrected_event_id' = ${correctedId}::text
+      LIMIT 1
+    `);
+    if ((voided as unknown as Array<unknown>).length > 0) {
+      return;
+    }
+  }
 
   // 1. read_station_live — track which bag is "currently at" each
   //    station. Three classes of event affect this read model:
