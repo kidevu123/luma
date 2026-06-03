@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.101] — 2026-06-03
+
+### Fixed (READY PARTIAL FLOOR START)
+- **Ready partial floor scan:** Inventory-resolved partial bags (e.g. `bag-card-104` after supervisor estimate) no longer block on a stale non-finalized legacy workflow assignment. First-op station scans create a new workflow run with product selection instead of returning “not ready for this station yet.”
+- **Classification order:** Partial Ready eligibility is evaluated before the active-workflow gate so `/partial-bags`, admin Start run, and floor scan share the same rules.
+
 ## [0.4.100] — 2026-06-03
 
 ### Fixed (MULTI-SEALING-STATION-UNBLOCK-1)

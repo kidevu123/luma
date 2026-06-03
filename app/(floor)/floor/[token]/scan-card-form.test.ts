@@ -323,12 +323,44 @@ describe("lookupCardByTokenAction", () => {
       bagStage: "BLISTERED",
     };
     queueLookupResults([idlePool104], [assigned104]);
+    mockLoadRawBagStartClassification.mockResolvedValue({
+      status: "PARTIAL_READY",
+      inventoryBagId: "a23bec0d-36e8-4b65-a172-a605eb22c559",
+      canStart: true,
+      operatorMessage: "",
+      eligibilityNote: "Ready for a new production run.",
+    });
     const result = await lookupCardByTokenAction(makeForm("bag-card-104"));
     expect(result).toHaveProperty("ok", true);
     const ok = result as { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean };
     expect(ok.cardId).toBe(assigned104.id);
     expect(ok.cardLabel).toBe("Bag Card 104");
-    expect(ok.isIntakeReserved).toBe(false);
+    expect(ok.isIntakeReserved).toBe(true);
+  });
+
+  it("returns isIntakeReserved for ASSIGNED Ready partial bag (stale legacy workflow)", async () => {
+    const assignedReadyPartial = {
+      id: "00000000-0000-0000-0000-000000000011",
+      label: "Bag Card 104",
+      scanToken: "bag-card-104",
+      cardType: "RAW_BAG",
+      status: "ASSIGNED",
+      assignedWorkflowBagId: "3d026c01-4521-4825-9c08-3e8e9bd87196",
+      tabletTypeId: "tt-104",
+      bagStage: "BLISTERED",
+    };
+    queueLookupResults([assignedReadyPartial], []);
+    mockLoadRawBagStartClassification.mockResolvedValue({
+      status: "PARTIAL_READY",
+      inventoryBagId: "a23bec0d-36e8-4b65-a172-a605eb22c559",
+      canStart: true,
+      operatorMessage: "",
+      eligibilityNote: "Ready for a new production run.",
+    });
+    const result = await lookupCardByTokenAction(makeForm("Bag Card 104"));
+    expect(result).toHaveProperty("ok", true);
+    const ok = result as { ok: true; isIntakeReserved: boolean };
+    expect(ok.isIntakeReserved).toBe(true);
   });
 
   it("trims whitespace from scan token before lookup", async () => {

@@ -21,7 +21,7 @@ import {
 import { canResumeFinalizedWorkflowOnInventoryBag } from "@/lib/production/partial-bag-restart";
 import type { PartialBagSession } from "@/lib/production/partial-bags";
 import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
-import { loadRawBagStartClassificationForScan } from "@/lib/production/floor-partial-bag-start-resolution";
+import { loadRawBagStartClassificationForScan, RAW_BAG_START_OPERATOR_MESSAGES } from "@/lib/production/floor-partial-bag-start-resolution";
 import {
   floorScanInputMatchesCard,
   pickBestFloorScanCard,
@@ -394,6 +394,131 @@ export async function scanCardAction(
           })
           .from(readBagState)
           .where(eq(readBagState.workflowBagId, bagId));
+        const partialStart = await loadRawBagStartClassificationForScan(tx, {
+          scannedToken: card.scanToken,
+          cardScanToken: card.scanToken,
+        });
+        if (
+          partialStart.status === "PARTIAL_NEEDS_REVIEW" ||
+          partialStart.status === "PARTIAL_NEEDS_ALLOCATION_CLOSEOUT"
+        ) {
+          throw new Error(partialStart.operatorMessage);
+        }
+        if (partialStart.status === "PARTIAL_READY") {
+          if (!FRESH_BAG_STATION_KINDS.has(station.kind)) {
+            throw new Error(
+              RAW_BAG_START_OPERATOR_MESSAGES.PARTIAL_READY_WRONG_STATION,
+            );
+          }
+          const productLookup = pickedProductId
+            ? (
+                await tx
+                  .select({
+                    id: products.id,
+                    sku: products.sku,
+                    name: products.name,
+                    kind: products.kind,
+                    isActive: products.isActive,
+                  })
+                  .from(products)
+                  .where(eq(products.id, pickedProductId))
+              )[0] ?? null
+            : null;
+          const firstOp = checkFirstOpProductSelection({
+            stationKind: station.kind,
+            cardStatus: "IDLE",
+            pickedProductId,
+            product: productLookup,
+          });
+          if (!firstOp.ok) throw new Error(firstOp.reason);
+
+          const restartReadiness = await evaluateQrCardReadinessById(tx, cardId);
+          if (!restartReadiness) throw new Error("Card not found.");
+          if (restartReadiness.level === "BLOCKED") {
+            throw new Error(floorReadinessOperatorMessage(restartReadiness));
+          }
+
+          const productIdToSet = firstOp.productId;
+          const inventoryLink = await lookupInventoryBagByQrScanToken(
+            tx,
+            card.scanToken,
+          );
+          if (!inventoryLink?.inventoryBagId) {
+            throw new Error(floorReadinessOperatorMessage(restartReadiness));
+          }
+          const [restartBag] = await tx
+            .insert(workflowBags)
+            .values({
+              ...(productIdToSet ? { productId: productIdToSet } : {}),
+              inventoryBagId: inventoryLink.inventoryBagId,
+            })
+            .returning();
+          if (!restartBag) {
+            throw new Error("Could not create workflow bag for partial-bag restart.");
+          }
+
+          await tx
+            .update(qrCards)
+            .set({ assignedWorkflowBagId: restartBag.id })
+            .where(eq(qrCards.id, cardId));
+
+          await projectEvent(tx, {
+            workflowBagId: restartBag.id,
+            stationId: station.id,
+            eventType: "CARD_ASSIGNED",
+            payload: {
+              qr_card_id: cardId,
+              station_kind: station.kind,
+              inventory_bag_id: inventoryLink.inventoryBagId,
+              tablet_type_id: inventoryLink.tabletTypeId,
+              partial_bag_restart: true,
+              prior_workflow_bag_id: bagId,
+            },
+            enteredByUserId: accountability.enteredByUserId,
+            accountableEmployeeId: accountability.accountableEmployeeId,
+            accountabilitySource: accountability.accountabilitySource,
+            accountableEmployeeNameSnapshot:
+              accountability.accountableEmployeeNameSnapshot,
+          });
+          if (productIdToSet && productLookup) {
+            await projectEvent(tx, {
+              workflowBagId: restartBag.id,
+              stationId: station.id,
+              eventType: "PRODUCT_MAPPED",
+              payload: {
+                product_id: productIdToSet,
+                product_sku: productLookup.sku,
+                product_name: productLookup.name,
+                product_kind: productLookup.kind,
+                station_kind: station.kind,
+                source: "FIRST_OPERATION_SELECTION",
+              },
+              enteredByUserId: accountability.enteredByUserId,
+              accountableEmployeeId: accountability.accountableEmployeeId,
+              accountabilitySource: accountability.accountabilitySource,
+              accountableEmployeeNameSnapshot:
+                accountability.accountableEmployeeNameSnapshot,
+            });
+          }
+          await writeAudit(
+            {
+              actorId: null,
+              actorRole: null,
+              action: "floor.partial_bag_restart",
+              targetType: "WorkflowBag",
+              targetId: restartBag.id,
+              after: {
+                card_id: cardId,
+                station_id: stationId,
+                product_id: productIdToSet,
+                prior_workflow_bag_id: bagId,
+                inventory_bag_id: inventoryLink.inventoryBagId,
+              },
+            },
+            tx,
+          );
+          return;
+        }
         if (state?.isFinalized) {
           const inventoryLinkForResume = await lookupInventoryBagByQrScanToken(
             tx,
@@ -2129,6 +2254,28 @@ export async function lookupCardByTokenAction(
         isIntakeReserved: true,
         tabletTypeId: card.tabletTypeId ?? null,
       };
+    }
+
+    if (card.status === "ASSIGNED" && card.cardType === "RAW_BAG") {
+      const partialStart = await loadRawBagStartClassificationForScan(db, {
+        scannedToken: token,
+        cardScanToken: card.scanToken,
+      });
+      if (
+        partialStart.status === "PARTIAL_NEEDS_REVIEW" ||
+        partialStart.status === "PARTIAL_NEEDS_ALLOCATION_CLOSEOUT"
+      ) {
+        return { error: partialStart.operatorMessage };
+      }
+      if (partialStart.status === "PARTIAL_READY") {
+        return {
+          ok: true,
+          cardId: card.id,
+          cardLabel: card.label,
+          isIntakeReserved: true,
+          tabletTypeId: card.tabletTypeId ?? null,
+        };
+      }
     }
 
     const classification = classifyFloorScanCard(card);

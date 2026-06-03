@@ -43,6 +43,8 @@ export const RAW_BAG_START_OPERATOR_MESSAGES = {
     "This bag QR has not been linked to a received bag. Receive the bag first on the Receive Pills page.",
   PARTIAL_NEEDS_REVIEW:
     "This partial bag needs inventory review before it can be started. Ask a lead/admin to resolve remaining tablets on Available Partial Bags.",
+  PARTIAL_READY_WRONG_STATION:
+    "This partial bag is ready for a new run. Scan it at a blister, handpack, or combined first-operation station, or use Available Partial Bags → Start run.",
   DEPLETED: "This bag has no tablets remaining and cannot be started again.",
   ACTIVE_ELSEWHERE:
     "This bag is already active in production elsewhere. Ask a supervisor before continuing.",
@@ -80,16 +82,6 @@ export function classifyRawBagStartFromInventoryContext(
     };
   }
 
-  if (ctx.hasActiveNonFinalizedWorkflow) {
-    return {
-      status: "ACTIVE_ELSEWHERE",
-      inventoryBagId: ctx.inventoryBagId,
-      canStart: false,
-      operatorMessage: RAW_BAG_START_OPERATOR_MESSAGES.ACTIVE_ELSEWHERE,
-      eligibilityNote: null,
-    };
-  }
-
   if (
     ctx.sessions.length > 0 &&
     ctx.sessions.every(
@@ -101,6 +93,56 @@ export function classifyRawBagStartFromInventoryContext(
       inventoryBagId: ctx.inventoryBagId,
       canStart: false,
       operatorMessage: RAW_BAG_START_OPERATOR_MESSAGES.DEPLETED,
+      eligibilityNote: null,
+    };
+  }
+
+  if (ctx.hasPartialPackagingWorkflow) {
+    const { eligibility, note } = classifyPartialBagInventoryEligibility({
+      inventoryStatus: ctx.inventoryStatus,
+      sessions: ctx.sessions,
+      hasPartialPackagingWorkflow: true,
+    });
+
+    if (eligibility === "ready") {
+      const partialReady = canRestartAvailablePartialRawBag({
+        inventoryStatus: ctx.inventoryStatus,
+        sessions: ctx.sessions,
+      });
+      return {
+        status: partialReady ? "PARTIAL_READY" : "FRESH_READY",
+        inventoryBagId: ctx.inventoryBagId,
+        canStart: true,
+        operatorMessage: "",
+        eligibilityNote: note,
+      };
+    }
+
+    if (eligibility === "needs_allocation_closeout") {
+      return {
+        status: "PARTIAL_NEEDS_ALLOCATION_CLOSEOUT",
+        inventoryBagId: ctx.inventoryBagId,
+        canStart: false,
+        operatorMessage: note,
+        eligibilityNote: note,
+      };
+    }
+
+    return {
+      status: "PARTIAL_NEEDS_REVIEW",
+      inventoryBagId: ctx.inventoryBagId,
+      canStart: false,
+      operatorMessage: RAW_BAG_START_OPERATOR_MESSAGES.PARTIAL_NEEDS_REVIEW,
+      eligibilityNote: note,
+    };
+  }
+
+  if (ctx.hasActiveNonFinalizedWorkflow) {
+    return {
+      status: "ACTIVE_ELSEWHERE",
+      inventoryBagId: ctx.inventoryBagId,
+      canStart: false,
+      operatorMessage: RAW_BAG_START_OPERATOR_MESSAGES.ACTIVE_ELSEWHERE,
       eligibilityNote: null,
     };
   }
@@ -124,42 +166,12 @@ export function classifyRawBagStartFromInventoryContext(
     };
   }
 
-  const { eligibility, note } = classifyPartialBagInventoryEligibility({
-    inventoryStatus: ctx.inventoryStatus,
-    sessions: ctx.sessions,
-    hasPartialPackagingWorkflow: true,
-  });
-
-  if (eligibility === "ready") {
-    const partialReady = canRestartAvailablePartialRawBag({
-      inventoryStatus: ctx.inventoryStatus,
-      sessions: ctx.sessions,
-    });
-    return {
-      status: partialReady ? "PARTIAL_READY" : "FRESH_READY",
-      inventoryBagId: ctx.inventoryBagId,
-      canStart: true,
-      operatorMessage: "",
-      eligibilityNote: note,
-    };
-  }
-
-  if (eligibility === "needs_allocation_closeout") {
-    return {
-      status: "PARTIAL_NEEDS_ALLOCATION_CLOSEOUT",
-      inventoryBagId: ctx.inventoryBagId,
-      canStart: false,
-      operatorMessage: note,
-      eligibilityNote: note,
-    };
-  }
-
   return {
     status: "PARTIAL_NEEDS_REVIEW",
     inventoryBagId: ctx.inventoryBagId,
     canStart: false,
     operatorMessage: RAW_BAG_START_OPERATOR_MESSAGES.PARTIAL_NEEDS_REVIEW,
-    eligibilityNote: note,
+    eligibilityNote: null,
   };
 }
 

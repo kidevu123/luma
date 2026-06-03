@@ -54,6 +54,25 @@ describe("classifyRawBagStartFromInventoryContext", () => {
     expect(r.canStart).toBe(true);
   });
 
+  it("returns PARTIAL_READY even when a stale non-finalized legacy workflow exists (bag-card-104 after void repair + resolve)", () => {
+    const r = classifyRawBagStartFromInventoryContext({
+      inventoryBagId: "a23bec0d-36e8-4b65-a172-a605eb22c559",
+      inventoryStatus: "AVAILABLE",
+      sessions: [
+        {
+          allocationStatus: "RETURNED_TO_STOCK",
+          endingBalanceQty: 3598,
+          closedAt: new Date("2026-06-03T21:50:05Z"),
+        },
+      ],
+      hasPartialPackagingWorkflow: true,
+      hasActiveNonFinalizedWorkflow: true,
+    });
+    expect(r.status).toBe("PARTIAL_READY");
+    expect(r.canStart).toBe(true);
+    expect(r.operatorMessage).toBe("");
+  });
+
   it("returns PARTIAL_NEEDS_ALLOCATION_CLOSEOUT when OPEN session remains", () => {
     const r = classifyRawBagStartFromInventoryContext({
       inventoryBagId: "inv-3",
