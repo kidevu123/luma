@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and, or, sql, desc } from "drizzle-orm";
+import { eq, and, or, sql, desc, isNotNull, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   qrCards,
@@ -21,6 +21,12 @@ import {
 import { canResumeFinalizedWorkflowOnInventoryBag } from "@/lib/production/partial-bag-restart";
 import type { PartialBagSession } from "@/lib/production/partial-bags";
 import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
+import {
+  floorScanInputMatchesCard,
+  pickBestFloorScanCard,
+  type FloorScanCardCandidate,
+} from "@/lib/production/floor-scan-resolve";
+import { numericSuffix } from "@/lib/production/qr-sort";
 import { floorReadinessOperatorMessage } from "@/lib/production/floor-readiness";
 import { evaluateQrCardReadinessById } from "@/lib/production/floor-readiness-loaders";
 import { writeAudit } from "@/lib/db/audit";
@@ -1685,6 +1691,145 @@ export async function packagingCompleteAction(
 
 // ── lookup card by scan token (floor scanner text input) ───────────────────
 
+type FloorScanLookupRow = FloorScanCardCandidate & {
+  tabletTypeId: string | null;
+  bagStage: string | null;
+};
+
+async function loadAssignedPickupScanCandidates(args: {
+  token: string;
+  stationId: string | null;
+}): Promise<FloorScanLookupRow[]> {
+  let pickupStages: readonly string[] = [];
+  if (args.stationId) {
+    const [stationRow] = await db
+      .select({ kind: stations.kind })
+      .from(stations)
+      .where(eq(stations.id, args.stationId))
+      .limit(1);
+    pickupStages = STATION_PICKUP_FROM_STAGE[stationRow?.kind ?? ""] ?? [];
+  }
+
+  const suffix = numericSuffix(args.token);
+  const labelPatterns =
+    suffix > 0 && /bag[-\s]?card/i.test(args.token)
+      ? [
+          sql`${qrCards.label} ~* ${`^Bag\\s+Card\\s+${suffix}\\s*$`}`,
+          sql`${qrCards.label} ~* ${`^bag-card-${suffix}\\s*$`}`,
+        ]
+      : [];
+
+  const tokenMatch = or(
+    sql`lower(${qrCards.label}) = lower(${args.token})`,
+    eq(qrCards.scanToken, args.token),
+    ...(UUID_RE.test(args.token) ? [eq(qrCards.id, args.token)] : []),
+    ...labelPatterns,
+  );
+
+  const rows = await db
+    .select({
+      id: qrCards.id,
+      label: qrCards.label,
+      scanToken: qrCards.scanToken,
+      cardType: qrCards.cardType,
+      status: qrCards.status,
+      assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
+      tabletTypeId: inventoryBags.tabletTypeId,
+      bagStage: readBagState.stage,
+    })
+    .from(qrCards)
+    .innerJoin(
+      readBagState,
+      eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
+    )
+    .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
+    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+    .where(
+      and(
+        eq(qrCards.cardType, "RAW_BAG"),
+        eq(qrCards.status, "ASSIGNED"),
+        isNotNull(qrCards.assignedWorkflowBagId),
+        eq(readBagState.isFinalized, false),
+        eq(readBagState.isPaused, false),
+        ...(pickupStages.length > 0
+          ? [inArray(readBagState.stage, pickupStages as string[])]
+          : []),
+        tokenMatch,
+      ),
+    );
+
+  return rows.filter((row) => floorScanInputMatchesCard(args.token, row));
+}
+
+async function resolveFloorScanLookupRow(args: {
+  token: string;
+  stationId: string | null;
+}): Promise<FloorScanLookupRow | null> {
+  const [primary] = await db
+    .select({
+      id: qrCards.id,
+      label: qrCards.label,
+      scanToken: qrCards.scanToken,
+      cardType: qrCards.cardType,
+      status: qrCards.status,
+      assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
+      tabletTypeId: inventoryBags.tabletTypeId,
+      bagStage: readBagState.stage,
+    })
+    .from(qrCards)
+    .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
+    .leftJoin(
+      readBagState,
+      eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
+    )
+    .where(
+      UUID_RE.test(args.token)
+        ? or(eq(qrCards.scanToken, args.token), eq(qrCards.id, args.token))
+        : eq(qrCards.scanToken, args.token),
+    )
+    .limit(1);
+
+  const candidates: FloorScanLookupRow[] = [];
+  if (primary) {
+    candidates.push({
+      ...primary,
+      bagStage: primary.bagStage ?? null,
+    });
+  }
+
+  const assignedPickups = await loadAssignedPickupScanCandidates(args);
+  for (const row of assignedPickups) {
+    if (!candidates.some((c) => c.id === row.id)) {
+      candidates.push(row);
+    }
+  }
+
+  let pickupStages: readonly string[] = [];
+  if (args.stationId) {
+    const [stationRow] = await db
+      .select({ kind: stations.kind })
+      .from(stations)
+      .where(eq(stations.id, args.stationId))
+      .limit(1);
+    pickupStages = STATION_PICKUP_FROM_STAGE[stationRow?.kind ?? ""] ?? [];
+  }
+
+  const pickupStageByBagId = new Map<string, string | null | undefined>();
+  for (const c of candidates) {
+    if (c.assignedWorkflowBagId) {
+      pickupStageByBagId.set(c.assignedWorkflowBagId, c.bagStage);
+    }
+  }
+
+  const best = pickBestFloorScanCard(candidates, args.token, {
+    pickupStages,
+    pickupStageByBagId,
+  });
+  if (!best) return null;
+
+  return candidates.find((c) => c.id === best.id) ?? null;
+}
+
 export async function lookupCardByTokenAction(
   formData: FormData,
 ): Promise<
@@ -1696,6 +1841,12 @@ export async function lookupCardByTokenAction(
     return { error: "No scan token provided." };
   }
 
+  const stationIdRaw = formData.get("stationId");
+  const stationId =
+    typeof stationIdRaw === "string" && UUID_RE.test(stationIdRaw)
+      ? stationIdRaw
+      : null;
+
   const token = scanToken.trim();
   // QR-SCAN-PAYLOAD-1: new labels encode scanToken (e.g. "bag-card-117").
   // Legacy labels printed before QR-SCAN-PAYLOAD-1 encode qrCards.id (a UUID).
@@ -1703,24 +1854,7 @@ export async function lookupCardByTokenAction(
   // column throws PostgresError 22P02 (string_to_uuid, digest 2676337210).
   // TODO: remove the id fallback once legacy labels are reprinted.
   try {
-    const [card] = await db
-      .select({
-        id: qrCards.id,
-        label: qrCards.label,
-        cardType: qrCards.cardType,
-        status: qrCards.status,
-        assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
-        tabletTypeId: inventoryBags.tabletTypeId,
-      })
-      .from(qrCards)
-      .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
-      .where(
-        UUID_RE.test(token)
-          ? or(eq(qrCards.scanToken, token), eq(qrCards.id, token))
-          : eq(qrCards.scanToken, token),
-      )
-      .limit(1);
-
+    const card = await resolveFloorScanLookupRow({ token, stationId });
     if (!card) return { error: "Bag QR not found." };
 
     const classification = classifyFloorScanCard(card);

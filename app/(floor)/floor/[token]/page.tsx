@@ -313,6 +313,35 @@ export default async function FloorStationPage({
         )
       : new Map<string, number>();
 
+  const partialSealingCloseoutByBag = new Map<string, boolean>();
+  if (pickupBagIds.length > 0) {
+    const sealingCompleteEvents = await db
+      .select({
+        workflowBagId: workflowEvents.workflowBagId,
+        eventType: workflowEvents.eventType,
+        payload: workflowEvents.payload,
+      })
+      .from(workflowEvents)
+      .where(
+        and(
+          inArray(workflowEvents.workflowBagId, pickupBagIds),
+          eq(workflowEvents.eventType, "SEALING_COMPLETE"),
+        ),
+      );
+    for (const bagId of pickupBagIds) {
+      const eventsForBag = sealingCompleteEvents
+        .filter((ev) => ev.workflowBagId === bagId)
+        .map((ev) => ({
+          eventType: ev.eventType,
+          payload: (ev.payload as Record<string, unknown> | null) ?? null,
+        }));
+      partialSealingCloseoutByBag.set(
+        bagId,
+        hasPartialSealingCloseout(eventsForBag),
+      );
+    }
+  }
+
   const eligiblePickupsForForm = eligiblePickups.map((c) => ({
     ...c,
     needsSealingFinalClose:
@@ -322,7 +351,9 @@ export default async function FloorStationPage({
         segmentCount: c.bagId
           ? (sealingSegmentCountsByBag.get(c.bagId) ?? 0)
           : 0,
-        hasPartialSealingCloseout: false,
+        hasPartialSealingCloseout: c.bagId
+          ? (partialSealingCloseoutByBag.get(c.bagId) ?? false)
+          : false,
       }),
   }));
 

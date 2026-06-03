@@ -17,38 +17,65 @@ const formSrc = readFileSync(resolve(here, "scan-card-form.tsx"), "utf8");
 let callIdx = 0;
 const selectResults: unknown[][] = [];
 
+function nextSelectRows(): unknown[] {
+  return (selectResults[callIdx++] ?? []) as unknown[];
+}
+
+function makeSelectChain(): {
+  from: () => ReturnType<typeof makeSelectChain>;
+  leftJoin: () => ReturnType<typeof makeSelectChain>;
+  innerJoin: () => ReturnType<typeof makeSelectChain>;
+  where: () => {
+    limit: (_count?: unknown) => Promise<unknown[]>;
+    then: (
+      resolve: (value: unknown[]) => void,
+      reject?: (reason: unknown) => void,
+    ) => void;
+  };
+  limit: (_count?: unknown) => Promise<unknown[]>;
+} {
+  const chain = {
+    from: () => chain,
+    leftJoin: () => chain,
+    innerJoin: () => chain,
+    where: () => ({
+      limit: async () => nextSelectRows(),
+      then(
+        resolve: (value: unknown[]) => void,
+        _reject?: (reason: unknown) => void,
+      ) {
+        resolve(nextSelectRows());
+      },
+    }),
+    limit: async () => nextSelectRows(),
+  };
+  return chain;
+}
+
 vi.mock("@/lib/db", () => ({
   db: {
-    select: (_fields?: unknown) => ({
-      from: (_table?: unknown) => ({
-        leftJoin: (_t: unknown, _c: unknown) => ({
-          where: (_cond?: unknown) => ({
-            limit: async (_count?: unknown) => {
-              const rows = (selectResults[callIdx++] ?? []) as unknown[];
-              return rows;
-            },
-          }),
-        }),
-        where: (_cond?: unknown) => ({
-          limit: async (_count?: unknown) => {
-            const rows = (selectResults[callIdx++] ?? []) as unknown[];
-            return rows;
-          },
-        }),
-      }),
-    }),
+    select: (_fields?: unknown) => makeSelectChain(),
   },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
   qrCards: {},
   inventoryBags: {},
+  readBagState: {},
+  workflowBags: {},
+  stations: {},
 }));
 
 vi.mock("drizzle-orm", () => ({
   eq: (a: unknown, b: unknown) => ({ eq: [a, b] }),
   or: (...args: unknown[]) => ({ or: args }),
   inArray: (a: unknown, b: unknown) => ({ inArray: [a, b] }),
+  and: (...args: unknown[]) => ({ and: args }),
+  isNotNull: (a: unknown) => ({ isNotNull: a }),
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    sql: strings,
+    values,
+  }),
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────
@@ -57,37 +84,49 @@ import { lookupCardByTokenAction } from "./actions";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function makeForm(scanToken: string): FormData {
+function makeForm(scanToken: string, stationId?: string): FormData {
   const fd = new FormData();
   fd.set("scanToken", scanToken);
+  if (stationId) fd.set("stationId", stationId);
   return fd;
+}
+
+/** Primary scanToken lookup, then assigned-pickup candidate query. */
+function queueLookupResults(primary: unknown[], assignedPickups: unknown[] = []) {
+  selectResults.push(primary, assignedPickups);
 }
 
 const IDLE_RAW_BAG = {
   id: "00000000-0000-0000-0000-000000000001",
   label: "bag-card-001",
+  scanToken: "bag-card-001",
   cardType: "RAW_BAG",
   status: "IDLE",
   assignedWorkflowBagId: null,
   tabletTypeId: null,
+  bagStage: null,
 };
 
 const INTAKE_RESERVED_RAW_BAG = {
   id: "00000000-0000-0000-0000-000000000002",
   label: "bag-card-002",
+  scanToken: "bag-card-002",
   cardType: "RAW_BAG",
   status: "ASSIGNED",
   assignedWorkflowBagId: null,
   tabletTypeId: "tt-001",
+  bagStage: null,
 };
 
 const ASSIGNED_RAW_BAG = {
   id: "00000000-0000-0000-0000-000000000003",
   label: "bag-card-003",
+  scanToken: "pickup-bag-token",
   cardType: "RAW_BAG",
   status: "ASSIGNED",
   assignedWorkflowBagId: "00000000-0000-0000-0000-000000000099",
   tabletTypeId: "tt-002",
+  bagStage: "BLISTERED",
 };
 
 // ── beforeEach ────────────────────────────────────────────────────────────
@@ -109,42 +148,72 @@ describe("lookupCardByTokenAction", () => {
   });
 
   it("returns error when card not found", async () => {
-    selectResults[0] = []; // no card for this token
+    queueLookupResults([], []);
     const result = await lookupCardByTokenAction(makeForm("nonexistent-token"));
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toMatch(/not found/i);
   });
 
   it("returns error for VARIETY_PACK card", async () => {
-    selectResults[0] = [{ id: "aaa", cardType: "VARIETY_PACK", status: "IDLE", assignedWorkflowBagId: null }];
+    queueLookupResults([
+      {
+        id: "aaa",
+        label: "variety-token",
+        scanToken: "variety-token",
+        cardType: "VARIETY_PACK",
+        status: "IDLE",
+        assignedWorkflowBagId: null,
+        bagStage: null,
+      },
+    ]);
     const result = await lookupCardByTokenAction(makeForm("variety-token"));
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toMatch(/not a bag QR/i);
   });
 
   it("returns error for UNKNOWN card type", async () => {
-    selectResults[0] = [{ id: "bbb", cardType: "UNKNOWN", status: "IDLE", assignedWorkflowBagId: null }];
+    queueLookupResults([
+      {
+        id: "bbb",
+        label: "unknown-token",
+        scanToken: "unknown-token",
+        cardType: "UNKNOWN",
+        status: "IDLE",
+        assignedWorkflowBagId: null,
+        bagStage: null,
+      },
+    ]);
     const result = await lookupCardByTokenAction(makeForm("unknown-token"));
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toMatch(/not a bag QR/i);
   });
 
   it("returns error for RETIRED RAW_BAG card", async () => {
-    selectResults[0] = [{ id: "ccc", cardType: "RAW_BAG", status: "RETIRED", assignedWorkflowBagId: null }];
+    queueLookupResults([
+      {
+        id: "ccc",
+        label: "retired-token",
+        scanToken: "retired-token",
+        cardType: "RAW_BAG",
+        status: "RETIRED",
+        assignedWorkflowBagId: null,
+        bagStage: null,
+      },
+    ]);
     const result = await lookupCardByTokenAction(makeForm("retired-token"));
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toMatch(/retired/i);
   });
 
   it("returns error for IDLE RAW_BAG card — pool cards must be received first", async () => {
-    selectResults[0] = [IDLE_RAW_BAG];
+    queueLookupResults([IDLE_RAW_BAG], []);
     const result = await lookupCardByTokenAction(makeForm("bag-card-1"));
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toMatch(/receive/i);
   });
 
   it("returns ok+isIntakeReserved=true for intake-reserved ASSIGNED RAW_BAG card", async () => {
-    selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
+    queueLookupResults([INTAKE_RESERVED_RAW_BAG], []);
     const result = await lookupCardByTokenAction(makeForm("bag-card-2"));
     expect(result).toHaveProperty("ok", true);
     const ok = result as { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean; tabletTypeId: string | null };
@@ -155,7 +224,7 @@ describe("lookupCardByTokenAction", () => {
   });
 
   it("returns ok+isIntakeReserved=false for mid-production ASSIGNED RAW_BAG card", async () => {
-    selectResults[0] = [ASSIGNED_RAW_BAG];
+    queueLookupResults([ASSIGNED_RAW_BAG], []);
     const result = await lookupCardByTokenAction(makeForm("pickup-bag-token"));
     expect(result).toHaveProperty("ok", true);
     const ok = result as { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean; tabletTypeId: string | null };
@@ -165,21 +234,55 @@ describe("lookupCardByTokenAction", () => {
     expect(ok.tabletTypeId).toBe("tt-002");
   });
 
+  it("prefers assigned workflow pickup over idle pool for bag-card-104 token", async () => {
+    const idlePool104 = {
+      id: "00000000-0000-0000-0000-000000000010",
+      label: "bag-card-104",
+      scanToken: "bag-card-104",
+      cardType: "RAW_BAG",
+      status: "IDLE",
+      assignedWorkflowBagId: null,
+      tabletTypeId: null,
+      bagStage: null,
+    };
+    const assigned104 = {
+      id: "00000000-0000-0000-0000-000000000011",
+      label: "Bag Card 104",
+      scanToken: "00000000-0000-4000-8000-000000000104",
+      cardType: "RAW_BAG",
+      status: "ASSIGNED",
+      assignedWorkflowBagId: "00000000-0000-0000-0000-000000000199",
+      tabletTypeId: "tt-104",
+      bagStage: "BLISTERED",
+    };
+    queueLookupResults([idlePool104], [assigned104]);
+    const result = await lookupCardByTokenAction(makeForm("bag-card-104"));
+    expect(result).toHaveProperty("ok", true);
+    const ok = result as { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean };
+    expect(ok.cardId).toBe(assigned104.id);
+    expect(ok.cardLabel).toBe("Bag Card 104");
+    expect(ok.isIntakeReserved).toBe(false);
+  });
+
   it("trims whitespace from scan token before lookup", async () => {
-    selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
+    queueLookupResults([INTAKE_RESERVED_RAW_BAG], []);
     const result = await lookupCardByTokenAction(makeForm("  bag-card-2  "));
     expect(result).toHaveProperty("ok", true);
   });
 
   it("returns tabletTypeId null when leftJoin finds no inventory bag", async () => {
-    selectResults[0] = [{
-      id: "00000000-0000-0000-0000-000000000004",
-      label: "bag-card-004",
-      cardType: "RAW_BAG",
-      status: "ASSIGNED",
-      assignedWorkflowBagId: null,
-      tabletTypeId: null,
-    }];
+    queueLookupResults([
+      {
+        id: "00000000-0000-0000-0000-000000000004",
+        label: "bag-card-004",
+        scanToken: "unlinked-token",
+        cardType: "RAW_BAG",
+        status: "ASSIGNED",
+        assignedWorkflowBagId: null,
+        tabletTypeId: null,
+        bagStage: null,
+      },
+    ], []);
     const result = await lookupCardByTokenAction(makeForm("unlinked-token"));
     expect(result).toHaveProperty("ok", true);
     const ok = result as { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean; tabletTypeId: string | null };
@@ -536,15 +639,19 @@ describe("QR-SCAN-PAYLOAD-1 · lookupCardByTokenAction dual lookup", () => {
     // FLOOR-SCAN-ERROR-2: unconditional or(eq(qrCards.id, token)) crashes with
     // PostgresError 22P02 when token is a slug like "bag-card-117". The fix gates
     // the id path on UUID format so slugs only hit the scanToken column.
-    expect(actionsSrc).toMatch(/UUID_RE\.test\s*\(\s*token\s*\)/);
+    expect(actionsSrc).toMatch(/UUID_RE\.test\s*\(\s*(?:token|args\.token)\s*\)/);
   });
 
   it("includes eq(qrCards.scanToken, token) inside the or() clause", () => {
-    expect(actionsSrc).toMatch(/eq\s*\(\s*qrCards\.scanToken\s*,\s*token\s*\)/);
+    expect(actionsSrc).toMatch(
+      /eq\s*\(\s*qrCards\.scanToken\s*,\s*(?:token|args\.token)\s*\)/,
+    );
   });
 
   it("includes eq(qrCards.id, token) as the legacy fallback inside or()", () => {
-    expect(actionsSrc).toMatch(/eq\s*\(\s*qrCards\.id\s*,\s*token\s*\)/);
+    expect(actionsSrc).toMatch(
+      /eq\s*\(\s*qrCards\.id\s*,\s*(?:token|args\.token)\s*\)/,
+    );
   });
 
   it("includes a TODO comment about removing the id fallback", () => {
@@ -729,7 +836,16 @@ describe("FLOOR-SCAN-ERROR-2 · non-UUID scan token does not hit UUID column", (
   });
 
   it("returns ok for non-UUID slug token when card exists by scanToken", async () => {
-    selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
+    queueLookupResults(
+      [
+        {
+          ...INTAKE_RESERVED_RAW_BAG,
+          scanToken: "bag-card-117",
+          label: "bag-card-117",
+        },
+      ],
+      [],
+    );
     const result = await lookupCardByTokenAction(makeForm("bag-card-117"));
     expect(result).toHaveProperty("ok", true);
     const ok = result as { ok: true; cardId: string; cardLabel: string };
@@ -737,14 +853,14 @@ describe("FLOOR-SCAN-ERROR-2 · non-UUID scan token does not hit UUID column", (
   });
 
   it("returns not-found error for non-UUID slug with no matching card", async () => {
-    selectResults[0] = [];
+    queueLookupResults([], []);
     const result = await lookupCardByTokenAction(makeForm("bag-card-999"));
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toMatch(/not found/i);
   });
 
   it("returns ok for UUID-format token (legacy label path)", async () => {
-    selectResults[0] = [INTAKE_RESERVED_RAW_BAG];
+    queueLookupResults([INTAKE_RESERVED_RAW_BAG], []);
     const result = await lookupCardByTokenAction(
       makeForm("00000000-0000-0000-0000-000000000002"),
     );

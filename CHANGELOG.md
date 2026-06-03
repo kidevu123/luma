@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.87] — 2026-06-03
+
+### Fixed (SEALING-STATION-PICKUP-WORKFLOW-CARD-1)
+- **Floor scan resolution:** `lookupCardByTokenAction` now resolves assigned workflow pickup cards before idle pool cards when the operator scans a reusable `bag-card-N` token that matches a mid-production card by label suffix (e.g. `bag-card-104` → **Bag Card 104**).
+- **Sealing waiting banner:** `needsSealingFinalClose` now honors durable partial sealing close-out per bag instead of hardcoding `hasPartialSealingCloseout: false`.
+
+### Tests
+- `lib/production/floor-scan-resolve.test.ts`, lookup collision test in `scan-card-form.test.ts`, `scripts/verify-sealing-station-pickup-workflow-card.ts`.
+
 ## [0.4.86] — 2026-06-03
 
 ### Fixed (SEALING-PARTIAL-CLOSEOUT-COUNT-VALIDATION-1)

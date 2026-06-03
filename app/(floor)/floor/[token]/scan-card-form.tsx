@@ -168,6 +168,7 @@ export function ScanCardForm({
       try {
         const fd = new FormData();
         fd.set("scanToken", raw.trim());
+        fd.set("stationId", stationId);
         const result = await lookupCardByTokenAction(fd);
         if (!("ok" in result)) {
           setScanError(result.error);
@@ -218,7 +219,7 @@ export function ScanCardForm({
         setScanPending(false);
       }
     },
-    [requireProductForFreshBag, submitWithCardId, allowedProducts, receivedCards],
+    [requireProductForFreshBag, submitWithCardId, allowedProducts, receivedCards, stationId],
   );
 
   const handleScanKeyDown = async (
