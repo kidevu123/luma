@@ -237,6 +237,32 @@ describe("MULTI-SEALING-SAME-BAG-1 · segment vs final sealing", () => {
     expect(actionsSrc).toMatch(/maybeAutoReleaseAfterPartialSealingClose/);
   });
 
+  it("partial SEALING_COMPLETE skips counter presses on pure sealing station", () => {
+    expect(actionsSrc).toMatch(/sealingFinalOnPureStation/);
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("export async function pauseBagAction");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    expect(block).toMatch(
+      /if \(sealingUsesCounter && !sealingFinalOnPureStation\)/,
+    );
+    expect(block).toMatch(
+      /sealingUsesCounter && !sealingFinalOnPureStation[\s\S]*buildPartialSealingClosePayload/,
+    );
+    expect(block).not.toMatch(
+      /isPartialSealingClose[\s\S]{0,120}SEALING_COUNTER_PRESS_ERROR/,
+    );
+  });
+
+  it("partial close with no segments returns segment error not counter error", () => {
+    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
+    const pauseIdx = actionsSrc.indexOf("export async function pauseBagAction");
+    const block = actionsSrc.slice(fireIdx, pauseIdx);
+    const partialValIdx = block.indexOf("validateSealingPartialCloseInput");
+    const counterIdx = block.indexOf("SEALING_COUNTER_PRESS_ERROR");
+    expect(partialValIdx).toBeGreaterThan(-1);
+    expect(counterIdx).toBeGreaterThan(partialValIdx);
+  });
+
   it("packaging complete allows BLISTERED when partial sealing close-out exists", () => {
     expect(actionsSrc).toMatch(/packagingPartialSealedReady/);
     expect(actionsSrc).toMatch(/allowsPackagingCompleteAtBlistered/);

@@ -28,7 +28,7 @@ describe("sealing partial close-out helpers", () => {
       reasonNote: null,
     });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/at least one sealing segment/i);
+    if (!r.ok) expect(r.error).toMatch(/at least one sealing segment before submitting a partial bag/i);
   });
 
   it("requires reason and note for OTHER", () => {

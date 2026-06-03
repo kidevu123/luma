@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.86] — 2026-06-03
+
+### Fixed (SEALING-PARTIAL-CLOSEOUT-COUNT-VALIDATION-1)
+- **Sealing Step 3 partial submit:** No longer requires machine counter presses when segment totals already exist. Partial close-out derives `sealed_partial_count` from recorded segments only.
+- **Error copy:** Zero-segment partial close-out now says “Record at least one sealing segment before submitting a partial bag” instead of the counter-presses message.
+
+### Tests
+- Floor action + UI source guards; `verify-sealing-partial-closeout.ts` static contract updated.
+
 ## [0.4.85] — 2026-06-02
 
 ### Fixed (PARTIAL-BAG-RESTART-PRODUCT-SELECTION-1)

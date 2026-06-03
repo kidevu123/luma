@@ -895,6 +895,23 @@ describe("SEALING-SEGMENT-UX-1 · sealing step layout and copy", () => {
     expect(formBlock).toMatch(/Add a short note when the reason is Other/);
   });
 
+  it("Step 3 partial submit does not send counterPresses", () => {
+    const formIdx = src.indexOf("function SealingFinalConfirmForm");
+    const submitIdx = src.indexOf("const submitClose = async", formIdx);
+    const submitBlock = src.slice(submitIdx, submitIdx + 900);
+    expect(submitBlock).toMatch(/sealingCloseMode/);
+    expect(submitBlock).not.toMatch(/counterPresses/);
+  });
+
+  it("regression: partial close with segment progress uses sealingCloseMode partial", () => {
+    const formIdx = src.indexOf("function SealingFinalConfirmForm");
+    const submitIdx = src.indexOf("const submitClose", formIdx);
+    const submitBlock = src.slice(submitIdx, submitIdx + 800);
+    expect(submitBlock).toMatch(/sealingCloseMode", mode/);
+    expect(submitBlock).toMatch(/partialCloseReason/);
+    expect(submitBlock).not.toMatch(/counterPresses/);
+  });
+
   it("complete sealing button requires product saved and prior segments", () => {
     expect(src).toMatch(/!sealingProductReady/);
     expect(src).toMatch(/!hasSealingSegments/);

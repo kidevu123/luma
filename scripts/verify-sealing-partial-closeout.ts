@@ -47,6 +47,10 @@ function runStaticContracts(): void {
   assert(!buttons.includes("Confirm sealing complete"), "Step 3 UI: old confirm copy removed");
 
   assert(actions.includes("sealingCloseMode"), "actions: sealingCloseMode form field");
+  assert(
+    actions.includes("sealingFinalOnPureStation"),
+    "actions: pure sealing final close skips counter",
+  );
   assert(actions.includes("validateSealingPartialCloseInput"), "actions: partial validation");
   assert(actions.includes("maybeAutoReleaseAfterPartialSealingClose"), "actions: partial auto-release");
   assert(actions.includes("packagingPartialSealedReady"), "actions: packaging BLISTERED gate");

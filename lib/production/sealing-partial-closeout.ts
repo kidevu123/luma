@@ -84,7 +84,7 @@ export function validateSealingPartialCloseInput(
     return {
       ok: false,
       error:
-        "Record at least one sealing segment with a sealed count before partial close-out.",
+        "Record at least one sealing segment before submitting a partial bag.",
     };
   }
   const reason = input.reason?.trim() ?? "";

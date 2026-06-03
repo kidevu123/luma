@@ -849,6 +849,11 @@ export async function fireStageEventAction(
     const sealingCloseMode = parsed.data.sealingCloseMode ?? "whole";
     const isPartialSealingClose =
       isSealingFinal && isPureSealingStation && sealingCloseMode === "partial";
+    /** Pure SEALING station final close (whole or partial) uses segment totals, not counter. */
+    const sealingFinalOnPureStation =
+      isSealingFinal && isPureSealingStation;
+    const sealingFinalCloseOnly =
+      sealingFinalOnPureStation && !isPartialSealingClose;
     let partialCloseReady: {
       sealedPartialCount: number;
       reason: (typeof SEALING_PARTIAL_CLOSE_REASONS)[number];
@@ -910,10 +915,8 @@ export async function fireStageEventAction(
     const sealingUsesCounter =
       (isSealingSegment || isSealingFinal) &&
       stationUsesSealingCounter(station.kind);
-    const sealingFinalCloseOnly =
-      isSealingFinal && isPureSealingStation && !isPartialSealingClose;
 
-    if (sealingUsesCounter && !sealingFinalCloseOnly) {
+    if (sealingUsesCounter && !sealingFinalOnPureStation) {
       if (counterPresses === undefined) {
         return { error: SEALING_COUNTER_PRESS_ERROR };
       }
@@ -1035,7 +1038,7 @@ export async function fireStageEventAction(
         stationId,
         eventType,
         payload: {
-          ...(sealingUsesCounter && !sealingFinalCloseOnly
+          ...(sealingUsesCounter && !sealingFinalOnPureStation
             ? {
                 count_total: resolvedCountTotal ?? 0,
                 counter_presses: sealingCounterPresses,
