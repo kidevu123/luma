@@ -19,6 +19,23 @@ describe("FLOOR-CURRENT-BAG-CONTEXT-1 · current bag label", () => {
     });
   });
 
+  it("does not duplicate an existing PO prefix", () => {
+    expect(
+      buildCurrentBagDisplayLabel({
+        cardLabel: "Bag Card 107",
+        poNumber: "PO-00238",
+        tabletTypeName: "MIT B Green Apple",
+        productName: null,
+        inventoryBagNumber: 1,
+        workflowBagNumber: 107,
+      }),
+    ).toMatchObject({
+      primary: "PO-00238 - MIT B Green Apple - Bag 1",
+      secondary: "Bag Card 107",
+      hasReceivedContext: true,
+    });
+  });
+
   it("falls back to product and workflow bag number when tablet/inventory bag context is partial", () => {
     expect(
       buildCurrentBagDisplayLabel({

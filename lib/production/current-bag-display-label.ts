@@ -18,6 +18,14 @@ function clean(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+function formatPoLabel(poNumber: string | null): string | null {
+  if (!poNumber) {
+    return null;
+  }
+
+  return /^po(?:[\s-]|$)/i.test(poNumber) ? poNumber : `PO ${poNumber}`;
+}
+
 export function buildCurrentBagDisplayLabel(
   input: CurrentBagDisplayLabelInput,
 ): CurrentBagDisplayLabel {
@@ -26,7 +34,7 @@ export function buildCurrentBagDisplayLabel(
   const tabletName = clean(input.tabletTypeName) ?? clean(input.productName);
   const bagNumber = input.inventoryBagNumber ?? input.workflowBagNumber ?? null;
   const parts = [
-    poNumber ? `PO ${poNumber}` : null,
+    formatPoLabel(poNumber),
     tabletName,
     bagNumber != null ? `Bag ${bagNumber}` : null,
   ].filter((part): part is string => part != null);

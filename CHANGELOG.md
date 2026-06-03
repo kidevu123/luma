@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.98] — 2026-06-03
+
+### Fixed (FLOOR-CURRENT-BAG-PO-PREFIX-1)
+- **Floor current bag label:** Avoids duplicating the PO prefix when received PO numbers are already stored as values like `PO-00238`.
+
 ## [0.4.97] — 2026-06-03
 
 ### Changed (FLOOR-CURRENT-BAG-CONTEXT-1)
