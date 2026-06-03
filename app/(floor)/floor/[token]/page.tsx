@@ -55,6 +55,7 @@ import {
   deriveSealingSegmentProgress,
   needsSealingLaneClose,
 } from "@/lib/production/sealing-segments";
+import { hasPartialSealingCloseout } from "@/lib/production/sealing-partial-closeout";
 import { OperatorSessionPanel } from "./operator-session-form";
 import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
@@ -321,6 +322,7 @@ export default async function FloorStationPage({
         segmentCount: c.bagId
           ? (sealingSegmentCountsByBag.get(c.bagId) ?? 0)
           : 0,
+        hasPartialSealingCloseout: false,
       }),
   }));
 
@@ -497,29 +499,38 @@ export default async function FloorStationPage({
       )
     : null;
 
+  const sealingEventsForForm = currentAtStation
+    ? (
+        await db
+          .select({
+            eventType: workflowEvents.eventType,
+            stationId: workflowEvents.stationId,
+            payload: workflowEvents.payload,
+          })
+          .from(workflowEvents)
+          .where(
+            and(
+              eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
+              inArray(workflowEvents.eventType, [
+                "SEALING_SEGMENT_COMPLETE",
+                "SEALING_COMPLETE",
+              ]),
+            ),
+          )
+      ).map((row) => ({
+        eventType: row.eventType,
+        stationId: row.stationId,
+        payload: (row.payload ?? null) as Record<string, unknown> | null,
+      }))
+    : [];
+
   const sealingSegmentProgressForForm = currentAtStation
-    ? deriveSealingSegmentProgress(
-        (
-          await db
-            .select({
-              eventType: workflowEvents.eventType,
-              stationId: workflowEvents.stationId,
-              payload: workflowEvents.payload,
-            })
-            .from(workflowEvents)
-            .where(
-              and(
-                eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
-                eq(workflowEvents.eventType, "SEALING_SEGMENT_COMPLETE"),
-              ),
-            )
-        ).map((row) => ({
-          eventType: row.eventType,
-          stationId: row.stationId,
-          payload: (row.payload ?? null) as Record<string, unknown> | null,
-        })),
-      )
+    ? deriveSealingSegmentProgress(sealingEventsForForm)
     : null;
+
+  const hasPartialSealingCloseoutForForm = currentAtStation
+    ? hasPartialSealingCloseout(sealingEventsForForm)
+    : false;
 
   const handpackTabletContext =
     station.station.kind === "HANDPACK_BLISTER" && currentAtStation
@@ -845,6 +856,7 @@ export default async function FloorStationPage({
               rollChangeRole={requiredRollChangeRole}
               handpackTabletContext={handpackTabletContextForForm}
               sealingSegmentProgress={sealingSegmentProgressForForm}
+              hasPartialSealingCloseout={hasPartialSealingCloseoutForForm}
             />
             {/* Help operator pick the next action when the bag has
              *  already advanced past this station's stage. The

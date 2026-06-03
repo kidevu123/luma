@@ -26,6 +26,11 @@ import {
   STATION_RELEASE_FROM_STAGE,
   STATIONS_THAT_FINALIZE,
 } from "@/lib/production/stage-progression";
+import {
+  SEALING_PARTIAL_CLOSE_REASONS,
+  SEALING_PARTIAL_CLOSE_REASON_LABELS,
+  type SealingPartialCloseReason,
+} from "@/lib/production/sealing-partial-closeout";
 
 // crypto.randomUUID() is only available in secure contexts (HTTPS or
 // localhost). Floor PWA runs over plain HTTP on the LAN, so we fall
@@ -139,6 +144,7 @@ export function StageActionButtons({
   rollChangeRole = null,
   handpackTabletContext = null,
   sealingSegmentProgress = null,
+  hasPartialSealingCloseout = false,
 }: {
   token: string;
   stationId: string;
@@ -166,6 +172,8 @@ export function StageActionButtons({
   handpackTabletContext?: HandpackTabletContext | null;
   /** Bag-level sealing segment totals (all stations). */
   sealingSegmentProgress?: SealingSegmentProgress | null;
+  /** Durable partial sealing close-out — packaging may complete at BLISTERED. */
+  hasPartialSealingCloseout?: boolean;
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -249,9 +257,15 @@ export function StageActionButtons({
   const sealingStageReady =
     !currentStage || currentStage === "BLISTERED";
   const hasSealingSegments = (sealingSegmentProgress?.segmentCount ?? 0) > 0;
-  const packagingReady = !currentStage || currentStage === "SEALED";
+  const packagingReady =
+    !currentStage ||
+    currentStage === "SEALED" ||
+    (currentStage === "BLISTERED" && hasPartialSealingCloseout);
   const packagingSealingInProgress =
-    isPackaging && currentStage === "BLISTERED" && hasSealingSegments;
+    isPackaging &&
+    currentStage === "BLISTERED" &&
+    hasSealingSegments &&
+    !hasPartialSealingCloseout;
   const needsSealingProductMapping = !hasProductMapped;
   const showSealingProductPicker =
     needsSealingProductMapping && SEALING_STATION_KINDS.has(stationKind);
@@ -862,6 +876,7 @@ export function StageActionButtons({
           workflowBagId={workflowBagId}
           stationId={stationId}
           operatorCode={operatorCode}
+          sealedCardsTotal={sealingSegmentProgress?.cardsTotal ?? 0}
           onClose={(success) => {
             setSealingFinalOpen(false);
             if (success && error) setError(null);
@@ -1238,6 +1253,7 @@ function SealingFinalConfirmForm({
   workflowBagId,
   stationId,
   operatorCode,
+  sealedCardsTotal,
   onClose,
   onError,
 }: {
@@ -1245,14 +1261,59 @@ function SealingFinalConfirmForm({
   workflowBagId: string;
   stationId: string;
   operatorCode: string;
+  sealedCardsTotal: number;
   onClose: (success: boolean) => void;
   onError: (msg: string) => void;
 }) {
-  const [pending, setPending] = React.useState(false);
+  const [pending, setPending] = React.useState<"whole" | "partial" | null>(null);
+  const [partialReason, setPartialReason] = React.useState<
+    SealingPartialCloseReason | ""
+  >("");
+  const [partialNote, setPartialNote] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, []);
+
+  const submitClose = async (mode: "whole" | "partial") => {
+    if (mode === "partial") {
+      if (!partialReason) {
+        onError("Select a partial close-out reason.");
+        return;
+      }
+      if (partialReason === "OTHER" && partialNote.trim().length < 3) {
+        onError("Add a short note when the reason is Other.");
+        return;
+      }
+    }
+    setPending(mode);
+    try {
+      const fd = new FormData();
+      fd.set("token", token);
+      fd.set("workflowBagId", workflowBagId);
+      fd.set("stationId", stationId);
+      fd.set("eventType", "SEALING_COMPLETE");
+      fd.set("sealingCloseMode", mode);
+      if (mode === "partial") {
+        fd.set("partialCloseReason", partialReason);
+        if (partialReason === "OTHER") {
+          fd.set("partialCloseReasonNote", partialNote.trim());
+        }
+      }
+      const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+      if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
+      fd.set("clientEventId", newClientEventId());
+      const r = await fireStageEventAction(fd);
+      if (r?.error) {
+        onError(r.error);
+        onClose(false);
+      } else {
+        onClose(true);
+      }
+    } finally {
+      setPending(null);
+    }
+  };
 
   return (
     <div
@@ -1260,50 +1321,76 @@ function SealingFinalConfirmForm({
       className="rounded-lg border-2 border-sky-400 bg-sky-50/60 p-3 space-y-3"
     >
       <p className="text-sm font-semibold text-sky-900">
-        Step 3: Complete sealing for this bag?
+        Step 3: Close sealing for this bag
       </p>
       <p className="text-xs text-sky-900/90 leading-relaxed">
-        Use only when this bag is done at sealing — every machine has recorded
-        its segment. This is final close-out, not another segment. Packaging
-        unlocks after this step.
+        <span className="font-medium">Submit whole bag</span> when every machine
+        is done sealing this bag.{" "}
+        <span className="font-medium">Submit partial bag</span> sends the sealed
+        quantity forward to packaging. Use only when this bag will not be fully
+        sealed now.
       </p>
-      <div className="grid grid-cols-2 gap-2">
+      <p className="text-xs text-sky-800 bg-sky-100/80 border border-sky-200 rounded-lg px-3 py-2">
+        Sealed quantity from segments:{" "}
+        <span className="font-semibold tabular-nums">{sealedCardsTotal}</span>{" "}
+        cards (system total — not re-entered on partial submit).
+      </p>
+      <label className="block text-xs font-medium text-sky-900">
+        Partial close-out reason (required only for partial submit)
+        <select
+          value={partialReason}
+          onChange={(e) =>
+            setPartialReason(e.target.value as SealingPartialCloseReason | "")
+          }
+          disabled={pending !== null}
+          className="mt-1 w-full h-11 rounded-lg border border-sky-300 bg-white px-3 text-sm text-text"
+        >
+          <option value="">Select reason…</option>
+          {SEALING_PARTIAL_CLOSE_REASONS.map((code) => (
+            <option key={code} value={code}>
+              {SEALING_PARTIAL_CLOSE_REASON_LABELS[code]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {partialReason === "OTHER" ? (
+        <label className="block text-xs font-medium text-sky-900">
+          Short note (required for Other)
+          <input
+            type="text"
+            maxLength={200}
+            value={partialNote}
+            onChange={(e) => setPartialNote(e.target.value)}
+            disabled={pending !== null}
+            className="mt-1 w-full h-11 rounded-lg border border-sky-300 bg-white px-3 text-sm text-text"
+            placeholder="Brief explanation"
+          />
+        </label>
+      ) : null}
+      <div className="grid grid-cols-1 gap-2">
         <button
           type="button"
           onClick={() => onClose(false)}
-          disabled={pending}
+          disabled={pending !== null}
           className="h-12 rounded-xl border border-border bg-surface text-sm font-medium"
         >
           Cancel
         </button>
         <button
           type="button"
-          disabled={pending}
-          onClick={async () => {
-            setPending(true);
-            try {
-              const fd = new FormData();
-              fd.set("token", token);
-              fd.set("workflowBagId", workflowBagId);
-              fd.set("stationId", stationId);
-              fd.set("eventType", "SEALING_COMPLETE");
-              const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
-              if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
-              fd.set("clientEventId", newClientEventId());
-              const r = await fireStageEventAction(fd);
-              if (r?.error) {
-                onError(r.error);
-                onClose(false);
-              } else {
-                onClose(true);
-              }
-            } finally {
-              setPending(false);
-            }
-          }}
+          disabled={pending !== null}
+          onClick={() => submitClose("whole")}
           className="h-14 rounded-xl bg-sky-800 text-white text-base font-semibold disabled:opacity-60"
         >
-          {pending ? "Saving…" : "Confirm sealing complete"}
+          {pending === "whole" ? "Saving…" : "Submit whole bag"}
+        </button>
+        <button
+          type="button"
+          disabled={pending !== null || !partialReason}
+          onClick={() => submitClose("partial")}
+          className="h-14 rounded-xl border-2 border-sky-600 bg-white text-sky-900 text-base font-semibold disabled:opacity-60"
+        >
+          {pending === "partial" ? "Saving…" : "Submit partial bag"}
         </button>
       </div>
     </div>

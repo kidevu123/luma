@@ -192,6 +192,16 @@ describe("station pickup eligibility — same QR scanned downstream", () => {
     ).toBe(false);
   });
 
+  it("PACKAGING_COMPLETE allowed at BLISTERED after partial sealing close-out", () => {
+    expect(
+      checkStageProgression({
+        eventType: "PACKAGING_COMPLETE",
+        currentStage: "BLISTERED",
+        packagingPartialSealedReady: true,
+      }).allowed,
+    ).toBe(true);
+  });
+
   it("PACKAGING_COMPLETE still allowed from SEALED (unchanged)", () => {
     expect(
       checkStageProgression({ eventType: "PACKAGING_COMPLETE", currentStage: "SEALED" }).allowed,

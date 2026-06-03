@@ -63,6 +63,16 @@ describe("needsSealingLaneClose", () => {
       needsSealingLaneClose({ stage: "BLISTERED", segmentCount: 0 }),
     ).toBe(false);
   });
+
+  it("is false after partial sealing close-out", () => {
+    expect(
+      needsSealingLaneClose({
+        stage: "BLISTERED",
+        segmentCount: 2,
+        hasPartialSealingCloseout: true,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("deriveSealingSegmentProgress", () => {

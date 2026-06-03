@@ -74,6 +74,9 @@ export function checkStageProgression(args: {
   currentStage: string | null | undefined;
   isPaused?: boolean;
   isFinalized?: boolean;
+  /** SEALING-PARTIAL-CLOSEOUT-1: after partial sealing close-out, packaging
+   *  may complete while global stage remains BLISTERED. */
+  packagingPartialSealedReady?: boolean;
 }): StageProgressionResult {
   if (args.isFinalized) {
     return { allowed: false, reason: "Bag is already finalized." };
@@ -97,6 +100,13 @@ export function checkStageProgression(args: {
     return { allowed: true };
   }
   if (prereq.includes(stage)) return { allowed: true };
+  if (
+    args.eventType === "PACKAGING_COMPLETE" &&
+    args.packagingPartialSealedReady === true &&
+    stage === "BLISTERED"
+  ) {
+    return { allowed: true };
+  }
   return {
     allowed: false,
     reason: `Bag is at stage ${stage} — ${args.eventType} expected ${prereq.join(" or ")}. Cannot fire again.`,

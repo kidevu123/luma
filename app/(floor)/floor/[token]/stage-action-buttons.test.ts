@@ -133,11 +133,11 @@ describe("PRODUCTION-OVERLAP-3 · completion gate at overlap stages", () => {
     expect(src).toMatch(/prereq.*includes.*currentStage/s);
   });
 
-  it("packagingReady requires currentStage === SEALED — BLISTERED is not ready", () => {
-    // const packagingReady = !currentStage || currentStage === "SEALED"
-    // BLISTERED ≠ SEALED → packagingReady = false → packaging form hidden.
-    expect(src).toMatch(/packagingReady.*currentStage.*SEALED/s);
-    expect(src).not.toMatch(/packagingReady.*BLISTERED/);
+  it("packagingReady allows SEALED or BLISTERED with partial sealing close-out", () => {
+    expect(src).toMatch(/packagingReady[\s\S]*currentStage === "SEALED"/);
+    expect(src).toMatch(
+      /currentStage === "BLISTERED" && hasPartialSealingCloseout/,
+    );
   });
 
   it("SEALING stage list filters on EVENT_STAGE_PREREQ — stages const derived from allStages.filter", () => {
@@ -552,8 +552,8 @@ describe("PACKAGING-AUTO-FINALIZE-1 · manual finalize fallback for legacy PACKA
     expect(src).toMatch(/canFinalize/);
   });
 
-  it("packaging close-out form still gated on packagingReady (SEALED only)", () => {
-    expect(src).toMatch(/packagingReady.*currentStage.*SEALED/s);
+  it("packaging close-out form gated on packagingReady including partial BLISTERED", () => {
+    expect(src).toMatch(/packagingReady[\s\S]*hasPartialSealingCloseout/);
   });
 
   it("sealing auto-release path unchanged — packaging does not use release helper", () => {
@@ -876,12 +876,23 @@ describe("SEALING-SEGMENT-UX-1 · sealing step layout and copy", () => {
     expect(formBlock).not.toMatch(/final close-out when all sealers/);
   });
 
-  it("complete sealing form says use only when bag is done", () => {
+  it("Step 3 offers whole and partial submit — not primary Confirm sealing complete", () => {
     const formIdx = src.indexOf("function SealingFinalConfirmForm");
-    const formBlock = src.slice(formIdx, formIdx + 1200);
-    expect(formBlock).toMatch(/Step 3: Complete sealing for this bag/);
-    expect(formBlock).toMatch(/Use only when this bag is done at sealing/);
-    expect(formBlock).toMatch(/not another segment/);
+    const formBlock = src.slice(formIdx, formIdx + 6000);
+    expect(formBlock).toMatch(/Submit whole bag/);
+    expect(formBlock).toMatch(/Submit partial bag/);
+    expect(formBlock).not.toMatch(/Confirm sealing complete/);
+    expect(formBlock).toMatch(/sealingCloseMode/);
+    expect(formBlock).toMatch(/partialCloseReason/);
+    expect(formBlock).toMatch(/will not be fully[\s\S]*sealed now/);
+  });
+
+  it("partial close requires reason and note for OTHER", () => {
+    const formIdx = src.indexOf("function SealingFinalConfirmForm");
+    const formBlock = src.slice(formIdx, formIdx + 6000);
+    expect(formBlock).toMatch(/Select a partial close-out reason/);
+    expect(formBlock).toMatch(/partialReason === "OTHER"/);
+    expect(formBlock).toMatch(/Add a short note when the reason is Other/);
   });
 
   it("complete sealing button requires product saved and prior segments", () => {

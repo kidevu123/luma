@@ -28,7 +28,10 @@ export function readSealingSegmentCount(
 export function needsSealingLaneClose(args: {
   stage: string | null | undefined;
   segmentCount: number;
+  /** Partial sealing close-out satisfies lane close for downstream packaging. */
+  hasPartialSealingCloseout?: boolean;
 }): boolean {
+  if (args.hasPartialSealingCloseout) return false;
   return args.stage === "BLISTERED" && args.segmentCount > 0;
 }
 

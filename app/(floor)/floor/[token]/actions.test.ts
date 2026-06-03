@@ -229,6 +229,19 @@ describe("MULTI-SEALING-SAME-BAG-1 · segment vs final sealing", () => {
     expect(actionsSrc).toMatch(/lane_close: true/);
   });
 
+  it("partial SEALING_COMPLETE validates reason and segment totals", () => {
+    expect(actionsSrc).toMatch(/sealingCloseMode/);
+    expect(actionsSrc).toMatch(/validateSealingPartialCloseInput/);
+    expect(actionsSrc).toMatch(/buildPartialSealingClosePayload/);
+    expect(actionsSrc).toMatch(/buildPartialSealingClosePayload/);
+    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterPartialSealingClose/);
+  });
+
+  it("packaging complete allows BLISTERED when partial sealing close-out exists", () => {
+    expect(actionsSrc).toMatch(/packagingPartialSealedReady/);
+    expect(actionsSrc).toMatch(/allowsPackagingCompleteAtBlistered/);
+  });
+
   it("handpack material runs on segment not final close-only", () => {
     expect(actionsSrc).toMatch(/isSealingSegment \|\|\s*\(isSealingFinal && !isPureSealingStation\)/);
   });
@@ -480,7 +493,7 @@ describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · packaging complete accountabilit
   it("packagingCompleteAction resolves accountability via resolveStationAccountability", () => {
     const idx = actionsSrc.indexOf("export async function packagingCompleteAction");
     expect(idx).toBeGreaterThan(-1);
-    const chunk = actionsSrc.slice(idx, idx + 4500);
+    const chunk = actionsSrc.slice(idx, idx + 5500);
     expect(chunk).toMatch(/resolveStationAccountability\(tx,/);
     expect(chunk).toMatch(/overrideEmployeeCode: parsed\.data\.operatorCode/);
     expect(chunk).toMatch(

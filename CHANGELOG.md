@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.84] — 2026-06-02
+
+### Added (SEALING-PARTIAL-CLOSEOUT-1)
+- **Sealing Step 3:** Submit whole bag (unchanged `{ lane_close: true }` → `SEALED`) or **Submit partial bag** with required reason enum (+ note when Other).
+- **Partial close-out payload** on existing `SEALING_COMPLETE` (no migration): `partial_close`, `lane_close: false`, `sealed_partial_count` from segment totals, `partial_close_reason` / label / optional note.
+- **Partial path:** Global stage stays `BLISTERED`; skips full sealed-bag throughput increment; auto-releases to packaging queue; packaging complete allowed at `BLISTERED` when partial close-out exists; QR/card assignment preserved through packaging.
+
+### Intentionally not wired
+- **Raw-bag allocation auto-close** on partial seal — sealed output is in cards, not tablets; closing allocation sessions would fabricate inventory counts without a reliable card→tablet mapping.
+
+### Tests (SEALING-PARTIAL-CLOSEOUT-1)
+- `lib/production/sealing-partial-closeout.test.ts`, `lib/projector/sealing-partial-projector.test.ts`, stage-progression / sealing-segments / floor action tests; `scripts/verify-sealing-partial-closeout.ts`.
+
 ## [0.4.83] — 2026-06-02
 
 ### Added (RAW-BAGS-READINESS-BADGES-1)

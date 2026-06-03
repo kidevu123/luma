@@ -109,11 +109,25 @@ export function deriveLaneWipFromEvents(
       case "SEALING_SEGMENT_COMPLETE":
         sealedOutputUnits += readCount(ev.payload ?? null);
         break;
-      case "SEALING_COMPLETE":
-        // Legacy single-shot completes (e.g. COMBINED) may still carry count_total.
-        // Lane-close-only finals omit count_total and contribute 0 here.
-        sealedOutputUnits += readCount(ev.payload ?? null);
+      case "SEALING_COMPLETE": {
+        // Partial lane close records sealed_partial_count; whole lane close
+        // may omit counts (lane_close only).
+        const p = ev.payload ?? null;
+        if (p?.partial_close === true) {
+          const partialRaw =
+            p.sealed_partial_count ?? p.sealedPartialCount ?? p.count_total;
+          if (typeof partialRaw === "number" && Number.isFinite(partialRaw)) {
+            sealedOutputUnits += Math.max(0, Math.floor(partialRaw));
+          } else if (typeof partialRaw === "string" && partialRaw.trim() !== "") {
+            const n = Number(partialRaw);
+            if (Number.isFinite(n)) sealedOutputUnits += Math.max(0, Math.floor(n));
+          }
+          sawPartialLaneEvent = true;
+        } else {
+          sealedOutputUnits += readCount(p);
+        }
         break;
+      }
       case "PACKAGING_COMPLETE":
       case "PACKAGING_SNAPSHOT":
         packagedOutputUnits += readCount(ev.payload ?? null);

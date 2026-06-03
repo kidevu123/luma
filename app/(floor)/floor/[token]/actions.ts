@@ -47,6 +47,13 @@ import {
 } from "@/lib/production/sealing-counter";
 import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
 import {
+  SEALING_PARTIAL_CLOSE_REASONS,
+  buildPartialSealingClosePayload,
+  hasPartialSealingCloseout,
+  validateSealingPartialCloseInput,
+  allowsPackagingCompleteAtBlistered,
+} from "@/lib/production/sealing-partial-closeout";
+import {
   lookupProductMatchedBlisterCardLot,
   issueHandpackBlisterCardMaterial,
   emitHandpackBlisterEstimatedMaterial,
@@ -581,6 +588,10 @@ const eventSchema = z.object({
    *  station-operator-session helper; falls back to the active
    *  session when omitted. */
   overrideEmployeeCode: z.string().max(40).optional().nullable(),
+  /** SEALING-PARTIAL-CLOSEOUT-1: whole (lane_close) vs partial close-out. */
+  sealingCloseMode: z.enum(["whole", "partial"]).optional(),
+  partialCloseReason: z.enum(SEALING_PARTIAL_CLOSE_REASONS).optional(),
+  partialCloseReasonNote: z.string().max(200).optional().nullable(),
 });
 
 import { checkStageProgression } from "@/lib/production/stage-progression";
@@ -753,6 +764,9 @@ export async function fireStageEventAction(
     clientEventId: pickClientEventId(formData),
     productId: formData.get("productId") || undefined,
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
+    sealingCloseMode: formData.get("sealingCloseMode") || undefined,
+    partialCloseReason: formData.get("partialCloseReason") || undefined,
+    partialCloseReasonNote: formData.get("partialCloseReasonNote") || undefined,
   });
   if (!parsed.success) return { error: "Invalid input." };
   const {
@@ -811,21 +825,60 @@ export async function fireStageEventAction(
     const isSealingFinal = eventType === "SEALING_COMPLETE";
     const isPureSealingStation = station.kind === "SEALING";
 
+    const sealingCloseMode = parsed.data.sealingCloseMode ?? "whole";
+    const isPartialSealingClose =
+      isSealingFinal && isPureSealingStation && sealingCloseMode === "partial";
+    let partialCloseReady: {
+      sealedPartialCount: number;
+      reason: (typeof SEALING_PARTIAL_CLOSE_REASONS)[number];
+    } | null = null;
+
     if (isSealingFinal && isPureSealingStation) {
-      const [segmentRow] = await db
-        .select({ n: sql<number>`count(*)::int` })
+      const priorEvents = await db
+        .select({
+          eventType: workflowEvents.eventType,
+          payload: workflowEvents.payload,
+        })
         .from(workflowEvents)
-        .where(
-          and(
-            eq(workflowEvents.workflowBagId, workflowBagId),
-            eq(workflowEvents.eventType, SEALING_SEGMENT_EVENT),
-          ),
-        );
-      if ((segmentRow?.n ?? 0) < 1) {
-        return {
-          error:
-            "Record at least one sealing segment before marking sealing complete.",
+        .where(eq(workflowEvents.workflowBagId, workflowBagId));
+
+      if (isPartialSealingClose) {
+        const partialValidation = validateSealingPartialCloseInput({
+          events: priorEvents.map((row) => ({
+            eventType: row.eventType,
+            payload: (row.payload as Record<string, unknown> | null) ?? null,
+          })),
+          reason: parsed.data.partialCloseReason ?? null,
+          reasonNote: parsed.data.partialCloseReasonNote ?? null,
+        });
+        if (!partialValidation.ok) {
+          return { error: partialValidation.error };
+        }
+        partialCloseReady = {
+          sealedPartialCount: partialValidation.sealedPartialCount,
+          reason: partialValidation.reason,
         };
+      } else {
+        if (hasPartialSealingCloseout(
+          priorEvents.map((row) => ({
+            eventType: row.eventType,
+            payload: (row.payload as Record<string, unknown> | null) ?? null,
+          })),
+        )) {
+          return {
+            error:
+              "This bag already has a partial sealing close-out. Finish packaging before starting another sealing close-out.",
+          };
+        }
+        const segmentCount = priorEvents.filter(
+          (row) => row.eventType === SEALING_SEGMENT_EVENT,
+        ).length;
+        if (segmentCount < 1) {
+          return {
+            error:
+              "Record at least one sealing segment before marking sealing complete.",
+          };
+        }
       }
     }
 
@@ -836,7 +889,8 @@ export async function fireStageEventAction(
     const sealingUsesCounter =
       (isSealingSegment || isSealingFinal) &&
       stationUsesSealingCounter(station.kind);
-    const sealingFinalCloseOnly = isSealingFinal && isPureSealingStation;
+    const sealingFinalCloseOnly =
+      isSealingFinal && isPureSealingStation && !isPartialSealingClose;
 
     if (sealingUsesCounter && !sealingFinalCloseOnly) {
       if (counterPresses === undefined) {
@@ -973,11 +1027,17 @@ export async function fireStageEventAction(
                     }
                   : {}),
               }
-            : isSealingFinal && sealingFinalCloseOnly
-              ? { lane_close: true }
-              : resolvedCountTotal
-                ? { count_total: resolvedCountTotal }
-                : {}),
+            : isSealingFinal && isPartialSealingClose && partialCloseReady
+              ? buildPartialSealingClosePayload({
+                  sealedPartialCount: partialCloseReady.sealedPartialCount,
+                  reason: partialCloseReady.reason,
+                  reasonNote: parsed.data.partialCloseReasonNote ?? null,
+                })
+              : isSealingFinal && sealingFinalCloseOnly
+                ? { lane_close: true }
+                : resolvedCountTotal
+                  ? { count_total: resolvedCountTotal }
+                  : {}),
           ...(packsRemaining ? { packs_remaining: packsRemaining } : {}),
           ...(cardsReopened ? { cards_reopened: cardsReopened } : {}),
           ...(eventType === "HANDPACK_BLISTER_COMPLETE" && handpackTabletContext
@@ -1039,7 +1099,14 @@ export async function fireStageEventAction(
       // Segment submit intentionally keeps the bag pinned at this station
       // so the final lane-close button stays visible. Operators hand off to
       // the next sealing machine via releaseSealingHandoffAction.
-      if (
+      if (isPartialSealingClose) {
+        await maybeAutoReleaseAfterPartialSealingClose(tx, {
+          workflowBagId,
+          stationId,
+          clientEventId: clientEventId ?? null,
+          accountability,
+        });
+      } else if (
         eventType === "HANDPACK_BLISTER_COMPLETE" ||
         (eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER") ||
         (isSealingFinal && station.kind === "SEALING")
@@ -1467,11 +1534,25 @@ export async function packagingCompleteAction(
       })
       .from(readBagState)
       .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
+    const pkgPriorEvents = await db
+      .select({
+        eventType: workflowEvents.eventType,
+        payload: workflowEvents.payload,
+      })
+      .from(workflowEvents)
+      .where(eq(workflowEvents.workflowBagId, parsed.data.workflowBagId));
+    const packagingPartialSealedReady = allowsPackagingCompleteAtBlistered(
+      pkgPriorEvents.map((row) => ({
+        eventType: row.eventType,
+        payload: (row.payload as Record<string, unknown> | null) ?? null,
+      })),
+    );
     const pkgProg = checkStageProgression({
       eventType: "PACKAGING_COMPLETE",
       currentStage: pkgState?.stage ?? null,
       isPaused: pkgState?.isPaused ?? false,
       isFinalized: pkgState?.isFinalized ?? false,
+      packagingPartialSealedReady,
     });
     if (!pkgProg.allowed) return { error: pkgProg.reason };
 
@@ -1801,6 +1882,42 @@ const AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS = new Set([
   "HANDPACK_BLISTER",
   "SEALING",
 ]);
+
+/** Partial sealing close-out: release at BLISTERED so packaging can pick up. */
+async function maybeAutoReleaseAfterPartialSealingClose(
+  tx: DbTx,
+  args: {
+    workflowBagId: string;
+    stationId: string;
+    clientEventId?: string | null | undefined;
+    accountability: StationAccountability;
+  },
+): Promise<void> {
+  const [afterPartial] = await tx
+    .select({ stage: readBagState.stage })
+    .from(readBagState)
+    .where(eq(readBagState.workflowBagId, args.workflowBagId));
+  if (afterPartial?.stage !== "BLISTERED") return;
+
+  const [live] = await tx
+    .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+    .from(readStationLive)
+    .where(eq(readStationLive.stationId, args.stationId));
+  if (live?.currentWorkflowBagId !== args.workflowBagId) return;
+
+  const releaseClientEventId = args.clientEventId
+    ? `${args.clientEventId}-auto-release`
+    : undefined;
+
+  await projectBagReleasedEvent(tx, {
+    workflowBagId: args.workflowBagId,
+    stationId: args.stationId,
+    stationKind: "SEALING",
+    releasedAtStage: "BLISTERED",
+    accountability: args.accountability,
+    ...(releaseClientEventId ? { clientEventId: releaseClientEventId } : {}),
+  });
+}
 
 /** BLISTER + HANDPACK_BLISTER + SEALING: complete also releases when still pinned. */
 async function maybeAutoReleaseAfterComplete(

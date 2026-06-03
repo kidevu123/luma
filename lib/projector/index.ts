@@ -32,6 +32,7 @@ import {
   rawBagAllocationSessions,
 } from "@/lib/db/schema";
 import { shouldReleaseQrAtFinalization } from "@/lib/production/bag-allocation";
+import { isPartialSealingClosePayload } from "@/lib/production/sealing-partial-closeout";
 import {
   refreshQueueState,
   QUEUE_REFRESH_EVENTS,
@@ -83,6 +84,21 @@ type EventInput = {
   accountabilitySource?: AccountabilitySource | null;
   accountableEmployeeNameSnapshot?: string | null;
 };
+
+/** Stage advance for workflow events. Partial sealing close-out does not
+ *  advance global stage to SEALED — sealed quantity moves downstream at BLISTERED. */
+export function resolveStageForWorkflowEvent(
+  eventType: string,
+  payload: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (
+    eventType === "SEALING_COMPLETE" &&
+    isPartialSealingClosePayload(payload ?? null)
+  ) {
+    return undefined;
+  }
+  return STAGE_FOR_EVENT[eventType];
+}
 
 const STAGE_FOR_EVENT: Record<string, string> = {
   CARD_ASSIGNED: "STARTED",
@@ -230,7 +246,7 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
   //    productName / inventoryBagBatchId / receiptNumber off the
   //    bag's workflowBags row so every consumer of read_bag_state
   //    has display-ready columns without an extra join.
-  const stage = STAGE_FOR_EVENT[ev.eventType];
+  const stage = resolveStageForWorkflowEvent(ev.eventType, mergedPayload);
   if (stage) {
     const isFinalized = ev.eventType === "BAG_FINALIZED";
     const newRank = stageRank(stage);
@@ -396,7 +412,11 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
   //    distinct), and a polluted "unknown" bucket would mislead the
   //    floor manager more than skipping early-stage events helps. The
   //    bag picks up its productId on the first stage event anyway.
-  const counterCol = THROUGHPUT_COLUMN[ev.eventType];
+  const counterCol =
+    ev.eventType === "SEALING_COMPLETE" &&
+    isPartialSealingClosePayload(mergedPayload)
+      ? undefined
+      : THROUGHPUT_COLUMN[ev.eventType];
   if (counterCol && ev.stationId) {
     const [bagRow] = await tx
       .select({ productId: workflowBags.productId })
