@@ -2,9 +2,9 @@
 
 **Purpose:** Prioritized, visible bug and UI-friction work — separate from launch hardening and recovery tooling.
 
-**Last updated:** 2026-06-02 (RAW-BAGS-READINESS-BADGES-1)
+**Last updated:** 2026-06-03 (PARTIAL-BAG-RESTART-PRODUCT-SELECTION-1 closeout)
 
-**Live baseline:** v0.4.83 @ `e630b26` (verify via `/api/health` on shift day)
+**Live baseline:** v0.4.85 @ `9e0d464` (verify via `/api/health` on shift day)
 
 ---
 

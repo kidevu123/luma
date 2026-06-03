@@ -13,6 +13,7 @@
 
 ### Tests
 - `lib/production/partial-bag-restart.test.ts`, `app/(admin)/production/start/actions.partial-restart.test.ts`, `scripts/verify-partial-bag-restart.ts`.
+- Closeout: `scripts/verify-partial-bag-restart-e2e.ts` (staging DB E2E + cleanup sweep), `lib/production/partial-bag-restart-e2e.harness.test.ts`.
 
 ## [0.4.84] — 2026-06-02
 
