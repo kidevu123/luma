@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPartialPackagingCompletePayload,
   buildPartialSealingClosePayload,
   deriveSealedPartialCountFromSegments,
+  hasFullSealingLaneClose,
+  hasPartialPackagingComplete,
   hasPartialSealingCloseout,
+  isPartialPackagingPayload,
   isPartialSealingClosePayload,
+  isWorkflowBagResumableAtSealingAfterPartialPackaging,
+  shouldEmitPartialPackagingComplete,
   validateSealingPartialCloseInput,
 } from "./sealing-partial-closeout";
 
@@ -80,5 +86,98 @@ describe("sealing partial close-out helpers", () => {
         },
       ]),
     ).toBe(true);
+  });
+
+  const partialPathEvents = [
+    { eventType: "SEALING_SEGMENT_COMPLETE", payload: { count_total: 12 } },
+    {
+      eventType: "SEALING_COMPLETE",
+      payload: buildPartialSealingClosePayload({
+        sealedPartialCount: 12,
+        reason: "END_OF_SHIFT",
+      }),
+    },
+    {
+      eventType: "PACKAGING_COMPLETE",
+      payload: buildPartialPackagingCompletePayload({
+        masterCases: 0,
+        displaysMade: 1,
+        looseCards: 0,
+        damagedPackaging: 0,
+        rippedCards: 0,
+        sealedPartialCount: 12,
+      }),
+    },
+  ] as const;
+
+  it("shouldEmitPartialPackagingComplete when partial close without whole lane close", () => {
+    expect(shouldEmitPartialPackagingComplete(partialPathEvents)).toBe(true);
+    expect(
+      shouldEmitPartialPackagingComplete([
+        ...partialPathEvents,
+        { eventType: "SEALING_COMPLETE", payload: { lane_close: true } },
+      ]),
+    ).toBe(false);
+  });
+
+  it("buildPartialPackagingCompletePayload is durable and queryable", () => {
+    const p = buildPartialPackagingCompletePayload({
+      masterCases: 0,
+      displaysMade: 2,
+      looseCards: 3,
+      damagedPackaging: 0,
+      rippedCards: 0,
+      sealedPartialCount: 40,
+    });
+    expect(p.partial_packaging).toBe(true);
+    expect(p.packaged_partial_count).toBe(5);
+    expect(p.sealed_partial_count_at_pack).toBe(40);
+  });
+
+  it("isWorkflowBagResumableAtSealingAfterPartialPackaging for partial path only", () => {
+    expect(
+      isWorkflowBagResumableAtSealingAfterPartialPackaging(partialPathEvents, {
+        stage: "BLISTERED",
+        isFinalized: false,
+      }),
+    ).toBe(true);
+    expect(
+      isWorkflowBagResumableAtSealingAfterPartialPackaging(partialPathEvents, {
+        stage: "PACKAGED",
+        isFinalized: false,
+      }),
+    ).toBe(true);
+    expect(
+      isWorkflowBagResumableAtSealingAfterPartialPackaging(
+        [{ eventType: "PACKAGING_COMPLETE", payload: { partial_packaging: false } }],
+        { stage: "PACKAGED", isFinalized: false },
+      ),
+    ).toBe(false);
+    expect(
+      isWorkflowBagResumableAtSealingAfterPartialPackaging(partialPathEvents, {
+        stage: "BLISTERED",
+        isFinalized: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("whole-bag terminal packaging is not resumable at sealing", () => {
+    const wholeBagEvents = [
+      { eventType: "SEALING_COMPLETE", payload: { lane_close: true } },
+      { eventType: "PACKAGING_COMPLETE", payload: { master_cases: 1 } },
+    ];
+    expect(hasFullSealingLaneClose(wholeBagEvents)).toBe(true);
+    expect(hasPartialPackagingComplete(wholeBagEvents)).toBe(false);
+    expect(
+      isWorkflowBagResumableAtSealingAfterPartialPackaging(wholeBagEvents, {
+        stage: "PACKAGED",
+        isFinalized: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("isPartialPackagingPayload detects partial_packaging flag", () => {
+    expect(isPartialPackagingPayload({ partial_packaging: true })).toBe(true);
+    expect(isPartialPackagingPayload({ master_cases: 1 })).toBe(false);
   });
 });

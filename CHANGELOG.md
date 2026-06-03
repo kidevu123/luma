@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.89] — 2026-06-03
+
+### Fixed (PARTIAL-PACKAGING-MUST-NOT-TERMINATE-CARD-ASSIGNMENT-1)
+- **Partial packaging lifecycle:** `PACKAGING_COMPLETE` after a partial sealing close-out now emits `partial_packaging: true`, keeps `read_bag_state.stage` at `BLISTERED`, skips auto-finalize, and leaves the workflow QR card assigned.
+- **Sealing resume:** Operators can scan the same reusable workflow card at sealing after partial downstream packaging; pickup eligibility is event-history aware (not a global `PACKAGED` reopen).
+- **Legacy rows:** Assigned bags stuck at `PACKAGED` without whole-bag sealing close remain resumable only when partial-close evidence exists.
+
+### Tests
+- `sealing-partial-closeout.test.ts`, `sealing-partial-projector.test.ts`, updated `verify-sealing-partial-closeout.ts`, `scripts/verify-partial-packaging-resume.ts`.
+
 ## [0.4.88] — 2026-06-03
 
 ### Fixed (BLISTER-STARTED-BAG-RESUME-CLOSEOUT-1)

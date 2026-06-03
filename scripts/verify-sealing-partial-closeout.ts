@@ -61,6 +61,24 @@ function runStaticContracts(): void {
 
   assert(partial.includes("partial_close: true"), "partial helpers: durable partial_close flag");
   assert(partial.includes("lane_close: false"), "partial helpers: not whole lane close");
+  assert(partial.includes("partial_packaging: true"), "partial helpers: partial_packaging flag");
+  assert(
+    partial.includes("isWorkflowBagResumableAtSealingAfterPartialPackaging"),
+    "partial helpers: resumable after partial packaging",
+  );
+  assert(
+    actions.includes("shouldEmitPartialPackagingComplete"),
+    "actions: partial packaging emit gate",
+  );
+  assert(
+    actions.includes("buildPartialPackagingCompletePayload"),
+    "actions: partial packaging payload builder",
+  );
+  assert(
+    actions.includes("!emitPartialPackaging"),
+    "actions: skip auto-finalize for partial packaging",
+  );
+  assert(projector.includes("isPartialPackagingPayload"), "projector: partial packaging payload guard");
 
   assert(
     progression.includes("packagingPartialSealedReady"),
@@ -95,9 +113,12 @@ async function runStagingQa(): Promise<void> {
   const { projectEvent } = await import("@/lib/projector");
   const { checkStageProgression } = await import("@/lib/production/stage-progression");
   const {
+    buildPartialPackagingCompletePayload,
     buildPartialSealingClosePayload,
     allowsPackagingCompleteAtBlistered,
+    isPartialPackagingPayload,
     isPartialSealingClosePayload,
+    isWorkflowBagResumableAtSealingAfterPartialPackaging,
   } = await import("@/lib/production/sealing-partial-closeout");
 
   const [sealingStation] = await db
@@ -256,11 +277,14 @@ async function runStagingQa(): Promise<void> {
         stationId: packStationId,
         eventType: "PACKAGING_COMPLETE",
         payload: {
-          master_cases: 0,
-          displays_made: 1,
-          loose_cards: 0,
-          damaged_packaging: 0,
-          ripped_cards: 0,
+          ...buildPartialPackagingCompletePayload({
+            masterCases: 0,
+            displaysMade: 1,
+            looseCards: 0,
+            damagedPackaging: 0,
+            rippedCards: 0,
+            sealedPartialCount: 24,
+          }),
           qa: QA_PREFIX,
         },
         clientEventId: randomUUID(),
@@ -268,10 +292,34 @@ async function runStagingQa(): Promise<void> {
     });
 
     const [stateAfter] = await db
-      .select({ stage: readBagState.stage })
+      .select({ stage: readBagState.stage, isFinalized: readBagState.isFinalized })
       .from(readBagState)
       .where(eq(readBagState.workflowBagId, workflowBagId));
-    assert(stateAfter?.stage === "PACKAGED", `stage after packaging: ${stateAfter?.stage}`);
+    assert(
+      stateAfter?.stage === "BLISTERED",
+      `stage after partial packaging: ${stateAfter?.stage} (must stay BLISTERED)`,
+    );
+    assert(stateAfter?.isFinalized === false, "partial packaging must not finalize bag");
+
+    const eventsAfterPack = await db
+      .select({ eventType: workflowEvents.eventType, payload: workflowEvents.payload })
+      .from(workflowEvents)
+      .where(eq(workflowEvents.workflowBagId, workflowBagId));
+    const packEv = eventsAfterPack.find((e) => e.eventType === "PACKAGING_COMPLETE");
+    assert(
+      packEv != null && isPartialPackagingPayload(packEv.payload as Record<string, unknown>),
+      "partial PACKAGING_COMPLETE payload persisted",
+    );
+    assert(
+      isWorkflowBagResumableAtSealingAfterPartialPackaging(
+        eventsAfterPack.map((e) => ({
+          eventType: e.eventType,
+          payload: (e.payload as Record<string, unknown> | null) ?? null,
+        })),
+        { stage: stateAfter?.stage ?? null, isFinalized: false },
+      ),
+      "bag resumable at sealing after partial packaging",
+    );
 
     const [cardAfterPack] = await db
       .select({ status: qrCards.status, assignedWorkflowBagId: qrCards.assignedWorkflowBagId })

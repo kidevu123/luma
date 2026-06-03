@@ -50,6 +50,14 @@ function main(): void {
     !page.includes("hasPartialSealingCloseout: false"),
     "page: no hardcoded hasPartialSealingCloseout false",
   );
+  assert(
+    page.includes("eligiblePartialPackagingResumes"),
+    "page: partial packaging resume pickup list",
+  );
+  assert(
+    actions.includes("isWorkflowBagResumableAtSealingAfterPartialPackaging"),
+    "actions: partial packaging resume eligibility",
+  );
 
   console.log("[verify-sealing-station-pickup-workflow-card] PASS — static contracts OK");
 }

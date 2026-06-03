@@ -388,7 +388,9 @@ export function ScanCardForm({
                         ? " · sealing in progress — pick up to finalize"
                         : c.bagStage === "STARTED"
                           ? " · in progress — resume"
-                          : ` · ${c.bagStage}`}
+                          : c.bagStage === "PACKAGED"
+                            ? " · partial packaged — resume sealing"
+                            : ` · ${c.bagStage}`}
                     </option>
                   ))}
                 </optgroup>

@@ -52,6 +52,108 @@ export function hasPartialSealingCloseout(
   );
 }
 
+/** True when whole-bag sealing lane close has fired (not partial close-out). */
+export function hasFullSealingLaneClose(
+  events: readonly WorkflowEventSlice[],
+): boolean {
+  return events.some(
+    (ev) =>
+      ev.eventType === "SEALING_COMPLETE" &&
+      !isPartialSealingClosePayload(ev.payload ?? null),
+  );
+}
+
+export function isPartialPackagingPayload(
+  payload: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!payload) return false;
+  return payload.partial_packaging === true;
+}
+
+/** True when packaging complete recorded a partial-sealed quantity only. */
+export function hasPartialPackagingComplete(
+  events: readonly WorkflowEventSlice[],
+): boolean {
+  return events.some(
+    (ev) =>
+      ev.eventType === "PACKAGING_COMPLETE" &&
+      isPartialPackagingPayload(ev.payload ?? null),
+  );
+}
+
+/** Packaging after partial sealing close-out (no whole lane close yet). */
+export function shouldEmitPartialPackagingComplete(
+  events: readonly WorkflowEventSlice[],
+): boolean {
+  return hasPartialSealingCloseout(events) && !hasFullSealingLaneClose(events);
+}
+
+export function buildPartialPackagingCompletePayload(args: {
+  masterCases: number;
+  displaysMade: number;
+  looseCards: number;
+  damagedPackaging: number;
+  rippedCards: number;
+  sealedPartialCount: number;
+  operatorCode?: string | null;
+}): Record<string, unknown> {
+  const packagedPartialCount =
+    args.masterCases + args.displaysMade + args.looseCards;
+  const payload: Record<string, unknown> = {
+    partial_packaging: true,
+    packaged_partial_count: packagedPartialCount,
+    sealed_partial_count_at_pack: args.sealedPartialCount,
+    master_cases: args.masterCases,
+    displays_made: args.displaysMade,
+    loose_cards: args.looseCards,
+    damaged_packaging: args.damagedPackaging,
+    ripped_cards: args.rippedCards,
+  };
+  if (args.operatorCode) payload.operator_code = args.operatorCode;
+  return payload;
+}
+
+/** Sealing may reopen after partial packaging — not after whole-bag terminal path. */
+export function isWorkflowBagResumableAtSealingAfterPartialPackaging(
+  events: readonly WorkflowEventSlice[],
+  args: {
+    stage: string | null | undefined;
+    isFinalized: boolean;
+  },
+): boolean {
+  if (args.isFinalized) return false;
+  if (!hasPartialSealingCloseout(events)) return false;
+  if (hasFullSealingLaneClose(events)) return false;
+  const stage = args.stage ?? null;
+  if (stage === "BLISTERED" || stage === "STARTED") return true;
+  if (stage === "PACKAGED") {
+    return (
+      hasPartialPackagingComplete(events) ||
+      (hasPartialSealingCloseout(events) && !hasFullSealingLaneClose(events))
+    );
+  }
+  return false;
+}
+
+/** Latest sealed_partial_count from the most recent partial close event. */
+export function readLatestPartialSealedCount(
+  events: readonly WorkflowEventSlice[],
+): number {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i]!;
+    if (
+      ev.eventType === "SEALING_COMPLETE" &&
+      isPartialSealingClosePayload(ev.payload ?? null)
+    ) {
+      const raw = ev.payload?.sealed_partial_count;
+      if (typeof raw === "number" && Number.isFinite(raw)) {
+        return Math.max(0, Math.floor(raw));
+      }
+    }
+  }
+  return deriveSealedPartialCountFromSegments(events);
+}
+
 /** Sealed card count for partial close — sum of segment payloads only. */
 export function deriveSealedPartialCountFromSegments(
   events: readonly WorkflowEventSlice[],

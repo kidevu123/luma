@@ -32,7 +32,10 @@ import {
   rawBagAllocationSessions,
 } from "@/lib/db/schema";
 import { shouldReleaseQrAtFinalization } from "@/lib/production/bag-allocation";
-import { isPartialSealingClosePayload } from "@/lib/production/sealing-partial-closeout";
+import {
+  isPartialSealingClosePayload,
+  isPartialPackagingPayload,
+} from "@/lib/production/sealing-partial-closeout";
 import {
   refreshQueueState,
   QUEUE_REFRESH_EVENTS,
@@ -94,6 +97,12 @@ export function resolveStageForWorkflowEvent(
   if (
     eventType === "SEALING_COMPLETE" &&
     isPartialSealingClosePayload(payload ?? null)
+  ) {
+    return undefined;
+  }
+  if (
+    eventType === "PACKAGING_COMPLETE" &&
+    isPartialPackagingPayload(payload ?? null)
   ) {
     return undefined;
   }

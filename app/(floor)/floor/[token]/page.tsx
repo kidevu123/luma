@@ -55,7 +55,7 @@ import {
   deriveSealingSegmentProgress,
   needsSealingLaneClose,
 } from "@/lib/production/sealing-segments";
-import { hasPartialSealingCloseout } from "@/lib/production/sealing-partial-closeout";
+import { hasPartialSealingCloseout, isWorkflowBagResumableAtSealingAfterPartialPackaging } from "@/lib/production/sealing-partial-closeout";
 import { OperatorSessionPanel } from "./operator-session-form";
 import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
@@ -319,10 +319,82 @@ export default async function FloorStationPage({
           )
       : [];
 
+  const partialPackagingResumeRaw =
+    station.station.kind === "SEALING"
+      ? await db
+          .select({
+            id: qrCards.id,
+            label: qrCards.label,
+            scanToken: qrCards.scanToken,
+            bagId: qrCards.assignedWorkflowBagId,
+            bagStage: readBagState.stage,
+            productSku: products.sku,
+          })
+          .from(qrCards)
+          .innerJoin(
+            readBagState,
+            eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
+          )
+          .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
+          .leftJoin(products, eq(products.id, workflowBags.productId))
+          .where(
+            and(
+              eq(qrCards.status, "ASSIGNED"),
+              isNotNull(qrCards.assignedWorkflowBagId),
+              eq(readBagState.isFinalized, false),
+              eq(readBagState.isPaused, false),
+              eq(readBagState.stage, "PACKAGED"),
+            ),
+          )
+      : [];
+
+  let eligiblePartialPackagingResumes: typeof partialPackagingResumeRaw = [];
+  if (partialPackagingResumeRaw.length > 0) {
+    const partialBagIds = partialPackagingResumeRaw
+      .map((c) => c.bagId)
+      .filter((id): id is string => id != null);
+    const partialResumeEvents =
+      partialBagIds.length > 0
+        ? await db
+            .select({
+              workflowBagId: workflowEvents.workflowBagId,
+              eventType: workflowEvents.eventType,
+              payload: workflowEvents.payload,
+            })
+            .from(workflowEvents)
+            .where(inArray(workflowEvents.workflowBagId, partialBagIds))
+        : [];
+    const eventsByPartialBag = new Map<
+      string,
+      Array<{ eventType: string; payload: Record<string, unknown> | null }>
+    >();
+    for (const row of partialResumeEvents) {
+      const list = eventsByPartialBag.get(row.workflowBagId) ?? [];
+      list.push({
+        eventType: row.eventType,
+        payload: (row.payload as Record<string, unknown> | null) ?? null,
+      });
+      eventsByPartialBag.set(row.workflowBagId, list);
+    }
+    eligiblePartialPackagingResumes = partialPackagingResumeRaw.filter((c) => {
+      if (!c.bagId) return false;
+      return isWorkflowBagResumableAtSealingAfterPartialPackaging(
+        eventsByPartialBag.get(c.bagId) ?? [],
+        { stage: c.bagStage, isFinalized: false },
+      );
+    });
+  }
+
   const resumeIds = new Set(eligibleStartedResumes.map((c) => c.id));
+  const partialPackagingResumeIds = new Set(
+    eligiblePartialPackagingResumes.map((c) => c.id),
+  );
   const eligiblePickupsMerged = [
     ...eligibleStartedResumes,
-    ...eligiblePickups.filter((c) => !resumeIds.has(c.id)),
+    ...eligiblePartialPackagingResumes,
+    ...eligiblePickups.filter(
+      (c) => !resumeIds.has(c.id) && !partialPackagingResumeIds.has(c.id),
+    ),
   ];
 
   const pickupBagIds = eligiblePickupsMerged

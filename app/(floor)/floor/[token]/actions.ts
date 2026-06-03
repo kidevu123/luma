@@ -61,6 +61,11 @@ import {
   hasPartialSealingCloseout,
   validateSealingPartialCloseInput,
   allowsPackagingCompleteAtBlistered,
+  buildPartialPackagingCompletePayload,
+  deriveSealedPartialCountFromSegments,
+  isWorkflowBagResumableAtSealingAfterPartialPackaging,
+  readLatestPartialSealedCount,
+  shouldEmitPartialPackagingComplete,
 } from "@/lib/production/sealing-partial-closeout";
 import {
   lookupProductMatchedBlisterCardLot,
@@ -583,6 +588,76 @@ export async function scanCardAction(
         }
         const allowedStages =
           STATION_PICKUP_FROM_STAGE[station.kind] ?? [];
+        const bagEventRows = await tx
+          .select({
+            eventType: workflowEvents.eventType,
+            payload: workflowEvents.payload,
+          })
+          .from(workflowEvents)
+          .where(eq(workflowEvents.workflowBagId, bagId));
+        const bagEventSlices = bagEventRows.map((row) => ({
+          eventType: row.eventType,
+          payload: (row.payload as Record<string, unknown> | null) ?? null,
+        }));
+        const partialPackagingResume =
+          station.kind === "SEALING" &&
+          isWorkflowBagResumableAtSealingAfterPartialPackaging(bagEventSlices, {
+            stage: state?.stage,
+            isFinalized: state?.isFinalized ?? false,
+          });
+        if (
+          partialPackagingResume &&
+          (!state?.stage || !allowedStages.includes(state.stage))
+        ) {
+          const [otherPin] = await tx
+            .select({ stationId: readStationLive.stationId })
+            .from(readStationLive)
+            .where(
+              and(
+                eq(readStationLive.currentWorkflowBagId, bagId),
+                ne(readStationLive.stationId, station.id),
+              ),
+            )
+            .limit(1);
+          if (otherPin) {
+            throw new Error(
+              "This bag is already in progress at another station. Ask a supervisor to check the bag assignment.",
+            );
+          }
+          await projectEvent(tx, {
+            workflowBagId: bagId,
+            stationId: station.id,
+            eventType: "BAG_PICKED_UP",
+            payload: {
+              qr_card_id: cardId,
+              station_kind: station.kind,
+              from_stage: state?.stage ?? "PACKAGED",
+              partial_packaging_resume: true,
+            },
+            enteredByUserId: accountability.enteredByUserId,
+            accountableEmployeeId: accountability.accountableEmployeeId,
+            accountabilitySource: accountability.accountabilitySource,
+            accountableEmployeeNameSnapshot:
+              accountability.accountableEmployeeNameSnapshot,
+          });
+          await writeAudit(
+            {
+              actorId: null,
+              actorRole: null,
+              action: "floor.bag_picked_up",
+              targetType: "WorkflowBag",
+              targetId: bagId,
+              after: {
+                card_id: cardId,
+                station_id: stationId,
+                from_stage: state?.stage ?? "PACKAGED",
+                partial_packaging_resume: true,
+              },
+            },
+            tx,
+          );
+          return;
+        }
         if (!state?.stage || !allowedStages.includes(state.stage)) {
           throw new Error(
             formatFloorStationBagOpenError({
@@ -1630,11 +1705,15 @@ export async function packagingCompleteAction(
       })
       .from(workflowEvents)
       .where(eq(workflowEvents.workflowBagId, parsed.data.workflowBagId));
+    const pkgEventSlices = pkgPriorEvents.map((row) => ({
+      eventType: row.eventType,
+      payload: (row.payload as Record<string, unknown> | null) ?? null,
+    }));
     const packagingPartialSealedReady = allowsPackagingCompleteAtBlistered(
-      pkgPriorEvents.map((row) => ({
-        eventType: row.eventType,
-        payload: (row.payload as Record<string, unknown> | null) ?? null,
-      })),
+      pkgEventSlices,
+    );
+    const emitPartialPackaging = shouldEmitPartialPackagingComplete(
+      pkgEventSlices,
     );
     const pkgProg = checkStageProgression({
       eventType: "PACKAGING_COMPLETE",
@@ -1685,20 +1764,31 @@ export async function packagingCompleteAction(
         overrideEmployeeCode: parsed.data.operatorCode ?? null,
       });
       const occurredAt = new Date();
+      const packagingPayload = emitPartialPackaging
+        ? buildPartialPackagingCompletePayload({
+            masterCases: parsed.data.masterCases,
+            displaysMade: parsed.data.displaysMade,
+            looseCards: parsed.data.looseCards,
+            damagedPackaging: parsed.data.damagedPackaging,
+            rippedCards: parsed.data.rippedCards,
+            sealedPartialCount: readLatestPartialSealedCount(pkgEventSlices),
+            operatorCode: parsed.data.operatorCode ?? null,
+          })
+        : {
+            master_cases: parsed.data.masterCases,
+            displays_made: parsed.data.displaysMade,
+            loose_cards: parsed.data.looseCards,
+            damaged_packaging: parsed.data.damagedPackaging,
+            ripped_cards: parsed.data.rippedCards,
+            ...(parsed.data.operatorCode
+              ? { operator_code: parsed.data.operatorCode }
+              : {}),
+          };
       await projectEvent(tx, {
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
         eventType: "PACKAGING_COMPLETE",
-        payload: {
-          master_cases: parsed.data.masterCases,
-          displays_made: parsed.data.displaysMade,
-          loose_cards: parsed.data.looseCards,
-          damaged_packaging: parsed.data.damagedPackaging,
-          ripped_cards: parsed.data.rippedCards,
-          ...(parsed.data.operatorCode
-            ? { operator_code: parsed.data.operatorCode }
-            : {}),
-        },
+        payload: packagingPayload,
         ...(parsed.data.clientEventId
           ? { clientEventId: parsed.data.clientEventId }
           : {}),
@@ -1728,7 +1818,7 @@ export async function packagingCompleteAction(
       await refreshMaterialReadModelsAfterConsumption(tx, {
         refreshRecommendations: true,
       });
-      if (station.kind === "PACKAGING") {
+      if (station.kind === "PACKAGING" && !emitPartialPackaging) {
         await maybeAutoFinalizeAfterPackagingComplete(tx, {
           workflowBagId: parsed.data.workflowBagId,
           stationId: parsed.data.stationId,
@@ -1761,15 +1851,16 @@ async function loadAssignedPickupScanCandidates(args: {
 }): Promise<FloorScanLookupRow[]> {
   let pickupStages: readonly string[] = [];
   let resumeStages: readonly string[] = [];
+  let stationKind = "";
   if (args.stationId) {
     const [stationRow] = await db
       .select({ kind: stations.kind })
       .from(stations)
       .where(eq(stations.id, args.stationId))
       .limit(1);
-    const kind = stationRow?.kind ?? "";
-    pickupStages = STATION_PICKUP_FROM_STAGE[kind] ?? [];
-    resumeStages = STATION_STARTED_RESUME_FROM_STAGE[kind] ?? [];
+    stationKind = stationRow?.kind ?? "";
+    pickupStages = STATION_PICKUP_FROM_STAGE[stationKind] ?? [];
+    resumeStages = STATION_STARTED_RESUME_FROM_STAGE[stationKind] ?? [];
   }
 
   const cardHashMatch = args.token.match(/^card\s*#\s*(\d+)\s*$/i);
@@ -1793,7 +1884,13 @@ async function loadAssignedPickupScanCandidates(args: {
     }
   }
 
-  const stageFilter = [...new Set([...pickupStages, ...resumeStages])];
+  const stageFilter = [
+    ...new Set([
+      ...pickupStages,
+      ...resumeStages,
+      ...(stationKind === "SEALING" ? ["PACKAGED"] : []),
+    ]),
+  ];
 
   const tokenMatch = or(
     sql`lower(${qrCards.label}) = lower(${args.token})`,
@@ -1834,7 +1931,47 @@ async function loadAssignedPickupScanCandidates(args: {
       ),
     );
 
-  return rows.filter((row) => floorScanInputMatchesCard(args.token, row));
+  let matched = rows.filter((row) => floorScanInputMatchesCard(args.token, row));
+  if (stationKind === "SEALING") {
+    const packagedRows = matched.filter(
+      (row) => row.bagStage === "PACKAGED" && row.assignedWorkflowBagId,
+    );
+    if (packagedRows.length > 0) {
+      const bagIds = packagedRows
+        .map((row) => row.assignedWorkflowBagId)
+        .filter((id): id is string => id != null);
+      const eventRows = await db
+        .select({
+          workflowBagId: workflowEvents.workflowBagId,
+          eventType: workflowEvents.eventType,
+          payload: workflowEvents.payload,
+        })
+        .from(workflowEvents)
+        .where(inArray(workflowEvents.workflowBagId, bagIds));
+      const eventsByBag = new Map<
+        string,
+        Array<{ eventType: string; payload: Record<string, unknown> | null }>
+      >();
+      for (const row of eventRows) {
+        const list = eventsByBag.get(row.workflowBagId) ?? [];
+        list.push({
+          eventType: row.eventType,
+          payload: (row.payload as Record<string, unknown> | null) ?? null,
+        });
+        eventsByBag.set(row.workflowBagId, list);
+      }
+      matched = matched.filter((row) => {
+        if (row.bagStage !== "PACKAGED" || !row.assignedWorkflowBagId) {
+          return true;
+        }
+        return isWorkflowBagResumableAtSealingAfterPartialPackaging(
+          eventsByBag.get(row.assignedWorkflowBagId) ?? [],
+          { stage: row.bagStage, isFinalized: false },
+        );
+      });
+    }
+  }
+  return matched;
 }
 
 async function resolveFloorScanLookupRow(args: {

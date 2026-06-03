@@ -302,7 +302,9 @@ describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () =
     const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
     const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
     const block = actionsSrc.slice(pkgIdx, lookupIdx);
-    expect(block).toMatch(/if \(station\.kind === "PACKAGING"\)/);
+    expect(block).toMatch(
+      /if \(station\.kind === "PACKAGING" && !emitPartialPackaging\)/,
+    );
     expect(block).not.toMatch(/COMBINED[\s\S]{0,40}maybeAutoFinalizeAfterPackagingComplete/);
   });
 
@@ -323,6 +325,8 @@ describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () =
     expect(block).toMatch(/loose_cards/);
     expect(block).toMatch(/damaged_packaging/);
     expect(block).toMatch(/ripped_cards/);
+    expect(block).toMatch(/buildPartialPackagingCompletePayload/);
+    expect(block).toMatch(/shouldEmitPartialPackagingComplete/);
   });
 });
 
@@ -519,7 +523,7 @@ describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · packaging complete accountabilit
   it("packagingCompleteAction resolves accountability via resolveStationAccountability", () => {
     const idx = actionsSrc.indexOf("export async function packagingCompleteAction");
     expect(idx).toBeGreaterThan(-1);
-    const chunk = actionsSrc.slice(idx, idx + 5500);
+    const chunk = actionsSrc.slice(idx, idx + 7200);
     expect(chunk).toMatch(/resolveStationAccountability\(tx,/);
     expect(chunk).toMatch(/overrideEmployeeCode: parsed\.data\.operatorCode/);
     expect(chunk).toMatch(
