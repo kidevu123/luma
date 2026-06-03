@@ -8,6 +8,7 @@ import type { BagGenealogyResult } from "@/lib/production/types";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
+  extractSubmissionLines,
   formatWorkflowDatetime,
   formatWorkflowTimestamp,
   getPayloadRecord,
@@ -128,40 +129,6 @@ function buildBagLabel(bag: WorkflowBagRow): {
     secondary: "Missing received-bag context",
     isLegacyFallback: true,
   };
-}
-
-function extractSubmissionLines(
-  eventType: string,
-  payload: Record<string, unknown>,
-): Array<{ label: string; value: number | null }> {
-  const n = (k: string): number | null => {
-    const v = payload[k];
-    return typeof v === "number" ? v : null;
-  };
-
-  switch (eventType) {
-    case "BLISTER_COMPLETE":
-      return [{ label: "Blistered", value: n("count_total") }];
-    case "SEALING_COMPLETE":
-      return [
-        { label: "Sealed", value: n("count_total") },
-        { label: "Remaining", value: n("packs_remaining") },
-      ];
-    case "PACKAGING_COMPLETE":
-      return [
-        { label: "Cases", value: n("master_cases") },
-        { label: "Displays", value: n("displays_made") },
-        { label: "Loose cards", value: n("loose_cards") },
-        { label: "Damaged", value: n("damaged_packaging") },
-        { label: "Ripped", value: n("ripped_cards") },
-      ];
-    case "BOTTLE_HANDPACK_COMPLETE":
-    case "BOTTLE_CAP_SEAL_COMPLETE":
-    case "BOTTLE_STICKER_COMPLETE":
-      return [{ label: "Count", value: n("count_total") }];
-    default:
-      return [];
-  }
 }
 
 // ── Row expand state ──────────────────────────────────────────────

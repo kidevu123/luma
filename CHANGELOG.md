@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.94] — 2026-06-03
+
+### Fixed (PARTIAL-SEAL-DISPLAY-1)
+- **Workflow submissions display:** Historical partial `SEALING_COMPLETE` events now render `payload.sealed_partial_count` as `Sealed partial` instead of showing a blank sealed count.
+- **Honest remaining count:** Partial seal display keeps remaining tablets unknown; no sealed-card-to-remaining-tablet inference and no DB backfill/event rewrite required.
+- **Verify script:** `scripts/verify-partial-seal-display.ts`.
+
 ## [0.4.93] — 2026-06-03
 
 ### Fixed (FLOOR-PARTIAL-BAG-START-RESOLUTION-1)

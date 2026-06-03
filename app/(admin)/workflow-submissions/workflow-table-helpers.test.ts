@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   coerceEventCount,
+  extractSubmissionLines,
   formatWorkflowDatetime,
   formatWorkflowTimestamp,
   getPayloadRecord,
@@ -41,6 +42,14 @@ const BAG_117_SEALING_PAYLOAD = {
   count_total: 1818,
 };
 
+const BAG_104_HISTORICAL_PARTIAL_SEAL_PAYLOAD = {
+  partial_close: true,
+  lane_close: false,
+  sealed_partial_count: 1656,
+  partial_close_reason: "OTHER",
+  partial_close_reason_note: "Historical partial close-out",
+};
+
 describe("WORKFLOW-DATA-VISIBILITY-1 · RSC date serialization", () => {
   it("formatWorkflowDatetime accepts ISO strings from the server boundary", () => {
     expect(formatWorkflowDatetime(BAG_117_ROW.startedAt)).toBe("2026-05-28 12:00");
@@ -76,6 +85,62 @@ describe("WORKFLOW-DATA-VISIBILITY-1 · optional payload fields", () => {
     const p = getPayloadRecord(BAG_117_SEALING_PAYLOAD);
     expect(p["counter_presses"]).toBe(303);
     expect(p["count_total"]).toBe(1818);
+  });
+});
+
+describe("PARTIAL-SEAL-DISPLAY-1 · workflow submission sealing counts", () => {
+  it("renders historical partial SEALING_COMPLETE sealed_partial_count", () => {
+    const lines = extractSubmissionLines(
+      "SEALING_COMPLETE",
+      BAG_104_HISTORICAL_PARTIAL_SEAL_PAYLOAD,
+    );
+
+    expect(lines).toContainEqual({
+      label: "Sealed partial",
+      value: 1656,
+      kind: "partial",
+    });
+    expect(lines.find((line) => line.label === "Sealed partial")?.value).not.toBeNull();
+  });
+
+  it("does not fabricate remaining tablets for historical partial seal", () => {
+    const lines = extractSubmissionLines(
+      "SEALING_COMPLETE",
+      BAG_104_HISTORICAL_PARTIAL_SEAL_PAYLOAD,
+    );
+
+    expect(lines).toContainEqual({ label: "Remaining", value: null });
+  });
+
+  it("keeps whole-bag seal display unchanged", () => {
+    expect(extractSubmissionLines("SEALING_COMPLETE", BAG_117_SEALING_PAYLOAD)).toEqual([
+      { label: "Sealed", value: 1818, kind: "whole" },
+      { label: "Remaining", value: null },
+    ]);
+  });
+
+  it("keeps missing seal counts unknown", () => {
+    expect(
+      extractSubmissionLines("SEALING_COMPLETE", {
+        partial_close: true,
+        lane_close: false,
+      }),
+    ).toEqual([
+      { label: "Sealed partial", value: null, kind: "partial" },
+      { label: "Remaining", value: null },
+    ]);
+  });
+
+  it("accepts historical whole-seal aliases without changing event payloads", () => {
+    expect(
+      extractSubmissionLines("SEALING_COMPLETE", {
+        sealed_count: "42",
+        packsRemaining: 3,
+      }),
+    ).toEqual([
+      { label: "Sealed", value: 42, kind: "whole" },
+      { label: "Remaining", value: 3 },
+    ]);
   });
 });
 

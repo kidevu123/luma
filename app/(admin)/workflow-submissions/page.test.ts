@@ -106,7 +106,7 @@ describe("WORKFLOW-RECEIPT-DISPLAY-P1 · receipt lineage display", () => {
 
   it("legacy/unlinked bag label is explicit and does not fabricate a bag number", () => {
     const helperStart = tableSrc.indexOf("function buildBagLabel");
-    const helperEnd = tableSrc.indexOf("function extractSubmissionLines", helperStart);
+    const helperEnd = tableSrc.indexOf("// ── Row expand state", helperStart);
     const helperBlock =
       helperStart >= 0 && helperEnd > helperStart
         ? tableSrc.slice(helperStart, helperEnd)
@@ -114,5 +114,11 @@ describe("WORKFLOW-RECEIPT-DISPLAY-P1 · receipt lineage display", () => {
     expect(helperBlock).toMatch(/Legacy bag \$\{shortId\}/);
     expect(helperBlock).toMatch(/Missing received-bag context/);
     expect(helperBlock).not.toMatch(/row order|payload|event payload/);
+  });
+
+  it("uses shared submission line helper for partial seal display", () => {
+    expect(tableSrc).toMatch(/extractSubmissionLines/);
+    expect(helpersSrc).toMatch(/Sealed partial/);
+    expect(helpersSrc).toMatch(/sealed_partial_count/);
   });
 });

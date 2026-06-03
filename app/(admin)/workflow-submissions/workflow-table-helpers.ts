@@ -32,3 +32,73 @@ export function getPayloadRecord(payload: unknown): Record<string, unknown> {
   }
   return {};
 }
+
+export type WorkflowSubmissionLine = {
+  label: string;
+  value: number | null;
+  kind?: "partial" | "whole";
+};
+
+function readCountValue(
+  payload: Record<string, unknown>,
+  keys: readonly string[],
+): number | null {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return Math.max(0, Math.floor(value));
+    }
+    if (typeof value === "string" && value.trim() !== "") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return Math.max(0, Math.floor(parsed));
+    }
+  }
+  return null;
+}
+
+export function extractSubmissionLines(
+  eventType: string,
+  payload: Record<string, unknown>,
+): WorkflowSubmissionLine[] {
+  const count = (...keys: string[]): number | null =>
+    readCountValue(payload, keys);
+
+  switch (eventType) {
+    case "BLISTER_COMPLETE":
+      return [{ label: "Blistered", value: count("count_total", "countTotal") }];
+    case "SEALING_COMPLETE": {
+      if (payload.partial_close === true) {
+        return [
+          {
+            label: "Sealed partial",
+            value: count("sealed_partial_count", "sealedPartialCount"),
+            kind: "partial",
+          },
+          { label: "Remaining", value: null },
+        ];
+      }
+      return [
+        {
+          label: "Sealed",
+          value: count("count_total", "countTotal", "sealed_count", "sealedCount"),
+          kind: "whole",
+        },
+        { label: "Remaining", value: count("packs_remaining", "packsRemaining") },
+      ];
+    }
+    case "PACKAGING_COMPLETE":
+      return [
+        { label: "Cases", value: count("master_cases", "masterCases") },
+        { label: "Displays", value: count("displays_made", "displaysMade") },
+        { label: "Loose cards", value: count("loose_cards", "looseCards") },
+        { label: "Damaged", value: count("damaged_packaging", "damagedPackaging") },
+        { label: "Ripped", value: count("ripped_cards", "rippedCards") },
+      ];
+    case "BOTTLE_HANDPACK_COMPLETE":
+    case "BOTTLE_CAP_SEAL_COMPLETE":
+    case "BOTTLE_STICKER_COMPLETE":
+      return [{ label: "Count", value: count("count_total", "countTotal") }];
+    default:
+      return [];
+  }
+}
