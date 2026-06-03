@@ -33,6 +33,8 @@ export interface PartialBagSession {
   allocationStatus: AllocationStatus;
   endingBalanceQty: number | null;
   closedAt: Date | null;
+  confidence?: string | null;
+  endingBalanceSource?: string | null;
 }
 
 export interface AvailablePartialBagRow {
@@ -46,6 +48,10 @@ export interface AvailablePartialBagRow {
   declaredPillCount: number | null;
   pillCount: number | null;
   remainingEstimate: number | null;
+  /** Confidence from the most recent closed/returned session with ending balance. */
+  remainingConfidence: string | null;
+  /** endingBalanceSource from the same session (e.g. SUPERVISOR_ESTIMATE). */
+  remainingSource: string | null;
   lastConsumedQty: number | null;
   lastUsedProductName: string | null;
   lastUsedAt: Date | null;
@@ -111,6 +117,26 @@ export function deriveRemainingEstimate(sessions: readonly PartialBagSession[]):
     )
     .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0));
   return relevant[0]?.endingBalanceQty ?? null;
+}
+
+type SessionWithProvenance = PartialBagSession;
+
+/** Confidence + source from the same session as deriveRemainingEstimate. */
+export function deriveRemainingProvenance(
+  sessions: readonly SessionWithProvenance[],
+): { confidence: string | null; source: string | null } {
+  const relevant = sessions
+    .filter(
+      (s) =>
+        (s.allocationStatus === "CLOSED" || s.allocationStatus === "RETURNED_TO_STOCK") &&
+        s.endingBalanceQty != null,
+    )
+    .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0));
+  const latest = relevant[0];
+  return {
+    confidence: latest?.confidence ?? null,
+    source: latest?.endingBalanceSource ?? null,
+  };
 }
 
 /** Classify why a partial-packaged inventory bag may or may not restart. */
@@ -197,6 +223,8 @@ export async function loadAvailablePartialBags(): Promise<AvailablePartialBagRow
       allocationStatus: rawBagAllocationSessions.allocationStatus,
       consumedQty: rawBagAllocationSessions.consumedQty,
       endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+      endingBalanceSource: rawBagAllocationSessions.endingBalanceSource,
+      confidence: rawBagAllocationSessions.confidence,
       openedAt: rawBagAllocationSessions.openedAt,
       closedAt: rawBagAllocationSessions.closedAt,
       productName: products.name,
@@ -235,6 +263,8 @@ export async function loadAvailablePartialBags(): Promise<AvailablePartialBagRow
       .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0))[0];
 
     const remainingEstimate = deriveRemainingEstimate(sessions);
+    const { confidence: remainingConfidence, source: remainingSource } =
+      deriveRemainingProvenance(sessions);
 
     result.push({
       bagId: bag.id,
@@ -247,6 +277,8 @@ export async function loadAvailablePartialBags(): Promise<AvailablePartialBagRow
       declaredPillCount: bag.declaredPillCount,
       pillCount: bag.pillCount,
       remainingEstimate,
+      remainingConfidence,
+      remainingSource,
       lastConsumedQty: lastClosed?.consumedQty ?? null,
       lastUsedProductName: lastClosed?.productName ?? null,
       lastUsedAt: lastClosed?.closedAt ?? null,
@@ -344,6 +376,8 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
       inventoryBagId: rawBagAllocationSessions.inventoryBagId,
       allocationStatus: rawBagAllocationSessions.allocationStatus,
       endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+      endingBalanceSource: rawBagAllocationSessions.endingBalanceSource,
+      confidence: rawBagAllocationSessions.confidence,
       closedAt: rawBagAllocationSessions.closedAt,
       consumedQty: rawBagAllocationSessions.consumedQty,
       productName: products.name,
@@ -404,6 +438,8 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
       )
       .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0))[0];
 
+    const provenance = deriveRemainingProvenance(sessions);
+
     adminRows.push({
       bagId: candidate.inventoryBagId,
       bagNumber: candidate.bagNumber,
@@ -415,6 +451,8 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
       declaredPillCount: candidate.declaredPillCount,
       pillCount: candidate.pillCount,
       remainingEstimate: deriveRemainingEstimate(sessions),
+      remainingConfidence: provenance.confidence,
+      remainingSource: provenance.source,
       lastConsumedQty: lastClosed?.consumedQty ?? null,
       lastUsedProductName:
         lastClosed?.productName ?? candidate.productName ?? null,
@@ -443,6 +481,8 @@ function sessionsByBagToPartial(
   sessions: Array<{
     allocationStatus: AllocationStatus;
     endingBalanceQty: number | null;
+    endingBalanceSource?: string | null;
+    confidence?: string | null;
     closedAt: Date | null;
   }>,
 ): PartialBagSession[] {
@@ -450,5 +490,7 @@ function sessionsByBagToPartial(
     allocationStatus: s.allocationStatus,
     endingBalanceQty: s.endingBalanceQty,
     closedAt: s.closedAt,
+    confidence: s.confidence ?? null,
+    endingBalanceSource: s.endingBalanceSource ?? null,
   }));
 }

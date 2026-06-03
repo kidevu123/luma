@@ -55,7 +55,7 @@ export default async function ResolvePartialBagPage({
     <div className="space-y-5">
       <PageHeader
         title="Resolve partial bag inventory"
-        description="Record physically verified remaining tablets so this bag can restart production. Never inferred from sealed cards."
+        description="Record remaining tablets so this bag can restart production. Use physical count or weigh-back when possible. For historical partials where verification is no longer possible, use supervisor estimate with a documented reason."
       />
 
       <Card>

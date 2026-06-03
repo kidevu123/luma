@@ -44,6 +44,7 @@ type AllocationStatus =
 
 import {
   confidenceForResolutionMethod,
+  MIN_SUPERVISOR_ESTIMATE_NOTE_LENGTH,
   type PartialBagResolutionMethod,
 } from "@/lib/production/partial-bag-resolution-constants";
 
@@ -60,6 +61,15 @@ export function validatePartialBagResolutionInput(args: {
   const note = args.note.trim();
   if (note.length === 0) {
     return { ok: false, error: "A reason or note is required." };
+  }
+  if (
+    args.resolutionMethod === "SUPERVISOR_ESTIMATE" &&
+    note.length < MIN_SUPERVISOR_ESTIMATE_NOTE_LENGTH
+  ) {
+    return {
+      ok: false,
+      error: `Supervisor estimate requires a reason of at least ${MIN_SUPERVISOR_ESTIMATE_NOTE_LENGTH} characters.`,
+    };
   }
   if (note.length > 500) {
     return { ok: false, error: "Note must be 500 characters or fewer." };

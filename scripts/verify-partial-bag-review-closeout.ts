@@ -35,7 +35,11 @@ function runStaticContracts(): void {
   assert(actions.includes("requireLead"), "actions: lead auth");
   assert(lib.includes("partial_bag.inventory_resolution"), "lib: audit action name");
   assert(lib.includes("admin_partial_bag_review_closeout"), "lib: session marker");
-  assert(lib.includes("endingBalanceQty: args.remainingTabletCount"), "lib: admin-entered ending balance");
+  assert(lib.includes("MIN_SUPERVISOR_ESTIMATE_NOTE_LENGTH"), "lib: estimate note min");
+  assert(resolvePage.includes("supervisor estimate"), "resolve page: estimate path copy");
+  assert(read("app/(admin)/partial-bags/[inventoryBagId]/resolve/resolve-form.tsx").includes("Low confidence"), "resolve form: estimate warning");
+  assert(page.includes("labelPartialBagEndingBalanceSource"), "partial-bags: source column");
+  assert(read("app/(admin)/workflow-submissions/page.tsx").includes("deriveWorkflowDisplayStatus"), "workflow-submissions: display status");
 
   console.log("[verify-partial-bag-review-closeout] PASS — static contracts OK");
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.96] — 2026-06-03
+
+### Fixed (LEGACY PARTIAL STATUS + SUPERVISOR ESTIMATE)
+- **Workflow submissions badge:** Partial sealed/packaged workflows (including legacy void-repaired bags like `bag-card-104`) display `PARTIAL` instead of misleading `BLISTERED`. Display-only — `read_bag_state.stage` unchanged for floor resume.
+- **Supervisor estimate resolution:** Resolve inventory form warns that estimate is low confidence, requires a 10+ character reason, and never prefills from sealed cards. `/partial-bags` shows remaining source and confidence for Ready rows.
+
 ## [0.4.95] — 2026-06-03
 
 ### Added (BAG-CARD-104 LEGACY PARTIAL FINALIZATION VOID SUPPORT)

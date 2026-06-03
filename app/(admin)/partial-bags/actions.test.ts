@@ -47,5 +47,7 @@ describe("partial-bags admin resolve workflow", () => {
     expect(form).toContain('name="note"');
     expect(form).toContain("required");
     expect(form).toContain("Do not use sealed card counts");
+    expect(form).toContain("Supervisor estimate");
+    expect(form).toContain("Low confidence");
   });
 });

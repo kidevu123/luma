@@ -33,6 +33,9 @@ export type WorkflowBagRow = {
   stage: string | null;
   isFinalized: boolean | null;
   isPaused: boolean | null;
+  /** Display-only badge label (may differ from read_bag_state.stage). */
+  displayStage: string | null;
+  displayStageHelp: string | null;
   operatorCode: string | null;
   lastEventAt: string | null;
   masterCases: number | null;
@@ -54,6 +57,7 @@ export type WorkflowBagRow = {
 const STAGE_COLORS: Record<string, string> = {
   STARTED:   "bg-sky-50 text-sky-700 border-sky-200",
   BLISTERED: "bg-cyan-50 text-cyan-700 border-cyan-200",
+  PARTIAL:   "bg-amber-50 text-amber-800 border-amber-200",
   SEALED:    "bg-blue-50 text-blue-700 border-blue-200",
   PACKAGED:  "bg-amber-50 text-amber-700 border-amber-200",
   FINALIZED: "bg-good-50/80 text-good-700 border-good-200",
@@ -326,7 +330,9 @@ function BagRow({ bag }: { bag: WorkflowBagRow }) {
 
   const isOpen = expand.status === "loaded" || expand.status === "error";
 
-  const stageLabel = bag.isPaused ? "PAUSED" : (bag.stage ?? null);
+  const stageLabel = bag.isPaused
+    ? "PAUSED"
+    : (bag.displayStage ?? bag.stage ?? null);
   const stageColor = stageLabel
     ? (STAGE_COLORS[stageLabel] ?? "border-border bg-surface-2 text-text-muted")
     : "border-border bg-surface-2 text-text-subtle";
@@ -387,12 +393,18 @@ function BagRow({ bag }: { bag: WorkflowBagRow }) {
                 "inline-flex items-center h-5 px-1.5 rounded border text-[10px] font-medium uppercase tracking-wider",
                 stageColor,
               )}
+              title={bag.displayStageHelp ?? undefined}
             >
               {stageLabel}
             </span>
           ) : (
             <span className="text-[11px] text-text-subtle">—</span>
           )}
+          {bag.displayStageHelp ? (
+            <p className="mt-1 max-w-[12rem] text-[10px] text-text-muted leading-snug">
+              {bag.displayStageHelp}
+            </p>
+          ) : null}
         </TD>
 
         <TD className="text-[12px] font-mono tabular-nums text-text-strong">

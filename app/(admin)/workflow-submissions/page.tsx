@@ -16,7 +16,7 @@ import {
   readBagMetrics,
   workflowEvents,
 } from "@/lib/db/schema";
-import { eq, desc, and, or, ilike, gte, lte, count, sql } from "drizzle-orm";
+import { eq, desc, and, or, ilike, gte, lte, count, sql, inArray } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { PageHeader, EmptyState } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { WorkflowTable } from "./workflow-table";
 import type { WorkflowBagRow } from "./workflow-table";
 import { coerceEventCount } from "./workflow-table-helpers";
+import { deriveWorkflowDisplayStatus } from "@/lib/production/workflow-display-status";
 import { ClipboardList } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -161,7 +162,41 @@ export default async function WorkflowSubmissionsPage({
     .orderBy(desc(workflowBags.startedAt))
     .limit(200);
 
-  const bags: WorkflowBagRow[] = rows.map((r) => ({
+  const wfIds = rows.map((r) => r.id);
+  const eventRows =
+    wfIds.length > 0
+      ? await db
+          .select({
+            workflowBagId: workflowEvents.workflowBagId,
+            eventType: workflowEvents.eventType,
+            payload: workflowEvents.payload,
+          })
+          .from(workflowEvents)
+          .where(inArray(workflowEvents.workflowBagId, wfIds))
+      : [];
+
+  const eventsByWf = new Map<
+    string,
+    Array<{ eventType: string; payload: Record<string, unknown> | null }>
+  >();
+  for (const ev of eventRows) {
+    const list = eventsByWf.get(ev.workflowBagId) ?? [];
+    list.push({
+      eventType: ev.eventType,
+      payload: (ev.payload as Record<string, unknown> | null) ?? null,
+    });
+    eventsByWf.set(ev.workflowBagId, list);
+  }
+
+  const bags: WorkflowBagRow[] = rows.map((r) => {
+    const events = eventsByWf.get(r.id) ?? [];
+    const display = deriveWorkflowDisplayStatus({
+      readStage: r.stage,
+      isFinalized: r.isFinalized,
+      isPaused: r.isPaused,
+      events,
+    });
+    return {
     id: r.id,
     receiptNumber: r.receiptNumber ?? null,
     bagNumber: r.bagNumber ?? null,
@@ -177,6 +212,8 @@ export default async function WorkflowSubmissionsPage({
     stage: r.stage ?? null,
     isFinalized: r.isFinalized ?? null,
     isPaused: r.isPaused ?? null,
+    displayStage: display.badgeLabel === "—" ? null : display.badgeLabel,
+    displayStageHelp: display.helpText,
     operatorCode: r.operatorCode ?? null,
     lastEventAt: r.lastEventAt?.toISOString() ?? null,
     masterCases: r.masterCases ?? null,
@@ -191,7 +228,8 @@ export default async function WorkflowSubmissionsPage({
     sealingSeconds: r.sealingSeconds ?? null,
     packagingSeconds: r.packagingSeconds ?? null,
     eventCount: coerceEventCount(r.eventCount),
-  }));
+  };
+  });
 
   const qVal = typeof sp["q"] === "string" ? sp["q"] : "";
   const stageVal = typeof sp["stage"] === "string" ? sp["stage"] : "all";

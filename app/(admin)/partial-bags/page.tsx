@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth-guards";
 import { loadPartialBagAdminRows } from "@/lib/production/partial-bags";
+import {
+  labelPartialBagConfidence,
+  labelPartialBagEndingBalanceSource,
+} from "@/lib/production/partial-bag-resolution-constants";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
@@ -74,6 +78,7 @@ export default async function PartialBagsPage() {
                     <th className="text-left py-2 pr-3">Receipt #</th>
                     <th className="text-right py-2 pr-3">Declared</th>
                     <th className="text-right py-2 pr-3">Remaining</th>
+                    <th className="text-left py-2 pr-3">Source</th>
                     <th className="text-left py-2 pr-3">Last product</th>
                     <th className="text-left py-2 pr-3">Last used</th>
                     <th className="text-left py-2">Actions</th>
@@ -90,6 +95,32 @@ export default async function PartialBagsPage() {
                         </span>
                       ) : (
                         row.remainingEstimate.toLocaleString()
+                      );
+
+                    const sourceLabel = labelPartialBagEndingBalanceSource(
+                      row.remainingSource,
+                    );
+                    const confidenceLabel = labelPartialBagConfidence(
+                      row.remainingConfidence,
+                    );
+                    const sourceCell =
+                      row.eligibility === "ready" && sourceLabel ? (
+                        <div>
+                          <span className="text-text-strong">{sourceLabel}</span>
+                          {confidenceLabel ? (
+                            <p
+                              className={`mt-0.5 text-[10px] ${
+                                row.remainingConfidence === "LOW"
+                                  ? "text-amber-700 font-medium"
+                                  : "text-text-muted"
+                              }`}
+                            >
+                              {confidenceLabel}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-text-muted">—</span>
                       );
 
                     const receiptLabel =
@@ -143,6 +174,7 @@ export default async function PartialBagsPage() {
                         <td className="py-2 pr-3 text-right tabular-nums">
                           {remainingCell}
                         </td>
+                        <td className="py-2 pr-3 align-top text-[11px]">{sourceCell}</td>
                         <td className="py-2 pr-3">
                           {row.lastUsedProductName ?? "—"}
                         </td>

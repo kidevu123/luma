@@ -40,6 +40,27 @@ describe("validatePartialBagResolutionInput", () => {
     expect(r.ok).toBe(false);
   });
 
+  it("rejects short note for SUPERVISOR_ESTIMATE", () => {
+    const r = validatePartialBagResolutionInput({
+      remainingTabletCount: 500,
+      resolutionMethod: "SUPERVISOR_ESTIMATE",
+      note: "too short",
+      declaredStartingCount: 7197,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/10 characters/);
+  });
+
+  it("accepts SUPERVISOR_ESTIMATE with adequate note", () => {
+    const r = validatePartialBagResolutionInput({
+      remainingTabletCount: 5000,
+      resolutionMethod: "SUPERVISOR_ESTIMATE",
+      note: "Historical partial from weeks ago; physical count no longer possible.",
+      declaredStartingCount: 7197,
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it("rejects remaining above declared starting count", () => {
     const r = validatePartialBagResolutionInput({
       remainingTabletCount: 1001,

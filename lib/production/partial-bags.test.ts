@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPartialBagInventoryEligibility,
   deriveRemainingEstimate,
+  deriveRemainingProvenance,
   hasOpenAllocationSession,
   hasPartialClosePackagingWorkflowEvidence,
   isAvailablePartialBag,
@@ -128,6 +129,25 @@ describe("deriveRemainingEstimate", () => {
     const newerNull = closed(null, new Date("2026-01-20T00:00:00Z"));
     const olderKnown = closed(55, new Date("2026-01-01T00:00:00Z"));
     expect(deriveRemainingEstimate([olderKnown, newerNull])).toBe(55);
+  });
+});
+
+describe("deriveRemainingProvenance", () => {
+  it("returns confidence and source from latest session with ending balance", () => {
+    const older = {
+      ...closed(100, new Date("2026-01-01T00:00:00Z")),
+      confidence: "MEDIUM",
+      endingBalanceSource: "PHYSICAL_COUNT",
+    };
+    const newer = {
+      ...returned(5000, new Date("2026-01-15T00:00:00Z")),
+      confidence: "LOW",
+      endingBalanceSource: "SUPERVISOR_ESTIMATE",
+    };
+    expect(deriveRemainingProvenance([older, newer])).toEqual({
+      confidence: "LOW",
+      source: "SUPERVISOR_ESTIMATE",
+    });
   });
 });
 
