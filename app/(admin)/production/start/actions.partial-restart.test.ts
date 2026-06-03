@@ -19,6 +19,10 @@ describe("PARTIAL-BAG-RESTART-PRODUCT-SELECTION-1 · admin start", () => {
     expect(actionsSrc).toMatch(/tabletTypeId, bag\.tabletTypeId/);
   });
 
+  it("admin start blocks partial bags via shared classifier", () => {
+    expect(actionsSrc).toMatch(/loadRawBagStartClassificationForScan/);
+  });
+
   it("does not read product_id from a prior workflow_bag row", () => {
     expect(actionsSrc).not.toMatch(
       /select\([\s\S]*productId[\s\S]*from\(workflowBags\)/,

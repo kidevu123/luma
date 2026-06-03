@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.93] — 2026-06-03
+
+### Fixed (FLOOR-PARTIAL-BAG-START-RESOLUTION-1)
+- **Floor partial bag scans:** Idle linked partial bags (e.g. legacy `bag-card-104` after finalize) no longer show the receive-first error. Needs review bags get an operator-safe inventory review message; Ready partial bags can start/restart with fresh product selection.
+- **Shared classifier:** `loadRawBagStartClassificationForScan` reuses `/partial-bags` eligibility (`classifyPartialBagInventoryEligibility`, `canRestartAvailablePartialRawBag`) for floor lookup, floor scan, and admin start.
+- **Verify script:** `scripts/verify-floor-partial-bag-start-resolution.ts`.
+
 ## [0.4.92] — 2026-06-03
 
 ### Added (PARTIAL-BAG-REVIEW-CLOSEOUT-WORKFLOW-1)

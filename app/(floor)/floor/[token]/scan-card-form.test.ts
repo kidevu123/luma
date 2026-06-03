@@ -72,10 +72,25 @@ vi.mock("drizzle-orm", () => ({
   inArray: (a: unknown, b: unknown) => ({ inArray: [a, b] }),
   and: (...args: unknown[]) => ({ and: args }),
   isNotNull: (a: unknown) => ({ isNotNull: a }),
+  desc: (a: unknown) => ({ desc: a }),
+  asc: (a: unknown) => ({ asc: a }),
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
     sql: strings,
     values,
   }),
+}));
+
+const mockLoadRawBagStartClassification = vi.fn();
+
+vi.mock("@/lib/production/floor-partial-bag-start-resolution", () => ({
+  loadRawBagStartClassificationForScan: (...args: unknown[]) =>
+    mockLoadRawBagStartClassification(...args),
+  RAW_BAG_START_OPERATOR_MESSAGES: {
+    UNLINKED:
+      "This bag QR has not been linked to a received bag. Receive the bag first on the Receive Pills page.",
+    PARTIAL_NEEDS_REVIEW:
+      "This partial bag needs inventory review before it can be started. Ask a lead/admin to resolve remaining tablets on Available Partial Bags.",
+  },
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────
@@ -134,6 +149,15 @@ const ASSIGNED_RAW_BAG = {
 beforeEach(() => {
   callIdx = 0;
   selectResults.length = 0;
+  mockLoadRawBagStartClassification.mockReset();
+  mockLoadRawBagStartClassification.mockResolvedValue({
+    status: "UNLINKED",
+    inventoryBagId: null,
+    canStart: false,
+    operatorMessage:
+      "This bag QR has not been linked to a received bag. Receive the bag first on the Receive Pills page.",
+    eligibilityNote: null,
+  });
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -210,6 +234,49 @@ describe("lookupCardByTokenAction", () => {
     const result = await lookupCardByTokenAction(makeForm("bag-card-1"));
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toMatch(/receive/i);
+    expect(mockLoadRawBagStartClassification).toHaveBeenCalled();
+  });
+
+  it("returns partial-review message for linked IDLE partial bag (bag-card-104 class)", async () => {
+    const idlePartial104 = {
+      id: "00000000-0000-0000-0000-000000000010",
+      label: "bag-card-104",
+      scanToken: "bag-card-104",
+      cardType: "RAW_BAG",
+      status: "IDLE",
+      assignedWorkflowBagId: null,
+      tabletTypeId: "tt-104",
+      bagStage: null,
+    };
+    queueLookupResults([idlePartial104], []);
+    mockLoadRawBagStartClassification.mockResolvedValue({
+      status: "PARTIAL_NEEDS_REVIEW",
+      inventoryBagId: "a23bec0d-36e8-4b65-a172-a605eb22c559",
+      canStart: false,
+      operatorMessage:
+        "This partial bag needs inventory review before it can be started. Ask a lead/admin to resolve remaining tablets on Available Partial Bags.",
+      eligibilityNote: "Partial production recorded, but no raw-bag allocation session exists.",
+    });
+    const result = await lookupCardByTokenAction(makeForm("bag-card-104"));
+    expect(result).toHaveProperty("error");
+    const err = (result as { error: string }).error;
+    expect(err).toMatch(/inventory review/i);
+    expect(err).not.toMatch(/not been linked/i);
+  });
+
+  it("returns ok for linked IDLE partial bag that is Ready", async () => {
+    queueLookupResults([IDLE_RAW_BAG], []);
+    mockLoadRawBagStartClassification.mockResolvedValue({
+      status: "PARTIAL_READY",
+      inventoryBagId: "inv-ready",
+      canStart: true,
+      operatorMessage: "",
+      eligibilityNote: "Ready for a new production run.",
+    });
+    const result = await lookupCardByTokenAction(makeForm("bag-card-1"));
+    expect(result).toHaveProperty("ok", true);
+    const ok = result as { ok: true; isIntakeReserved: boolean };
+    expect(ok.isIntakeReserved).toBe(true);
   });
 
   it("returns ok+isIntakeReserved=true for intake-reserved ASSIGNED RAW_BAG card", async () => {
@@ -492,9 +559,10 @@ describe("FLOOR-SCAN-1 · downstream station fresh-bag guard", () => {
     expect(actionsSrc).toMatch(/FRESH_BAG_STATION_KINDS\.has/);
   });
 
-  it("IDLE card scan is blocked with receive-first message", () => {
-    expect(actionsSrc).toMatch(/not been linked to a received bag/);
-    expect(actionsSrc).toMatch(/Receive Pills page/);
+  it("IDLE card scan uses partial-bag classification before receive-first fallback", () => {
+    expect(actionsSrc).toMatch(/loadRawBagStartClassificationForScan/);
+    expect(actionsSrc).toMatch(/idleLinkedStart\?\.canStart/);
+    expect(actionsSrc).toMatch(/idleLinkedStart\?\.operatorMessage/);
   });
 
   it("RETIRED card scan is blocked", () => {

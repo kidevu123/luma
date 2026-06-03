@@ -45,6 +45,7 @@ import {
   canRestartAvailablePartialRawBag,
   type PartialBagSession,
 } from "@/lib/production/partial-bag-restart";
+import { loadRawBagStartClassificationForScan } from "@/lib/production/floor-partial-bag-start-resolution";
 
 export type StartProductionResult =
   | {
@@ -174,6 +175,14 @@ export async function startProductionForRawBagAction(
     inventoryStatus: bag.status,
     sessions: partialSessions,
   });
+
+  const startClassification = await loadRawBagStartClassificationForScan(db, {
+    scannedToken: bag.bagQrCode,
+    cardScanToken: bag.bagQrCode,
+  });
+  if (!startClassification.canStart) {
+    return { ok: false, error: startClassification.operatorMessage };
+  }
 
   const [cardRow] = await db
     .select({ id: qrCards.id, status: qrCards.status, assignedWorkflowBagId: qrCards.assignedWorkflowBagId, cardType: qrCards.cardType })

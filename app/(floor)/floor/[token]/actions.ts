@@ -21,6 +21,7 @@ import {
 import { canResumeFinalizedWorkflowOnInventoryBag } from "@/lib/production/partial-bag-restart";
 import type { PartialBagSession } from "@/lib/production/partial-bags";
 import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
+import { loadRawBagStartClassificationForScan } from "@/lib/production/floor-partial-bag-start-resolution";
 import {
   floorScanInputMatchesCard,
   pickBestFloorScanCard,
@@ -237,13 +238,26 @@ export async function scanCardAction(
         throw new Error("Only bag QR cards (RAW_BAG type) can be used to start production.");
       }
 
+      const idleLinkedStart =
+        card.status === "IDLE"
+          ? await loadRawBagStartClassificationForScan(tx, {
+              scannedToken: card.scanToken,
+              cardScanToken: card.scanToken,
+            })
+          : null;
       if (card.status === "IDLE") {
-        throw new Error(
-          "This bag QR has not been linked to a received bag. Use the Receive Pills page to receive the bag before starting production.",
-        );
+        if (!idleLinkedStart?.canStart) {
+          throw new Error(
+            idleLinkedStart?.operatorMessage ??
+              "This bag QR has not been linked to a received bag. Receive the bag first on the Receive Pills page.",
+          );
+        }
       }
 
-      if (card.status === "ASSIGNED" && !card.assignedWorkflowBagId) {
+      if (
+        (card.status === "ASSIGNED" && !card.assignedWorkflowBagId) ||
+        (card.status === "IDLE" && idleLinkedStart?.canStart)
+      ) {
         // Intake-reserved fresh scan — first-op stations REQUIRE a product pick so
         // workflow_bags.product_id lands non-null at the very first
         // event. Downstream stations inherit via the projector's
@@ -312,6 +326,9 @@ export async function scanCardAction(
             station_kind: station.kind,
             inventory_bag_id: inventoryLink.inventoryBagId,
             tablet_type_id: inventoryLink.tabletTypeId,
+            ...(idleLinkedStart?.status === "PARTIAL_READY"
+              ? { partial_bag_restart: true }
+              : {}),
           },
           enteredByUserId: accountability.enteredByUserId,
           accountableEmployeeId: accountability.accountableEmployeeId,
@@ -2088,6 +2105,23 @@ export async function lookupCardByTokenAction(
   try {
     const card = await resolveFloorScanLookupRow({ token, stationId });
     if (!card) return { error: "Bag QR not found." };
+
+    if (card.status === "IDLE" && card.cardType === "RAW_BAG") {
+      const partialStart = await loadRawBagStartClassificationForScan(db, {
+        scannedToken: token,
+        cardScanToken: card.scanToken,
+      });
+      if (!partialStart.canStart) {
+        return { error: partialStart.operatorMessage };
+      }
+      return {
+        ok: true,
+        cardId: card.id,
+        cardLabel: card.label,
+        isIntakeReserved: true,
+        tabletTypeId: card.tabletTypeId ?? null,
+      };
+    }
 
     const classification = classifyFloorScanCard(card);
     if (!classification.eligible) {
