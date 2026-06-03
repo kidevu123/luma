@@ -271,7 +271,7 @@ describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
     );
     expect(releaseBlock).not.toMatch(/stationKind !== "BLISTER"/);
     expect(releaseBlock).toMatch(/stationKind !== "HANDPACK_BLISTER"/);
-    expect(releaseBlock).toMatch(/stationKind !== "SEALING"/);
+    expect(releaseBlock).not.toMatch(/stationKind !== "SEALING"/);
     expect(src).toMatch(/Release to sealing queue/);
   });
 
@@ -303,12 +303,13 @@ describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
     expect(autoIdx).toBeGreaterThan(sealingIdx);
   });
 
-  it("SEALING hides manual Release button — BLISTER still shows release label", () => {
+  it("SEALING keeps manual Release available after another sealer completes the bag", () => {
     const releaseBlock = src.slice(
       src.indexOf("const releaseReady"),
       src.indexOf("const releaseLabel"),
     );
-    expect(releaseBlock).toMatch(/stationKind !== "SEALING"/);
+    expect(releaseBlock).not.toMatch(/stationKind !== "SEALING"/);
+    expect(releaseBlock).toMatch(/currentStage === releaseAtStage/);
     expect(src).toMatch(/Release to sealing queue/);
     expect(src).toMatch(/Release to packaging queue/);
   });

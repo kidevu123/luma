@@ -281,11 +281,14 @@ export function StageActionButtons({
   // Release button shows after this station's stage event has fired
   // and the bag is at the station's "ready to release" stage.
   const releaseAtStage = STATION_RELEASE_FROM_STAGE[stationKind];
-  // HANDPACK_BLISTER + SEALING auto-release on complete server-side — no manual step.
+  // HANDPACK_BLISTER auto-releases on complete server-side — no manual step.
+  // SEALING also auto-releases on the final station, but other overlapped
+  // sealing stations may still be pinned after another station submits the
+  // final full-bag close-out. Keep manual release available at SEALED so
+  // those stations can clear their own pin.
   // BLISTER keeps manual release for legacy bags already BLISTERED but not yet released.
   const releaseReady =
     stationKind !== "HANDPACK_BLISTER" &&
-    stationKind !== "SEALING" &&
     releaseAtStage != null &&
     currentStage === releaseAtStage;
   const releaseLabel =

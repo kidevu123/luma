@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.100] — 2026-06-03
+
+### Fixed (MULTI-SEALING-STATION-UNBLOCK-1)
+- **Sealing station handoff:** Overlapped sealing stations can now manually release their station pin after another sealing station submits the final full-bag close-out, preventing completed bags from blocking the other sealer tablets.
+
 ## [0.4.99] — 2026-06-03
 
 ### Fixed (PARTIAL-BAGS RESOLVE RENDER HOTFIX)
