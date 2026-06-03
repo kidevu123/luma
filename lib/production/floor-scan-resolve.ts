@@ -31,13 +31,20 @@ export function floorScanInputMatchesCard(
   if (UUID_RE.test(token) && card.id === token) return true;
   if (card.label.toLowerCase() === lower) return true;
 
-  const inputSuffix = numericSuffix(token);
+  const cardHashMatch = token.match(/^card\s*#\s*(\d+)\s*$/i);
+  const inputSuffix = cardHashMatch
+    ? parseInt(cardHashMatch[1]!, 10)
+    : numericSuffix(token);
   const labelSuffix = numericSuffix(card.label);
   if (inputSuffix > 0 && inputSuffix === labelSuffix) {
     const inputLooksLikeBagCard =
-      /bag[-\s]?card/i.test(token) || /^bag-card-/i.test(token);
+      cardHashMatch != null ||
+      /bag[-\s]?card/i.test(token) ||
+      /^bag-card-/i.test(token);
     const labelLooksLikeBagCard =
-      /bag\s+card/i.test(card.label) || /^bag-card-/i.test(card.label);
+      /^card\s*#/i.test(card.label) ||
+      /bag\s+card/i.test(card.label) ||
+      /^bag-card-/i.test(card.label);
     if (inputLooksLikeBagCard && labelLooksLikeBagCard) return true;
   }
   return false;
@@ -46,6 +53,7 @@ export function floorScanInputMatchesCard(
 export type PickFloorScanCardOptions = {
   pickupStageByBagId?: ReadonlyMap<string, string | null | undefined>;
   pickupStages?: readonly string[];
+  resumeStages?: readonly string[];
 };
 
 function scoreFloorScanCandidate(
@@ -57,6 +65,7 @@ function scoreFloorScanCandidate(
   if (card.status === "ASSIGNED" && card.assignedWorkflowBagId) {
     const stage = options?.pickupStageByBagId?.get(card.assignedWorkflowBagId);
     if (stage && options?.pickupStages?.includes(stage)) return 100;
+    if (stage && options?.resumeStages?.includes(stage)) return 95;
     return 90;
   }
   if (card.status === "ASSIGNED" && !card.assignedWorkflowBagId) return 50;

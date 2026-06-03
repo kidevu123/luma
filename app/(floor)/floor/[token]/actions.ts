@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and, or, sql, desc, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, or, sql, desc, isNotNull, inArray, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   qrCards,
@@ -34,6 +34,8 @@ import { projectEvent } from "@/lib/projector";
 import {
   STATION_RELEASE_FROM_STAGE,
   STATION_PICKUP_FROM_STAGE,
+  STATION_STARTED_RESUME_FROM_STAGE,
+  formatFloorStationBagOpenError,
   STATIONS_THAT_FINALIZE,
 } from "@/lib/production/stage-progression";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
@@ -523,14 +525,71 @@ export async function scanCardAction(
           );
           return;
         }
+        const resumeStages = STATION_STARTED_RESUME_FROM_STAGE[station.kind] ?? [];
+        if (state?.stage && resumeStages.includes(state.stage)) {
+          const [otherPin] = await tx
+            .select({ stationId: readStationLive.stationId })
+            .from(readStationLive)
+            .where(
+              and(
+                eq(readStationLive.currentWorkflowBagId, bagId),
+                ne(readStationLive.stationId, station.id),
+              ),
+            )
+            .limit(1);
+          if (otherPin) {
+            throw new Error(
+              "This bag is already in progress at another station. Ask a supervisor to check the bag assignment.",
+            );
+          }
+          const [live] = await tx
+            .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+            .from(readStationLive)
+            .where(eq(readStationLive.stationId, station.id));
+          if (live?.currentWorkflowBagId !== bagId) {
+            await projectEvent(tx, {
+              workflowBagId: bagId,
+              stationId: station.id,
+              eventType: "BAG_PICKED_UP",
+              payload: {
+                qr_card_id: cardId,
+                station_kind: station.kind,
+                from_stage: state.stage,
+                same_station_resume: true,
+              },
+              enteredByUserId: accountability.enteredByUserId,
+              accountableEmployeeId: accountability.accountableEmployeeId,
+              accountabilitySource: accountability.accountabilitySource,
+              accountableEmployeeNameSnapshot:
+                accountability.accountableEmployeeNameSnapshot,
+            });
+            await writeAudit(
+              {
+                actorId: null,
+                actorRole: null,
+                action: "floor.bag_resumed",
+                targetType: "WorkflowBag",
+                targetId: bagId,
+                after: {
+                  card_id: cardId,
+                  station_id: stationId,
+                  from_stage: state.stage,
+                },
+              },
+              tx,
+            );
+          }
+          return;
+        }
         const allowedStages =
           STATION_PICKUP_FROM_STAGE[station.kind] ?? [];
         if (!state?.stage || !allowedStages.includes(state.stage)) {
-          const list = allowedStages.length === 0
-            ? "no pickup stages defined"
-            : allowedStages.join(" or ");
           throw new Error(
-            `${station.kind} station expects bag at ${list} (bag is ${state?.stage ?? "unknown"}).`,
+            formatFloorStationBagOpenError({
+              stationKind: station.kind,
+              bagStage: state?.stage,
+              pickupStages: allowedStages,
+            }),
           );
         }
         await projectEvent(tx, {
@@ -1701,23 +1760,40 @@ async function loadAssignedPickupScanCandidates(args: {
   stationId: string | null;
 }): Promise<FloorScanLookupRow[]> {
   let pickupStages: readonly string[] = [];
+  let resumeStages: readonly string[] = [];
   if (args.stationId) {
     const [stationRow] = await db
       .select({ kind: stations.kind })
       .from(stations)
       .where(eq(stations.id, args.stationId))
       .limit(1);
-    pickupStages = STATION_PICKUP_FROM_STAGE[stationRow?.kind ?? ""] ?? [];
+    const kind = stationRow?.kind ?? "";
+    pickupStages = STATION_PICKUP_FROM_STAGE[kind] ?? [];
+    resumeStages = STATION_STARTED_RESUME_FROM_STAGE[kind] ?? [];
   }
 
-  const suffix = numericSuffix(args.token);
-  const labelPatterns =
-    suffix > 0 && /bag[-\s]?card/i.test(args.token)
-      ? [
-          sql`${qrCards.label} ~* ${`^Bag\\s+Card\\s+${suffix}\\s*$`}`,
-          sql`${qrCards.label} ~* ${`^bag-card-${suffix}\\s*$`}`,
-        ]
-      : [];
+  const cardHashMatch = args.token.match(/^card\s*#\s*(\d+)\s*$/i);
+  const suffix = cardHashMatch
+    ? parseInt(cardHashMatch[1]!, 10)
+    : numericSuffix(args.token);
+  const labelPatterns: ReturnType<typeof sql>[] = [];
+  if (suffix > 0) {
+    if (/bag[-\s]?card/i.test(args.token)) {
+      labelPatterns.push(
+        sql`${qrCards.label} ~* ${`^Bag\\s+Card\\s+${suffix}\\s*$`}`,
+        sql`${qrCards.label} ~* ${`^bag-card-${suffix}\\s*$`}`,
+      );
+    }
+    if (cardHashMatch) {
+      labelPatterns.push(
+        sql`${qrCards.label} ~* ${`^Card\\s*#\\s*${suffix}\\s*$`}`,
+        sql`${qrCards.label} ~* ${`^Bag\\s+Card\\s+${suffix}\\s*$`}`,
+        sql`${qrCards.label} ~* ${`^bag-card-${suffix}\\s*$`}`,
+      );
+    }
+  }
+
+  const stageFilter = [...new Set([...pickupStages, ...resumeStages])];
 
   const tokenMatch = or(
     sql`lower(${qrCards.label}) = lower(${args.token})`,
@@ -1751,8 +1827,8 @@ async function loadAssignedPickupScanCandidates(args: {
         isNotNull(qrCards.assignedWorkflowBagId),
         eq(readBagState.isFinalized, false),
         eq(readBagState.isPaused, false),
-        ...(pickupStages.length > 0
-          ? [inArray(readBagState.stage, pickupStages as string[])]
+        ...(stageFilter.length > 0
+          ? [inArray(readBagState.stage, stageFilter as string[])]
           : []),
         tokenMatch,
       ),
@@ -1805,13 +1881,16 @@ async function resolveFloorScanLookupRow(args: {
   }
 
   let pickupStages: readonly string[] = [];
+  let resumeStages: readonly string[] = [];
   if (args.stationId) {
     const [stationRow] = await db
       .select({ kind: stations.kind })
       .from(stations)
       .where(eq(stations.id, args.stationId))
       .limit(1);
-    pickupStages = STATION_PICKUP_FROM_STAGE[stationRow?.kind ?? ""] ?? [];
+    const kind = stationRow?.kind ?? "";
+    pickupStages = STATION_PICKUP_FROM_STAGE[kind] ?? [];
+    resumeStages = STATION_STARTED_RESUME_FROM_STAGE[kind] ?? [];
   }
 
   const pickupStageByBagId = new Map<string, string | null | undefined>();
@@ -1823,6 +1902,7 @@ async function resolveFloorScanLookupRow(args: {
 
   const best = pickBestFloorScanCard(candidates, args.token, {
     pickupStages,
+    resumeStages,
     pickupStageByBagId,
   });
   if (!best) return null;

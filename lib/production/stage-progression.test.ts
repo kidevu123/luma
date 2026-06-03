@@ -3,8 +3,10 @@ import {
   EVENT_STAGE_PREREQ,
   STATION_RELEASE_FROM_STAGE,
   STATION_PICKUP_FROM_STAGE,
+  STATION_STARTED_RESUME_FROM_STAGE,
   STATIONS_THAT_FINALIZE,
   checkStageProgression,
+  formatFloorStationBagOpenError,
 } from "./stage-progression";
 
 describe("stage progression — duplicate BLISTER_COMPLETE prevention", () => {
@@ -67,6 +69,25 @@ describe("stage progression — duplicate BLISTER_COMPLETE prevention", () => {
     });
     expect(r.allowed).toBe(false);
     if (!r.allowed) expect(r.reason).toMatch(/paused/);
+  });
+});
+
+describe("STATION_STARTED_RESUME_FROM_STAGE", () => {
+  it("BLISTER can resume STARTED bags at same station", () => {
+    expect(STATION_STARTED_RESUME_FROM_STAGE.BLISTER).toContain("STARTED");
+    expect(STATION_PICKUP_FROM_STAGE.BLISTER).toBeUndefined();
+  });
+});
+
+describe("formatFloorStationBagOpenError", () => {
+  it("never returns developer pickup-stage text", () => {
+    const msg = formatFloorStationBagOpenError({
+      stationKind: "BLISTER",
+      bagStage: "STARTED",
+      pickupStages: [],
+    });
+    expect(msg).not.toMatch(/no pickup stages defined/i);
+    expect(msg).toMatch(/not ready for this station/i);
   });
 });
 

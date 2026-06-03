@@ -25,6 +25,23 @@ describe("floorScanInputMatchesCard", () => {
     ).toBe(true);
   });
 
+  it("matches Card #55 to Bag Card 55 and bag-card-55 labels", () => {
+    expect(
+      floorScanInputMatchesCard("Card #55", {
+        id: "uuid-55",
+        label: "Bag Card 55",
+        scanToken: "bag-card-55",
+      }),
+    ).toBe(true);
+    expect(
+      floorScanInputMatchesCard("Card #55", {
+        id: "uuid-55b",
+        label: "Card #55",
+        scanToken: "00000000-0000-4000-8000-000000000055",
+      }),
+    ).toBe(true);
+  });
+
   it("matches legacy UUID input to card id", () => {
     const id = "00000000-0000-4000-8000-000000000104";
     expect(

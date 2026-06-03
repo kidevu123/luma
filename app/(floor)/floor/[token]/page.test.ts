@@ -79,7 +79,7 @@ describe("PRODUCTION-OVERLAP-3 · idle-state copy and pickup labels", () => {
       'utf8'
     );
     expect(formSrc).not.toMatch(/Pick up released bag/);
-    expect(formSrc).toMatch(/Pick up bag \(same QR continues\)/);
+    expect(formSrc).toMatch(/Pick up or resume bag \(same QR continues\)/);
   });
 });
 

@@ -379,14 +379,16 @@ export function ScanCardForm({
                 Select a received bag QR…
               </option>
               {hasPickups && (
-                <optgroup label="Pick up bag (same QR continues)">
+                <optgroup label="Pick up or resume bag (same QR continues)">
                   {eligiblePickups.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.label}
                       {c.productSku ? ` — ${c.productSku}` : ""}
                       {c.needsSealingFinalClose
                         ? " · sealing in progress — pick up to finalize"
-                        : ` · ${c.bagStage}`}
+                        : c.bagStage === "STARTED"
+                          ? " · in progress — resume"
+                          : ` · ${c.bagStage}`}
                     </option>
                   ))}
                 </optgroup>

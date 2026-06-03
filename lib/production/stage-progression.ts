@@ -54,6 +54,39 @@ export const STATION_PICKUP_FROM_STAGE: Readonly<Record<string, ReadonlyArray<st
   // CARD_ASSIGNED on an IDLE card, not via pickup of an ASSIGNED card.
 };
 
+/** First-op stations may re-open a bag still at STARTED on the same
+ *  station (operator refresh / close-out resume). Not downstream pickup. */
+export const STATION_STARTED_RESUME_FROM_STAGE: Readonly<
+  Record<string, ReadonlyArray<string>>
+> = {
+  BLISTER: ["STARTED"],
+  HANDPACK_BLISTER: ["STARTED"],
+  BOTTLE_HANDPACK: ["STARTED"],
+  COMBINED: ["STARTED"],
+};
+
+/** Operator-safe message when a card's bag cannot open at this station. */
+export function formatFloorStationBagOpenError(args: {
+  stationKind: string;
+  bagStage: string | null | undefined;
+  pickupStages: readonly string[];
+}): string {
+  const stage = args.bagStage ?? "unknown";
+  if (
+    args.pickupStages.length === 0 &&
+    (STATION_STARTED_RESUME_FROM_STAGE[args.stationKind] ?? []).includes(
+      stage,
+    )
+  ) {
+    // Should not reach callers once resume path is wired — defensive copy.
+    return "This bag is not ready for this station yet.";
+  }
+  if (args.pickupStages.length === 0) {
+    return "This bag is not ready for this station yet.";
+  }
+  return `This bag is not ready for this station yet (currently ${stage}).`;
+}
+
 // Station kinds that finalize a bag (close the workflow + return QR
 // to IDLE). Anything else MUST use release, not finalize.
 // BOTTLE_STICKER is the last station in the bottle pipeline so it

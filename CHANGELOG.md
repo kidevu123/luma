@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.88] — 2026-06-03
+
+### Fixed (BLISTER-STARTED-BAG-RESUME-CLOSEOUT-1)
+- **BLISTER same-station resume:** Scanning an assigned workflow card whose bag is still `STARTED` re-opens that bag at the first-op station instead of failing downstream pickup validation.
+- **Operator errors:** Removed developer text (`no pickup stages defined`); stage mismatches use plain-language copy.
+- **Card label normalization:** `Card #55`, `Bag Card 55`, and `bag-card-55` resolve to the same reusable QR card where applicable.
+- **Dropdown backup:** First-op stations list in-progress `STARTED` bags for resume alongside received intake cards.
+
+### Tests
+- `stage-progression.test.ts`, `floor-scan-resolve.test.ts`, `scripts/verify-blister-started-bag-resume.ts`.
+
 ## [0.4.87] — 2026-06-03
 
 ### Fixed (SEALING-STATION-PICKUP-WORKFLOW-CARD-1)

@@ -31,7 +31,7 @@ import {
 import { eq, and, or, inArray, isNotNull, isNull, sql, desc, asc } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
-import { STATION_PICKUP_FROM_STAGE } from "@/lib/production/stage-progression";
+import { STATION_PICKUP_FROM_STAGE, STATION_STARTED_RESUME_FROM_STAGE } from "@/lib/production/stage-progression";
 import {
   resolveSealingCardsPerPress,
   stationUsesSealingCounter,
@@ -260,6 +260,7 @@ export default async function FloorStationPage({
   // scan picker is the only way the operator can claim a released
   // bag without typing a UUID.
   const pickupStages = STATION_PICKUP_FROM_STAGE[station.station.kind] ?? [];
+  const resumeStages = STATION_STARTED_RESUME_FROM_STAGE[station.station.kind] ?? [];
   const eligiblePickups =
     pickupStages.length === 0
       ? []
@@ -289,7 +290,42 @@ export default async function FloorStationPage({
             ),
           );
 
-  const pickupBagIds = eligiblePickups
+  const eligibleStartedResumes =
+    canStartFreshBag && resumeStages.length > 0
+      ? await db
+          .select({
+            id: qrCards.id,
+            label: qrCards.label,
+            scanToken: qrCards.scanToken,
+            bagId: qrCards.assignedWorkflowBagId,
+            bagStage: readBagState.stage,
+            productSku: products.sku,
+          })
+          .from(qrCards)
+          .innerJoin(
+            readBagState,
+            eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
+          )
+          .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
+          .leftJoin(products, eq(products.id, workflowBags.productId))
+          .where(
+            and(
+              eq(qrCards.status, "ASSIGNED"),
+              isNotNull(qrCards.assignedWorkflowBagId),
+              eq(readBagState.isFinalized, false),
+              eq(readBagState.isPaused, false),
+              inArray(readBagState.stage, resumeStages as string[]),
+            ),
+          )
+      : [];
+
+  const resumeIds = new Set(eligibleStartedResumes.map((c) => c.id));
+  const eligiblePickupsMerged = [
+    ...eligibleStartedResumes,
+    ...eligiblePickups.filter((c) => !resumeIds.has(c.id)),
+  ];
+
+  const pickupBagIds = eligiblePickupsMerged
     .map((c) => c.bagId)
     .filter((id): id is string => id != null);
   const sealingSegmentCountsByBag =
@@ -342,7 +378,7 @@ export default async function FloorStationPage({
     }
   }
 
-  const eligiblePickupsForForm = eligiblePickups.map((c) => ({
+  const eligiblePickupsForForm = eligiblePickupsMerged.map((c) => ({
     ...c,
     needsSealingFinalClose:
       station.station.kind === "SEALING" &&
