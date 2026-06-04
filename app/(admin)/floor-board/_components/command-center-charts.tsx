@@ -15,7 +15,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function panelClass() {
-  return "rounded-lg border border-white/[0.08] bg-slate-900/50 flex flex-col min-h-[140px] max-h-[28vh] overflow-hidden";
+  return "rounded-lg border border-white/[0.08] bg-slate-900/50 flex flex-col h-[168px] overflow-hidden relative isolate";
 }
 
 function fmtSec(s: number): string {
@@ -81,7 +81,7 @@ export function CommandCenterCharts({
         <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
           Production trend · shift
         </div>
-        <div className="flex-1 min-h-[180px]">
+        <div className="h-[130px] w-full">
           <ThroughputChartWidget
             data={throughputPoints}
             targetBagsPerHour={targetBagsPerHour}

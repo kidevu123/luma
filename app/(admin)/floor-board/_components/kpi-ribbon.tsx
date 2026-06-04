@@ -92,12 +92,18 @@ export function KpiRibbon({ shiftStatus, kpiData, plant, throughputPoints }: Pro
       ? "skewed by stuck bag — see pulse"
       : "finalized bags this shift";
 
+  const unitsOut =
+    kpiData.unitsOut > 0 ? kpiData.unitsOut : plant.unitsYieldedShift;
+  const bagsOut =
+    kpiData.bagsToday > 0 ? kpiData.bagsToday : plant.bagsFinalizedShift;
   const outputValue =
-    kpiData.unitsOut > 0
-      ? `${kpiData.unitsOut.toLocaleString()} units`
-      : kpiData.bagsToday > 0
-        ? `${kpiData.bagsToday} bags`
-        : target.value;
+    unitsOut > 0 || bagsOut > 0
+      ? `${unitsOut.toLocaleString()} units · ${bagsOut} bag${bagsOut === 1 ? "" : "s"}`
+      : target.value;
+  const outputSub =
+    kpiData.unitsOut === 0 && plant.unitsYieldedShift > 0
+      ? "from finalized bags this shift (throughput projector empty for today)"
+      : target.detail;
 
   return (
     <div
@@ -107,7 +113,7 @@ export function KpiRibbon({ shiftStatus, kpiData, plant, throughputPoints }: Pro
       <KpiCard
         label="Output today"
         value={outputValue}
-        {...(target.detail ? { sub: target.detail } : {})}
+        {...(outputSub ? { sub: outputSub } : {})}
         accent={outputAccent}
         {...(spark.length >= 2 ? { spark } : {})}
       />

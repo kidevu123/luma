@@ -63,19 +63,21 @@ export function CommandCenterView({
         />
       </div>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden min-h-0">
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 border-r border-white/[0.06]">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 border-r border-white/[0.06] overflow-y-auto overflow-x-hidden">
           <LineFlowStrip
             stations={widgetData.stations}
             machines={managerSnapshot.machines}
             stationScans={managerSnapshot.stations}
           />
-          <CommandCenterCharts
-            throughputPoints={widgetData.throughputPoints}
-            targetBagsPerHour={widgetData.targetBagsPerHour}
-            queues={widgetData.queues}
-            pauseReasons={pauseReasons}
-          />
+          <div className="shrink-0 relative z-0 bg-[#07090d] border-t border-white/[0.06]">
+            <CommandCenterCharts
+              throughputPoints={widgetData.throughputPoints}
+              targetBagsPerHour={widgetData.targetBagsPerHour}
+              queues={widgetData.queues}
+              pauseReasons={pauseReasons}
+            />
+          </div>
         </div>
         {!isTv && (
           <aside

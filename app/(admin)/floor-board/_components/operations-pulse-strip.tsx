@@ -51,7 +51,7 @@ export function OperationsPulseStrip({ snapshot }: Props) {
           </span>
           ,{" "}
           <span className="text-slate-300 tabular-nums">
-            {plant.unitsYieldedShift} units
+            {plant.unitsYieldedShift.toLocaleString()} units yielded
           </span>
           {avgCycle != null && (
             <>

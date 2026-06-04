@@ -142,7 +142,7 @@ export function LineFlowStrip({ stations, machines, stationScans }: Props) {
   }
 
   return (
-    <section className="flex flex-col min-h-0 flex-1 p-2 shrink-0">
+    <section className="flex flex-col shrink-0 p-2 relative z-10 bg-[#07090d]">
       <h2 className="text-[11px] font-semibold uppercase tracking-wider text-amber-400/90 mb-2">
         Line status · live
       </h2>

@@ -29,12 +29,8 @@ export function ThroughputChartWidget({
   }
 
   return (
-    <div className="flex flex-col gap-1 p-2 h-full">
-      <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-        Throughput (bags/hr)
-      </div>
-      <div className="flex-1">
-        <ResponsiveContainer width="100%" height="100%">
+    <div className="h-full w-full p-1">
+      <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: -20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
             <XAxis
@@ -79,7 +75,6 @@ export function ThroughputChartWidget({
             />
           </LineChart>
         </ResponsiveContainer>
-      </div>
     </div>
   );
 }

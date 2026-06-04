@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import {
   formatCycleSec,
+  formatWait,
   receiptLabel,
   trustedCycleSec,
   MAX_TRUSTED_CYCLE_SEC,
@@ -19,14 +20,9 @@ function paceLabel(shiftSec: number | null, baselineSec: number | null): string 
   return "Near 7-day average";
 }
 
-type PanelProps = {
-  title: string;
-  children: ReactNode;
-};
-
-function Panel({ title, children }: PanelProps) {
+function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-white/[0.08] bg-slate-900/60 px-3 py-2 min-w-[160px] flex-1">
+    <div className="rounded-lg border border-white/[0.08] bg-slate-900/60 px-3 py-2 min-w-[150px] flex-1 max-w-[280px]">
       <h3 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
         {title}
       </h3>
@@ -39,15 +35,11 @@ type Props = {
   snapshot: FloorManagerSnapshot;
 };
 
-/** The four questions a floor lead asks — sourced only from managerSnapshot (already loaded). */
 export function CommandCenterProductionAnswers({ snapshot }: Props) {
-  const { plant, machines, flavorToday, stageCycles, recentFinalized, products } =
+  const { plant, machines, flavorToday, stageCycles, recentFinalized, wipByStage } =
     snapshot;
 
   const flavors = flavorToday.filter((f) => f.units > 0 || f.bags > 0);
-  const flavorFallback = products.filter(
-    (p) => p.bagsFinalized > 0 || p.unitsYielded > 0,
-  );
 
   const machinesRanked = machines
     .map((m) => ({
@@ -58,15 +50,40 @@ export function CommandCenterProductionAnswers({ snapshot }: Props) {
     .filter((m) => m.shift != null && m.base != null)
     .sort((a, b) => (b.shift! / b.base!) - (a.shift! / a.base!));
 
-  const slowest = machinesRanked[0];
-  const avgCycle = trustedCycleSec(plant.avgCycleSecShift);
-  const skewed =
-    plant.avgCycleSecShift != null &&
-    plant.avgCycleSecShift > MAX_TRUSTED_CYCLE_SEC;
+  const slowestShift = machinesRanked[0];
+
+  const slowest7d = [...machines]
+    .filter((m) => trustedCycleSec(m.avgCycleSec7d) != null)
+    .sort(
+      (a, b) =>
+        (trustedCycleSec(b.avgCycleSec7d) ?? 0) -
+        (trustedCycleSec(a.avgCycleSec7d) ?? 0),
+    )[0];
+
+  const worstWip = [...wipByStage].sort(
+    (a, b) => b.oldestMinutes - a.oldestMinutes,
+  )[0];
+
+  const recentTrusted = recentFinalized
+    .map((b) => b.totalCycleSec)
+    .filter((s) => s > 0 && s <= MAX_TRUSTED_CYCLE_SEC);
+  const avgFromRecent =
+    recentTrusted.length > 0
+      ? Math.round(
+          recentTrusted.reduce((sum, s) => sum + s, 0) / recentTrusted.length,
+        )
+      : null;
+
+  const plantAvg = trustedCycleSec(plant.avgCycleSecShift);
+  const avgCycle = plantAvg ?? avgFromRecent;
 
   const bottleneckStage = stageCycles
-    .filter((s) => s.avgSecShift != null)
-    .sort((a, b) => (b.avgSecShift ?? 0) - (a.avgSecShift ?? 0))[0];
+    .filter((s) => s.avgSecShift != null && trustedCycleSec(s.avgSecShift))
+    .sort(
+      (a, b) =>
+        (trustedCycleSec(b.avgSecShift) ?? 0) -
+        (trustedCycleSec(a.avgSecShift) ?? 0),
+    )[0];
 
   const last = recentFinalized[0];
 
@@ -75,115 +92,101 @@ export function CommandCenterProductionAnswers({ snapshot }: Props) {
       className="shrink-0 px-3 py-2 border-b border-white/[0.06] bg-slate-950/80"
       aria-label="Production answers"
     >
-      <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">
-        What you asked for · from live read models
-      </p>
-      <div className="flex gap-2 overflow-x-auto pb-0.5">
-        <Panel title="Flavors / products today">
+      <div className="flex gap-2 overflow-x-auto">
+        <Panel title="Flavors today">
           {flavors.length > 0 ? (
-            <ul className="space-y-1">
-              {flavors.slice(0, 5).map((f) => (
+            <ul className="space-y-0.5">
+              {flavors.slice(0, 4).map((f) => (
                 <li key={f.productName} className="flex justify-between gap-2">
-                  <span className="truncate text-slate-200">{f.productName}</span>
+                  <span className="truncate">{f.productName}</span>
                   <span className="tabular-nums text-slate-400 shrink-0">
-                    {f.units} u · {f.bags} bag{f.bags === 1 ? "" : "s"}
+                    {f.units.toLocaleString()} u
                   </span>
                 </li>
               ))}
-            </ul>
-          ) : flavorFallback.length > 0 ? (
-            <ul className="space-y-1">
-              {flavorFallback.slice(0, 5).map((p) => (
-                <li key={p.productId} className="flex justify-between gap-2">
-                  <span className="truncate">{p.productName}</span>
-                  <span className="tabular-nums text-slate-400 shrink-0">
-                    {p.unitsYielded} u
-                  </span>
-                </li>
-              ))}
-              <li className="text-[10px] text-slate-600">Shift material usage</li>
             </ul>
           ) : (
-            <span className="text-slate-500">
-              No units finalized today in throughput read model. Check scanners
-              / BAG_FINALIZED events.
-            </span>
+            <span className="text-slate-500">No throughput logged for today yet.</span>
           )}
         </Panel>
 
-        <Panel title="Machine taking longer">
-          {slowest ? (
+        <Panel title="Slowest / bottleneck">
+          {slowestShift ? (
             <>
-              <p className="font-medium text-amber-200/90">{slowest.name}</p>
-              <p className="text-slate-400 mt-0.5">
-                {paceLabel(slowest.shift, slowest.base)}
+              <p className="font-medium text-amber-200/90">{slowestShift.name}</p>
+              <p className="text-slate-400">{paceLabel(slowestShift.shift, slowestShift.base)}</p>
+            </>
+          ) : slowest7d ? (
+            <>
+              <p className="font-medium text-slate-200">{slowest7d.name}</p>
+              <p className="text-slate-400">
+                7d avg {formatCycleSec(trustedCycleSec(slowest7d.avgCycleSec7d))}
+                {slowest7d.currentReceiptNumber
+                  ? ` · on ${receiptLabel(slowest7d.currentReceiptNumber)}`
+                  : ""}
               </p>
-              <p className="text-[10px] text-slate-600 mt-1 tabular-nums">
-                Shift {formatCycleSec(slowest.shift)} · 7d{" "}
-                {formatCycleSec(slowest.base)}
+              <p className="text-[10px] text-slate-600 mt-0.5">
+                Shift pace needs more finalized bags on this machine.
               </p>
-              {slowest.currentReceiptNumber && (
-                <p className="text-[10px] text-emerald-400/80 mt-1">
-                  On: {receiptLabel(slowest.currentReceiptNumber)}
-                </p>
-              )}
+            </>
+          ) : worstWip ? (
+            <>
+              <p className="font-medium text-red-300/90">{worstWip.label}</p>
+              <p className="text-slate-400">
+                {worstWip.count} bag{worstWip.count === 1 ? "" : "s"} · oldest{" "}
+                {formatWait(worstWip.oldestMinutes)}
+              </p>
             </>
           ) : (
-            <span className="text-slate-500">
-              Need finalized bags this shift on machines to compare pace (3
-              finalized may not tie to a machine yet).
-            </span>
+            <span className="text-slate-500">No machine or queue signal yet.</span>
           )}
         </Panel>
 
-        <Panel title="Average cycle">
+        <Panel title="Avg cycle">
           {avgCycle != null ? (
             <>
-              <p className="text-lg font-semibold tabular-nums text-slate-50">
+              <p className="text-lg font-semibold tabular-nums">
                 {formatCycleSec(avgCycle)}
               </p>
-              <p className="text-slate-500 text-[11px]">
-                {plant.bagsFinalizedShift} bag
-                {plant.bagsFinalizedShift === 1 ? "" : "s"} finalized this shift
-                (under 8h each)
+              <p className="text-[11px] text-slate-500">
+                {plantAvg != null
+                  ? `${plant.bagsFinalizedShift} finalized this shift`
+                  : `Last ${recentTrusted.length} completed (under 8h each)`}
               </p>
-              {bottleneckStage && (
-                <p className="text-[10px] text-slate-600 mt-1">
-                  Slowest step: {bottleneckStage.label}{" "}
-                  {formatCycleSec(bottleneckStage.avgSecShift)}
-                </p>
-              )}
             </>
-          ) : skewed ? (
-            <span className="text-amber-300/90">
-              Hidden — one or more finalized bags took multi-day (stuck WIP).
-              Clear old bags or use step times below.
-            </span>
-          ) : plant.bagsFinalizedShift === 0 ? (
-            <span className="text-slate-500">
-              No bags finalized this shift yet.
-            </span>
+          ) : last && last.totalCycleSec > MAX_TRUSTED_CYCLE_SEC ? (
+            <>
+              <p className="text-amber-300/90">Last bag {formatCycleSec(last.totalCycleSec)}</p>
+              <p className="text-[11px] text-slate-500">
+                Multi-day bag — clear WIP for a honest shift average.
+              </p>
+            </>
+          ) : bottleneckStage ? (
+            <>
+              <p className="font-medium">{formatCycleSec(bottleneckStage.avgSecShift)}</p>
+              <p className="text-[11px] text-slate-500">
+                Slowest step this shift: {bottleneckStage.label}
+              </p>
+            </>
           ) : (
-            <span className="text-slate-500">
-              {plant.bagsFinalizedShift} finalized but none under 8h total time.
-            </span>
+            <span className="text-slate-500">No clean completions yet this shift.</span>
           )}
         </Panel>
 
         <Panel title="Last completed">
           {last ? (
             <>
-              <p className="font-medium">
+              <p className="font-medium truncate">
                 {receiptLabel(last.receiptNumber, null)}
               </p>
-              <p className="text-slate-400">{last.productName ?? "—"}</p>
-              <p className="text-[10px] text-slate-600 mt-1 tabular-nums">
-                {last.unitsYielded} units · {formatCycleSec(last.totalCycleSec)}{" "}
-                total · {last.minutesAgo}m ago
+              <p className="text-slate-400 truncate">{last.productName ?? "—"}</p>
+              <p className="text-[10px] text-slate-600 mt-0.5 tabular-nums">
+                {last.unitsYielded.toLocaleString()} u · {formatCycleSec(last.totalCycleSec)} ·{" "}
+                {last.minutesAgo}m ago
               </p>
             </>
           ) : (
-            <span className="text-slate-500">Nothing finalized yet today.</span>
+            <span className="text-slate-500">Nothing finalized yet.</span>
           )}
         </Panel>
       </div>
