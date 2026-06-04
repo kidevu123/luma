@@ -7,15 +7,13 @@ import {
   getLiveStationStatus,
   LIVE_STATUS_STYLES,
 } from "@/lib/floor-command/station-live-status";
+import {
+  formatCycleSec,
+  formatWait,
+  trustedCycleSec,
+} from "@/lib/floor-command/floor-display";
 import type { StationWithLive } from "@/lib/floor-command/types";
 import type { MachineProductionRow } from "@/lib/production/floor-manager-snapshot-types";
-
-function formatCycleSec(sec: number | null): string {
-  if (sec == null || sec <= 0) return "—";
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}m ${s}s`;
-}
 
 function machineForStation(
   machines: MachineProductionRow[],
@@ -36,16 +34,16 @@ function StationTile({
   const style = LIVE_STATUS_STYLES[status];
   const isPack = PACK_OUT_KINDS.includes(station.kind);
   const machine = machineForStation(machines, station.machineId);
-  const ct =
-    machine?.avgCycleSecShift != null
-      ? formatCycleSec(machine.avgCycleSecShift)
-      : station.busyForSeconds != null
-        ? formatBusyTime(station.busyForSeconds)
-        : "—";
+  const shiftCycle = trustedCycleSec(machine?.avgCycleSecShift);
+  const baseline7d = trustedCycleSec(machine?.avgCycleSec7d);
+  const onBagMin =
+    station.busyForSeconds != null
+      ? Math.floor(station.busyForSeconds / 60)
+      : null;
 
   return (
     <div
-      className={`flex flex-col rounded-lg border ${style.border} bg-slate-900/80 p-3 min-w-[140px] max-w-[180px] flex-1`}
+      className={`flex flex-col rounded-lg border ${style.border} bg-slate-900/80 p-2.5 min-w-[128px] max-w-[160px] flex-1`}
     >
       <div className="flex items-start justify-between gap-1">
         <span className="text-xs font-semibold text-slate-200 leading-tight">
@@ -63,13 +61,21 @@ function StationTile({
           <span className="text-[11px]">Hand pack</span>
         </div>
       ) : (
-        <div className="mt-2 space-y-1 min-h-[52px]">
+        <div className="mt-1.5 space-y-0.5 min-h-[40px]">
           <div className="text-[11px] text-slate-400">
-            CT: <span className="text-slate-200 tabular-nums">{ct}</span>
+            Cycle:{" "}
+            <span className="text-slate-200 tabular-nums">
+              {shiftCycle != null ? formatCycleSec(shiftCycle) : "—"}
+            </span>
           </div>
-          {machine?.avgCycleSec7d != null && (
+          {baseline7d != null && (
             <div className="text-[10px] text-slate-600">
-              7d avg {formatCycleSec(machine.avgCycleSec7d)}
+              7d {formatCycleSec(baseline7d)}
+            </div>
+          )}
+          {onBagMin != null && onBagMin > 15 && (
+            <div className="text-[10px] text-amber-400/90">
+              On bag {formatWait(onBagMin)}
             </div>
           )}
         </div>
@@ -114,11 +120,11 @@ export function LineFlowStrip({ stations, machines }: Props) {
   }
 
   return (
-    <section className="flex flex-col min-h-0 flex-1 p-3">
-      <h2 className="text-[11px] font-semibold uppercase tracking-wider text-amber-400/90 mb-3">
+    <section className="flex flex-col min-h-0 flex-1 p-2 shrink-0">
+      <h2 className="text-[11px] font-semibold uppercase tracking-wider text-amber-400/90 mb-2">
         Line status · live
       </h2>
-      <div className="flex items-stretch gap-2 overflow-x-auto pb-2 flex-1 min-h-[200px]">
+      <div className="flex items-stretch gap-2 overflow-x-auto pb-1 min-h-[120px] max-h-[38vh]">
         {groups.map((group, gi) => (
           <div key={group.label} className="flex items-stretch gap-2 shrink-0">
             <div className="flex flex-col gap-2">

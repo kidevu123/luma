@@ -15,7 +15,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function panelClass() {
-  return "rounded-lg border border-white/[0.08] bg-slate-900/50 flex flex-col min-h-[200px] overflow-hidden";
+  return "rounded-lg border border-white/[0.08] bg-slate-900/50 flex flex-col min-h-[140px] max-h-[28vh] overflow-hidden";
 }
 
 function fmtSec(s: number): string {

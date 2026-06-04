@@ -426,7 +426,10 @@ async function loadPlantShiftStats(shiftStartUtc: Date) {
     .select({
       bags: sql<number>`COUNT(*)::int`,
       units: sql<number>`COALESCE(SUM(${readBagMetrics.unitsYielded}), 0)::int`,
-      avg_cycle: sql<number>`ROUND(AVG(${readBagMetrics.totalSeconds}))::int`,
+      avg_cycle: sql<number>`ROUND(AVG(${readBagMetrics.totalSeconds}) FILTER (
+        WHERE ${readBagMetrics.totalSeconds} > 0
+          AND ${readBagMetrics.totalSeconds} < 28800
+      ))::int`,
       avg_yield: sql<number>`ROUND(AVG(${readBagMetrics.yieldPct})::numeric, 2)`,
       damage_rate: sql<number>`ROUND(
         (COALESCE(SUM(${readBagMetrics.damagedPackaging}), 0)

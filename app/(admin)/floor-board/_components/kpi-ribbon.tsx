@@ -5,13 +5,10 @@ import type { ShiftStatusData } from "@/lib/floor-command/types";
 import type { KpiStripData } from "@/lib/production/floor-command";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import type { ThroughputDataPoint } from "@/lib/floor-command/types";
-
-function formatCycle(sec: number | null): string {
-  if (sec == null) return "—";
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
+import {
+  formatCycleSec,
+  trustedCycleSec,
+} from "@/lib/floor-command/floor-display";
 
 function formatRunway(days: number | null): string {
   if (days == null) return "—";
@@ -85,10 +82,22 @@ export function KpiRibbon({ shiftStatus, kpiData, plant, throughputPoints }: Pro
           ? "good"
           : "neutral";
 
-  const pacePct =
-    plant.bagsFinalizedShift > 0 && plant.avgCycleSecShift
-      ? formatCycle(plant.avgCycleSecShift)
-      : formatCycle(kpiData.avgCycleSeconds);
+  const avgCycle =
+    trustedCycleSec(plant.avgCycleSecShift) ??
+    trustedCycleSec(kpiData.avgCycleSeconds);
+  const cycleSub =
+    plant.avgCycleSecShift != null &&
+    plant.avgCycleSecShift > 8 * 3600 &&
+    avgCycle == null
+      ? "skewed by stuck bag — see pulse"
+      : "finalized bags this shift";
+
+  const outputValue =
+    kpiData.unitsOut > 0
+      ? `${kpiData.unitsOut.toLocaleString()} units`
+      : kpiData.bagsToday > 0
+        ? `${kpiData.bagsToday} bags`
+        : target.value;
 
   return (
     <div
@@ -97,7 +106,7 @@ export function KpiRibbon({ shiftStatus, kpiData, plant, throughputPoints }: Pro
     >
       <KpiCard
         label="Output today"
-        value={target.value}
+        value={outputValue}
         {...(target.detail ? { sub: target.detail } : {})}
         accent={outputAccent}
         {...(spark.length >= 2 ? { spark } : {})}
@@ -110,8 +119,8 @@ export function KpiRibbon({ shiftStatus, kpiData, plant, throughputPoints }: Pro
       />
       <KpiCard
         label="Avg cycle"
-        value={pacePct}
-        sub="shift finalized bags"
+        value={avgCycle != null ? formatCycleSec(avgCycle) : "—"}
+        sub={cycleSub}
         accent="neutral"
       />
       <KpiCard

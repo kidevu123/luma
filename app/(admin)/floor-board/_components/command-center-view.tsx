@@ -12,6 +12,7 @@ import { CommandCenterCharts } from "./command-center-charts";
 import { CommandCenterHeader } from "./command-center-header";
 import { KpiRibbon } from "./kpi-ribbon";
 import { LineFlowStrip } from "./line-flow-strip";
+import { OperationsPulseStrip } from "./operations-pulse-strip";
 
 type Props = {
   mode: FloorBoardMode;
@@ -50,7 +51,8 @@ export function CommandCenterView({
         onModeChange={onModeChange}
         showControls={!isTv}
       />
-      <div className={enlarged ? "scale-[1.08] origin-top" : ""}>
+      <OperationsPulseStrip snapshot={managerSnapshot} />
+      <div className={enlarged ? "scale-[1.05] origin-top" : ""}>
         <KpiRibbon
           shiftStatus={shiftStatus}
           kpiData={kpiData}
@@ -59,7 +61,7 @@ export function CommandCenterView({
         />
       </div>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden min-h-0">
         <div className="flex flex-col flex-1 min-w-0 min-h-0 border-r border-white/[0.06]">
           <LineFlowStrip
             stations={widgetData.stations}

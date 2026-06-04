@@ -25,6 +25,14 @@ export function formatWait(minutes: number): string {
   return h > 0 ? `${d}d ${h}h` : `${d}d`;
 }
 
+/** Ignore cycle times from stuck/ghost bags when showing shift averages. */
+export const MAX_TRUSTED_CYCLE_SEC = 8 * 3600;
+
+export function trustedCycleSec(sec: number | null | undefined): number | null {
+  if (sec == null || sec <= 0 || sec > MAX_TRUSTED_CYCLE_SEC) return null;
+  return sec;
+}
+
 export function formatCycleSec(sec: number | null): string {
   if (sec == null || sec <= 0) return "—";
   return formatWait(Math.floor(sec / 60));

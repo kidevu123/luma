@@ -23,8 +23,10 @@ import { WidgetPicker } from "./widget-picker";
 import { stageKeyToMetricsLane } from "@/lib/floor-command/metrics-links";
 import { MetricsQuickLinks } from "./metrics-quick-links";
 import { OwnerPulseStrip } from "./owner-pulse-strip";
+import { ActNowPanel } from "./act-now-panel";
 import { TvRotationPanel } from "./tv-rotation-panel";
 import { CommandCenterView } from "./command-center-view";
+import { OperationsBriefingPanel } from "./operations-briefing-panel";
 import type { PauseReasonRow } from "../_loaders";
 
 type Props = {
@@ -62,11 +64,13 @@ export function FloorCommandClient({
   const [showPicker, setShowPicker] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(isManager);
   const [showMap, setShowMap] = useState(false);
+  const [showBriefing, setShowBriefing] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setDetailsOpen(isManager);
     setShowMap(false);
+    setShowBriefing(false);
   }, [mode, isManager]);
 
   useEffect(() => {
@@ -143,11 +147,32 @@ export function FloorCommandClient({
     return stageKeyToMetricsLane(sk.value);
   }, [productionIntelligence.bottleneck.stageKey]);
 
-  const showCommandCenter = !showMap;
+  const showCommandCenter = !showMap && !showBriefing;
 
   return (
     <div className={rootClass}>
-      {showCommandCenter ? (
+      {showBriefing ? (
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.06] shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowBriefing(false)}
+              className="text-[11px] px-2.5 py-1 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300"
+            >
+              ← Command center
+            </button>
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider">
+              Operations briefing
+            </span>
+          </div>
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <OperationsBriefingPanel snapshot={managerSnapshot} />
+            </div>
+            {!isTv && <ActNowPanel items={actNowItems} />}
+          </div>
+        </div>
+      ) : showCommandCenter ? (
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <div className="flex-1 min-w-0 flex flex-col min-h-0">
             <CommandCenterView
@@ -234,7 +259,14 @@ export function FloorCommandClient({
       )}
 
       {!isTv && showCommandCenter && (
-        <div className="flex items-center justify-end gap-2 px-3 py-1 border-t border-white/[0.06] bg-slate-950/90 shrink-0">
+        <div className="flex items-center justify-end gap-3 px-3 py-1 border-t border-white/[0.06] bg-slate-950/90 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowBriefing(true)}
+            className="text-[11px] text-slate-500 hover:text-amber-300 transition-colors"
+          >
+            Full operations briefing →
+          </button>
           <button
             type="button"
             onClick={() => setShowMap(true)}
