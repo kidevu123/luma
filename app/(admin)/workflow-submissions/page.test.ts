@@ -100,8 +100,14 @@ describe("WORKFLOW-RECEIPT-DISPLAY-P1 · receipt lineage display", () => {
     expect(tableSrc).toMatch(/function buildBagLabel/);
     expect(tableSrc).toMatch(/bag\.inventoryBagNumber \?\? bag\.bagNumber/);
     expect(tableSrc).toMatch(/bag\.tabletTypeName \?\? bag\.productName/);
-    expect(tableSrc).toMatch(/bag\.poNumber \? `PO \$\{bag\.poNumber\}` : null/);
+    expect(tableSrc).toMatch(/formatPoLabel\(bag\.poNumber\)/);
     expect(tableSrc).toMatch(/Workflow \$\{shortId\}/);
+  });
+
+  it("does not duplicate PO prefix in human-readable bag labels", () => {
+    expect(tableSrc).toMatch(/function formatPoLabel/);
+    expect(tableSrc).toMatch(/test\(trimmed\) \? trimmed : `PO \$\{trimmed\}`/);
+    expect(tableSrc).not.toMatch(/bag\.poNumber \? `PO \$\{bag\.poNumber\}` : null/);
   });
 
   it("legacy/unlinked bag label is explicit and does not fabricate a bag number", () => {
@@ -120,5 +126,33 @@ describe("WORKFLOW-RECEIPT-DISPLAY-P1 · receipt lineage display", () => {
     expect(tableSrc).toMatch(/extractSubmissionLines/);
     expect(helpersSrc).toMatch(/Sealed partial/);
     expect(helpersSrc).toMatch(/sealed_partial_count/);
+  });
+});
+
+describe("WORKFLOW-SUBMISSION-ADMIN-REPAIR-1 · missing blister close-out repair", () => {
+  it("passes admin repair access to the client table only for OWNER/ADMIN roles", () => {
+    expect(pageSrc).toMatch(/const user = await requireSession\(\)/);
+    expect(pageSrc).toMatch(/user\.role === "OWNER" \|\| user\.role === "ADMIN"/);
+    expect(pageSrc).toMatch(/<WorkflowTable bags=\{bags\} canAdminRepair=\{canAdminRepair\} \/>/);
+  });
+
+  it("renders an admin-only repair form for started bags with no submission events", () => {
+    expect(tableSrc).toMatch(/canAdminRepair/);
+    expect(tableSrc).toMatch(/bag\.stage === "STARTED"/);
+    expect(tableSrc).toMatch(/submissionEvents\.length === 0/);
+    expect(tableSrc).toMatch(/Admin repair · missing blister close-out/);
+    expect(tableSrc).toMatch(/name="workflowBagId"/);
+    expect(tableSrc).toMatch(/name="countTotal"/);
+    expect(tableSrc).toMatch(/name="notes"/);
+  });
+
+  it("repair copy warns that the fix appends events instead of editing history", () => {
+    expect(tableSrc).toMatch(/This appends auditable events; it does not edit the\s+old timeline\./);
+    expect(tableSrc).toMatch(/Enter 0 if the blister output was already captured by a pause counter\s+snapshot\./);
+  });
+
+  it("wires the repair form to the server action through useActionState", () => {
+    expect(tableSrc).toMatch(/useActionState/);
+    expect(tableSrc).toMatch(/adminBackfillMissingBlisterCloseoutAction/);
   });
 });

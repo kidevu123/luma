@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.103] — 2026-06-04
+
+### Added (WORKFLOW-SUBMISSION-ADMIN-REPAIR-1)
+- **Workflow submissions admin repair:** OWNER/ADMIN users can append a missing BLISTER close-out for a STARTED bag with no submission events, releasing the bag for downstream sealing without editing historical events.
+- **Audit trail:** The repair appends `BAG_RESUMED` when needed, `BLISTER_COMPLETE`, `BAG_RELEASED`, and an `audit_log` entry with the supervisor note and counter value.
+- **Admin bag labels:** Workflow submissions avoids duplicating the PO prefix when PO numbers are already stored as values like `PO-00206`.
+
 ## [0.4.102] — 2026-06-03
 
 ### Fixed (READY PARTIAL FLOOR READINESS)

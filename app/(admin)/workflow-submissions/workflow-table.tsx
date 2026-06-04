@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useActionState, useState, useCallback } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { loadBagEventsAction } from "./load-events-action";
+import { adminBackfillMissingBlisterCloseoutAction } from "./actions";
 import type { BagGenealogyResult } from "@/lib/production/types";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -106,6 +107,12 @@ function fmtSeconds(s: number | null): string {
   return `${m}m`;
 }
 
+function formatPoLabel(poNumber: string | null): string | null {
+  const trimmed = poNumber?.trim();
+  if (!trimmed) return null;
+  return /^po(?:[\s-]|$)/i.test(trimmed) ? trimmed : `PO ${trimmed}`;
+}
+
 function buildBagLabel(bag: WorkflowBagRow): {
   primary: string;
   secondary: string;
@@ -115,7 +122,7 @@ function buildBagLabel(bag: WorkflowBagRow): {
   const bagNumber = bag.inventoryBagNumber ?? bag.bagNumber;
   const context = bag.tabletTypeName ?? bag.productName;
   const parts = [
-    bag.poNumber ? `PO ${bag.poNumber}` : null,
+    formatPoLabel(bag.poNumber),
     context,
     bagNumber != null ? `Bag ${bagNumber}` : null,
   ].filter((part): part is string => part != null && part.trim() !== "");
@@ -148,13 +155,20 @@ type ExpandState =
 function ExpandedContent({
   bag,
   genealogy,
+  canAdminRepair,
 }: {
   bag: WorkflowBagRow;
   genealogy: BagGenealogyResult;
+  canAdminRepair: boolean;
 }) {
   const submissionEvents = genealogy.events.filter((e) =>
     SUBMISSION_EVENT_TYPES.has(e.eventType),
   );
+  const canShowMissingBlisterRepair =
+    canAdminRepair &&
+    bag.stage === "STARTED" &&
+    !bag.isFinalized &&
+    submissionEvents.length === 0;
 
   let totalCountSum = 0;
   for (const e of submissionEvents) {
@@ -300,14 +314,99 @@ function ExpandedContent({
             </div>
           </div>
         )}
+        {canShowMissingBlisterRepair ? (
+          <MissingBlisterCloseoutRepairForm workflowBagId={bag.id} />
+        ) : null}
       </div>
     </div>
   );
 }
 
+function MissingBlisterCloseoutRepairForm({
+  workflowBagId,
+}: {
+  workflowBagId: string;
+}) {
+  const [state, formAction, isPending] = useActionState(
+    adminBackfillMissingBlisterCloseoutAction,
+    null,
+  );
+
+  return (
+    <form
+      action={formAction}
+      className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950 space-y-2"
+    >
+      <input type="hidden" name="workflowBagId" value={workflowBagId} />
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.12em]">
+          Admin repair · missing blister close-out
+        </div>
+        <p className="mt-1 text-[11px] leading-snug">
+          Use only when the blister station missed close-out and downstream
+          work is blocked. This appends auditable events; it does not edit the
+          old timeline.
+        </p>
+      </div>
+      <label className="block space-y-1">
+        <span className="text-[11px] font-medium">
+          Machine counter for missing blister close-out
+        </span>
+        <input
+          name="countTotal"
+          type="number"
+          min={0}
+          required
+          placeholder="0"
+          className="h-9 w-full rounded border border-amber-300 bg-white px-2 text-sm tabular-nums text-text"
+        />
+        <span className="block text-[10px] text-amber-900/80">
+          Enter 0 if the blister output was already captured by a pause counter
+          snapshot.
+        </span>
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[11px] font-medium">Reason / supervisor note</span>
+        <textarea
+          name="notes"
+          required
+          minLength={10}
+          maxLength={500}
+          rows={2}
+          placeholder="Example: Blister operator missed close-out; PM approved admin repair."
+          className="w-full rounded border border-amber-300 bg-white px-2 py-1.5 text-sm text-text"
+        />
+      </label>
+      {state?.error ? (
+        <p className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-800">
+          {state.error}
+        </p>
+      ) : null}
+      {state?.ok ? (
+        <p className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] text-emerald-800">
+          Repair recorded. Refresh the row to see the new submission events.
+        </p>
+      ) : null}
+      <button
+        type="submit"
+        disabled={isPending}
+        className="inline-flex h-9 items-center justify-center rounded bg-amber-700 px-3 text-xs font-semibold text-white disabled:opacity-60"
+      >
+        {isPending ? "Recording repair..." : "Record missing blister close-out"}
+      </button>
+    </form>
+  );
+}
+
 // ── Table row ─────────────────────────────────────────────────────
 
-function BagRow({ bag }: { bag: WorkflowBagRow }) {
+function BagRow({
+  bag,
+  canAdminRepair,
+}: {
+  bag: WorkflowBagRow;
+  canAdminRepair: boolean;
+}) {
   const [expand, setExpand] = useState<ExpandState>({ status: "idle" });
 
   const toggle = useCallback(async () => {
@@ -471,7 +570,11 @@ function BagRow({ bag }: { bag: WorkflowBagRow }) {
         <tr>
           <td colSpan={11} className="p-0">
             {expand.status === "loaded" && (
-              <ExpandedContent bag={bag} genealogy={expand.data} />
+              <ExpandedContent
+                bag={bag}
+                genealogy={expand.data}
+                canAdminRepair={canAdminRepair}
+              />
             )}
             {expand.status === "error" && (
               <div className="px-4 py-3 text-[12px] text-crit-700 bg-crit-50/40 border-t border-crit-200">
@@ -487,7 +590,13 @@ function BagRow({ bag }: { bag: WorkflowBagRow }) {
 
 // ── Main table component ──────────────────────────────────────────
 
-export function WorkflowTable({ bags }: { bags: WorkflowBagRow[] }) {
+export function WorkflowTable({
+  bags,
+  canAdminRepair = false,
+}: {
+  bags: WorkflowBagRow[];
+  canAdminRepair?: boolean;
+}) {
   return (
     <DataTable>
       <THead>
@@ -507,7 +616,11 @@ export function WorkflowTable({ bags }: { bags: WorkflowBagRow[] }) {
       </THead>
       <tbody>
         {bags.map((bag) => (
-          <BagRow key={bag.id} bag={bag} />
+          <BagRow
+            key={bag.id}
+            bag={bag}
+            canAdminRepair={canAdminRepair}
+          />
         ))}
       </tbody>
     </DataTable>

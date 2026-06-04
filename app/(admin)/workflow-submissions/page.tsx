@@ -42,7 +42,8 @@ export default async function WorkflowSubmissionsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireSession();
+  const user = await requireSession();
+  const canAdminRepair = user.role === "OWNER" || user.role === "ADMIN";
 
   const sp = await searchParams;
 
@@ -314,7 +315,7 @@ export default async function WorkflowSubmissionsPage({
           description="Adjust the search or date range above to broaden results."
         />
       ) : (
-        <WorkflowTable bags={bags} />
+        <WorkflowTable bags={bags} canAdminRepair={canAdminRepair} />
       )}
     </div>
   );
