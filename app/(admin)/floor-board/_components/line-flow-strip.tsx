@@ -13,7 +13,26 @@ import {
   trustedCycleSec,
 } from "@/lib/floor-command/floor-display";
 import type { StationWithLive } from "@/lib/floor-command/types";
-import type { MachineProductionRow } from "@/lib/production/floor-manager-snapshot-types";
+import type {
+  MachineProductionRow,
+  StationScanRow,
+} from "@/lib/production/floor-manager-snapshot-types";
+
+/** Floor manager snapshot station scans are authoritative for “what’s on this station”. */
+function mergeStationScan(
+  live: StationWithLive,
+  scan: StationScanRow | undefined,
+): StationWithLive {
+  if (!scan?.workflowBagId && !scan?.receiptNumber) return live;
+  return {
+    ...live,
+    currentWorkflowBagId: scan.workflowBagId ?? live.currentWorkflowBagId,
+    currentReceiptNumber: scan.receiptNumber ?? live.currentReceiptNumber,
+    currentProductName: scan.productName ?? live.currentProductName,
+    currentEmployeeName: scan.operatorName ?? live.currentEmployeeName,
+    busyForSeconds: scan.busyForSeconds ?? live.busyForSeconds,
+  };
+}
 
 function machineForStation(
   machines: MachineProductionRow[],
@@ -106,10 +125,13 @@ function StationTile({
 type Props = {
   stations: StationWithLive[];
   machines: MachineProductionRow[];
+  stationScans?: StationScanRow[];
 };
 
-export function LineFlowStrip({ stations, machines }: Props) {
-  const groups = groupStationsByStep(stations);
+export function LineFlowStrip({ stations, machines, stationScans }: Props) {
+  const scanById = new Map(stationScans?.map((s) => [s.stationId, s]) ?? []);
+  const merged = stations.map((s) => mergeStationScan(s, scanById.get(s.id)));
+  const groups = groupStationsByStep(merged);
 
   if (groups.length === 0) {
     return (

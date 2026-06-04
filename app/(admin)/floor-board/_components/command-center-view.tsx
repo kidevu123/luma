@@ -13,6 +13,7 @@ import { CommandCenterHeader } from "./command-center-header";
 import { KpiRibbon } from "./kpi-ribbon";
 import { LineFlowStrip } from "./line-flow-strip";
 import { OperationsPulseStrip } from "./operations-pulse-strip";
+import { CommandCenterProductionAnswers } from "./command-center-production-answers";
 
 type Props = {
   mode: FloorBoardMode;
@@ -52,6 +53,7 @@ export function CommandCenterView({
         showControls={!isTv}
       />
       <OperationsPulseStrip snapshot={managerSnapshot} />
+      <CommandCenterProductionAnswers snapshot={managerSnapshot} />
       <div className={enlarged ? "scale-[1.05] origin-top" : ""}>
         <KpiRibbon
           shiftStatus={shiftStatus}
@@ -66,6 +68,7 @@ export function CommandCenterView({
           <LineFlowStrip
             stations={widgetData.stations}
             machines={managerSnapshot.machines}
+            stationScans={managerSnapshot.stations}
           />
           <CommandCenterCharts
             throughputPoints={widgetData.throughputPoints}
