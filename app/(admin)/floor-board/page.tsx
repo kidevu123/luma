@@ -18,6 +18,7 @@ import { companies, userDashboardConfig } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { buildActNowPanel } from "@/lib/floor-command/act-now";
 import { parseFloorBoardMode } from "@/lib/floor-command/floor-board-mode";
+import { getPauseReasons7d } from "./_loaders";
 import { FloorCommandClient } from "./_components/floor-command-client";
 import type { WidgetLayout } from "@/lib/floor-command/types";
 import { DEFAULT_LAYOUT } from "@/lib/floor-command/types";
@@ -67,6 +68,7 @@ export default async function FloorBoardPage({
     productionIntelligence,
     managerSnapshot,
     savedLayoutRow,
+    pauseReasons7d,
   ] = await Promise.all([
     safe("getStationsWithLiveState", () => getStationsWithLiveState()),
     safe("getQueueHealthSummary", () => getQueueHealthSummary()),
@@ -90,6 +92,7 @@ export default async function FloorBoardPage({
         )
         .limit(1),
     ),
+    safe("getPauseReasons7d", () => getPauseReasons7d()),
   ]);
 
   console.log("[floor-board] all fetches OK");
@@ -132,6 +135,7 @@ export default async function FloorBoardPage({
       actNowItems={actNowItems}
       savedLayout={savedLayout}
       widgetData={widgetData}
+      pauseReasons={pauseReasons7d}
     />
   );
 }

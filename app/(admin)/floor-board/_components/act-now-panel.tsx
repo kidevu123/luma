@@ -62,26 +62,30 @@ function ActNowRow({ item }: { item: ActNowItem }) {
 export function ActNowPanel({
   items,
   compact = false,
+  hideHeader = false,
 }: {
   items: ActNowItem[];
   compact?: boolean;
+  hideHeader?: boolean;
 }) {
   return (
     <aside
       className={[
         "flex flex-col border-l border-white/10 bg-slate-950/90 shrink-0",
-        compact ? "w-full border-l-0" : "w-[min(100%,280px)]",
+        compact ? "w-full border-l-0 h-full" : "w-[min(100%,280px)]",
       ].join(" ")}
       aria-label="Act now"
     >
-      <header className="px-3 py-2 border-b border-white/10 shrink-0">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          Act now
-        </h2>
-        <p className="text-[10px] text-slate-600 mt-0.5">
-          Exceptions needing attention this shift
-        </p>
-      </header>
+      {!hideHeader && (
+        <header className="px-3 py-2 border-b border-white/10 shrink-0">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            Act now
+          </h2>
+          <p className="text-[10px] text-slate-600 mt-0.5">
+            Exceptions needing attention this shift
+          </p>
+        </header>
+      )}
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-8 text-center px-2">
