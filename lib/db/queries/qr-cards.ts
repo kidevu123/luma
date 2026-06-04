@@ -1,6 +1,17 @@
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { qrCards, workflowBags, products, inventoryBags, batches, smallBoxes, receives, tabletTypes } from "@/lib/db/schema";
+import {
+  qrCards,
+  workflowBags,
+  products,
+  inventoryBags,
+  batches,
+  smallBoxes,
+  receives,
+  purchaseOrders,
+  tabletTypes,
+  readBagState,
+} from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
 import { isQrCardMidProduction } from "@/lib/production/qr-card-retire";
@@ -12,6 +23,12 @@ export async function listQrCards() {
     .select({
       card: qrCards,
       bag: workflowBags,
+      workflowState: {
+        stage: readBagState.stage,
+        isPaused: readBagState.isPaused,
+        isFinalized: readBagState.isFinalized,
+        lastEventAt: readBagState.lastEventAt,
+      },
       productName: products.name,
       intakeBag: {
         id: inventoryBags.id,
@@ -19,17 +36,26 @@ export async function listQrCards() {
         batchId: inventoryBags.batchId,
         bagNumber: inventoryBags.bagNumber,
         receiveName: receives.receiveName,
+        poNumber: purchaseOrders.poNumber,
         tabletTypeName: tabletTypes.name,
       },
       intakeBatchNumber: batches.batchNumber,
     })
     .from(qrCards)
     .leftJoin(workflowBags, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
+    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
     .leftJoin(products, eq(workflowBags.productId, products.id))
-    .leftJoin(inventoryBags, eq(qrCards.scanToken, inventoryBags.bagQrCode))
+    .leftJoin(
+      inventoryBags,
+      or(
+        eq(inventoryBags.id, workflowBags.inventoryBagId),
+        eq(qrCards.scanToken, inventoryBags.bagQrCode),
+      ),
+    )
     .leftJoin(batches, eq(inventoryBags.batchId, batches.id))
     .leftJoin(smallBoxes, eq(inventoryBags.smallBoxId, smallBoxes.id))
     .leftJoin(receives, eq(smallBoxes.receiveId, receives.id))
+    .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
     .leftJoin(tabletTypes, eq(inventoryBags.tabletTypeId, tabletTypes.id))
     .orderBy(asc(qrCards.label));
 }

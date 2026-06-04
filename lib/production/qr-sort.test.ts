@@ -6,6 +6,7 @@ const mkCard = (label: string, cardType: string) => ({
   intakeBag: null,
   intakeBatchNumber: null,
   productName: null,
+  workflowState: null,
 });
 
 describe("numericSuffix", () => {
@@ -144,6 +145,28 @@ describe("sortQrRows", () => {
     const result = sortQrRows([r10, r9]);
     expect(result[0]).toBe(r9);
     expect(result[1]).toBe(r10);
+  });
+});
+
+describe("matchesQrSearch", () => {
+  it("matches active workflow PO, tablet, product, and stage context", () => {
+    const row = {
+      card: { label: "Card #81", cardType: "RAW_BAG", scanToken: "bag-card-81" },
+      intakeBag: {
+        internalReceiptNumber: "352195",
+        receiveName: "PO-00248-R1",
+        poNumber: "PO-00248",
+        tabletTypeName: "12ct FIX Relax",
+      },
+      intakeBatchNumber: null,
+      productName: "Hyroxi MIT A - BlueRaz",
+      workflowState: { stage: "STARTED" },
+    };
+
+    expect(matchesQrSearch(row, "00248")).toBe(true);
+    expect(matchesQrSearch(row, "fix relax")).toBe(true);
+    expect(matchesQrSearch(row, "blueraz")).toBe(true);
+    expect(matchesQrSearch(row, "started")).toBe(true);
   });
 });
 

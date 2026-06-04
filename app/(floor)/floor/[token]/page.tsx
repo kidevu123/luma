@@ -292,6 +292,10 @@ export default async function FloorStationPage({
             bagId: qrCards.assignedWorkflowBagId,
             bagStage: readBagState.stage,
             productSku: products.sku,
+            receiptNumber: inventoryBags.internalReceiptNumber,
+            tabletTypeName: tabletTypes.name,
+            bagNumber: inventoryBags.bagNumber,
+            poNumber: purchaseOrders.poNumber,
           })
           .from(qrCards)
           .innerJoin(
@@ -300,6 +304,11 @@ export default async function FloorStationPage({
           )
           .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
           .leftJoin(products, eq(products.id, workflowBags.productId))
+          .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+          .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+          .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+          .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+          .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
           .where(
             and(
               eq(qrCards.status, "ASSIGNED"),
@@ -320,6 +329,10 @@ export default async function FloorStationPage({
             bagId: qrCards.assignedWorkflowBagId,
             bagStage: readBagState.stage,
             productSku: products.sku,
+            receiptNumber: inventoryBags.internalReceiptNumber,
+            tabletTypeName: tabletTypes.name,
+            bagNumber: inventoryBags.bagNumber,
+            poNumber: purchaseOrders.poNumber,
           })
           .from(qrCards)
           .innerJoin(
@@ -328,6 +341,11 @@ export default async function FloorStationPage({
           )
           .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
           .leftJoin(products, eq(products.id, workflowBags.productId))
+          .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+          .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+          .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+          .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+          .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
           .where(
             and(
               eq(qrCards.status, "ASSIGNED"),
@@ -349,6 +367,10 @@ export default async function FloorStationPage({
             bagId: qrCards.assignedWorkflowBagId,
             bagStage: readBagState.stage,
             productSku: products.sku,
+            receiptNumber: inventoryBags.internalReceiptNumber,
+            tabletTypeName: tabletTypes.name,
+            bagNumber: inventoryBags.bagNumber,
+            poNumber: purchaseOrders.poNumber,
           })
           .from(qrCards)
           .innerJoin(
@@ -357,6 +379,11 @@ export default async function FloorStationPage({
           )
           .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
           .leftJoin(products, eq(products.id, workflowBags.productId))
+          .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+          .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+          .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+          .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+          .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
           .where(
             and(
               eq(qrCards.status, "ASSIGNED"),
@@ -892,15 +919,7 @@ export default async function FloorStationPage({
                 .filter(
                   (
                     c,
-                  ): c is {
-                    id: string;
-                    label: string;
-                    scanToken: string;
-                    bagId: string;
-                    bagStage: string;
-                    productSku: string | null;
-                    needsSealingFinalClose: boolean;
-                  } => c.bagId != null,
+                  ): c is typeof c & { bagId: string } => c.bagId != null,
                 )
                 .map((c) => ({
                   id: c.id,
@@ -909,6 +928,10 @@ export default async function FloorStationPage({
                   bagId: c.bagId,
                   bagStage: c.bagStage ?? "",
                   productSku: c.productSku ?? null,
+                  receiptNumber: c.receiptNumber ?? null,
+                  tabletTypeName: c.tabletTypeName ?? null,
+                  bagNumber: c.bagNumber ?? null,
+                  poNumber: c.poNumber ?? null,
                   needsSealingFinalClose: c.needsSealingFinalClose,
                 }))}
               allowedProducts={allowedProducts.map((p) => ({

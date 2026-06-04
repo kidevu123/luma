@@ -33,6 +33,10 @@ export type EligiblePickup = {
   bagId: string;
   bagStage: string;
   productSku: string | null;
+  receiptNumber?: string | null;
+  tabletTypeName?: string | null;
+  bagNumber?: number | null;
+  poNumber?: string | null;
   /** BLISTERED bag with segment(s) but no lane-close yet. */
   needsSealingFinalClose?: boolean;
 };
@@ -382,8 +386,17 @@ export function ScanCardForm({
                 <optgroup label="Pick up or resume bag (same QR continues)">
                   {eligiblePickups.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.label}
-                      {c.productSku ? ` — ${c.productSku}` : ""}
+                      {formatEligibleCardLabel({
+                        id: c.id,
+                        label: c.label,
+                        scanToken: c.scanToken,
+                        receiptNumber: c.receiptNumber ?? null,
+                        tabletTypeName: c.tabletTypeName ?? null,
+                        tabletTypeId: null,
+                        bagNumber: c.bagNumber ?? null,
+                        poNumber: c.poNumber ?? null,
+                      })}
+                      {c.productSku ? ` · ${c.productSku}` : ""}
                       {c.needsSealingFinalClose
                         ? " · sealing in progress — pick up to finalize"
                         : c.bagStage === "STARTED"

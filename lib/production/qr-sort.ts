@@ -3,9 +3,14 @@ type QrCardSortable = {
   intakeBag?: {
     internalReceiptNumber: string | null;
     receiveName?: string | null;
+    poNumber?: string | null;
+    tabletTypeName?: string | null;
   } | null;
   intakeBatchNumber?: string | null;
   productName?: string | null;
+  workflowState?: {
+    stage?: string | null;
+  } | null;
 };
 
 const TYPE_PRIORITY: Record<string, number> = {
@@ -61,7 +66,10 @@ export function matchesQrSearch(row: QrCardSortable & { card: { scanToken?: stri
     (row.card.scanToken?.toLowerCase().includes(qLower) ?? false) ||
     (row.intakeBag?.internalReceiptNumber?.toLowerCase().includes(qLower) ?? false) ||
     (row.intakeBag?.receiveName?.toLowerCase().includes(qLower) ?? false) ||
+    (row.intakeBag?.poNumber?.toLowerCase().includes(qLower) ?? false) ||
+    (row.intakeBag?.tabletTypeName?.toLowerCase().includes(qLower) ?? false) ||
     (row.intakeBatchNumber?.toLowerCase().includes(qLower) ?? false) ||
-    (row.productName?.toLowerCase().includes(qLower) ?? false)
+    (row.productName?.toLowerCase().includes(qLower) ?? false) ||
+    (row.workflowState?.stage?.toLowerCase().includes(qLower) ?? false)
   );
 }

@@ -96,6 +96,14 @@ describe("PRODUCTION-OVERLAP-3 · idle-state copy and pickup labels", () => {
     expect(formSrc).not.toMatch(/Pick up released bag/);
     expect(formSrc).toMatch(/Pick up or resume bag \(same QR continues\)/);
   });
+
+  it("loads PO/tablet/bag context for pickup and resume options", () => {
+    expect(pageSrc).toMatch(/receiptNumber:\s*inventoryBags\.internalReceiptNumber/);
+    expect(pageSrc).toMatch(/tabletTypeName:\s*tabletTypes\.name/);
+    expect(pageSrc).toMatch(/bagNumber:\s*inventoryBags\.bagNumber/);
+    expect(pageSrc).toMatch(/poNumber:\s*purchaseOrders\.poNumber/);
+    expect(pageSrc).toMatch(/leftJoin\(inventoryBags,\s*eq\(inventoryBags\.id,\s*workflowBags\.inventoryBagId\)\)/);
+  });
 });
 
 describe('STATION-ACTIVE-UX-1 · active bag Eastern time', () => {

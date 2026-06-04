@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { RetireButton } from "./forms";
@@ -21,6 +22,12 @@ type QrCardRow = {
     notes: string | null;
   };
   bag: { id: string } | null;
+  workflowState: {
+    stage: string | null;
+    isPaused: boolean | null;
+    isFinalized: boolean | null;
+    lastEventAt: Date | null;
+  } | null;
   productName: string | null;
   intakeBag: {
     id: string | null;
@@ -28,6 +35,7 @@ type QrCardRow = {
     batchId: string | null;
     bagNumber: number | null;
     receiveName: string | null;
+    poNumber: string | null;
     tabletTypeName: string | null;
   } | null;
   intakeBatchNumber: string | null;
@@ -92,11 +100,13 @@ function StatusBadge({ status }: { status: string }) {
 function AssignmentCell({
   card,
   bag,
+  workflowState,
   productName,
   intakeBag,
 }: {
   card: QrCardRow["card"];
   bag: QrCardRow["bag"];
+  workflowState: QrCardRow["workflowState"];
   productName: string | null;
   intakeBag: QrCardRow["intakeBag"];
 }) {
@@ -105,13 +115,43 @@ function AssignmentCell({
   }
 
   if (bag) {
+    const shortWorkflowId = `${bag.id.slice(0, 8)}…`;
+    const details: string[] = [];
+    const stage = workflowState?.isFinalized
+      ? "FINALIZED"
+      : workflowState?.isPaused
+        ? `${workflowState.stage ?? "UNKNOWN"} · paused`
+        : workflowState?.stage;
+    if (stage) details.push(stage);
+    if (intakeBag?.poNumber) details.push(intakeBag.poNumber);
+    if (intakeBag?.receiveName) details.push(intakeBag.receiveName);
+    if (intakeBag?.internalReceiptNumber) {
+      details.push(`Receipt #${intakeBag.internalReceiptNumber}`);
+    }
+    if (intakeBag?.bagNumber != null) details.push(`Bag ${intakeBag.bagNumber}`);
+    if (productName) details.push(productName);
+    else if (intakeBag?.tabletTypeName) details.push(intakeBag.tabletTypeName);
+
     return (
-      <span className="text-[11px] leading-snug">
-        <span className="text-blue-700 font-medium">Active workflow</span>
-        {productName && (
-          <span className="text-text-muted"> · {productName}</span>
+      <div className="text-[11px] leading-snug space-y-0.5">
+        <div>
+          <span className="text-blue-700 font-medium">Active workflow</span>
+          <span className="font-mono text-text-muted"> · {shortWorkflowId}</span>
+        </div>
+        {details.length > 0 ? (
+          <div className="text-text-muted">{details.join(" · ")}</div>
+        ) : (
+          <div className="text-amber-700 font-medium">
+            Missing received-bag details
+          </div>
         )}
-      </span>
+        <Link
+          href={`/genealogy/${bag.id}`}
+          className="inline-flex text-[10px] font-medium text-brand-700 hover:text-brand-800 hover:underline"
+        >
+          View timeline
+        </Link>
+      </div>
     );
   }
 
@@ -359,7 +399,7 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              {filtered.map(({ card, bag, productName, intakeBag }) => (
+              {filtered.map(({ card, bag, workflowState, productName, intakeBag }) => (
                 <tr
                   key={card.id}
                   className={`hover:bg-surface-2/40 transition-colors ${
@@ -384,6 +424,7 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
                     <AssignmentCell
                       card={card}
                       bag={bag}
+                      workflowState={workflowState}
                       productName={productName}
                       intakeBag={intakeBag}
                     />

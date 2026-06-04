@@ -1153,4 +1153,13 @@ describe("MULTI-SEALING-FINAL-CLOSE-UNSTICK-1 · pickup labels", () => {
     expect(formSrc).toMatch(/needsSealingFinalClose/);
     expect(formSrc).toMatch(/sealing in progress — pick up to finalize/);
   });
+
+  it("uses received-bag context for pickup/resume labels", () => {
+    expect(formSrc).toMatch(/receiptNumber\?: string \| null/);
+    expect(formSrc).toMatch(/tabletTypeName\?: string \| null/);
+    expect(formSrc).toMatch(/poNumber\?: string \| null/);
+    expect(formSrc).toMatch(/receiptNumber: c\.receiptNumber \?\? null/);
+    expect(formSrc).toMatch(/tabletTypeName: c\.tabletTypeName \?\? null/);
+    expect(formSrc).toMatch(/poNumber: c\.poNumber \?\? null/);
+  });
 });

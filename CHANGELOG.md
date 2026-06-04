@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.104] — 2026-06-04
+
+### Fixed (QR-ACTIVE-WORKFLOW-CONTEXT-1)
+- **QR card assignments:** Assigned cards now show the active workflow id, stage/paused/finalized state, PO/receipt/tablet/bag context, and a direct timeline link instead of only “Active workflow.”
+- **Floor pickup labels:** Resume/pickup dropdowns now include PO/tablet/bag context when available, so operators and supervisors can identify active cards like Card #55/#81 without guessing.
+
 ## [0.4.103] — 2026-06-04
 
 ### Added (WORKFLOW-SUBMISSION-ADMIN-REPAIR-1)
