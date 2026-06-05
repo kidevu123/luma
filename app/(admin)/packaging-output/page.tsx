@@ -66,8 +66,15 @@ export default async function PackagingOutputPage() {
       .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
       .leftJoin(products, eq(products.id, workflowBags.productId))
       .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
+      .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
       .leftJoin(finishedLots, eq(finishedLots.workflowBagId, workflowBags.id))
-      .where(and(sql`${workflowBags.finalizedAt} IS NOT NULL`, isNull(finishedLots.id)))
+      .where(
+        and(
+          sql`${workflowBags.finalizedAt} IS NOT NULL`,
+          isNull(finishedLots.id),
+          sql`COALESCE(${readBagState.excludedFromOutput}, false) = false`,
+        ),
+      )
       .orderBy(desc(workflowBags.finalizedAt))
       .limit(20),
 
@@ -89,7 +96,12 @@ export default async function PackagingOutputPage() {
       .leftJoin(products, eq(products.id, workflowBags.productId))
       .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
       .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
-      .where(eq(readBagState.stage, "PACKAGED"))
+      .where(
+        and(
+          eq(readBagState.stage, "PACKAGED"),
+          sql`COALESCE(${readBagState.excludedFromOutput}, false) = false`,
+        ),
+      )
       .orderBy(desc(workflowBags.startedAt))
       .limit(20),
 

@@ -186,8 +186,8 @@ export default async function ZohoOperationsPage({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Zoho Operations"
-        description="Assembly and receive operations queued for Zoho sync. Dry-run validation only — live writes are disabled. NEEDS_MAPPING rows require operator action before the worker can proceed."
+        title="Zoho Operations (legacy)"
+        description="Legacy atomic assembly/receive ops (TABLET_RECEIVE, UNIT_ASSEMBLE, etc.). Dry-run and history only when consolidated production output is enabled — live finished-lot Zoho writes use /zoho-production-operations instead. NEEDS_MAPPING rows require operator action before dry-run can proceed."
       />
 
       {/* Lot filter strip */}

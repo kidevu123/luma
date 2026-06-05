@@ -59,8 +59,8 @@ export type ZohoProductionOutputPreviewMetadata = {
   commitAttemptCount?: number;
   commitError?: string | null;
   externalReferenceId?: string | null;
-  zohoPurchaseorderId: string;
-  zohoPurchaseorderLineItemId: string;
+  zohoPurchaseorderId: string | null;
+  zohoPurchaseorderLineItemId: string | null;
   zohoWarehouseId: string | null;
   zohoCompositeItemId: string | null;
 };

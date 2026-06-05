@@ -54,6 +54,14 @@ import {
   shouldApplyVoidErroneousBagFinalizationRepair,
 } from "./bag-finalization-void-repair";
 import { ymdInTz } from "@/lib/production/time";
+import {
+  computePackagingCountsFromEvents,
+  computeUnitsYieldedFromPackagingCounts,
+  computeYieldPctText,
+} from "./bag-metrics-snapshot";
+import { reprojectBagMetricsForWorkflowBag } from "./reproject-bag-metrics";
+import { projectWorkflowRecoveryEvent } from "./workflow-recovery-projection";
+import type { WorkflowRecoveryPayload } from "@/lib/production/workflow-recovery";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -683,6 +691,16 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       stationId: ev.stationId ?? null,
       payload: mergedPayload as Record<string, unknown>,
     });
+    if (ev.eventType === "SUBMISSION_CORRECTED") {
+      await reprojectBagMetricsForWorkflowBag(tx, ev.workflowBagId);
+    }
+  }
+
+  if (ev.eventType === "WORKFLOW_RECOVERY") {
+    await projectWorkflowRecoveryEvent(tx, {
+      workflowBagId: ev.workflowBagId,
+      payload: mergedPayload as WorkflowRecoveryPayload,
+    });
   }
 
   // Phase H.x3 — When a BLISTER_COMPLETE event lands and an active
@@ -840,32 +858,20 @@ async function projectMetricsForFinalizedBag(
   const bottleStickerSeconds = gap("BOTTLE_STICKER_COMPLETE");
 
   // Pull packaging counts off the most recent PACKAGING_COMPLETE
-  // event's payload (if present); fall back to the legacy
-  // PACKAGING_SNAPSHOT.count_total when only that event fired.
-  let masterCases = 0,
-    displaysMade = 0,
-    looseCards = 0,
-    damagedPackaging = 0,
-    rippedCards = 0;
-  const packagingCompleteEv = [...events]
-    .reverse()
-    .find((e) => e.eventType === "PACKAGING_COMPLETE");
-  if (packagingCompleteEv) {
-    const p = (packagingCompleteEv.payload ?? {}) as Record<string, unknown>;
-    masterCases = Number(p.master_cases ?? 0) || 0;
-    displaysMade = Number(p.displays_made ?? 0) || 0;
-    looseCards = Number(p.loose_cards ?? 0) || 0;
-    damagedPackaging = Number(p.damaged_packaging ?? 0) || 0;
-    rippedCards = Number(p.ripped_cards ?? 0) || 0;
-  } else {
-    const snapshot = [...events]
-      .reverse()
-      .find((e) => e.eventType === "PACKAGING_SNAPSHOT");
-    if (snapshot) {
-      const p = (snapshot.payload ?? {}) as Record<string, unknown>;
-      looseCards = Number(p.count_total ?? 0) || 0;
-    }
-  }
+  // event's payload (if present), applying SUBMISSION_CORRECTED overrides.
+  const packagingCounts = computePackagingCountsFromEvents(
+    events.map((e) => ({
+      id: e.id,
+      eventType: e.eventType,
+      occurredAt: e.occurredAt as unknown as Date,
+      payload: (e.payload ?? {}) as Record<string, unknown>,
+    })),
+  );
+  const masterCases = packagingCounts.masterCases;
+  const displaysMade = packagingCounts.displaysMade;
+  const looseCards = packagingCounts.looseCards;
+  const damagedPackaging = packagingCounts.damagedPackaging;
+  const rippedCards = packagingCounts.rippedCards;
 
   // Resolve the product so we can derive units/yield. workflow_bags
   // sets productId once per bag; any stage event can populate it
@@ -881,15 +887,10 @@ async function projectMetricsForFinalizedBag(
       })
       .from(products)
       .where(eq(products.id, bag.productId));
-    if (product?.unitsPerDisplay && product.displaysPerCase) {
-      const cardsPerCase = product.unitsPerDisplay * product.displaysPerCase;
-      unitsYielded =
-        masterCases * cardsPerCase +
-        displaysMade * product.unitsPerDisplay +
-        looseCards;
-    } else {
-      unitsYielded = looseCards;
-    }
+    unitsYielded = computeUnitsYieldedFromPackagingCounts(
+      packagingCounts,
+      product ?? null,
+    );
   }
   if (bag.inventoryBagId) {
     const [invBag] = await tx
@@ -898,9 +899,7 @@ async function projectMetricsForFinalizedBag(
       .where(eq(inventoryBags.id, bag.inventoryBagId));
     if (invBag?.pillCount) {
       inputPillCount = invBag.pillCount;
-      if (inputPillCount > 0) {
-        yieldPctText = ((unitsYielded / inputPillCount) * 100).toFixed(3);
-      }
+      yieldPctText = computeYieldPctText(unitsYielded, inputPillCount);
     }
   }
 

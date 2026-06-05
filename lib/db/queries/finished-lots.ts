@@ -19,6 +19,159 @@ import type { CurrentUser } from "@/lib/auth";
 import { projectEvent } from "@/lib/projector";
 import { projectFinishedLotPassportForLot } from "@/lib/projector/finished-lot-passport";
 import { runZohoAssemblyEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-after-lot-create";
+import { runProductionOutputEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-production-output-after-lot-create";
+import { isConsolidatedProductionOutputEnabled } from "@/lib/zoho/production-output-config";
+
+type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type FinishedLotAuditActor = {
+  id: string | null;
+  role: CurrentUser["role"] | null;
+};
+
+export type PackagingFinishedLotCounts = {
+  masterCases: number;
+  displaysMade: number;
+  looseCards: number;
+};
+
+export type AutoFinishedLotDraftInput = {
+  productId: string | null;
+  unitsPerDisplay: number | null;
+  displaysPerCase: number | null;
+  defaultShelfLifeDays: number | null;
+  inventoryReceiptNumber: string | null;
+  workflowReceiptNumber: string | null;
+  packagedAt: Date;
+  counts: PackagingFinishedLotCounts;
+};
+
+export type AutoFinishedLotDraftResult =
+  | {
+      ok: true;
+      finishedLotNumber: string;
+      producedOn: string;
+      expiryDate: string;
+      expiresAt: Date;
+      unitsProduced: number;
+      displaysProduced: number;
+      casesProduced: number;
+    }
+  | {
+      ok: false;
+      reason:
+        | "MISSING_PRODUCT"
+        | "MISSING_RECEIPT_NUMBER"
+        | "MISSING_SHELF_LIFE"
+        | "MISSING_PACKAGING_STRUCTURE";
+      message: string;
+    };
+
+type AutoFinishedLotDraftBlocker = Extract<
+  AutoFinishedLotDraftResult,
+  { ok: false }
+>["reason"];
+
+export type AutoFinishedLotReleaseResult =
+  | {
+      ok: true;
+      finishedLotId: string;
+      finishedLotNumber: string;
+      effects: FinishedLotPostCommitEffect[];
+      reusedExistingLot: boolean;
+    }
+  | {
+      ok: false;
+      reason:
+        | AutoFinishedLotDraftBlocker
+        | "WORKFLOW_BAG_NOT_FOUND"
+        | "LOT_NUMBER_CONFLICT"
+        | "OPEN_ALLOCATION_SESSION";
+      message: string;
+    };
+
+export type FinishedLotPostCommitEffect =
+  | { kind: "created"; finishedLotId: string; actor: FinishedLotAuditActor }
+  | {
+      kind: "released";
+      finishedLotId: string;
+      next: FinishedLotStatus;
+      beforeStatus: FinishedLotStatus;
+    };
+
+function formatDateOnlyUtc(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+export function computePackagingUnitsProduced(
+  counts: PackagingFinishedLotCounts,
+  product: { unitsPerDisplay: number | null; displaysPerCase: number | null },
+): number | null {
+  if (!product.unitsPerDisplay || !product.displaysPerCase) return null;
+  return (
+    counts.masterCases * product.displaysPerCase * product.unitsPerDisplay +
+    counts.displaysMade * product.unitsPerDisplay +
+    counts.looseCards
+  );
+}
+
+export function buildAutoFinishedLotDraft(
+  input: AutoFinishedLotDraftInput,
+): AutoFinishedLotDraftResult {
+  if (!input.productId) {
+    return {
+      ok: false,
+      reason: "MISSING_PRODUCT",
+      message: "Packaging completed, but no finished product is mapped to this bag.",
+    };
+  }
+  const finishedLotNumber = (
+    input.inventoryReceiptNumber ??
+    input.workflowReceiptNumber ??
+    ""
+  ).trim();
+  if (!finishedLotNumber) {
+    return {
+      ok: false,
+      reason: "MISSING_RECEIPT_NUMBER",
+      message:
+        "Packaging completed, but no source receipt number is linked to this bag.",
+    };
+  }
+  if (!input.defaultShelfLifeDays || input.defaultShelfLifeDays <= 0) {
+    return {
+      ok: false,
+      reason: "MISSING_SHELF_LIFE",
+      message:
+        "Packaging completed, but the product does not have default shelf life configured.",
+    };
+  }
+  const unitsProduced = computePackagingUnitsProduced(input.counts, input);
+  if (unitsProduced === null) {
+    return {
+      ok: false,
+      reason: "MISSING_PACKAGING_STRUCTURE",
+      message:
+        "Packaging completed, but the product packaging structure is incomplete.",
+    };
+  }
+  const expiresAt = addUtcDays(input.packagedAt, input.defaultShelfLifeDays);
+  return {
+    ok: true,
+    finishedLotNumber,
+    producedOn: formatDateOnlyUtc(input.packagedAt),
+    expiryDate: formatDateOnlyUtc(expiresAt),
+    expiresAt,
+    unitsProduced,
+    displaysProduced: input.counts.displaysMade,
+    casesProduced: input.counts.masterCases,
+  };
+}
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type FinishedLotAuditActor = {
@@ -970,12 +1123,19 @@ export async function runFinishedLotPostCommitEffects(
   for (const effect of effects) {
     if (effect.kind === "created") {
       try {
-        await runZohoAssemblyEnqueueAfterLotCreate({
-          finishedLotId: effect.finishedLotId,
-          actor: effect.actor,
-        });
+        if (isConsolidatedProductionOutputEnabled()) {
+          await runProductionOutputEnqueueAfterLotCreate({
+            finishedLotId: effect.finishedLotId,
+            actor: effect.actor,
+          });
+        } else {
+          await runZohoAssemblyEnqueueAfterLotCreate({
+            finishedLotId: effect.finishedLotId,
+            actor: effect.actor,
+          });
+        }
       } catch (err) {
-        console.error("[zoho.assembly.enqueue] post-create error:", err);
+        console.error("[zoho.production_output.enqueue] post-create error:", err);
       }
     } else if (effect.kind === "released") {
       runFinishedLotReleaseSideEffects(

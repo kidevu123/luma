@@ -14,6 +14,13 @@ import {
   formatWorkflowTimestamp,
   getPayloadRecord,
 } from "./workflow-table-helpers";
+import { SubmissionCorrectionForm } from "./_submission-correction-form";
+import { WorkflowRecoveryForm } from "./_workflow-recovery-form";
+import {
+  isCorrectableSubmissionEventType,
+  type CorrectableSubmissionEventType,
+} from "@/lib/production/submission-correction-fields";
+import { buildCorrectedSubmissionEventIds } from "@/lib/production/submission-correction-effective";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -51,6 +58,8 @@ export type WorkflowBagRow = {
   sealingSeconds: number | null;
   packagingSeconds: number | null;
   eventCount: number;
+  recoveryStatus: string | null;
+  excludedFromOutput: boolean | null;
 };
 
 // ── Stage pill colors (light theme) ──────────────────────────────
@@ -82,6 +91,7 @@ const EVENT_BADGES: Record<string, { label: string; cls: string }> = {
   REWORK_RECEIVED:           { label: "Rework rec",   cls: "bg-sky-50 text-sky-700 border-sky-200" },
   SCRAP_RECORDED:            { label: "Scrap",        cls: "bg-red-50 text-red-700 border-red-200" },
   SUBMISSION_CORRECTED:      { label: "Corrected",    cls: "bg-warn-50/80 text-warn-700 border-warn-200" },
+  WORKFLOW_RECOVERY:         { label: "Recovered",    cls: "bg-red-50 text-red-800 border-red-200" },
   FINISHED_GOODS_RELEASED:   { label: "Released",     cls: "bg-good-50/80 text-good-700 border-good-200" },
   BOTTLE_HANDPACK_COMPLETE:  { label: "Handpack",     cls: "bg-cyan-50 text-cyan-700 border-cyan-200" },
   BOTTLE_CAP_SEAL_COMPLETE:  { label: "Cap/seal",     cls: "bg-cyan-50 text-cyan-700 border-cyan-200" },
@@ -90,12 +100,27 @@ const EVENT_BADGES: Record<string, { label: string; cls: string }> = {
 
 const SUBMISSION_EVENT_TYPES = new Set([
   "BLISTER_COMPLETE",
+  "HANDPACK_BLISTER_COMPLETE",
   "SEALING_COMPLETE",
   "PACKAGING_COMPLETE",
   "BOTTLE_HANDPACK_COMPLETE",
   "BOTTLE_CAP_SEAL_COMPLETE",
   "BOTTLE_STICKER_COMPLETE",
 ]);
+
+function recoveryStatusLabel(status: string | null | undefined): string | null {
+  if (!status) return null;
+  switch (status) {
+    case "WRONG_ROUTE_RECOVERED":
+      return "Recovered / wrong route";
+    case "VOIDED_FROM_OUTPUT":
+      return "Voided from output";
+    case "EXTERNAL_RECOVERY_REQUIRED":
+      return "External recovery required";
+    default:
+      return status;
+  }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -164,6 +189,26 @@ function ExpandedContent({
   const submissionEvents = genealogy.events.filter((e) =>
     SUBMISSION_EVENT_TYPES.has(e.eventType),
   );
+  const correctedIds = buildCorrectedSubmissionEventIds(
+    genealogy.events.map((e) => ({
+      id: e.eventId,
+      eventType: e.eventType,
+      payload: getPayloadRecord(e.payload),
+    })),
+  );
+  const correctionEventsByTarget = new Map<string, typeof genealogy.events>();
+  for (const e of genealogy.events) {
+    if (e.eventType !== "SUBMISSION_CORRECTED") continue;
+    const p = getPayloadRecord(e.payload);
+    const target = p["corrected_event_id"];
+    if (typeof target !== "string") continue;
+    const list = correctionEventsByTarget.get(target) ?? [];
+    list.push(e);
+    correctionEventsByTarget.set(target, list);
+  }
+  const hasFinishedLot = genealogy.events.some(
+    (e) => e.eventType === "FINISHED_GOODS_RELEASED",
+  );
   const canShowMissingBlisterRepair =
     canAdminRepair &&
     bag.stage === "STARTED" &&
@@ -179,6 +224,21 @@ function ExpandedContent({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 bg-surface-2/40 border-t border-border/60">
+      {bag.excludedFromOutput || bag.recoveryStatus ? (
+        <div className="lg:col-span-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-900">
+          {recoveryStatusLabel(bag.recoveryStatus) ?? "Excluded from production output"}
+          {bag.excludedFromOutput ? " — not counted for pack-out or Zoho sync." : null}
+        </div>
+      ) : null}
+      {canAdminRepair ? (
+        <div className="lg:col-span-2">
+          <WorkflowRecoveryForm
+            workflowBagId={bag.id}
+            bagFinalized={Boolean(bag.isFinalized)}
+            hasFinishedLot={hasFinishedLot}
+          />
+        </div>
+      ) : null}
       {/* Timeline */}
       <div>
         <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle mb-2">
@@ -212,6 +272,11 @@ function ExpandedContent({
                         {e.eventType}
                       </span>
                     )}
+                    {correctedIds.has(e.eventId) ? (
+                      <span className="inline-flex items-center h-4 px-1 rounded border text-[9px] font-medium uppercase tracking-wider bg-warn-50/80 text-warn-700 border-warn-200">
+                        Corrected
+                      </span>
+                    ) : null}
                     {e.machineName && (
                       <span className="text-text-strong text-[10px]">{e.machineName}</span>
                     )}
@@ -235,6 +300,14 @@ function ExpandedContent({
                       </pre>
                     </details>
                   )}
+                  {(correctionEventsByTarget.get(e.eventId) ?? []).map((c) => (
+                    <div
+                      key={c.eventId}
+                      className="mt-1 ml-2 border-l border-warn-300 pl-2 text-[10px] text-warn-800"
+                    >
+                      Correction {formatWorkflowTimestamp(c.occurredAt)} — see payload on corrected event row
+                    </div>
+                  ))}
                 </li>
               );
             })}
@@ -285,6 +358,17 @@ function ExpandedContent({
                       </div>
                     ))}
                   </div>
+                  {correctedIds.has(e.eventId) ? (
+                    <p className="mt-1 text-[10px] font-medium text-warn-700">Corrected — see timeline for override</p>
+                  ) : null}
+                  {canAdminRepair && isCorrectableSubmissionEventType(e.eventType) ? (
+                    <SubmissionCorrectionForm
+                      eventId={e.eventId}
+                      eventType={e.eventType as CorrectableSubmissionEventType}
+                      payload={p}
+                      bagFinalized={Boolean(bag.isFinalized)}
+                    />
+                  ) : null}
                 </div>
               );
             })}

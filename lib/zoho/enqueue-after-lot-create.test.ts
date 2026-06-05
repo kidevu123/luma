@@ -23,6 +23,7 @@ const mockAudit = vi.mocked(writeAudit);
 describe("runZohoAssemblyEnqueueAfterLotCreate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("ZOHO_PRODUCTION_OUTPUT_ENABLED", "false");
   });
 
   it("enqueues ops and writes success audit when plan exists", async () => {

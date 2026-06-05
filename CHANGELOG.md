@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.108] — 2026-06-05
+
+### Added (ZOHO-PRODUCTION-OUTPUT-CONSOLIDATED-1)
+- **Consolidated Zoho commit:** One shared-service production-output request per finished lot via `POST /zoho/luma/production-output/commit`, with stable idempotency, outbox table, and admin UI at `/zoho-production-operations`.
+- **Feature flags:** `ZOHO_PRODUCTION_OUTPUT_ENABLED` and related env gates default off; legacy `zoho_assembly_ops` path remains unless explicitly enabled.
+
+### Added (WORKFLOW-SUBMISSION-CORRECTION-RECOVERY-1)
+- **Submission correction:** OWNER/ADMIN numeric corrections via shared `SUBMISSION_CORRECTION` service with metrics reprojection and downstream Zoho op voiding when safe.
+- **Wrong-route recovery:** New `WORKFLOW_RECOVERY` event and admin forms on `/workflow-submissions` for auditable bag rerouting without rewriting history.
+
 ## [0.4.107] — 2026-06-05
 
 ### Fixed (FINISHED-LOT-ISSUE-PREFILL-1)

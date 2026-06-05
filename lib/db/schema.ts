@@ -232,6 +232,7 @@ export const workflowEventTypeEnum = pgEnum("workflow_event_type", [
   "BAG_PICKED_UP",
   // Corrections + termination
   "SUBMISSION_CORRECTED",
+  "WORKFLOW_RECOVERY",
   "BAG_FINALIZED",
   // Token rotation audit
   "STATION_SCAN_TOKEN_ROTATED",
@@ -1364,8 +1365,8 @@ export const zohoProductionOutputOps = pgTable(
       onDelete: "set null",
     }),
     status: text("status").notNull().default("DRAFT"),
-    zohoPurchaseorderId: text("zoho_purchaseorder_id").notNull(),
-    zohoPurchaseorderLineItemId: text("zoho_purchaseorder_line_item_id").notNull(),
+    zohoPurchaseorderId: text("zoho_purchaseorder_id"),
+    zohoPurchaseorderLineItemId: text("zoho_purchaseorder_line_item_id"),
     zohoWarehouseId: text("zoho_warehouse_id"),
     zohoCompositeItemId: text("zoho_composite_item_id"),
     zohoDisplayCompositeItemId: text("zoho_display_composite_item_id"),
@@ -1417,6 +1418,12 @@ export const zohoProductionOutputOps = pgTable(
     commitResponse: jsonb("commit_response").$type<unknown>(),
     commitError: text("commit_error"),
     externalReferenceId: text("external_reference_id"),
+    /** Consolidated path mapping blockers when status = NEEDS_MAPPING. */
+    mappingBlockers: jsonb("mapping_blockers").$type<
+      Array<{ code: string; message: string }>
+    >(),
+    /** preview = admin preview flow; consolidated = auto floor lot path. */
+    payloadKind: text("payload_kind").notNull().default("preview"),
     voidReason: text("void_reason"),
     voidedByUserId: uuid("voided_by_user_id").references(() => users.id, {
       onDelete: "set null",
@@ -2597,6 +2604,10 @@ export const readBagState = pgTable(
     reworkPending: boolean("rework_pending").notNull().default(false),
     reworkReceived: boolean("rework_received").notNull().default(false),
     hasCorrection: boolean("has_correction").notNull().default(false),
+    /** Wrong-route recovery — set by WORKFLOW_RECOVERY projector. */
+    recoveryStatus: text("recovery_status"),
+    /** When true, bag must not count toward production output / Zoho sync. */
+    excludedFromOutput: boolean("excluded_from_output").notNull().default(false),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

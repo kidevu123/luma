@@ -4,6 +4,7 @@
 
 import { writeAudit } from "@/lib/db/audit";
 import { enqueueZohoAssemblyOpsForFinishedLot } from "./assembly-enqueue";
+import { isLegacyAssemblyEnqueueEnabled } from "./production-output-config";
 
 export type ZohoEnqueueAfterLotCreateInput = {
   finishedLotId: string;
@@ -24,6 +25,24 @@ export type ZohoEnqueueAfterLotCreateResult =
 export async function runZohoAssemblyEnqueueAfterLotCreate(
   input: ZohoEnqueueAfterLotCreateInput,
 ): Promise<ZohoEnqueueAfterLotCreateResult> {
+  if (!isLegacyAssemblyEnqueueEnabled()) {
+    await writeAudit({
+      actorId: input.actor.id,
+      actorRole: input.actor.role,
+      action: "zoho.assembly.enqueue_skipped",
+      targetType: "FinishedLot",
+      targetId: input.finishedLotId,
+      after: {
+        reason:
+          "Legacy assembly enqueue disabled — consolidated production-output path is active.",
+      },
+    });
+    return {
+      ok: false,
+      reason: "legacy assembly enqueue disabled (consolidated path active)",
+    };
+  }
+
   const { finishedLotId, actor } = input;
   try {
     const result = await enqueueZohoAssemblyOpsForFinishedLot(finishedLotId);

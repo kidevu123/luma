@@ -105,6 +105,8 @@ export default async function WorkflowSubmissionsPage({
       isPaused: readBagState.isPaused,
       operatorCode: readBagState.currentOperatorCode,
       lastEventAt: readBagState.lastEventAt,
+      recoveryStatus: readBagState.recoveryStatus,
+      excludedFromOutput: readBagState.excludedFromOutput,
       masterCases: readBagMetrics.masterCases,
       displaysMade: readBagMetrics.displaysMade,
       looseCards: readBagMetrics.looseCards,
@@ -148,6 +150,8 @@ export default async function WorkflowSubmissionsPage({
       readBagState.isPaused,
       readBagState.currentOperatorCode,
       readBagState.lastEventAt,
+      readBagState.recoveryStatus,
+      readBagState.excludedFromOutput,
       readBagMetrics.masterCases,
       readBagMetrics.displaysMade,
       readBagMetrics.looseCards,
@@ -229,6 +233,8 @@ export default async function WorkflowSubmissionsPage({
     sealingSeconds: r.sealingSeconds ?? null,
     packagingSeconds: r.packagingSeconds ?? null,
     eventCount: coerceEventCount(r.eventCount),
+    recoveryStatus: r.recoveryStatus ?? null,
+    excludedFromOutput: r.excludedFromOutput ?? null,
   };
   });
 
@@ -242,7 +248,7 @@ export default async function WorkflowSubmissionsPage({
     <div className="space-y-5">
       <PageHeader
         title="Workflow submissions"
-        description="Search all production bags — receipt grouping, stage, operator, counts, and inline event history. For blister counter segment review after a shift, use Shift review."
+        description="Search production bags and correct station submission counts or recover wrong-route workflows. QC Review remains for damage, rework, and scrap."
       />
 
       {/* Filter bar */}

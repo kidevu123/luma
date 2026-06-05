@@ -38,9 +38,11 @@ import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
 import { resolveAdminAccountability } from "@/lib/production/station-operator-session";
 import {
+  executeSubmissionJsonCorrection,
+} from "@/lib/production/submission-correction-service";
+import {
   validateQcPayload,
   type ScrapRecordedPayload,
-  type SubmissionCorrectedPayload,
   type ReworkSentPayload,
   type ReworkReceivedPayload,
   type QCReasonCode,
@@ -380,90 +382,13 @@ export async function submissionCorrectedAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
-  const input = parsed.data;
 
-  let originalValue: unknown;
-  let correctedValue: unknown;
-  try {
-    originalValue = JSON.parse(input.originalValueJson);
-    correctedValue = JSON.parse(input.correctedValueJson);
-  } catch {
-    return { error: "originalValue / correctedValue must be valid JSON." };
-  }
-
-  try {
-    const result = await db.transaction(async (tx) => {
-      // Preserve original accountable employee EXACTLY.
-      const linked = await loadLinkedEventAccountability(
-        tx,
-        input.correctedEventId,
-      );
-      if (!linked.ok) return { error: linked.reason } as ActionResult;
-
-      const payload: SubmissionCorrectedPayload = {
-        client_event_id: input.clientEventId,
-        corrected_event_id: input.correctedEventId,
-        corrected_event_type: input.correctedEventType,
-        original_value: originalValue,
-        corrected_value: correctedValue,
-        correction_reason: input.correctionReason as QCReasonCode,
-        preserves_original_accountable_employee: true,
-        notes: input.notes ?? null,
-        photo_keys: input.photoKeys ?? null,
-        accountable_employee_id: linked.accountableEmployeeId,
-        accountability_source:
-          (linked.accountabilitySource as SubmissionCorrectedPayload["accountability_source"]) ??
-          "SUPERVISOR_OVERRIDE",
-        accountable_employee_name_snapshot: linked.nameSnapshot ?? "",
-        entered_by_user_id: actor.id,
-      };
-      const v = validateQcPayload("SUBMISSION_CORRECTED", payload);
-      if (!v.ok) {
-        return {
-          error: v.issues[0]?.message ?? "Invalid QC payload.",
-        } as ActionResult;
-      }
-
-      await projectEvent(tx, {
-        workflowBagId: linked.workflowBagId,
-        eventType: "SUBMISSION_CORRECTED",
-        payload,
-        clientEventId: input.clientEventId,
-        accountableEmployeeId: linked.accountableEmployeeId,
-        accountabilitySource:
-          (linked.accountabilitySource as Parameters<
-            typeof projectEvent
-          >[1]["accountabilitySource"]) ?? "SUPERVISOR_OVERRIDE",
-        accountableEmployeeNameSnapshot: linked.nameSnapshot,
-        enteredByUserId: actor.id,
-      });
-      await writeAudit(
-        {
-          actorId: actor.id,
-          actorRole: actor.role,
-          action: "admin.qc.submission_corrected",
-          targetType: "WorkflowBag",
-          targetId: linked.workflowBagId,
-          after: {
-            corrected_event_id: input.correctedEventId,
-            corrected_event_type: input.correctedEventType,
-            correction_reason: input.correctionReason,
-            preserved_accountable_employee_id: linked.accountableEmployeeId,
-            entered_by_user_id: actor.id,
-          },
-        },
-        tx,
-      );
-      return { ok: true } as ActionResult;
-    });
-
-    revalidatePath("/qc-review");
-    return result;
-  } catch (err) {
-    return {
-      error: err instanceof Error ? err.message : "Server error.",
-    };
-  }
+  const result = await executeSubmissionJsonCorrection(actor, {
+    ...parsed.data,
+    photoKeys: parsed.data.photoKeys ?? null,
+  });
+  if ("error" in result) return { error: result.error };
+  return { ok: true };
 }
 
 // ─── QC-4: admin rework conversions ────────────────────────────────────

@@ -1,17 +1,36 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { db } from "@/lib/db";
 import {
+  finishedLots,
+  products,
+  qrCards,
   readBagState,
   stations,
+  workflowBags,
   workflowEvents,
+  zohoProductionOutputOps,
 } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
+import {
+  executeSubmissionFieldCorrection,
+  fieldCorrectionSchema,
+  revalidateSubmissionCorrectionPaths,
+} from "@/lib/production/submission-correction-service";
+import {
+  buildRouteSummary,
+  evaluateWorkflowRecoveryEligibility,
+  WORKFLOW_RECOVERY_EVENT_TYPE,
+  workflowRecoveryPayloadSchema,
+  type WorkflowRecoveryKind,
+} from "@/lib/production/workflow-recovery";
+import { loadZohoOutputCommittedForWorkflowBag } from "@/lib/production/correction-downstream-effects";
 
 const missingBlisterCloseoutSchema = z.object({
   workflowBagId: z.string().uuid(),
@@ -24,6 +43,16 @@ const missingBlisterCloseoutSchema = z.object({
 });
 
 type RepairResult = { ok?: true; error?: string };
+
+type CorrectionActionResult = { ok?: true; error?: string; warnings?: string[] };
+
+const recoverySchema = z.object({
+  workflowBagId: z.string().uuid(),
+  recoveryKind: z.enum(["WRONG_ROUTE", "WRONG_PRODUCT", "WRONG_QR_ASSIGNMENT"]),
+  reason: z.string().trim().min(10).max(500),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  confirm: z.literal("true"),
+});
 
 async function resolveSingleBlisterStation(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -210,5 +239,224 @@ export async function adminBackfillMissingBlisterCloseoutAction(
 
   revalidatePath("/workflow-submissions");
   revalidatePath("/floor-board");
+  return { ok: true };
+}
+
+export async function workflowSubmissionCorrectAction(
+  _prev: CorrectionActionResult | null,
+  formData: FormData,
+): Promise<CorrectionActionResult> {
+  const actor = await requireAdmin();
+  const parsed = fieldCorrectionSchema.safeParse({
+    clientEventId: formData.get("clientEventId"),
+    correctedEventId: formData.get("correctedEventId"),
+    correctionReason: formData.get("correctionReason"),
+    notes: formData.get("notes") || null,
+    fieldValuesJson: formData.get("fieldValuesJson"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid correction." };
+  }
+  const result = await executeSubmissionFieldCorrection(actor, parsed.data);
+  if ("error" in result) return { error: result.error };
+  return { ok: true, warnings: result.warnings };
+}
+
+export async function workflowRecoveryAction(
+  _prev: CorrectionActionResult | null,
+  formData: FormData,
+): Promise<CorrectionActionResult> {
+  const actor = await requireAdmin();
+  const parsed = recoverySchema.safeParse({
+    workflowBagId: formData.get("workflowBagId"),
+    recoveryKind: formData.get("recoveryKind"),
+    reason: formData.get("reason"),
+    notes: formData.get("notes") || null,
+    confirm: formData.get("confirm"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid recovery request." };
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      const [state] = await tx
+        .select({
+          stage: readBagState.stage,
+          isFinalized: readBagState.isFinalized,
+          recoveryStatus: readBagState.recoveryStatus,
+          excludedFromOutput: readBagState.excludedFromOutput,
+        })
+        .from(readBagState)
+        .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
+      if (!state) throw new Error("Bag state not found.");
+
+      const [bag] = await tx
+        .select({
+          productId: workflowBags.productId,
+          productName: products.name,
+          productKind: products.kind,
+        })
+        .from(workflowBags)
+        .leftJoin(products, eq(products.id, workflowBags.productId))
+        .where(eq(workflowBags.id, parsed.data.workflowBagId));
+      if (!bag) throw new Error("Workflow bag not found.");
+
+      const events = await tx
+        .select({ eventType: workflowEvents.eventType })
+        .from(workflowEvents)
+        .where(eq(workflowEvents.workflowBagId, parsed.data.workflowBagId))
+        .orderBy(desc(workflowEvents.occurredAt))
+        .limit(20);
+
+      const [lot] = await tx
+        .select({ id: finishedLots.id, status: finishedLots.status })
+        .from(finishedLots)
+        .where(eq(finishedLots.workflowBagId, parsed.data.workflowBagId))
+        .limit(1);
+
+      const zohoCommitted = await loadZohoOutputCommittedForWorkflowBag(
+        tx,
+        parsed.data.workflowBagId,
+      );
+
+      const eligibility = evaluateWorkflowRecoveryEligibility({
+        alreadyRecovered: Boolean(state.excludedFromOutput || state.recoveryStatus),
+        zohoOutputCommitted: zohoCommitted,
+        isFinalized: state.isFinalized,
+        finishedLotExists: Boolean(lot),
+      });
+      if (!eligibility.eligible) {
+        throw new Error(eligibility.blockers[0]?.message ?? "Recovery blocked.");
+      }
+
+      const resetAllowed = eligibility.resetAllowed;
+      const routeSummary = buildRouteSummary({
+        productName: bag.productName,
+        productKind: bag.productKind,
+        stage: state.stage,
+        eventTypes: events.map((e) => e.eventType),
+      });
+
+      let finishedLotAction: "NONE" | "ON_HOLD" | "EXTERNAL_RECOVERY_REQUIRED" =
+        "NONE";
+      let zohoOutputAction: "NONE" | "VOID_UNCOMMITTED" | "BLOCKED_COMMITTED" =
+        "NONE";
+      if (zohoCommitted) {
+        finishedLotAction = "EXTERNAL_RECOVERY_REQUIRED";
+        zohoOutputAction = "BLOCKED_COMMITTED";
+      } else if (lot) {
+        finishedLotAction = "ON_HOLD";
+        zohoOutputAction = "VOID_UNCOMMITTED";
+      }
+
+      const payloadInput = {
+        client_event_id: randomUUID(),
+        recovery_kind: parsed.data.recoveryKind as WorkflowRecoveryKind,
+        reason: parsed.data.reason,
+        notes: parsed.data.notes ?? null,
+        entered_by_user_id: actor.id,
+        original_product_id: bag.productId,
+        intended_product_id: null,
+        original_route_summary: routeSummary,
+        source_inventory_released: resetAllowed,
+        finished_lot_existed: Boolean(lot),
+        finished_lot_id: lot?.id ?? null,
+        finished_lot_action: finishedLotAction,
+        zoho_output_action: zohoOutputAction,
+        reset_allowed: resetAllowed,
+        reset_performed: resetAllowed,
+      };
+      const validated = workflowRecoveryPayloadSchema.safeParse(payloadInput);
+      if (!validated.success) {
+        throw new Error(validated.error.issues[0]?.message ?? "Invalid recovery payload.");
+      }
+
+      await projectEvent(tx, {
+        workflowBagId: parsed.data.workflowBagId,
+        eventType: WORKFLOW_RECOVERY_EVENT_TYPE,
+        payload: validated.data,
+        clientEventId: validated.data.client_event_id,
+        enteredByUserId: actor.id,
+        accountabilitySource: "SUPERVISOR_OVERRIDE",
+        accountableEmployeeNameSnapshot: actor.email,
+      });
+
+      if (resetAllowed) {
+        await tx
+          .update(qrCards)
+          .set({ status: "IDLE", assignedWorkflowBagId: null })
+          .where(eq(qrCards.assignedWorkflowBagId, parsed.data.workflowBagId));
+
+        await projectEvent(tx, {
+          workflowBagId: parsed.data.workflowBagId,
+          eventType: "CARD_FORCE_RELEASED",
+          payload: {
+            recovery_kind: parsed.data.recoveryKind,
+            reason: parsed.data.reason,
+            admin_recovery: true,
+          },
+          clientEventId: `workflow-recovery-release:${parsed.data.workflowBagId}`,
+          enteredByUserId: actor.id,
+          accountabilitySource: "SUPERVISOR_OVERRIDE",
+          accountableEmployeeNameSnapshot: actor.email,
+        });
+      }
+
+      if (lot && !zohoCommitted && finishedLotAction === "ON_HOLD") {
+        await tx
+          .update(finishedLots)
+          .set({ status: "ON_HOLD" })
+          .where(eq(finishedLots.id, lot.id));
+
+        const ops = await tx
+          .select({ id: zohoProductionOutputOps.id })
+          .from(zohoProductionOutputOps)
+          .where(
+            and(
+              eq(zohoProductionOutputOps.finishedLotId, lot.id),
+              isNull(zohoProductionOutputOps.voidedAt),
+            ),
+          );
+        for (const op of ops) {
+          await tx
+            .update(zohoProductionOutputOps)
+            .set({
+              status: "VOIDED",
+              voidedAt: new Date(),
+              voidedByUserId: actor.id,
+              voidReason: "Voided after wrong-route recovery.",
+              updatedAt: new Date(),
+            })
+            .where(eq(zohoProductionOutputOps.id, op.id));
+        }
+      }
+
+      await writeAudit(
+        {
+          actorId: actor.id,
+          actorRole: actor.role,
+          action: "workflow_submissions.recovery",
+          targetType: "WorkflowBag",
+          targetId: parsed.data.workflowBagId,
+          after: {
+            recovery_kind: parsed.data.recoveryKind,
+            reset_allowed: resetAllowed,
+            zoho_committed: zohoCommitted,
+            finished_lot_id: lot?.id ?? null,
+          },
+        },
+        tx,
+      );
+    });
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Recovery failed.",
+    };
+  }
+
+  revalidateSubmissionCorrectionPaths();
+  revalidatePath("/packaging-output");
+  revalidatePath("/zoho-production-operations");
   return { ok: true };
 }

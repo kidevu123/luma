@@ -5,6 +5,8 @@ export type ZohoProductionOutputOpStatus =
   | "PREVIEWED"
   | "APPROVED"
   | "VOIDED"
+  | "READY"
+  | "NEEDS_MAPPING"
   | "QUEUED"
   | "COMMITTING"
   | "COMMITTED"

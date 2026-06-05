@@ -37,6 +37,16 @@ const captured: Captured = {
   execQueue: [],
 };
 
+function emptySelectResult(): Promise<unknown[]> & {
+  limit: () => Promise<unknown[]>;
+} {
+  const p = Promise.resolve([]) as Promise<unknown[]> & {
+    limit: () => Promise<unknown[]>;
+  };
+  p.limit = () => Promise.resolve([]);
+  return p;
+}
+
 function buildTx() {
   return {
     execute: async (..._args: unknown[]) => {
@@ -45,6 +55,11 @@ function buildTx() {
     },
     select: () => ({
       from: () => ({
+        where: () => emptySelectResult(),
+      }),
+    }),
+    update: () => ({
+      set: () => ({
         where: () => Promise.resolve([]),
       }),
     }),
@@ -542,6 +557,8 @@ describe("submissionCorrectedAction", () => {
         nameSnapshot: "Alice Operator",
       },
     ]);
+    captured.execQueue.push([]); // zoho committed check
+    captured.execQueue.push([]); // finished lot exists check
 
     const r = await submissionCorrectedAction(
       fd({

@@ -66,6 +66,8 @@ export function extractSubmissionLines(
   switch (eventType) {
     case "BLISTER_COMPLETE":
       return [{ label: "Blistered", value: count("count_total", "countTotal") }];
+    case "HANDPACK_BLISTER_COMPLETE":
+      return [{ label: "Handpack blistered", value: count("count_total", "countTotal") }];
     case "SEALING_COMPLETE": {
       if (payload.partial_close === true) {
         return [
