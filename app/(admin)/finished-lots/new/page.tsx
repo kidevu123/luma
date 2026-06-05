@@ -46,7 +46,10 @@ export default async function NewFinishedLotPage({
         }))}
         finalizedBags={finalizedBags.map((r) => ({
           id: r.bag.id,
-          finalizedAt: r.bag.finalizedAt as unknown as string | null,
+          finalizedAt:
+            r.bag.finalizedAt instanceof Date
+              ? r.bag.finalizedAt.toISOString()
+              : r.bag.finalizedAt ?? null,
           productId: r.bag.productId ?? null,
           productName: r.product?.name ?? null,
           receiptNumber: r.receiptNumber ?? null,

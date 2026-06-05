@@ -39,6 +39,21 @@ export function formatDateEst(
   }).format(d);
 }
 
+/** `<input type="date">` value in plant timezone (YYYY-MM-DD). */
+export function toDateInputValue(
+  value: Date | string | number | null | undefined,
+): string | null {
+  if (value == null) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: LUMA_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
 /** Integer grams from DB → display kg (rolls are received in kg). */
 export function formatWeightKg(
   grams: number | null | undefined,

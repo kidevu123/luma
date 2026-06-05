@@ -1,6 +1,6 @@
 "use client";
 
-import { formatDateTimeEst } from "@/lib/ui/luma-display";
+import { formatDateTimeEst, toDateInputValue } from "@/lib/ui/luma-display";
 
 import * as React from "react";
 import { Save, AlertCircle } from "lucide-react";
@@ -19,7 +19,7 @@ type Product = {
 
 type FinalizedBag = {
   id: string;
-  finalizedAt: string | null;
+  finalizedAt: Date | string | null;
   productId: string | null;
   productName: string | null;
   receiptNumber: string | null;
@@ -52,7 +52,7 @@ export function IssueLotForm({
   const [productId, setProductId] = React.useState(initialBag?.productId ?? "");
   const [lotNumber, setLotNumber] = React.useState(initialBag?.receiptNumber ?? "");
   const [producedOn, setProducedOn] = React.useState(
-    initialBag?.finalizedAt ? initialBag.finalizedAt.slice(0, 10) : today,
+    toDateInputValue(initialBag?.finalizedAt) ?? today,
   );
   const [expiryDate, setExpiryDate] = React.useState("");
   const [units, setUnits] = React.useState(initialBag?.unitsYielded ?? 0);
@@ -77,7 +77,8 @@ export function IssueLotForm({
     const b = finalizedBags.find((x) => x.id === bagId);
     if (!b) return;
     if (b.productId) setProductId(b.productId);
-    if (b.finalizedAt) setProducedOn(b.finalizedAt.slice(0, 10));
+    const produced = toDateInputValue(b.finalizedAt);
+    if (produced) setProducedOn(produced);
     setUnits(b.unitsYielded ?? 0);
     setDisplays(b.displaysMade ?? 0);
     setCases(b.masterCases ?? 0);

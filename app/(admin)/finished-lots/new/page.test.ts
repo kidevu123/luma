@@ -14,12 +14,22 @@ describe("finished lot issue prefill", () => {
     expect(pageSrc).toContain("initialBagId={requestedBagId ?? null}");
   });
 
+  it("serializes finalizedAt to ISO string for the client form", () => {
+    expect(pageSrc).toContain("r.bag.finalizedAt instanceof Date");
+    expect(pageSrc).toContain("toISOString()");
+  });
+
   it("passes bag receipt and production output metrics into the form", () => {
     expect(pageSrc).toContain("receiptNumber: r.receiptNumber ?? null");
     expect(pageSrc).toContain("masterCases: r.metrics?.masterCases ?? null");
     expect(pageSrc).toContain("displaysMade: r.metrics?.displaysMade ?? null");
     expect(pageSrc).toContain("looseCards: r.metrics?.looseCards ?? null");
     expect(pageSrc).toContain("unitsYielded: r.metrics?.unitsYielded ?? null");
+  });
+
+  it("prefills produced-on from finalizedAt without calling slice directly", () => {
+    expect(formSrc).toContain("toDateInputValue");
+    expect(formSrc).not.toMatch(/finalizedAt\.slice/);
   });
 
   it("prefills lot number and counts from the selected bag", () => {

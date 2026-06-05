@@ -5,6 +5,7 @@ import {
   formatKgPerCycle,
   formatWeightKg,
   LUMA_TIMEZONE,
+  toDateInputValue,
 } from "./luma-display";
 
 describe("luma-display", () => {
@@ -30,5 +31,13 @@ describe("luma-display", () => {
 
   it("formatBlistersPerKg", () => {
     expect(formatBlistersPerKg(0.625)).toBe("1600.0 blisters/kg");
+  });
+
+  it("toDateInputValue accepts Date objects for date inputs", () => {
+    expect(toDateInputValue(new Date("2026-06-04T20:12:00.000Z"))).toMatch(
+      /^2026-06-0[34]$/,
+    );
+    expect(toDateInputValue("2026-06-04T20:12:00.000Z")).toBe("2026-06-04");
+    expect(toDateInputValue(null)).toBeNull();
   });
 });
