@@ -16,6 +16,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { sql } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
+import { ensureLiveReadModelCoverage } from "@/lib/projector/live-read-models";
 import { rebuildDailyThroughput } from "@/lib/projector/daily-throughput";
 import { rebuildQueueState } from "@/lib/projector/queue-state";
 import { rebuildSkuDaily } from "@/lib/projector/sku-daily";
@@ -42,6 +43,8 @@ async function main() {
   );
 
   const tables = [
+    "read_station_live",
+    "read_bag_state",
     "read_daily_throughput",
     "read_queue_state",
     "read_sku_daily",
@@ -76,6 +79,11 @@ async function main() {
   }
 
   await db.transaction(async (tx) => {
+    console.log("[rebuild-read-models] ensuring live read-model coverage…");
+    const liveCoverage = await ensureLiveReadModelCoverage(tx);
+    console.log(
+      `[rebuild-read-models]   inserted station_live=${liveCoverage.stationRowsInserted} bag_state=${liveCoverage.bagStateRowsInserted}`,
+    );
     console.log("[rebuild-read-models] rebuilding read_daily_throughput…");
     await rebuildDailyThroughput(tx);
     console.log("[rebuild-read-models] rebuilding read_queue_state…");
