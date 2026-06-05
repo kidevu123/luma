@@ -259,7 +259,10 @@ export async function workflowSubmissionCorrectAction(
   }
   const result = await executeSubmissionFieldCorrection(actor, parsed.data);
   if ("error" in result) return { error: result.error };
-  return { ok: true, warnings: result.warnings };
+  return {
+    ok: true,
+    ...(result.warnings ? { warnings: result.warnings } : {}),
+  };
 }
 
 export async function workflowRecoveryAction(

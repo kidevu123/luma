@@ -231,7 +231,10 @@ export async function executeSubmissionFieldCorrection(
 
     if ("error" in result) return result;
     revalidateSubmissionCorrectionPaths(finishedLotId);
-    return { ok: true, warnings: result.warnings };
+    return {
+      ok: true,
+      ...(result.warnings ? { warnings: result.warnings } : {}),
+    };
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Server error.",
