@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 
 /** Shared visual language for the live floor board (industrial OLED dark). */
@@ -19,20 +20,63 @@ export const floorTokens = {
   danger: "text-red-400",
 } as const;
 
-export function FloorLiveIndicator({ className }: { className?: string }) {
+export function FloorLiveIndicator({
+  className,
+  status = "live",
+  lastUpdatedAt,
+}: {
+  className?: string;
+  status?: "connecting" | "live" | "polling" | "stale";
+  lastUpdatedAt?: number | null;
+}) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (lastUpdatedAt == null) return;
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [lastUpdatedAt]);
+
+  const ageSec =
+    lastUpdatedAt != null
+      ? Math.max(0, Math.floor((Date.now() - lastUpdatedAt) / 1000))
+      : null;
+
+  const dotClass =
+    status === "live"
+      ? "bg-emerald-500"
+      : status === "connecting"
+        ? "bg-amber-400"
+        : status === "stale"
+          ? "bg-red-400"
+          : "bg-sky-400";
+
+  const label =
+    status === "live"
+      ? ageSec != null
+        ? `Live · ${ageSec}s`
+        : "Live"
+      : status === "connecting"
+        ? "Connecting…"
+        : status === "stale"
+          ? "Stale · refresh"
+          : "Polling 20s";
+
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400/90",
+        "inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider",
+        status === "stale" ? "text-red-400/90" : "text-emerald-400/90",
         className,
       )}
-      aria-label="Live data stream"
+      aria-label={`Data stream ${status}`}
     >
       <span className="relative flex h-2 w-2">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/40 opacity-75" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+        {status === "live" && (
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/40 opacity-75" />
+        )}
+        <span className={cn("relative inline-flex h-2 w-2 rounded-full", dotClass)} />
       </span>
-      Live
+      {label}
     </span>
   );
 }

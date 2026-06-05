@@ -11,7 +11,6 @@ import {
   BOTTLE_PRODUCTION_LINE,
   buildLineStepGroupsForLine,
   CARD_PRODUCTION_LINE,
-  lineMismatchInfo,
   secondaryLineRows,
 } from "@/lib/floor-command/production-lines";
 import type { StationCommandRow } from "@/lib/production/floor-manager-snapshot-types";
@@ -23,7 +22,6 @@ type Props = {
   displayLine: ProductionLineDefinition;
   fillViewport?: boolean;
   dense?: boolean;
-  onSwitchLine?: (lineId: string) => void;
 };
 
 type CardState = "running" | "warning" | "paused" | "idle" | "down";
@@ -471,44 +469,16 @@ function SecondaryLineStrip({
   );
 }
 
-function LineMismatchBanner({
-  info,
-  onSwitchLine,
-}: {
-  info: NonNullable<ReturnType<typeof lineMismatchInfo>>;
-  onSwitchLine: (lineId: string) => void;
-}) {
-  return (
-    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-500/30 bg-amber-500/[0.06] px-4 py-2">
-      <AlertTriangle size={14} className="shrink-0 text-amber-400" />
-      <p className="min-w-0 flex-1 text-[11px] text-amber-100">
-        Mixed lines · showing{" "}
-        <span className="font-semibold">{info.primary.shortName}</span> (
-        {info.cardCount} card · {info.bottleCount} bottle stations)
-      </p>
-      <button
-        type="button"
-        onClick={() => onSwitchLine(info.secondary.id)}
-        className="shrink-0 rounded border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-amber-200 hover:bg-amber-500/20"
-      >
-        View {info.secondary.shortName}
-      </button>
-    </div>
-  );
-}
-
 export function MachineCommandGrid({
   rows,
   displayLine,
   fillViewport = false,
   dense = false,
-  onSwitchLine,
 }: Props) {
   const groups = useMemo(
     () => buildLineStepGroupsForLine(displayLine, rows),
     [displayLine, rows],
   );
-  const mismatch = useMemo(() => lineMismatchInfo(rows), [rows]);
   const secondaryRows = useMemo(
     () => secondaryLineRows(rows, displayLine),
     [rows, displayLine],
@@ -536,10 +506,6 @@ export function MachineCommandGrid({
         fillViewport ? "h-full flex-1" : "flex-1",
       )}
     >
-      {mismatch?.hasMismatch && onSwitchLine && (
-        <LineMismatchBanner info={mismatch} onSwitchLine={onSwitchLine} />
-      )}
-
       <LineFlowGrid groups={groups} {...(dense ? { dense: true } : {})} />
 
       {secondaryRows.length > 0 && dense && (

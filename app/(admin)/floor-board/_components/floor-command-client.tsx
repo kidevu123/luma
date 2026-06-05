@@ -28,6 +28,7 @@ import { TvRotationPanel } from "./tv-rotation-panel";
 import { CommandCenterView } from "./command-center-view";
 import { OperationsBriefingPanel } from "./operations-briefing-panel";
 import type { PauseReasonRow } from "../_loaders";
+import { useFloorLiveRefresh } from "../_hooks/use-floor-live-refresh";
 
 type Props = {
   mode: FloorBoardMode;
@@ -75,15 +76,7 @@ export function FloorCommandClient({
     setShowBriefing(false);
   }, [mode, isManager]);
 
-  useEffect(() => {
-    const es = new EventSource("/api/floor-board/stream");
-    const handler = () => router.refresh();
-    es.addEventListener("floor", handler);
-    return () => {
-      es.removeEventListener("floor", handler);
-      es.close();
-    };
-  }, [router]);
+  const { status: liveStatus, lastUpdatedAt } = useFloorLiveRefresh();
 
   const saveLayout = useCallback((next: WidgetLayout[]) => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -186,6 +179,9 @@ export function FloorCommandClient({
               widgetData={widgetData}
               pauseReasons={pauseReasons}
               onModeChange={setMode}
+              onOpenBriefing={() => setShowBriefing(true)}
+              liveStatus={liveStatus}
+              lastUpdatedAt={lastUpdatedAt}
               enlarged={isTv}
             />
           </div>

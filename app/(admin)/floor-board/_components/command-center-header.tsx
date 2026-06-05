@@ -9,6 +9,7 @@ import {
 } from "@/lib/floor-command/production-lines";
 import { partitionWip } from "@/lib/floor-command/wip-partition";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
+import type { FloorLiveStatus } from "@/app/(admin)/floor-board/_hooks/use-floor-live-refresh";
 import { FloorLiveIndicator } from "./floor-board-ui";
 
 const MODES: Array<{
@@ -28,6 +29,8 @@ type Props = {
   showControls?: boolean;
   snapshot?: FloorManagerSnapshot;
   displayLine?: ProductionLineDefinition;
+  liveStatus?: FloorLiveStatus;
+  lastUpdatedAt?: number | null;
 };
 
 export function CommandCenterHeader({
@@ -36,6 +39,8 @@ export function CommandCenterHeader({
   showControls = true,
   snapshot,
   displayLine,
+  liveStatus = "live",
+  lastUpdatedAt = null,
 }: Props) {
   const now = new Date();
   const dateStr = now.toLocaleDateString(undefined, {
@@ -83,7 +88,10 @@ export function CommandCenterHeader({
           <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
             Luma
           </span>
-          <FloorLiveIndicator />
+          <FloorLiveIndicator
+            status={liveStatus}
+            lastUpdatedAt={lastUpdatedAt}
+          />
           <span className="hidden text-[10px] text-slate-600 sm:inline">·</span>
           <span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-amber-400/80 sm:inline">
             {displayLine
