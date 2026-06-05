@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { requireSession } from "@/lib/auth-guards";
-import { listBatches, batchStatusCounts } from "@/lib/db/queries/batches";
+import { listBatches, batchStatusCounts, type BatchListFilter } from "@/lib/db/queries/batches";
 import { listTabletTypes } from "@/lib/db/queries/tablet-types";
 import { listPackagingMaterials } from "@/lib/db/queries/packaging";
 import { formatDateTimeEst } from "@/lib/ui/luma-display";
@@ -23,7 +23,9 @@ type FilterKey =
   | "EXPIRED"
   | "DEPLETED";
 
-const FILTERS: ReadonlyArray<[FilterKey, string, string | undefined]> = [
+type BatchStatus = NonNullable<BatchListFilter["status"]>;
+
+const FILTERS: ReadonlyArray<[FilterKey, string, BatchStatus | undefined]> = [
   ["", "All", undefined],
   ["AVAILABLE", "Available", "RELEASED"],
   ["BLOCKED", "Blocked / Needs review", "QUARANTINE"],
@@ -35,11 +37,12 @@ const FILTERS: ReadonlyArray<[FilterKey, string, string | undefined]> = [
 
 const VALID_FILTER_KEYS = new Set(FILTERS.map(([k]) => k));
 
-function resolveFilter(raw?: string): { key: FilterKey; status?: typeof FILTERS[number][2] } {
+function resolveFilter(raw?: string): { key: FilterKey; status?: BatchStatus } {
   const key = VALID_FILTER_KEYS.has(raw as FilterKey) ? (raw as FilterKey) : "";
   const match = FILTERS.find(([k]) => k === key);
   const status = match?.[2];
-  return status ? { key, status } : { key };
+  if (!status) return { key };
+  return { key, status };
 }
 
 export default async function BatchesPage({
@@ -54,7 +57,10 @@ export default async function BatchesPage({
     params.kind === "TABLET" || params.kind === "PACKAGING" ? params.kind : undefined;
 
   const [rows, counts, tabletTypes, materials] = await Promise.all([
-    listBatches({ ...(status ? { status } : {}), ...(kind ? { kind } : {}) }),
+    listBatches({
+      ...(status !== undefined ? { status } : {}),
+      ...(kind !== undefined ? { kind } : {}),
+    }),
     batchStatusCounts(),
     listTabletTypes(),
     listPackagingMaterials(),
