@@ -233,7 +233,7 @@ export async function executeSubmissionFieldCorrection(
     revalidateSubmissionCorrectionPaths(finishedLotId);
     return {
       ok: true,
-      ...(result.warnings ? { warnings: result.warnings } : {}),
+      ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
     };
   } catch (err) {
     return {

@@ -261,7 +261,7 @@ export async function workflowSubmissionCorrectAction(
   if ("error" in result) return { error: result.error };
   return {
     ok: true,
-    ...(result.warnings ? { warnings: result.warnings } : {}),
+    ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
   };
 }
 
