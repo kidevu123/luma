@@ -26,4 +26,10 @@ describe("packaging-output page receipt wiring", () => {
     expect(pageSrc).toContain("Finalized — needs lot review");
     expect(pageSrc).toContain("Review / issue lot");
   });
+
+  it("links each review action to the selected workflow bag", () => {
+    expect(pageSrc).toContain(
+      'href={`/finished-lots/new?bagId=${encodeURIComponent(bag.id)}`}',
+    );
+  });
 });

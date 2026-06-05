@@ -8,8 +8,16 @@ import { IssueLotForm } from "./issue-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewFinishedLotPage() {
+export default async function NewFinishedLotPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ bagId?: string | string[] }>;
+}) {
   await requireLead();
+  const params = await searchParams;
+  const requestedBagId = Array.isArray(params?.bagId)
+    ? params?.bagId[0]
+    : params?.bagId;
   const [products, finalizedBags] = await Promise.all([
     listProducts(),
     listFinalizedBagsWithoutLot(),
@@ -41,7 +49,13 @@ export default async function NewFinishedLotPage() {
           finalizedAt: r.bag.finalizedAt as unknown as string | null,
           productId: r.bag.productId ?? null,
           productName: r.product?.name ?? null,
+          receiptNumber: r.receiptNumber ?? null,
+          masterCases: r.metrics?.masterCases ?? null,
+          displaysMade: r.metrics?.displaysMade ?? null,
+          looseCards: r.metrics?.looseCards ?? null,
+          unitsYielded: r.metrics?.unitsYielded ?? null,
         }))}
+        initialBagId={requestedBagId ?? null}
       />
     </div>
   );

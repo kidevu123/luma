@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.107] — 2026-06-05
+
+### Fixed (FINISHED-LOT-ISSUE-PREFILL-1)
+- **Production output queue:** `Review / issue lot` now opens the finished-lot issue form for the selected workflow bag instead of a blank manual lot form.
+- **Issue lot prefill:** The form preloads the selected bag's receipt number, product, finalized date, cases, displays, loose count, and unit output from canonical read models while keeping the admin able to review/edit before issuing.
+
 ## [0.4.106] — 2026-06-05
 
 ### Added (AUTO-FINISHED-LOT-RELEASE-1)

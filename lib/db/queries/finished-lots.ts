@@ -11,6 +11,7 @@ import {
   workflowBags,
   workflowEvents,
   inventoryBags,
+  readBagMetrics,
   rawBagAllocationSessions,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
@@ -217,9 +218,18 @@ export async function listFinalizedBagsWithoutLot() {
     .select({
       bag: workflowBags,
       product: products,
+      metrics: {
+        masterCases: readBagMetrics.masterCases,
+        displaysMade: readBagMetrics.displaysMade,
+        looseCards: readBagMetrics.looseCards,
+        unitsYielded: readBagMetrics.unitsYielded,
+      },
+      receiptNumber: sql<string | null>`COALESCE(${inventoryBags.internalReceiptNumber}, ${workflowBags.receiptNumber})`,
     })
     .from(workflowBags)
+    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
     .leftJoin(products, eq(workflowBags.productId, products.id))
+    .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
     .leftJoin(finishedLots, eq(finishedLots.workflowBagId, workflowBags.id))
     .where(and(sql`${workflowBags.finalizedAt} IS NOT NULL`, isNull(finishedLots.id)))
     .orderBy(desc(workflowBags.finalizedAt));

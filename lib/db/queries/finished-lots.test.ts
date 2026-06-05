@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { resolveFinishedLotTabletQty } from "./finished-lots";
+
+const querySrc = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "finished-lots.ts"),
+  "utf8",
+);
 
 describe("resolveFinishedLotTabletQty", () => {
   it("returns consumedQty from a closed allocation session", () => {
@@ -42,5 +50,20 @@ describe("resolveFinishedLotTabletQty", () => {
     expect(() =>
       resolveFinishedLotTabletQty({ id: "sess-open-1" }, { consumedQty: 3000 }, 10000),
     ).toThrow("open allocation session");
+  });
+});
+
+describe("listFinalizedBagsWithoutLot", () => {
+  it("loads canonical receipt and packaging output metrics for issue-lot prefill", () => {
+    expect(querySrc).toContain(
+      "receiptNumber: sql<string | null>`COALESCE(${inventoryBags.internalReceiptNumber}, ${workflowBags.receiptNumber})`",
+    );
+    expect(querySrc).toContain("masterCases: readBagMetrics.masterCases");
+    expect(querySrc).toContain("displaysMade: readBagMetrics.displaysMade");
+    expect(querySrc).toContain("looseCards: readBagMetrics.looseCards");
+    expect(querySrc).toContain("unitsYielded: readBagMetrics.unitsYielded");
+    expect(querySrc).toContain(
+      "leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))",
+    );
   });
 });

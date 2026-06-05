@@ -22,6 +22,11 @@ type FinalizedBag = {
   finalizedAt: string | null;
   productId: string | null;
   productName: string | null;
+  receiptNumber: string | null;
+  masterCases: number | null;
+  displaysMade: number | null;
+  looseCards: number | null;
+  unitsYielded: number | null;
 };
 
 // Single-screen issue flow. Pick a bag (or skip), pick a product
@@ -32,32 +37,59 @@ type FinalizedBag = {
 export function IssueLotForm({
   products,
   finalizedBags,
+  initialBagId,
 }: {
   products: Product[];
   finalizedBags: FinalizedBag[];
+  initialBagId?: string | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
+  const initialBag = initialBagId
+    ? finalizedBags.find((bag) => bag.id === initialBagId)
+    : null;
 
-  const [bagId, setBagId] = React.useState("");
-  const [productId, setProductId] = React.useState("");
-  const [lotNumber, setLotNumber] = React.useState("");
-  const [producedOn, setProducedOn] = React.useState(today);
+  const [bagId, setBagId] = React.useState(initialBag?.id ?? "");
+  const [productId, setProductId] = React.useState(initialBag?.productId ?? "");
+  const [lotNumber, setLotNumber] = React.useState(initialBag?.receiptNumber ?? "");
+  const [producedOn, setProducedOn] = React.useState(
+    initialBag?.finalizedAt ? initialBag.finalizedAt.slice(0, 10) : today,
+  );
   const [expiryDate, setExpiryDate] = React.useState("");
-  const [units, setUnits] = React.useState(0);
-  const [displays, setDisplays] = React.useState(0);
-  const [cases, setCases] = React.useState(0);
+  const [units, setUnits] = React.useState(initialBag?.unitsYielded ?? 0);
+  const [displays, setDisplays] = React.useState(initialBag?.displaysMade ?? 0);
+  const [cases, setCases] = React.useState(initialBag?.masterCases ?? 0);
   const [notes, setNotes] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [autoExpiryTouched, setAutoExpiryTouched] = React.useState(false);
+  const lastAppliedBagLotRef = React.useRef<string | null>(
+    initialBag?.receiptNumber ?? null,
+  );
+  const selectedBag = bagId ? finalizedBags.find((x) => x.id === bagId) : null;
 
-  // When the bag changes, snap the product selector to whatever the
-  // bag was producing — that's almost always what the operator wants.
+  // When the bag changes, snap the lot form to the row the admin clicked.
+  // The receipt number is the finished-lot number used by the automated path.
   React.useEffect(() => {
-    if (!bagId) return;
+    if (!bagId) {
+      lastAppliedBagLotRef.current = null;
+      return;
+    }
     const b = finalizedBags.find((x) => x.id === bagId);
-    if (b?.productId && !productId) setProductId(b.productId);
-  }, [bagId, finalizedBags, productId]);
+    if (!b) return;
+    if (b.productId) setProductId(b.productId);
+    if (b.finalizedAt) setProducedOn(b.finalizedAt.slice(0, 10));
+    setUnits(b.unitsYielded ?? 0);
+    setDisplays(b.displaysMade ?? 0);
+    setCases(b.masterCases ?? 0);
+    if (
+      b.receiptNumber &&
+      (!lotNumber || lotNumber === lastAppliedBagLotRef.current)
+    ) {
+      setLotNumber(b.receiptNumber);
+      lastAppliedBagLotRef.current = b.receiptNumber;
+    }
+    setAutoExpiryTouched(false);
+  }, [bagId, finalizedBags]);
 
   // Auto-expiry: when product or producedOn changes, recompute expiry
   // from defaultShelfLifeDays — but only if the operator hasn't typed
@@ -97,7 +129,9 @@ export function IssueLotForm({
                 <option value="">— skip / manual lot —</option>
                 {finalizedBags.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.id.slice(0, 8)} · {b.productName ?? "no product"} ·{" "}
+                    {b.receiptNumber ? `${b.receiptNumber} · ` : ""}
+                    {b.productName ?? "no product"} ·{" "}
+                    {b.unitsYielded != null ? `${b.unitsYielded.toLocaleString()} units · ` : ""}
                     {b.finalizedAt ? formatDateTimeEst(b.finalizedAt) : "—"}
                   </option>
                 ))}
@@ -106,6 +140,24 @@ export function IssueLotForm({
                 When set, input batches auto-derive from the bag's consumption events.
               </p>
             </div>
+            {selectedBag ? (
+              <div className="rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2 text-xs text-brand-900">
+                <div className="font-semibold">Prefilled from selected bag</div>
+                <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                  <span>Receipt: {selectedBag.receiptNumber ?? "—"}</span>
+                  <span>Product: {selectedBag.productName ?? "—"}</span>
+                  <span>Cases: {(selectedBag.masterCases ?? 0).toLocaleString()}</span>
+                  <span>Displays: {(selectedBag.displaysMade ?? 0).toLocaleString()}</span>
+                  <span>Loose: {(selectedBag.looseCards ?? 0).toLocaleString()}</span>
+                  <span>Units: {(selectedBag.unitsYielded ?? 0).toLocaleString()}</span>
+                </div>
+              </div>
+            ) : initialBagId ? (
+              <div className="rounded-lg border border-warn-300 bg-warn-50 px-3 py-2 text-xs text-warn-800">
+                The bag from the review link is no longer awaiting lot issue. Pick another
+                bag or create a manual lot.
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="productId">Product</Label>
               <Select
@@ -224,7 +276,11 @@ export function IssueLotForm({
             <Row label="Cases" value={cases.toLocaleString()} />
             <Row
               label="Source"
-              value={bagId ? `bag ${bagId.slice(0, 8)}` : "manual"}
+              value={
+                selectedBag
+                  ? (selectedBag.receiptNumber ?? `bag ${selectedBag.id.slice(0, 8)}`)
+                  : "manual"
+              }
             />
             <p className="text-[11px] text-text-subtle pt-2 border-t border-border/60">
               Lot is created in <span className="font-mono">PENDING_QC</span>. Release

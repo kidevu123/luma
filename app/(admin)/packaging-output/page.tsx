@@ -301,7 +301,7 @@ export default async function PackagingOutputPage() {
                             </td>
                             <td className="py-2">
                               <Link
-                                href="/finished-lots/new"
+                                href={`/finished-lots/new?bagId=${encodeURIComponent(bag.id)}`}
                                 className="inline-flex items-center gap-1 rounded-md border border-warn-500/40 bg-warn-50/60 px-2.5 py-1 text-[11.5px] font-medium text-warn-700 hover:bg-warn-50 transition-colors"
                               >
                                 Review / issue lot
