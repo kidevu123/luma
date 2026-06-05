@@ -14,6 +14,7 @@ import { KpiRibbon } from "./kpi-ribbon";
 import { MachineCommandGrid } from "./machine-command-grid";
 import { OperationsPulseStrip } from "./operations-pulse-strip";
 import { CommandCenterProductionAnswers } from "./command-center-production-answers";
+import { ProductionLineGuide } from "./production-line-guide";
 
 type Props = {
   mode: FloorBoardMode;
@@ -53,7 +54,10 @@ export function CommandCenterView({
         showControls={!isTv}
       />
       <OperationsPulseStrip snapshot={managerSnapshot} />
-      <CommandCenterProductionAnswers snapshot={managerSnapshot} />
+      <ProductionLineGuide rows={managerSnapshot.stationCommandRows} />
+      {!isTv && (
+        <CommandCenterProductionAnswers snapshot={managerSnapshot} />
+      )}
       <div className={enlarged ? "scale-[1.05] origin-top" : ""}>
         <KpiRibbon
           shiftStatus={shiftStatus}
@@ -65,17 +69,19 @@ export function CommandCenterView({
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <div className="flex flex-col flex-1 min-w-0 min-h-0 border-r border-white/[0.06] overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-col flex-1 min-w-0 min-h-0 border-r border-white/[0.06] overflow-hidden">
           <MachineCommandGrid rows={managerSnapshot.stationCommandRows} />
-          <div className="shrink-0 relative z-0 bg-[#07090d] border-t border-white/[0.06]">
-            <CommandCenterCharts
-              throughputPoints={widgetData.throughputPoints}
-              targetBagsPerHour={widgetData.targetBagsPerHour}
-              queues={widgetData.queues}
-              pauseReasons={pauseReasons}
-              dataGaps={managerSnapshot.dataGaps}
-            />
-          </div>
+          {!isTv && (
+            <div className="relative z-0 max-h-[min(28vh,220px)] shrink-0 overflow-y-auto border-t border-white/[0.06] bg-[#07090d]">
+              <CommandCenterCharts
+                throughputPoints={widgetData.throughputPoints}
+                targetBagsPerHour={widgetData.targetBagsPerHour}
+                queues={widgetData.queues}
+                pauseReasons={pauseReasons}
+                dataGaps={managerSnapshot.dataGaps}
+              />
+            </div>
+          )}
         </div>
         {!isTv && (
           <aside

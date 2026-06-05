@@ -3,6 +3,7 @@
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Clock,
   Gauge,
@@ -16,10 +17,16 @@ import {
   formatWait,
   trustedCycleSec,
 } from "@/lib/floor-command/floor-display";
+import {
+  groupsForPrimaryLine,
+  otherLineGroups,
+  resolveLinePlacement,
+} from "@/lib/floor-command/production-lines";
 import type {
   MachineRollRow,
   StationCommandRow,
 } from "@/lib/production/floor-manager-snapshot-types";
+import { formatWeightKg, LUMA_TIMEZONE } from "@/lib/ui/luma-display";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -49,8 +56,10 @@ function formatTime(value: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: LUMA_TIMEZONE,
     hour: "numeric",
     minute: "2-digit",
+    timeZoneName: "short",
   }).format(date);
 }
 
@@ -208,7 +217,7 @@ function RollCard({ roll }: { roll: MachineRollRow }) {
     roll.projectedBlistersRemaining != null
       ? `${roll.projectedBlistersRemaining.toLocaleString()} blisters left`
       : roll.projectedRemainingGrams != null
-        ? `${Math.round(roll.projectedRemainingGrams).toLocaleString()}g left`
+        ? `${formatWeightKg(roll.projectedRemainingGrams)} left`
         : "remaining unknown";
 
   return (
@@ -455,15 +464,81 @@ function StationCommandCard({ row }: { row: StationCommandRow }) {
   );
 }
 
+function LineStepColumn({
+  stepNumber,
+  stepLabel,
+  stepRole,
+  stations,
+}: {
+  stepNumber: number;
+  stepLabel: string;
+  stepRole: string;
+  stations: StationCommandRow[];
+}) {
+  return (
+    <div className="flex h-full min-w-[min(100%,380px)] max-w-[440px] flex-1 flex-col px-2">
+      <header className="mb-2 shrink-0 border-b border-white/[0.06] pb-2">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-400/90">
+          Step {stepNumber} · {stepLabel}
+        </p>
+        <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-slate-500">
+          {stepRole}
+        </p>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-2">
+        {stations.map((row) => (
+          <StationCommandCard key={row.stationId} row={row} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LineFlowRow({
+  title,
+  groups,
+}: {
+  title: string;
+  groups: ReturnType<typeof groupsForPrimaryLine>;
+}) {
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="min-h-0 shrink-0">
+      <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+        {title}
+      </p>
+      <div className="flex min-h-[320px] items-stretch overflow-x-auto pb-2">
+        {groups.map((group, index) => (
+          <div
+            key={`${group.line.id}-${group.step.key}`}
+            className="flex shrink-0 items-stretch"
+          >
+            <LineStepColumn
+              stepNumber={group.step.step}
+              stepLabel={group.step.label}
+              stepRole={group.step.role}
+              stations={group.stations}
+            />
+            {index < groups.length - 1 && (
+              <div
+                className="flex w-8 shrink-0 items-center justify-center self-center text-slate-600"
+                aria-hidden
+              >
+                <ArrowRight size={20} strokeWidth={1.5} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function MachineCommandGrid({ rows }: Props) {
-  const sorted = [...rows].sort((a, b) => {
-    const aActions = actionItems(a).length;
-    const bActions = actionItems(b).length;
-    if (a.workflowBagId && !b.workflowBagId) return -1;
-    if (!a.workflowBagId && b.workflowBagId) return 1;
-    if (aActions !== bActions) return bActions - aActions;
-    return a.stationLabel.localeCompare(b.stationLabel);
-  });
+  const primaryGroups = groupsForPrimaryLine(rows);
+  const secondaryGroups = otherLineGroups(rows);
+  const unmapped = rows.filter((r) => !resolveLinePlacement(r.stationKind));
 
   const running = rows.filter((r) => r.workflowBagId).length;
   const warnings = rows.filter((r) => actionItems(r).length > 0).length;
@@ -471,7 +546,7 @@ export function MachineCommandGrid({ rows }: Props) {
 
   if (rows.length === 0) {
     return (
-      <section className="shrink-0 border-b border-white/[0.06] bg-[#07090d] p-3">
+      <section className="flex flex-1 flex-col min-h-0 bg-[#07090d] p-3">
         <div className="rounded-lg border border-red-500/30 bg-red-500/[0.06] px-3 py-6 text-center text-sm text-red-100">
           No live station command rows loaded.
         </div>
@@ -480,14 +555,15 @@ export function MachineCommandGrid({ rows }: Props) {
   }
 
   return (
-    <section className="shrink-0 border-b border-white/[0.06] bg-[#07090d] p-3">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#07090d]">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-3 py-2">
         <div>
           <h2 className="text-[12px] font-bold uppercase tracking-[0.18em] text-amber-300">
-            Live machine command cards
+            Live line — left to right
           </h2>
           <p className="mt-1 text-[11px] text-slate-500">
-            {running} active · {warnings} exceptions · {queue} queued
+            {running} active · {warnings} exceptions · {queue} queued · blister
+            → seal → pack
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -509,10 +585,27 @@ export function MachineCommandGrid({ rows }: Props) {
           </span>
         </div>
       </div>
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
-        {sorted.map((row) => (
-          <StationCommandCard key={row.stationId} row={row} />
-        ))}
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1 pt-2">
+        <LineFlowRow
+          title={primaryGroups[0]?.line.shortName ?? "Primary line"}
+          groups={primaryGroups}
+        />
+        {secondaryGroups.length > 0 && (
+          <LineFlowRow title="Other lines" groups={secondaryGroups} />
+        )}
+        {unmapped.length > 0 && (
+          <div className="mt-3 border-t border-white/[0.06] px-2 pt-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+              Unmapped stations
+            </p>
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+              {unmapped.map((row) => (
+                <StationCommandCard key={row.stationId} row={row} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

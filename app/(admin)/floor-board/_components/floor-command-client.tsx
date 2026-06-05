@@ -135,7 +135,7 @@ export function FloorCommandClient({
   const rootClass = useMemo(
     () =>
       [
-        "flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden",
+        "flex flex-col h-full min-h-0 bg-slate-950 text-slate-100 overflow-hidden",
         isTv ? "text-lg" : "",
       ].join(" "),
     [isTv],
