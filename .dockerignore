@@ -12,3 +12,4 @@ data
 /_*.tsx
 scripts/_*.ts
 scripts/_*.tsx
+scripts/zoho-production-output-smoke-*.ts
