@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 // Deep metrics. Every cut the system can pull off the read models +
 // workflow_events, on a single scrollable page. All time-window
 // aggregations honor a single `?days=N` URL param (default 30).
@@ -709,7 +710,7 @@ export default async function MetricsPage({
                     <TD className="text-right tabular-nums">{s.events}</TD>
                     <TD className="text-xs text-text-muted">
                       {s.lastActivity
-                        ? new Date(s.lastActivity as unknown as string).toLocaleString()
+                        ? formatDateTimeEst(s.lastActivity as unknown as string)
                         : "never"}
                     </TD>
                   </TR>

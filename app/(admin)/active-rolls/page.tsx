@@ -2,16 +2,25 @@
 
 import { requireAdmin } from "@/lib/auth-guards";
 import { loadActiveRollPanel, type ActiveRollRow } from "@/lib/production/material-panels";
+import { getRollYieldReconciliation } from "@/lib/production/roll-yield-reconciliation";
+import { RollYieldReconciliationPanel } from "@/app/(admin)/settings/blister-standards/_components/roll-yield-reconciliation-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
-import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
+import { formatDateTimeEst, formatWeightKg } from "@/lib/ui/luma-display";
 
 export const dynamic = "force-dynamic";
 
 export default async function ActiveRollsPage() {
   await requireAdmin();
-  const panel = await loadActiveRollPanel();
+  const [panel, reconciliation] = await Promise.all([
+    loadActiveRollPanel(),
+    getRollYieldReconciliation(),
+  ]);
+
+  const reconByLot = new Map(
+    reconciliation.rows.map((r) => [r.packagingLotId, r]),
+  );
 
   return (
     <div className="space-y-5">
@@ -19,6 +28,14 @@ export default async function ActiveRollsPage() {
         title="Active rolls"
         description="PVC and foil rolls currently mounted on roll-capable machines. Missing rows mean no roll is mounted, never an inferred roll."
       />
+
+      {reconciliation.activeRunway.length > 0 && (
+        <RollYieldReconciliationPanel
+          rows={reconciliation.rows}
+          activeRunway={reconciliation.activeRunway}
+          cardsPerTurn={reconciliation.cardsPerTurnDefault}
+        />
+      )}
 
       <Card>
         <CardHeader>
@@ -81,6 +98,8 @@ export default async function ActiveRollsPage() {
                     <th className="text-left p-2">Machine</th>
                     <th className="text-left p-2">Mounted</th>
                     <th className="text-right p-2">Current est.</th>
+                    <th className="text-right p-2">Cycles</th>
+                    <th className="text-right p-2">Cards (×2)</th>
                     <th className="text-right p-2">Projected blisters left</th>
                     <th className="text-left p-2">Source</th>
                     <th className="text-left p-2">Conf.</th>
@@ -89,23 +108,37 @@ export default async function ActiveRollsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {panel.rows.map((r) => (
+                  {panel.rows.map((r) => {
+                    const recon = reconByLot.get(r.packagingLotId);
+                    return (
                     <tr key={r.packagingLotId} className="border-t border-border/40">
                       <td className="p-2">{r.materialRole ?? "Missing"}</td>
                       <td className="p-2">{r.rollNumber ?? r.packagingLotId.slice(0, 8)}</td>
                       <td className="p-2">{r.machineName ?? "Unassigned"}</td>
                       <td className="p-2">
-                        {r.mountedAt ? new Date(r.mountedAt).toLocaleString() : "Missing"}
+                        {r.mountedAt ? formatDateTimeEst(r.mountedAt) : "Missing"}
                       </td>
                       <td className="p-2 text-right tabular-nums">
                         {r.currentWeightGramsEstimate != null
-                          ? formatGramsAsKg(r.currentWeightGramsEstimate)
+                          ? formatWeightKg(r.currentWeightGramsEstimate)
                           : r.startingWeightGrams != null
-                            ? formatGramsAsKg(r.startingWeightGrams)
+                            ? formatWeightKg(r.startingWeightGrams)
                             : "Missing"}
                       </td>
                       <td className="p-2 text-right tabular-nums">
-                        {r.projectedBlistersRemaining ?? "Missing"}
+                        {recon?.machineCycles != null
+                          ? recon.machineCycles.toLocaleString()
+                          : "0"}
+                      </td>
+                      <td className="p-2 text-right tabular-nums">
+                        {recon?.blisterRoomCards != null
+                          ? recon.blisterRoomCards.toLocaleString()
+                          : "0"}
+                      </td>
+                      <td className="p-2 text-right tabular-nums">
+                        {recon?.remainingCardsVsManufacturer != null
+                          ? recon.remainingCardsVsManufacturer.toLocaleString()
+                          : r.projectedBlistersRemaining ?? "—"}
                       </td>
                       <td className="p-2 font-mono text-[10px]">{r.sourceSystem}</td>
                       <td className="p-2"><ConfidenceBadge confidence={r.confidence} /></td>
@@ -114,7 +147,8 @@ export default async function ActiveRollsPage() {
                         {r.warnings.length > 0 ? r.warnings.join(", ") : "None"}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -131,9 +165,9 @@ function RoleBadge({ label, roll }: { label: string; roll: ActiveRollRow }) {
       <span className="font-semibold mr-1">{label}</span>
       {roll.rollNumber ?? roll.packagingLotId.slice(0, 8)} ·{" "}
       {roll.currentWeightGramsEstimate != null
-        ? formatGramsAsKg(roll.currentWeightGramsEstimate)
+        ? formatWeightKg(roll.currentWeightGramsEstimate)
         : roll.startingWeightGrams != null
-          ? formatGramsAsKg(roll.startingWeightGrams)
+          ? formatWeightKg(roll.startingWeightGrams)
           : "Missing"}{" "}
       · <ConfidenceBadge confidence={roll.confidence} className="align-middle" />
     </span>

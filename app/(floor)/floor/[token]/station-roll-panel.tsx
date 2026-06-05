@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 "use client";
 
 // MATERIAL-ROLL-CHANGE-1 — PVC/Foil roll status + mid-bag change on the
@@ -201,7 +202,7 @@ function RollChangeRequiredCard({
               ? `${formatGramsAsKg(activeRoll.currentWeightEstimateGrams)} estimated`
               : "Weight estimate missing"}{" "}
             · conf {activeRoll.confidence} · mounted{" "}
-            {new Date(activeRoll.mountedAt).toLocaleString()}
+            {formatDateTimeEst(activeRoll.mountedAt)}
           </div>
         </div>
       ) : (

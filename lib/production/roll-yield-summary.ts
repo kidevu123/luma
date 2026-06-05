@@ -218,13 +218,13 @@ export async function getRollYieldSummary(): Promise<RollYieldRoleAnswer[]> {
         source === "CONFIGURED"
           ? "From confirmed standard."
           : source === "LEARNED"
-            ? `Learned from ${sampleRollCount} completed roll${sampleRollCount === 1 ? "" : "s"} (${gramsPerBlister!.toFixed(3)} g/blister).`
+            ? `Learned from ${sampleRollCount} completed roll${sampleRollCount === 1 ? "" : "s"} (${(gramsPerBlister! / 1000).toFixed(4)} kg/cycle).`
             : `From ${sampleRollCount} completed roll average on the floor.`;
     } else if (last?.blistersProduced) {
       headline = `Last roll: ${last.blistersProduced.toLocaleString()} blisters`;
       detail =
         lastGpb != null
-          ? `${lastGpb.toFixed(3)} g/blister on roll ${last.rollNumber ?? "?"}. Need more depleted rolls for a plant average.`
+          ? `${(lastGpb / 1000).toFixed(4)} kg/cycle on roll ${last.rollNumber ?? "?"}. Need more depleted rolls for a plant average.`
           : "Counter segments recorded — weigh roll on depletion for g/blister.";
     } else {
       headline = "No yield yet";

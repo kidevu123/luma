@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 // PT-4C — Packaging receipts admin list.
 //
 // Shows every packaging_lots row with the new PT-1 receipt fields
@@ -281,7 +282,7 @@ export default async function PackagingReceiptsPage({
                       </td>
                       <td className="p-2">
                         {r.received_at
-                          ? new Date(r.received_at).toLocaleString()
+                          ? formatDateTimeEst(r.received_at)
                           : "—"}
                       </td>
                       <td className="p-2">

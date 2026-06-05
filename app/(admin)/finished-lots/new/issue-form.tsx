@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 "use client";
 
 import * as React from "react";
@@ -96,7 +97,7 @@ export function IssueLotForm({
                 {finalizedBags.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.id.slice(0, 8)} · {b.productName ?? "no product"} ·{" "}
-                    {b.finalizedAt ? new Date(b.finalizedAt).toLocaleString() : "—"}
+                    {b.finalizedAt ? formatDateTimeEst(b.finalizedAt) : "—"}
                   </option>
                 ))}
               </Select>

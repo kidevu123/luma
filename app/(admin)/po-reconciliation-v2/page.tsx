@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 // PT-6D — 8-bucket reconciliation admin page.
 //
 // Reads from `read_material_reconciliation_v2`. The math is in PT-6B
@@ -300,8 +301,8 @@ function ReconciliationRow({ row }: { row: ReconciliationV2Row }) {
             <div className="text-[10px] uppercase tracking-wider text-text-muted">
               {row.scopeType} · {row.unit} ·{" "}
               {row.calculatedAt instanceof Date
-                ? row.calculatedAt.toLocaleString()
-                : new Date(row.calculatedAt).toLocaleString()}
+                ? formatDateTimeEst(row.calculatedAt)
+                : formatDateTimeEst(row.calculatedAt)}
             </div>
             <div className="text-sm font-semibold tracking-tight">
               {identityLine || row.scopeId.slice(0, 8)}

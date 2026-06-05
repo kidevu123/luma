@@ -67,7 +67,7 @@ export function RollYieldAnswerCard({ answers, compact = false }: Props) {
                   )}
                   {a.gramsPerBlister != null && (
                     <p className="text-xs text-text-subtle font-mono">
-                      {a.gramsPerBlister.toFixed(4)} g material per blister
+                      {(a.gramsPerBlister / 1000).toFixed(6)} kg per cycle
                     </p>
                   )}
                 </div>
@@ -84,7 +84,7 @@ export function RollYieldAnswerCard({ answers, compact = false }: Props) {
                   {" · "}
                   {a.lastRoll.blistersProduced.toLocaleString()} blisters
                   {a.lastRoll.gramsPerBlister != null &&
-                    ` · ${a.lastRoll.gramsPerBlister.toFixed(3)} g/blister`}
+                    ` · ${(a.lastRoll.gramsPerBlister / 1000).toFixed(4)} kg/cycle`}
                 </p>
               )}
             </div>

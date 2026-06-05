@@ -31,14 +31,26 @@ import {
   rebuildAllMaterialProjectionsAction,
 } from "./actions";
 import { getRollYieldSummary } from "@/lib/production/roll-yield-summary";
+import { getRollYieldReconciliation } from "@/lib/production/roll-yield-reconciliation";
 import { RollYieldAnswerCard } from "./_components/roll-yield-answer-card";
+import { RollYieldReconciliationPanel } from "./_components/roll-yield-reconciliation-panel";
+import {
+  formatBlistersPerKg,
+  formatDateEst,
+  formatDateTimeEst,
+  formatKgPerCycle,
+  formatWeightKg,
+} from "@/lib/ui/luma-display";
 
 export const dynamic = "force-dynamic";
 
 export default async function BlisterStandardsPage() {
   await requireAdmin();
 
-  const rollYieldAnswers = await getRollYieldSummary();
+  const [rollYieldAnswers, rollReconciliation] = await Promise.all([
+    getRollYieldSummary(),
+    getRollYieldReconciliation(),
+  ]);
 
   const [
     learnedRows,
@@ -170,6 +182,12 @@ export default async function BlisterStandardsPage() {
 
       <RollYieldAnswerCard answers={rollYieldAnswers} />
 
+      <RollYieldReconciliationPanel
+        rows={rollReconciliation.rows}
+        activeRunway={rollReconciliation.activeRunway}
+        cardsPerTurn={rollReconciliation.cardsPerTurnDefault}
+      />
+
       {/* How this works */}
       <Card>
         <CardHeader>
@@ -180,8 +198,8 @@ export default async function BlisterStandardsPage() {
             {[
               { step: "1", label: "Receive roll", detail: "Weigh it on intake — gross and tare. Luma records net weight." },
               { step: "2", label: "Mount at machine", detail: "Floor operator selects which PVC and foil roll they loaded. Luma notes the start." },
-              { step: "3", label: "Run production", detail: "Operator enters counter segments at each BLISTER_COMPLETE as normal." },
-              { step: "4", label: "Roll depletes", detail: "Operator marks roll done. Luma computes: net weight ÷ blisters made = g/blister." },
+              { step: "3", label: "Run production", detail: "Operator enters machine cycles at blister complete / roll change. Cards = cycles × cards/turn (2 on Blister Machine)." },
+              { step: "4", label: "Roll depletes", detail: "Mark depleted when empty. Compare cycles vs manufacturer spec and packaging finalized cards for waste." },
             ].map((s) => (
               <div key={s.step} className="flex gap-2">
                 <span className="flex-shrink-0 h-5 w-5 rounded-full bg-brand-accent/20 text-brand-accent text-[10px] font-semibold flex items-center justify-center">
@@ -195,7 +213,7 @@ export default async function BlisterStandardsPage() {
             ))}
           </div>
           <p className="text-xs text-text-subtle pt-1 border-t border-border/60">
-            After a few rolls, Luma builds a reliable g/blister figure. You can optionally confirm it as a locked standard below — but projections will use the learned average until then.
+            After a few rolls, Luma builds a reliable kg/cycle figure. You can optionally confirm it as a locked standard below — but projections will use the learned average until then.
           </p>
         </CardContent>
       </Card>
@@ -227,9 +245,9 @@ export default async function BlisterStandardsPage() {
                         <TR>
                           <TH>Roll</TH>
                           <TH>Role</TH>
-                          <TH className="text-right">Blisters</TH>
-                          <TH className="text-right">g/blister</TH>
-                          <TH>Ended</TH>
+                          <TH className="text-right">Cycles</TH>
+                          <TH className="text-right">kg/cycle</TH>
+                          <TH>Ended (EST)</TH>
                         </TR>
                       </THead>
                       <tbody>
@@ -257,11 +275,11 @@ export default async function BlisterStandardsPage() {
                                 {r.blistersProduced?.toLocaleString() ?? "—"}
                               </TD>
                               <TD className="text-right font-mono tabular-nums">
-                                {gpb != null ? `${gpb.toFixed(4)} g` : "—"}
+                                {gpb != null ? formatKgPerCycle(gpb) : "—"}
                               </TD>
                               <TD className="text-xs text-text-muted">
                                 {r.unmountedAt
-                                  ? new Date(r.unmountedAt).toLocaleString()
+                                  ? formatDateTimeEst(r.unmountedAt)
                                   : "—"}
                               </TD>
                             </TR>
@@ -341,13 +359,13 @@ export default async function BlisterStandardsPage() {
                   <TH>Material</TH>
                   <TH>Role</TH>
                   <TH>Product</TH>
-                  <TH className="text-right">Avg g/blister</TH>
+                  <TH className="text-right">kg/cycle</TH>
                   <TH className="text-right">Blisters/kg</TH>
-                  <TH className="text-right">Median</TH>
-                  <TH className="text-right">Total blisters</TH>
+                  <TH className="text-right">Median kg/cycle</TH>
+                  <TH className="text-right">Total cycles</TH>
                   <TH className="text-right">Rolls used</TH>
                   <TH>Confidence</TH>
-                  <TH>Last sample</TH>
+                  <TH>Last sample (EST)</TH>
                 </TR>
               </THead>
               <tbody>
@@ -364,20 +382,25 @@ export default async function BlisterStandardsPage() {
                       )}
                     </TD>
                     <TD className="text-right font-mono tabular-nums">
-                      {r.avgWeightPerBlister != null
-                        ? `${Number(r.avgWeightPerBlister).toFixed(4)} g`
-                        : "—"}
+                      {formatKgPerCycle(
+                        r.avgWeightPerBlister != null
+                          ? Number(r.avgWeightPerBlister)
+                          : null,
+                      )}
                     </TD>
                     <TD className="text-right font-mono tabular-nums text-brand-accent">
-                      {r.avgWeightPerBlister != null &&
-                      Number(r.avgWeightPerBlister) > 0
-                        ? (1000 / Number(r.avgWeightPerBlister)).toFixed(1)
-                        : "—"}
+                      {formatBlistersPerKg(
+                        r.avgWeightPerBlister != null
+                          ? Number(r.avgWeightPerBlister)
+                          : null,
+                      )}
                     </TD>
                     <TD className="text-right font-mono tabular-nums text-text-muted">
-                      {r.medianWeightPerBlister != null
-                        ? `${Number(r.medianWeightPerBlister).toFixed(4)} g`
-                        : "—"}
+                      {formatKgPerCycle(
+                        r.medianWeightPerBlister != null
+                          ? Number(r.medianWeightPerBlister)
+                          : null,
+                      )}
                     </TD>
                     <TD className="text-right tabular-nums">
                       {r.totalBlistersProduced != null
@@ -408,7 +431,7 @@ export default async function BlisterStandardsPage() {
                     </TD>
                     <TD className="text-text-muted text-xs">
                       {r.lastSampleAt
-                        ? new Date(r.lastSampleAt).toLocaleDateString()
+                        ? formatDateEst(r.lastSampleAt)
                         : "—"}
                     </TD>
                   </TR>
@@ -448,11 +471,7 @@ export default async function BlisterStandardsPage() {
                     <TD className="font-medium">{r.materialName}</TD>
                     <TD className="font-mono text-xs">{r.rollNumber ?? "—"}</TD>
                     <TD className="text-right tabular-nums font-mono">
-                      {r.netWeightGrams != null
-                        ? `${(r.netWeightGrams / 1000).toFixed(2)} kg`
-                        : r.grossWeightGrams != null
-                          ? `${(r.grossWeightGrams / 1000).toFixed(2)} kg gross`
-                          : "—"}
+                      {formatWeightKg(r.netWeightGrams)}
                     </TD>
                     <TD>
                       <StatusPill
@@ -470,9 +489,7 @@ export default async function BlisterStandardsPage() {
                       </StatusPill>
                     </TD>
                     <TD className="text-text-muted text-xs">
-                      {r.receivedAt
-                        ? new Date(r.receivedAt).toLocaleDateString()
-                        : "—"}
+                      {r.receivedAt ? formatDateEst(r.receivedAt) : "—"}
                     </TD>
                   </TR>
                 ))}
@@ -495,7 +512,7 @@ export default async function BlisterStandardsPage() {
 
         <div className="mt-3 space-y-4">
           <div className="rounded-md border border-border/60 bg-surface-2/40 px-4 py-3 text-xs text-text-subtle">
-            You only need this section if you want to lock a specific g/blister figure — for example, after the system has learned it and you want to fix it for planning. Leave blank to use the learned average.
+            You only need this section if you want to lock a specific kg/cycle figure — for example, after the system has learned it and you want to fix it for planning. Leave blank to use the learned average.
           </div>
 
           {rollMaterials.length > 0 && (
@@ -531,12 +548,12 @@ export default async function BlisterStandardsPage() {
                 ]}
               />
               <Field
-                name="expectedGramsPerBlister"
-                label="Grams per blister"
+                name="expectedKgPerCycle"
+                label="kg per cycle"
                 type="number"
                 min={0}
-                step="0.0001"
-                placeholder="e.g. 4.2000 — from learned data above"
+                step="0.000001"
+                placeholder="e.g. 0.0042 — from learned data above"
               />
               <Field
                 name="expectedBlistersPerKg"
@@ -544,21 +561,23 @@ export default async function BlisterStandardsPage() {
                 type="number"
                 min={0}
                 step="0.001"
-                placeholder="leave blank if using g/blister"
+                placeholder="leave blank if using kg/cycle"
               />
               <Field
-                name="setupWasteGrams"
-                label="Setup waste (g)"
+                name="setupWasteKg"
+                label="Setup waste (kg)"
                 type="number"
                 min={0}
+                step="0.001"
                 defaultValue="0"
                 required
               />
               <Field
-                name="changeoverWasteGrams"
-                label="Changeover waste (g)"
+                name="changeoverWasteKg"
+                label="Changeover waste (kg)"
                 type="number"
                 min={0}
+                step="0.001"
                 defaultValue="0"
                 required
               />
@@ -592,7 +611,7 @@ export default async function BlisterStandardsPage() {
                   <TH>Product</TH>
                   <TH>Material</TH>
                   <TH>Role</TH>
-                  <TH className="text-right">g/blister</TH>
+                  <TH className="text-right">kg/cycle</TH>
                   <TH className="text-right">blisters/kg</TH>
                   <TH className="text-right">Setup waste</TH>
                   <TH className="text-right">Changeover</TH>
@@ -617,15 +636,21 @@ export default async function BlisterStandardsPage() {
                       <StatusPill kind="neutral">{r.materialRole}</StatusPill>
                     </TD>
                     <TD className="text-right font-mono tabular-nums">
-                      {r.expectedGramsPerBlister != null
-                        ? `${r.expectedGramsPerBlister} g`
-                        : "—"}
+                      {formatKgPerCycle(
+                        r.expectedGramsPerBlister != null
+                          ? Number(r.expectedGramsPerBlister)
+                          : null,
+                      )}
                     </TD>
                     <TD className="text-right font-mono tabular-nums text-text-muted">
                       {r.expectedBlistersPerKg ?? "—"}
                     </TD>
-                    <TD className="text-right font-mono tabular-nums">{r.setupWasteGrams}g</TD>
-                    <TD className="text-right font-mono tabular-nums">{r.changeoverWasteGrams}g</TD>
+                    <TD className="text-right font-mono tabular-nums">
+                      {formatWeightKg(r.setupWasteGrams)}
+                    </TD>
+                    <TD className="text-right font-mono tabular-nums">
+                      {formatWeightKg(r.changeoverWasteGrams)}
+                    </TD>
                     <TD className="font-mono text-[11px] text-text-muted">
                       {r.effectiveFrom}
                       {r.effectiveTo ? ` → ${r.effectiveTo}` : " → ∞"}

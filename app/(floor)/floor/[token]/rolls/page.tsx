@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 // Phase H.x4 + VALIDATION-2E — Floor roll-management page.
 //
 // What an operator at a station sees on a tablet to mount, unmount,
@@ -143,7 +144,7 @@ export default async function FloorRollsPage({
                         : "—"}
                     </div>
                     <div className="text-text-muted">
-                      mounted {new Date(r.mountedAt).toLocaleString()}
+                      mounted {formatDateTimeEst(r.mountedAt)}
                     </div>
                     <div className="text-text-muted">conf {r.confidence}</div>
                   </div>

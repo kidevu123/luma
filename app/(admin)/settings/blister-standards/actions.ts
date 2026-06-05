@@ -21,10 +21,10 @@ const schema = z
     productId: z.string().uuid().optional().nullable(),
     packagingMaterialId: z.string().uuid(),
     materialRole: z.enum(ROLES),
-    expectedGramsPerBlister: z.coerce.number().min(0).optional().nullable(),
+    expectedKgPerCycle: z.coerce.number().min(0).optional().nullable(),
     expectedBlistersPerKg: z.coerce.number().min(0).optional().nullable(),
-    setupWasteGrams: z.coerce.number().int().min(0),
-    changeoverWasteGrams: z.coerce.number().int().min(0),
+    setupWasteKg: z.coerce.number().min(0).optional(),
+    changeoverWasteKg: z.coerce.number().min(0).optional(),
     effectiveFrom: z.string().date(),
     effectiveTo: z.string().date().optional().nullable(),
     isActive: z.coerce.boolean().optional(),
@@ -32,12 +32,12 @@ const schema = z
   })
   .refine(
     (d) =>
-      (d.expectedGramsPerBlister != null && d.expectedGramsPerBlister > 0) ||
+      (d.expectedKgPerCycle != null && d.expectedKgPerCycle > 0) ||
       (d.expectedBlistersPerKg != null && d.expectedBlistersPerKg > 0),
     {
       message:
-        "Set either expected grams per blister OR expected blisters per kg.",
-      path: ["expectedGramsPerBlister"],
+        "Set either kg per cycle OR blisters per kg.",
+      path: ["expectedKgPerCycle"],
     },
   );
 
@@ -50,10 +50,10 @@ export async function saveBlisterStandardAction(
     productId: formData.get("productId") || null,
     packagingMaterialId: formData.get("packagingMaterialId"),
     materialRole: formData.get("materialRole"),
-    expectedGramsPerBlister: formData.get("expectedGramsPerBlister") || null,
+    expectedKgPerCycle: formData.get("expectedKgPerCycle") || null,
     expectedBlistersPerKg: formData.get("expectedBlistersPerKg") || null,
-    setupWasteGrams: formData.get("setupWasteGrams") || 0,
-    changeoverWasteGrams: formData.get("changeoverWasteGrams") || 0,
+    setupWasteKg: formData.get("setupWasteKg") || 0,
+    changeoverWasteKg: formData.get("changeoverWasteKg") || 0,
     effectiveFrom: formData.get("effectiveFrom"),
     effectiveTo: formData.get("effectiveTo") || null,
     isActive: formData.get("isActive") === "on",
@@ -75,18 +75,20 @@ export async function saveBlisterStandardAction(
     };
   }
 
-  const { id, ...rest } = parsed.data;
-  // Drizzle wants strings for numerics.
+  const { id, expectedKgPerCycle, setupWasteKg, changeoverWasteKg, ...rest } =
+    parsed.data;
   const valuesForDb = {
     ...rest,
     expectedGramsPerBlister:
-      rest.expectedGramsPerBlister != null
-        ? String(rest.expectedGramsPerBlister)
+      expectedKgPerCycle != null && expectedKgPerCycle > 0
+        ? String(Math.round(expectedKgPerCycle * 1_000_000) / 1000)
         : null,
     expectedBlistersPerKg:
       rest.expectedBlistersPerKg != null
         ? String(rest.expectedBlistersPerKg)
         : null,
+    setupWasteGrams: Math.round((setupWasteKg ?? 0) * 1000),
+    changeoverWasteGrams: Math.round((changeoverWasteKg ?? 0) * 1000),
   };
   try {
     if (id) {

@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 // Phase H.x3.5 — PO reconciliation detail.
 //
 // Renders six sections per the spec:
@@ -376,9 +377,9 @@ function CycleTimeline({ tl }: { tl: PoReconciliation["cycleTimeline"] }) {
         <CardTitle>4. Production cycle timeline</CardTitle>
       </CardHeader>
       <CardContent className="grid sm:grid-cols-2 gap-3 text-sm">
-        <Row label="Received at" value={tl.receivedAt ? new Date(tl.receivedAt).toLocaleString() : "—"} />
-        <Row label="First production start" value={tl.firstProductionStart ? new Date(tl.firstProductionStart).toLocaleString() : "—"} />
-        <Row label="Last production end" value={tl.lastProductionEnd ? new Date(tl.lastProductionEnd).toLocaleString() : "—"} />
+        <Row label="Received at" value={tl.receivedAt ? formatDateTimeEst(tl.receivedAt) : "—"} />
+        <Row label="First production start" value={tl.firstProductionStart ? formatDateTimeEst(tl.firstProductionStart) : "—"} />
+        <Row label="Last production end" value={tl.lastProductionEnd ? formatDateTimeEst(tl.lastProductionEnd) : "—"} />
         <Row label="Finished lots" value={String(tl.finishedLotsCount)} />
         <Row label="Active WIP bags" value={String(tl.activeWipBags)} />
       </CardContent>

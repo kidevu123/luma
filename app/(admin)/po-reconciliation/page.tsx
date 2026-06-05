@@ -1,3 +1,4 @@
+import { formatDateEst } from "@/lib/ui/luma-display";
 // Phase H.x3.5 — PO reconciliation list.
 //
 // One row per PO with totals + confidence. Filter by vendor/raw item
@@ -109,7 +110,7 @@ export default async function PoReconciliationListPage({
                   <td className="p-3">{p.status}</td>
                   <td className="p-3 text-right tabular-nums">{p.bag_count}</td>
                   <td className="p-3 tabular-nums">
-                    {new Date(p.opened_at).toLocaleDateString()}
+                    {formatDateEst(p.opened_at)}
                   </td>
                   <td className="p-3 text-right">
                     <Link

@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 // Legacy-import settings. Owner-only. Holds the PythonAnywhere API
 // token + a list of remote files to pull on a schedule. Each row
 // shows last-fetch metadata so the operator can spot a 404 / auth
@@ -157,7 +158,7 @@ export default async function LegacyImportSettingsPage() {
                               ) : (
                                 <CircleCheck className="h-3 w-3 text-emerald-700" />
                               )}
-                              {new Date(p.lastFetchedAt).toLocaleString()}
+                              {formatDateTimeEst(p.lastFetchedAt)}
                               {p.lastError && (
                                 <span
                                   className="text-red-700 truncate max-w-[200px]"
@@ -219,7 +220,7 @@ export default async function LegacyImportSettingsPage() {
                 {recentRuns.map((r) => (
                   <TR key={r.id}>
                     <TD className="text-xs tabular-nums">
-                      {new Date(r.startedAt).toLocaleString()}
+                      {formatDateTimeEst(r.startedAt)}
                     </TD>
                     <TD>
                       <StatusPill kind="neutral">

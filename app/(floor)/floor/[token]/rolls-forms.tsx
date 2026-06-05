@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 "use client";
 
 // Phase VALIDATION-2E — observable rolls-page forms.
@@ -483,7 +484,7 @@ export function ChangeRollForm({
         <div className="text-amber-900/80 font-mono text-[10px]">
           bag {activeBag.id.slice(0, 8)} · started{" "}
           {activeBag.startedAt
-            ? new Date(activeBag.startedAt).toLocaleString()
+            ? formatDateTimeEst(activeBag.startedAt)
             : "—"}
         </div>
         <div className="text-amber-900/80">

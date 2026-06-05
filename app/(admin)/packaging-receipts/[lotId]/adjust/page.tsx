@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 // PT-4D — Cycle-count / supervisor adjustment form for a single
 // packaging_lots row. See ../actions.ts for the rules: never
 // overwrites original receipt fields, fires
@@ -94,7 +95,7 @@ export default async function AdjustPackagingLotPage({
               value={`PO ${row.packtrackPoId}${row.packtrackReceiptId ? ` · receipt ${row.packtrackReceiptId}` : ""}`}
             />
           )}
-          <Row label="Received" value={row.receivedAt ? new Date(row.receivedAt as unknown as string).toLocaleString() : "—"} />
+          <Row label="Received" value={row.receivedAt ? formatDateTimeEst(row.receivedAt as unknown as string) : "—"} />
           <hr className="my-2 border-border/40" />
           <Row label="Declared (receipt-time)" value={row.declaredQuantity?.toString() ?? "—"} />
           <Row label="Counted (receipt-time)" value={row.countedQuantity?.toString() ?? "—"} />
@@ -201,7 +202,7 @@ export default async function AdjustPackagingLotPage({
                     <tr key={h.id} className="border-t border-border/40">
                       <td className="p-2">
                         {h.occurredAt
-                          ? new Date(h.occurredAt as unknown as string).toLocaleString()
+                          ? formatDateTimeEst(h.occurredAt as unknown as string)
                           : "—"}
                       </td>
                       <td className="p-2 font-mono">{String(h.eventType)}</td>

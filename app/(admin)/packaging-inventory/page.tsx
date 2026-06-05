@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 // Phase H.x7 — Packaging inventory panel.
 
 import { requireAdmin } from "@/lib/auth-guards";
@@ -218,7 +219,7 @@ export default async function PackagingInventoryPage({
                         {row.workflowBagId?.slice(0, 8) ?? "Missing"}
                       </td>
                       <td className="p-2 text-text-muted">
-                        {new Date(row.occurredAt).toLocaleString()}
+                        {formatDateTimeEst(row.occurredAt)}
                       </td>
                       <td className="p-2 text-[11px] text-text-muted">
                         {row.insufficientOnHand

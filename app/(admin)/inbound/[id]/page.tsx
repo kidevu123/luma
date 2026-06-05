@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Box as BoxIcon, Truck, FileText } from "lucide-react";
@@ -344,7 +345,7 @@ export default async function ReceiveDetailPage({
               />
               <Row
                 label="Received"
-                value={new Date(r.receive.receivedAt as unknown as string).toLocaleString()}
+                value={formatDateTimeEst(r.receive.receivedAt as unknown as string)}
               />
               <p className="text-[11px] text-text-subtle pt-2 border-t border-border/60">
                 Each box created (or reused) a batch in <span className="font-mono">QUARANTINE</span>.

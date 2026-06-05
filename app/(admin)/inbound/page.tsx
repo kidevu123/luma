@@ -1,3 +1,4 @@
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 import Link from "next/link";
 import { Truck, Package, Inbox, Boxes } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
@@ -79,7 +80,7 @@ export default async function InboundPage() {
                 <TD className="text-text-muted">{vendor ?? "—"}</TD>
                 <TD className="text-xs text-text-muted">{formatFlavorSummary(tabletTypes)}</TD>
                 <TD className="text-text-muted text-xs">
-                  {new Date(receive.receivedAt as unknown as string).toLocaleString()}
+                  {formatDateTimeEst(receive.receivedAt as unknown as string)}
                 </TD>
                 <TD className="text-right tabular-nums">{bagCount}</TD>
                 <TD className="text-text-muted text-xs">

@@ -6,6 +6,7 @@ import { VARIANCE_LABELS } from "@/lib/production/reconciliation-v2-loader";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
+import { formatWeightKg } from "@/lib/ui/luma-display";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function RollVariancePage() {
           <Stat label="With actual usage" value={`${s.withWeighback} / ${s.totalRolls}`} />
           <Stat
             label="Total variance"
-            value={s.totalVarianceGrams != null ? `${s.totalVarianceGrams} g` : "Missing"}
+            value={s.totalVarianceGrams != null ? formatWeightKg(s.totalVarianceGrams) : "Missing"}
           />
           <Stat label="Rolls > 5% variance" value={String(s.rollsOver5Pct)} />
         </CardContent>
@@ -70,13 +71,13 @@ export default async function RollVariancePage() {
                       <td className="p-2">{r.materialRole ?? "Missing"}</td>
                       <td className="p-2">{r.machineName ?? "Unassigned"}</td>
                       <td className="p-2 text-right tabular-nums">
-                        {r.expectedUsedGrams != null ? `${r.expectedUsedGrams} g` : "Roll standard missing"}
+                        {r.expectedUsedGrams != null ? formatWeightKg(r.expectedUsedGrams) : "Roll standard missing"}
                       </td>
                       <td className="p-2 text-right tabular-nums">
-                        {r.actualUsedGrams != null ? `${r.actualUsedGrams} g` : "Not weighed back"}
+                        {r.actualUsedGrams != null ? formatWeightKg(r.actualUsedGrams) : "Not weighed back"}
                       </td>
                       <td className="p-2 text-right tabular-nums">
-                        {r.varianceGrams != null ? `${r.varianceGrams} g` : "Missing"}
+                        {r.varianceGrams != null ? formatWeightKg(r.varianceGrams) : "Missing"}
                       </td>
                       <td className="p-2"><SeverityBadge severity={r.varianceSeverity} /></td>
                       <td className="p-2 text-[11px] text-text-muted">{r.estimateActualLabel}</td>
