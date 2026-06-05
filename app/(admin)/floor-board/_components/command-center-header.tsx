@@ -33,6 +33,7 @@ type Props = {
   lineView?: LineViewMode;
   liveStatus?: FloorLiveStatus;
   lastUpdatedAt?: number | null;
+  compact?: boolean;
 };
 
 export function CommandCenterHeader({
@@ -44,6 +45,7 @@ export function CommandCenterHeader({
   lineView = "auto",
   liveStatus = "live",
   lastUpdatedAt = null,
+  compact = false,
 }: Props) {
   const now = new Date();
   const dateStr = now.toLocaleDateString(undefined, {
@@ -85,27 +87,38 @@ export function CommandCenterHeader({
     : null;
 
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b border-white/10 bg-[#0b0e14] px-4 py-2">
+    <header
+      className={[
+        "flex shrink-0 items-center gap-2 border-b border-white/10 bg-[#0b0e14]",
+        compact ? "px-3 py-1" : "px-4 py-2 gap-3",
+      ].join(" ")}
+    >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-            Luma
-          </span>
+          {!compact && (
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              Luma
+            </span>
+          )}
           <FloorLiveIndicator
             status={liveStatus}
             lastUpdatedAt={lastUpdatedAt}
           />
-          <span className="hidden text-[10px] text-slate-600 sm:inline">·</span>
-          <span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-amber-400/80 sm:inline">
+          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-amber-400/80">
             {displayLine
-              ? `${displayLine.shortName.toUpperCase()}${lineView === "both" ? " · BOTH LINES" : ""} · ${lineFlowLabel(displayLine)}`
+              ? `${displayLine.shortName.toUpperCase()}${lineView === "both" ? " · BOTH" : ""} · ${lineFlowLabel(displayLine)}`
               : "Blister → Seal → Pack"}
           </span>
         </div>
-        <h1 className="text-base font-semibold tracking-tight text-slate-50 sm:text-lg">
-          Production line
-        </h1>
-        {statusLine}
+        {!compact && (
+          <>
+            <h1 className="text-base font-semibold tracking-tight text-slate-50 sm:text-lg">
+              Production line
+            </h1>
+            {statusLine}
+          </>
+        )}
+        {compact && statusLine}
       </div>
       <div className="hidden shrink-0 text-right text-[11px] tabular-nums text-slate-500 sm:block">
         <div>{dateStr}</div>

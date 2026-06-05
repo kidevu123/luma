@@ -15,6 +15,7 @@ import {
   dueTargets,
 } from "@/lib/db/schema";
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { floorThroughputDayKey } from "@/lib/projector/index";
 import type {
   AttentionItem,
   OperatorDailyRow,
@@ -321,7 +322,7 @@ export type KpiStripData = {
 export async function getKpiStripData(tz: string): Promise<KpiStripData> {
   const now = new Date();
   const { shiftStartUtc } = computeShiftProgress(now, tz);
-  const todayStr = shiftStartUtc.toISOString().slice(0, 10);
+  const todayStr = floorThroughputDayKey(now);
 
   const [throughput, bagMetrics, liveStations] = await Promise.all([
     db

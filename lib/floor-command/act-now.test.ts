@@ -45,6 +45,20 @@ function minimalSnapshot(
     stageCycles: [],
     flavorToday: [],
     dataGaps: [],
+    shiftActivity: {
+      throughputDayKey: "2026-06-02",
+      shiftStartUtc: "2026-06-02T10:00:00.000Z",
+      bagsInFlow: inFlight.length,
+      atStation: 0,
+      blisteredShift: 0,
+      sealedShift: 0,
+      packagedShift: 0,
+      finalizedShift: 0,
+      unitsFinalizedShift: 0,
+      displaysShift: 0,
+      casesShift: 0,
+      activeOnFloor: 0,
+    },
   };
 }
 

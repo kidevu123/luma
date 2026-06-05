@@ -40,7 +40,7 @@ const captured: Captured = {
 function emptySelectResult(): Promise<unknown[]> & {
   limit: () => Promise<unknown[]>;
 } {
-  const p = Promise.resolve([]) as Promise<unknown[]> & {
+  const p = Promise.resolve([]) as unknown as Promise<unknown[]> & {
     limit: () => Promise<unknown[]>;
   };
   p.limit = () => Promise.resolve([]);

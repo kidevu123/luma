@@ -21,9 +21,10 @@ import {
   DualFlowStatusBar,
   type LineViewMode,
 } from "./dual-flow-status-bar";
-import { KpiRibbon } from "./kpi-ribbon";
 import { MachineCommandGrid } from "./machine-command-grid";
+import { CompactShiftStrip } from "./compact-shift-strip";
 import { CommandCenterProductionAnswers } from "./command-center-production-answers";
+import { KpiRibbon } from "./kpi-ribbon";
 import { PackOutHero } from "./pack-out-hero";
 import { QueueWipRail } from "./queue-wip-rail";
 import { ShiftDeck, type ShiftDeckTabId } from "./shift-deck";
@@ -140,25 +141,35 @@ export function CommandCenterView({
         lineView={lineView}
         liveStatus={liveStatus}
         lastUpdatedAt={lastUpdatedAt}
+        compact
         {...(isLead || isTv ? { snapshot: managerSnapshot } : {})}
       />
 
-      <KpiRibbon
-        shiftStatus={shiftStatus}
-        kpiData={kpiData}
-        plant={managerSnapshot.plant}
-        dataGaps={managerSnapshot.dataGaps}
-        throughputPoints={widgetData.throughputPoints}
-        showQuality
+      <CompactShiftStrip
+        activity={managerSnapshot.shiftActivity}
+        snapshot={managerSnapshot}
+        intelligence={productionIntelligence}
       />
 
-      <PackOutHero
-        intelligence={productionIntelligence}
-        snapshot={managerSnapshot}
-        kpiData={kpiData}
-        liveStatus={liveStatus}
-        lastUpdatedAt={lastUpdatedAt}
-      />
+      {isManager && (
+        <>
+          <KpiRibbon
+            shiftStatus={shiftStatus}
+            kpiData={kpiData}
+            plant={managerSnapshot.plant}
+            dataGaps={managerSnapshot.dataGaps}
+            throughputPoints={widgetData.throughputPoints}
+            showQuality
+          />
+          <PackOutHero
+            intelligence={productionIntelligence}
+            snapshot={managerSnapshot}
+            kpiData={kpiData}
+            liveStatus={liveStatus}
+            lastUpdatedAt={lastUpdatedAt}
+          />
+        </>
+      )}
 
       <DualFlowStatusBar
         rows={managerSnapshot.stationCommandRows}
@@ -172,7 +183,7 @@ export function CommandCenterView({
         }
       />
 
-      {!isTv && (
+      {isManager && (
         <CommandCenterProductionAnswers snapshot={managerSnapshot} />
       )}
 
@@ -187,11 +198,11 @@ export function CommandCenterView({
         />
         {!isTv && (
           <aside
-            className="flex w-[min(100%,280px)] shrink-0 flex-col border-l border-amber-500/20 bg-[#0b0e14]"
+            className="flex w-[min(100%,240px)] shrink-0 flex-col border-l border-amber-500/20 bg-[#0b0e14]"
             aria-label="Andon"
           >
-            <header className="shrink-0 border-b border-amber-500/25 bg-amber-500/[0.06] px-3 py-2">
-              <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-400">
+            <header className="shrink-0 border-b border-amber-500/25 bg-amber-500/[0.06] px-2 py-1.5">
+              <h2 className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-400">
                 Andon
               </h2>
             </header>
@@ -202,7 +213,7 @@ export function CommandCenterView({
         )}
       </div>
 
-      {trendsOpen && !isTv && (
+      {trendsOpen && !isTv && isManager && (
         <TrendsPanel
           throughputPoints={widgetData.throughputPoints}
           targetBagsPerHour={widgetData.targetBagsPerHour}
@@ -223,7 +234,7 @@ export function CommandCenterView({
       )}
 
       {!isTv && (isLead || isManager) && (
-        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-white/[0.06] bg-[#0a0d12] px-3 py-1.5">
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-white/[0.06] bg-[#0a0d12] px-3 py-1">
           {onOpenBriefing && (
             <button
               type="button"
@@ -233,19 +244,21 @@ export function CommandCenterView({
               Full briefing →
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setTrendsOpen((v) => !v)}
-            className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300"
-          >
-            {trendsOpen ? "Hide trends" : "Trends & downtime ↓"}
-          </button>
+          {isManager && (
+            <button
+              type="button"
+              onClick={() => setTrendsOpen((v) => !v)}
+              className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300"
+            >
+              {trendsOpen ? "Hide trends" : "Trends ↓"}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setDeckOpen((v) => !v)}
             className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300"
           >
-            {deckOpen ? "Hide shift deck" : "Shift deck ↓"}
+            {deckOpen ? "Hide tables" : "Tables ↓"}
           </button>
         </div>
       )}

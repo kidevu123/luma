@@ -85,6 +85,7 @@ import {
 import { lastNDays, todayRange, diffSeconds, formatDuration } from "./time";
 import { ROUTE_TO_MACHINE_KINDS, timeWindow, inText } from "./sql";
 import { routeForMachineKind } from "./units";
+import { floorThroughputDayKey } from "@/lib/projector/index";
 
 // ─── Standards availability ───────────────────────────────────────
 // One round-trip per call; cheap, and used by every standards-
@@ -146,9 +147,8 @@ export async function deriveDashboardMetrics(
     .where(eq(readBagState.isFinalized, false));
   const wip = wipRows[0]?.wip ?? 0;
 
-  // Today's throughput rollup.
-  const todayWindow = todayRange();
-  const dayKey = todayWindow.from.toISOString().slice(0, 10);
+  // Today's throughput rollup — same day key as projector / floor board.
+  const dayKey = floorThroughputDayKey(new Date());
   const [throughput] = await db
     .select({
       bagsBlistered: sum(readDailyThroughput.bagsBlistered).mapWith(Number),

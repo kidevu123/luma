@@ -26,6 +26,11 @@ import type {
 } from "@/lib/production/floor-manager-snapshot-types";
 import { humanStage } from "@/lib/floor-command/floor-display";
 import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
+import {
+  loadShiftActivityMetrics,
+  type ShiftActivityMetrics,
+} from "@/lib/production/shift-throughput";
+import { floorThroughputDayKey } from "@/lib/projector/index";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
@@ -37,13 +42,14 @@ function iso(d: Date | null | undefined): string | null {
 }
 
 export type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
+export type { ShiftActivityMetrics } from "@/lib/production/shift-throughput";
 
 export async function getFloorManagerSnapshot(
   tz: string,
 ): Promise<FloorManagerSnapshot> {
   const now = new Date();
   const { shiftStartUtc } = computeShiftProgress(now, tz);
-  const shiftDayKey = shiftStartUtc.toISOString().slice(0, 10);
+  const shiftDayKey = floorThroughputDayKey(now);
   const since7d = new Date(now.getTime() - SEVEN_DAYS_MS);
   const shiftStartIso = shiftStartUtc.toISOString();
 
@@ -65,6 +71,7 @@ export async function getFloorManagerSnapshot(
     damageClusterRow,
     dataGaps,
     operatorRows,
+    shiftActivity,
   ] = await Promise.all([
     loadMachineProduction(shiftStartIso, since7d, shiftDayKey),
     loadStationCommandRows(now, shiftDayKey),
@@ -86,6 +93,7 @@ export async function getFloorManagerSnapshot(
     loadDamageCluster(),
     loadDataGaps(shiftDayKey),
     deriveOperatorRows(lastNDays(1)),
+    loadShiftActivityMetrics(tz),
   ]);
 
   const pauseStats = await loadPauseCostToday(shiftStartIso);
@@ -130,6 +138,7 @@ export async function getFloorManagerSnapshot(
     stageCycles: stageCycleRows,
     flavorToday: flavorRows,
     dataGaps,
+    shiftActivity,
   };
 }
 

@@ -1,5 +1,7 @@
 /** Client-safe types for the live-floor production manager dashboard. */
 
+import type { ShiftActivityMetrics } from "@/lib/production/shift-throughput";
+
 export type MachineProductionRow = {
   machineId: string;
   name: string;
@@ -211,4 +213,5 @@ export type FloorManagerSnapshot = {
     detail: string;
     href?: string;
   }>;
+  shiftActivity: ShiftActivityMetrics;
 };
