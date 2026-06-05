@@ -59,6 +59,7 @@ export function CommandCenterView({
           shiftStatus={shiftStatus}
           kpiData={kpiData}
           plant={managerSnapshot.plant}
+          dataGaps={managerSnapshot.dataGaps}
           throughputPoints={widgetData.throughputPoints}
         />
       </div>
@@ -76,6 +77,7 @@ export function CommandCenterView({
               targetBagsPerHour={widgetData.targetBagsPerHour}
               queues={widgetData.queues}
               pauseReasons={pauseReasons}
+              dataGaps={managerSnapshot.dataGaps}
             />
           </div>
         </div>

@@ -4,6 +4,8 @@ import { BarRow, DonutChart } from "@/components/charts/inline-charts";
 import { ThroughputChartWidget } from "./widgets/throughput-chart-widget";
 import type { QueueHealthRow, ThroughputDataPoint } from "@/lib/floor-command/types";
 import type { PauseReasonRow } from "../_loaders";
+import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
+import { DataGapPanel } from "./data-gap-panel";
 
 const STAGE_LABELS: Record<string, string> = {
   post_blister_staging: "Post blister",
@@ -15,7 +17,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function panelClass() {
-  return "rounded-lg border border-white/[0.08] bg-slate-900/50 flex flex-col h-[168px] overflow-hidden relative isolate";
+  return "rounded-lg border border-white/[0.08] bg-slate-900/50 flex flex-col h-[184px] overflow-hidden relative isolate";
 }
 
 function fmtSec(s: number): string {
@@ -40,6 +42,7 @@ type Props = {
   targetBagsPerHour: number | null;
   queues: QueueHealthRow[];
   pauseReasons: PauseReasonRow[];
+  dataGaps: FloorManagerSnapshot["dataGaps"];
 };
 
 export function CommandCenterCharts({
@@ -47,6 +50,7 @@ export function CommandCenterCharts({
   targetBagsPerHour,
   queues,
   pauseReasons,
+  dataGaps,
 }: Props) {
   const wipRows = queues
     .filter((q) => q.wip > 0)
@@ -76,7 +80,7 @@ export function CommandCenterCharts({
     }));
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 p-3 shrink-0 border-t border-white/[0.06]">
+    <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-3 p-3 shrink-0 border-t border-white/[0.06]">
       <div className={panelClass()}>
         <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
           Production trend · shift
@@ -137,6 +141,13 @@ export function CommandCenterCharts({
             <DonutChart segments={pauseSegments} size={130} thickness={22} />
           )}
         </div>
+      </div>
+
+      <div className={panelClass()}>
+        <div className="px-3 pt-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          Data coverage · gaps
+        </div>
+        <DataGapPanel gaps={dataGaps} />
       </div>
     </div>
   );

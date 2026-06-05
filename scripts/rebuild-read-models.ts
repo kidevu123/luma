@@ -16,6 +16,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { sql } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
+import { rebuildDailyThroughput } from "@/lib/projector/daily-throughput";
 import { rebuildQueueState } from "@/lib/projector/queue-state";
 import { rebuildSkuDaily } from "@/lib/projector/sku-daily";
 import { rebuildMaterialReconciliation } from "@/lib/projector/material-reconciliation";
@@ -41,6 +42,7 @@ async function main() {
   );
 
   const tables = [
+    "read_daily_throughput",
     "read_queue_state",
     "read_sku_daily",
     "read_material_reconciliation",
@@ -74,6 +76,8 @@ async function main() {
   }
 
   await db.transaction(async (tx) => {
+    console.log("[rebuild-read-models] rebuilding read_daily_throughput…");
+    await rebuildDailyThroughput(tx);
     console.log("[rebuild-read-models] rebuilding read_queue_state…");
     await rebuildQueueState(tx);
     console.log("[rebuild-read-models] rebuilding read_sku_daily…");

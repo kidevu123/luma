@@ -17,6 +17,7 @@ import {
 import { computeShiftProgress } from "@/lib/production/floor-command";
 import { deriveOperatorRows } from "@/lib/production/metrics";
 import { lastNDays } from "@/lib/production/time";
+import { buildFloorDataGaps } from "@/lib/floor-command/data-gaps";
 import type {
   FloorManagerSnapshot,
   StageCycleBenchmarkRow,
@@ -59,6 +60,7 @@ export async function getFloorManagerSnapshot(
     runwayRow,
     laneRow,
     damageClusterRow,
+    dataGaps,
     operatorRows,
   ] = await Promise.all([
     loadMachineProduction(shiftStartIso, since7d, shiftDayKey),
@@ -78,6 +80,7 @@ export async function getFloorManagerSnapshot(
     loadMaterialRunway(),
     loadLaneImbalance(),
     loadDamageCluster(),
+    loadDataGaps(shiftDayKey),
     deriveOperatorRows(lastNDays(1)),
   ]);
 
@@ -121,6 +124,7 @@ export async function getFloorManagerSnapshot(
     wipByStage: wipByStageRows,
     stageCycles: stageCycleRows,
     flavorToday: flavorRows,
+    dataGaps,
   };
 }
 
@@ -738,6 +742,109 @@ async function loadDamageCluster() {
   } catch {
     return { isCluster: false };
   }
+}
+
+async function loadDataGaps(shiftDayKey: string) {
+  const [row] = (await db.execute(sql`
+    SELECT
+      (SELECT COUNT(*)::int FROM production_calendars) AS production_calendars,
+      (SELECT COUNT(*)::int FROM station_standards WHERE is_active = true) AS station_standards,
+      (SELECT COUNT(*)::int FROM labor_rates) AS labor_rates,
+      (SELECT COUNT(*)::int FROM due_targets WHERE completed_at IS NULL) AS due_targets,
+      (SELECT COUNT(*)::int FROM products WHERE daily_unit_goal IS NOT NULL) AS products_with_daily_goals,
+      (SELECT COUNT(*)::int FROM machines WHERE is_active = true AND target_bags_per_hour IS NOT NULL) AS active_machines_with_targets,
+      (SELECT COUNT(*)::int FROM stations WHERE is_active = true) AS active_stations,
+      (
+        SELECT COUNT(*)::int
+        FROM read_station_live rsl
+        INNER JOIN stations s ON s.id = rsl.station_id
+        WHERE s.is_active = true
+      ) AS station_live_rows,
+      (SELECT COUNT(*)::int FROM read_queue_state) AS queue_rows,
+      (
+        SELECT COUNT(*)::int
+        FROM workflow_bags wb
+        LEFT JOIN read_bag_state rbs ON rbs.workflow_bag_id = wb.id
+        WHERE wb.finalized_at IS NULL
+          AND rbs.workflow_bag_id IS NULL
+      ) AS in_flight_without_state,
+      (SELECT COALESCE(SUM(units_produced), 0)::int FROM read_daily_throughput) AS read_daily_units,
+      (SELECT COALESCE(SUM(units_yielded), 0)::int FROM read_bag_metrics) AS bag_metric_units,
+      (
+        SELECT COUNT(*)::int
+        FROM read_material_burn
+        WHERE day >= CURRENT_DATE - INTERVAL '7 days'
+      ) AS material_burn_rows_7d,
+      (
+        SELECT COUNT(*)::int
+        FROM read_operator_daily
+        WHERE day = ${shiftDayKey}::date
+      ) AS read_operator_daily_rows,
+      (
+        SELECT COUNT(*)::int
+        FROM workflow_events
+        WHERE event_type::text = 'PACKAGING_DAMAGE_RETURN'
+          AND occurred_at >= now() - INTERVAL '7 days'
+      ) AS damage_events_7d,
+      (
+        SELECT COUNT(*)::int
+        FROM workflow_events
+        WHERE event_type::text LIKE '%REWORK%'
+          AND occurred_at >= now() - INTERVAL '7 days'
+      ) AS rework_events_7d,
+      (
+        SELECT COUNT(*)::int
+        FROM workflow_events
+        WHERE event_type::text = 'SCRAP_RECORDED'
+          AND occurred_at >= now() - INTERVAL '7 days'
+      ) AS scrap_events_7d,
+      (
+        SELECT COUNT(*)::int
+        FROM workflow_events
+        WHERE event_type::text = 'SUBMISSION_CORRECTED'
+          AND occurred_at >= now() - INTERVAL '7 days'
+      ) AS correction_events_7d
+  `)) as unknown as Array<{
+    production_calendars: number;
+    station_standards: number;
+    labor_rates: number;
+    due_targets: number;
+    products_with_daily_goals: number;
+    active_machines_with_targets: number;
+    active_stations: number;
+    station_live_rows: number;
+    queue_rows: number;
+    in_flight_without_state: number;
+    read_daily_units: number;
+    bag_metric_units: number;
+    material_burn_rows_7d: number;
+    read_operator_daily_rows: number;
+    damage_events_7d: number;
+    rework_events_7d: number;
+    scrap_events_7d: number;
+    correction_events_7d: number;
+  }>;
+
+  return buildFloorDataGaps({
+    productionCalendars: Number(row?.production_calendars ?? 0),
+    stationStandards: Number(row?.station_standards ?? 0),
+    laborRates: Number(row?.labor_rates ?? 0),
+    dueTargets: Number(row?.due_targets ?? 0),
+    productsWithDailyGoals: Number(row?.products_with_daily_goals ?? 0),
+    activeMachinesWithTargets: Number(row?.active_machines_with_targets ?? 0),
+    activeStations: Number(row?.active_stations ?? 0),
+    stationLiveRows: Number(row?.station_live_rows ?? 0),
+    queueRows: Number(row?.queue_rows ?? 0),
+    inFlightWithoutState: Number(row?.in_flight_without_state ?? 0),
+    readDailyUnits: Number(row?.read_daily_units ?? 0),
+    bagMetricUnits: Number(row?.bag_metric_units ?? 0),
+    materialBurnRows7d: Number(row?.material_burn_rows_7d ?? 0),
+    readOperatorDailyRows: Number(row?.read_operator_daily_rows ?? 0),
+    damageEvents7d: Number(row?.damage_events_7d ?? 0),
+    reworkEvents7d: Number(row?.rework_events_7d ?? 0),
+    scrapEvents7d: Number(row?.scrap_events_7d ?? 0),
+    correctionEvents7d: Number(row?.correction_events_7d ?? 0),
+  });
 }
 
 async function loadPauseCostToday(shiftStartIso: string) {

@@ -66,9 +66,9 @@ describe("DASHBOARD-FINALIZED-TABLETS-1 · tablet totals for top flavors", () =>
   });
 });
 
-describe("DASHBOARD-FINALIZED-TABLETS-1 · Bag 117 regression shape", () => {
-  it("documents why read_daily_throughput under-counts (machine_id gate)", () => {
-    expect(loadersSrc).toMatch(/machine_id/);
-    expect(loadersSrc).toMatch(/units_yielded/);
+describe("DASHBOARD-FINALIZED-TABLETS-1 · owner dashboard source shape", () => {
+  it("documents read_daily_throughput as floor pace while finalized output stays per-bag", () => {
+    expect(loadersSrc).toMatch(/read_daily_throughput is a rollup for floor pace/);
+    expect(loadersSrc).toMatch(/per-bag source metric rows/);
   });
 });

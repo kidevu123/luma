@@ -5,11 +5,14 @@
 // stand up a fixture-driven integration suite (Phase F).
 
 import { describe, expect, it, vi } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 vi.mock("@/lib/db", () => ({
   db: { transaction: () => Promise.resolve(undefined) },
 }));
 
+import { buildThroughputProjection, floorThroughputDayKey } from "./index";
 import {
   classifyQueueStatus,
   QUEUE_THRESHOLDS,
@@ -64,6 +67,47 @@ describe("QUEUE_REFRESH_EVENTS", () => {
     expect(QUEUE_REFRESH_EVENTS.has("STATION_SCAN_TOKEN_ROTATED")).toBe(false);
     expect(QUEUE_REFRESH_EVENTS.has("OPERATOR_CHANGE")).toBe(false);
     expect(QUEUE_REFRESH_EVENTS.has("BATCH_RELEASED")).toBe(false);
+  });
+});
+
+// ─── Throughput projection ────────────────────────────────────────
+describe("buildThroughputProjection", () => {
+  it("increments units_produced from finalized bag metrics", () => {
+    expect(buildThroughputProjection("BAG_FINALIZED", {}, 1280, 12, 3)).toEqual({
+      counterCol: "bags_finalized",
+      unitsProduced: 1280,
+      displaysProduced: 12,
+      casesProduced: 3,
+    });
+  });
+
+  it("does not advance throughput for partial sealing close-outs", () => {
+    expect(
+      buildThroughputProjection(
+        "SEALING_COMPLETE",
+        { partial_close: true, sealed_partial_count: 40 },
+        null,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("floorThroughputDayKey", () => {
+  it("buckets throughput by the Luma Eastern production day", () => {
+    expect(floorThroughputDayKey(new Date("2026-06-05T02:30:00.000Z"))).toBe(
+      "2026-06-04",
+    );
+  });
+});
+
+describe("daily throughput rebuild source", () => {
+  it("rebuilds units_produced from read_bag_metrics units_yielded", () => {
+    const path = join(__dirname, "daily-throughput.ts");
+    expect(existsSync(path)).toBe(true);
+    const src = readFileSync(path, "utf8");
+    expect(src).toMatch(/read_bag_metrics/);
+    expect(src).toMatch(/units_yielded/);
+    expect(src).toMatch(/units_produced/);
   });
 });
 

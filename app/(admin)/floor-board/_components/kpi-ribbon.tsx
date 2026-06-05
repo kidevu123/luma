@@ -67,10 +67,17 @@ type Props = {
   shiftStatus: ShiftStatusData;
   kpiData: KpiStripData;
   plant: FloorManagerSnapshot["plant"];
+  dataGaps: FloorManagerSnapshot["dataGaps"];
   throughputPoints: ThroughputDataPoint[];
 };
 
-export function KpiRibbon({ shiftStatus, kpiData, plant, throughputPoints }: Props) {
+export function KpiRibbon({
+  shiftStatus,
+  kpiData,
+  plant,
+  dataGaps,
+  throughputPoints,
+}: Props) {
   const spark = throughputPoints.map((p) => p.bagsPerHour);
   const target = shiftStatus.target;
   const outputAccent =
@@ -104,6 +111,11 @@ export function KpiRibbon({ shiftStatus, kpiData, plant, throughputPoints }: Pro
     kpiData.unitsOut === 0 && plant.unitsYieldedShift > 0
       ? "from finalized bags this shift (throughput projector empty for today)"
       : target.detail;
+  const criticalGaps = dataGaps.filter((g) => g.status === "crit").length;
+  const openGaps = dataGaps.filter(
+    (g) => g.status === "warn" || g.status === "missing",
+  ).length;
+  const firstGap = dataGaps.find((g) => g.status !== "ok");
 
   return (
     <div
@@ -170,6 +182,22 @@ export function KpiRibbon({ shiftStatus, kpiData, plant, throughputPoints }: Pro
               ? "warn"
               : "neutral"
         }
+      />
+      <KpiCard
+        label="Data gaps"
+        value={
+          criticalGaps > 0
+            ? `${criticalGaps} critical`
+            : openGaps > 0
+              ? `${openGaps} open`
+              : "Clear"
+        }
+        sub={
+          firstGap
+            ? `${firstGap.label}: ${firstGap.value}`
+            : "all required inputs online"
+        }
+        accent={criticalGaps > 0 ? "crit" : openGaps > 0 ? "warn" : "good"}
       />
     </div>
   );

@@ -53,10 +53,17 @@ import {
   readResumeStageFromVoidCorrection,
   shouldApplyVoidErroneousBagFinalizationRepair,
 } from "./bag-finalization-void-repair";
+import { ymdInTz } from "@/lib/production/time";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
 type WorkflowEventType = typeof workflowEvents.$inferInsert["eventType"];
+
+const LUMA_TIME_ZONE = "America/New_York";
+
+export function floorThroughputDayKey(date: Date): string {
+  return ymdInTz(date, LUMA_TIME_ZONE);
+}
 
 /** OP-1B: how an accountable employee was identified for a count
  *  submission. Used to band confidence on operator productivity
@@ -140,6 +147,142 @@ const THROUGHPUT_COLUMN: Record<string, string> = {
   PACKAGING_COMPLETE: "bags_packaged",
   BOTTLE_STICKER_COMPLETE: "bags_packaged",
   BAG_FINALIZED: "bags_finalized",
+};
+
+export type ThroughputProjection = {
+  counterCol: string;
+  unitsProduced: number;
+  displaysProduced: number;
+  casesProduced: number;
+};
+
+export function buildThroughputProjection(
+  eventType: string,
+  payload: Record<string, unknown> | null | undefined,
+  finalizedUnitsYielded: number | null | undefined,
+  finalizedDisplaysMade: number | null | undefined = 0,
+  finalizedMasterCases: number | null | undefined = 0,
+): ThroughputProjection | null {
+  if (
+    eventType === "SEALING_COMPLETE" &&
+    isPartialSealingClosePayload(payload ?? null)
+  ) {
+    return null;
+  }
+  if (
+    eventType === "PACKAGING_COMPLETE" &&
+    isPartialPackagingPayload(payload ?? null)
+  ) {
+    return null;
+  }
+  const counterCol = THROUGHPUT_COLUMN[eventType];
+  if (!counterCol) return null;
+
+  const unitsProduced =
+    eventType === "BAG_FINALIZED"
+      ? Math.max(0, Math.floor(Number(finalizedUnitsYielded) || 0))
+      : 0;
+  const displaysProduced =
+    eventType === "BAG_FINALIZED"
+      ? Math.max(0, Math.floor(Number(finalizedDisplaysMade) || 0))
+      : 0;
+  const casesProduced =
+    eventType === "BAG_FINALIZED"
+      ? Math.max(0, Math.floor(Number(finalizedMasterCases) || 0))
+      : 0;
+
+  return { counterCol, unitsProduced, displaysProduced, casesProduced };
+}
+
+async function upsertDailyThroughput(
+  tx: Tx,
+  args: {
+    day: string;
+    productId: string;
+    machineId: string | null;
+    counterCol: string;
+    unitsProduced: number;
+    displaysProduced: number;
+    casesProduced: number;
+    occurredAtIso: string;
+  },
+): Promise<void> {
+  if (args.machineId) {
+    await tx.execute(sql`
+      INSERT INTO read_daily_throughput (
+        day,
+        product_id,
+        machine_id,
+        ${sql.raw(args.counterCol)},
+        units_produced,
+        displays_produced,
+        cases_produced,
+        updated_at
+      )
+      VALUES (
+        ${args.day}::date,
+        ${args.productId},
+        ${args.machineId},
+        1,
+        ${args.unitsProduced},
+        ${args.displaysProduced},
+        ${args.casesProduced},
+        ${args.occurredAtIso}::timestamptz
+      )
+      ON CONFLICT (day, product_id, machine_id)
+      DO UPDATE SET
+        ${sql.raw(args.counterCol)} = read_daily_throughput.${sql.raw(args.counterCol)} + 1,
+        units_produced = read_daily_throughput.units_produced + ${args.unitsProduced},
+        displays_produced = read_daily_throughput.displays_produced + ${args.displaysProduced},
+        cases_produced = read_daily_throughput.cases_produced + ${args.casesProduced},
+        updated_at = ${args.occurredAtIso}::timestamptz
+    `);
+    return;
+  }
+
+  await tx.execute(sql`
+    WITH updated AS (
+      UPDATE read_daily_throughput
+      SET
+        ${sql.raw(args.counterCol)} = read_daily_throughput.${sql.raw(args.counterCol)} + 1,
+        units_produced = read_daily_throughput.units_produced + ${args.unitsProduced},
+        displays_produced = read_daily_throughput.displays_produced + ${args.displaysProduced},
+        cases_produced = read_daily_throughput.cases_produced + ${args.casesProduced},
+        updated_at = ${args.occurredAtIso}::timestamptz
+      WHERE day = ${args.day}::date
+        AND product_id = ${args.productId}
+        AND machine_id IS NULL
+      RETURNING id
+    )
+    INSERT INTO read_daily_throughput (
+      day,
+      product_id,
+      machine_id,
+      ${sql.raw(args.counterCol)},
+      units_produced,
+      displays_produced,
+      cases_produced,
+      updated_at
+    )
+    SELECT
+      ${args.day}::date,
+      ${args.productId},
+      NULL,
+      1,
+      ${args.unitsProduced},
+      ${args.displaysProduced},
+      ${args.casesProduced},
+      ${args.occurredAtIso}::timestamptz
+    WHERE NOT EXISTS (SELECT 1 FROM updated)
+  `);
+}
+
+type FinalizedBagMetricsProjection = {
+  productId: string | null;
+  unitsYielded: number;
+  displaysMade: number;
+  masterCases: number;
+  machineIds: string[];
 };
 
 /** Insert a workflow_event AND update the live read models in one
@@ -426,6 +569,7 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
 
   // 3. workflow_bags.finalizedAt + qr_cards release on BAG_FINALIZED +
   //    snapshot read_bag_metrics + bump read_operator_daily.
+  let finalizedMetrics: FinalizedBagMetricsProjection | null = null;
   if (ev.eventType === "BAG_FINALIZED") {
     await tx
       .update(workflowBags)
@@ -452,46 +596,56 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
     }
     // else: QR remains ASSIGNED to the finalized bag; resumable via scanCardAction.
 
-    await projectMetricsForFinalizedBag(tx, ev.workflowBagId, occurredAt);
+    finalizedMetrics = await projectMetricsForFinalizedBag(
+      tx,
+      ev.workflowBagId,
+      occurredAt,
+    );
   }
 
   // 4. read_daily_throughput — increment the matching bag-stage counter
   //    for the day this event landed, keyed by (day, product, machine).
   //    Product is pulled from workflow_bags; machine from the station's
-  //    machine_id. We only project rows where both are known: nullable
-  //    keys break Postgres' UNIQUE-with-NULL semantics (each NULL is
-  //    distinct), and a polluted "unknown" bucket would mislead the
-  //    floor manager more than skipping early-stage events helps. The
-  //    bag picks up its productId on the first stage event anyway.
-  const counterCol =
-    ev.eventType === "SEALING_COMPLETE" &&
-    isPartialSealingClosePayload(mergedPayload)
-      ? undefined
-      : THROUGHPUT_COLUMN[ev.eventType];
-  if (counterCol && ev.stationId) {
+  //    machine_id when available. Stations without a machine still count
+  //    into a product-only row so packaging/finalize output is not dropped.
+  const throughputProjection = buildThroughputProjection(
+    ev.eventType,
+    mergedPayload,
+    finalizedMetrics?.unitsYielded,
+    finalizedMetrics?.displaysMade,
+    finalizedMetrics?.masterCases,
+  );
+  if (throughputProjection) {
     const [bagRow] = await tx
       .select({ productId: workflowBags.productId })
       .from(workflowBags)
       .where(eq(workflowBags.id, ev.workflowBagId));
-    const [stationRow] = await tx
-      .select({ machineId: stations.machineId })
-      .from(stations)
-      .where(eq(stations.id, ev.stationId));
-    if (bagRow?.productId && stationRow?.machineId) {
-      const day = occurredAt.toISOString().slice(0, 10);
+    const [stationRow] = ev.stationId
+      ? await tx
+          .select({ machineId: stations.machineId })
+          .from(stations)
+          .where(eq(stations.id, ev.stationId))
+      : [];
+    const productId = bagRow?.productId ?? finalizedMetrics?.productId ?? null;
+    const machineId = stationRow?.machineId ?? null;
+    if (productId) {
+      const day = floorThroughputDayKey(occurredAt);
       const occurredAtIso = occurredAt.toISOString();
       // postgres-js's Bind step rejects bare JS Date instances — pin
       // the timestamp through ::timestamptz so the driver only sees a
       // string at parameter time. Same Bind crash class that hit
       // floor-board / metrics earlier; fixing here pre-empts the next
       // BAG_FINALIZED action throw post-legacy-import.
-      await tx.execute(sql`
-        INSERT INTO read_daily_throughput (day, product_id, machine_id, ${sql.raw(counterCol)}, updated_at)
-        VALUES (${day}, ${bagRow.productId}, ${stationRow.machineId}, 1, ${occurredAtIso}::timestamptz)
-        ON CONFLICT (day, product_id, machine_id)
-        DO UPDATE SET ${sql.raw(counterCol)} = read_daily_throughput.${sql.raw(counterCol)} + 1,
-                      updated_at = ${occurredAtIso}::timestamptz
-      `);
+      await upsertDailyThroughput(tx, {
+        day,
+        productId,
+        machineId,
+        counterCol: throughputProjection.counterCol,
+        unitsProduced: throughputProjection.unitsProduced,
+        displaysProduced: throughputProjection.displaysProduced,
+        casesProduced: throughputProjection.casesProduced,
+        occurredAtIso,
+      });
     }
   }
 
@@ -601,9 +755,9 @@ async function projectMetricsForFinalizedBag(
   tx: Tx,
   bagId: string,
   finalizedAt: Date,
-): Promise<void> {
+): Promise<FinalizedBagMetricsProjection | null> {
   const [bag] = await tx.select().from(workflowBags).where(eq(workflowBags.id, bagId));
-  if (!bag) return;
+  if (!bag) return null;
 
   const events = await tx
     .select()
@@ -881,4 +1035,12 @@ async function projectMetricsForFinalizedBag(
       `);
     }
   }
+
+  return {
+    productId: bag.productId,
+    unitsYielded,
+    displaysMade,
+    masterCases,
+    machineIds,
+  };
 }

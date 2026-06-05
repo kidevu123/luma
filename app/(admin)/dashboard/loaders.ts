@@ -1,10 +1,9 @@
 // Dashboard owner-home loaders.
 //
 // Finalized-bag counts and tablet totals come from workflow_bags +
-// read_bag_metrics — not read_daily_throughput. The throughput projector
-// skips events when the firing station has no machine_id (e.g. packaging
-// stations), so aggregate rows under-count finalized bags and never carry
-// units_yielded. metrics-strategy.md §1.1–1.2.
+// read_bag_metrics. read_daily_throughput is a rollup for floor pace,
+// while this owner dashboard keeps finalized output tied directly to
+// the per-bag source metric rows. metrics-strategy.md §1.1–1.2.
 
 import { sql, and, gte, eq, isNotNull, lt, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";

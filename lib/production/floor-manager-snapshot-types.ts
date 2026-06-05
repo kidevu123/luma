@@ -145,4 +145,12 @@ export type FloorManagerSnapshot = {
     units: number;
     bags: number;
   }>;
+  dataGaps: Array<{
+    id: string;
+    label: string;
+    status: "ok" | "warn" | "crit" | "missing";
+    value: string;
+    detail: string;
+    href?: string;
+  }>;
 };

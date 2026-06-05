@@ -43,6 +43,7 @@ function minimalSnapshot(
     wipByStage: [],
     stageCycles: [],
     flavorToday: [],
+    dataGaps: [],
   };
 }
 
