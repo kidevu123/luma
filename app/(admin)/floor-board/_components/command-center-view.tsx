@@ -29,6 +29,7 @@ import { PackOutHero } from "./pack-out-hero";
 import { QueueWipRail } from "./queue-wip-rail";
 import { ShiftDeck, type ShiftDeckTabId } from "./shift-deck";
 import { TrendsPanel } from "./trends-drawer";
+import { TvCommandCenterView } from "./tv-command-center/tv-command-center-view";
 
 const LINE_VIEW_KEY = "luma-floor-line-view";
 
@@ -125,6 +126,42 @@ export function CommandCenterView({
     setDeckTab("staging");
     setDeckOpen(true);
   };
+
+  if (isLead || isTv) {
+    return (
+      <div className="relative h-full min-h-0 overflow-hidden">
+        <TvCommandCenterView
+          mode={mode}
+          shiftStatus={shiftStatus}
+          kpiData={kpiData}
+          productionIntelligence={productionIntelligence}
+          managerSnapshot={managerSnapshot}
+          actNowItems={actNowItems}
+          widgetData={widgetData}
+          lineView={lineView}
+          onLineViewChange={setLineViewPersist}
+          onModeChange={onModeChange}
+          {...(onOpenBriefing ? { onOpenBriefing } : {})}
+          onToggleTables={() => setDeckOpen((v) => !v)}
+          tablesOpen={deckOpen}
+          liveStatus={liveStatus}
+          lastUpdatedAt={lastUpdatedAt}
+          showModeControls={!isTv}
+        />
+        {deckOpen && (
+          <div className="absolute inset-x-0 bottom-0 z-20 max-h-[45%] overflow-hidden border-t border-white/10 bg-[#07090d] shadow-2xl">
+            <ShiftDeck
+              key={deckTab}
+              snapshot={managerSnapshot}
+              queues={widgetData.queues}
+              pauseReasons={pauseReasons}
+              defaultTab={deckTab}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div

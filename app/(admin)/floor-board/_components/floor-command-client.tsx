@@ -24,7 +24,6 @@ import { stageKeyToMetricsLane } from "@/lib/floor-command/metrics-links";
 import { MetricsQuickLinks } from "./metrics-quick-links";
 import { OwnerPulseStrip } from "./owner-pulse-strip";
 import { ActNowPanel } from "./act-now-panel";
-import { TvRotationPanel } from "./tv-rotation-panel";
 import { CommandCenterView } from "./command-center-view";
 import { OperationsBriefingPanel } from "./operations-briefing-panel";
 import type { PauseReasonRow } from "../_loaders";
@@ -186,16 +185,6 @@ export function FloorCommandClient({
               enlarged={isTv}
             />
           </div>
-          {isTv && (
-            <div className="w-[min(42%,400px)] shrink-0 min-h-0 border-l border-white/10">
-              <TvRotationPanel
-                shiftStatus={shiftStatus}
-                actNowItems={actNowItems}
-                intelligence={productionIntelligence}
-                throughputPoints={widgetData.throughputPoints}
-              />
-            </div>
-          )}
         </div>
       ) : (
         <>
