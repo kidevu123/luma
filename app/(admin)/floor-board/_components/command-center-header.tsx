@@ -7,6 +7,7 @@ import {
   lineFlowLabel,
   type ProductionLineDefinition,
 } from "@/lib/floor-command/production-lines";
+import type { LineViewMode } from "./dual-flow-status-bar";
 import { partitionWip } from "@/lib/floor-command/wip-partition";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import type { FloorLiveStatus } from "@/app/(admin)/floor-board/_hooks/use-floor-live-refresh";
@@ -29,6 +30,7 @@ type Props = {
   showControls?: boolean;
   snapshot?: FloorManagerSnapshot;
   displayLine?: ProductionLineDefinition;
+  lineView?: LineViewMode;
   liveStatus?: FloorLiveStatus;
   lastUpdatedAt?: number | null;
 };
@@ -39,6 +41,7 @@ export function CommandCenterHeader({
   showControls = true,
   snapshot,
   displayLine,
+  lineView = "auto",
   liveStatus = "live",
   lastUpdatedAt = null,
 }: Props) {
@@ -95,7 +98,7 @@ export function CommandCenterHeader({
           <span className="hidden text-[10px] text-slate-600 sm:inline">·</span>
           <span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-amber-400/80 sm:inline">
             {displayLine
-              ? `${displayLine.shortName.toUpperCase()} · ${lineFlowLabel(displayLine)}`
+              ? `${displayLine.shortName.toUpperCase()}${lineView === "both" ? " · BOTH LINES" : ""} · ${lineFlowLabel(displayLine)}`
               : "Blister → Seal → Pack"}
           </span>
         </div>

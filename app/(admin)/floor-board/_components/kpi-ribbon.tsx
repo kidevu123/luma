@@ -69,6 +69,7 @@ type Props = {
   plant: FloorManagerSnapshot["plant"];
   dataGaps: FloorManagerSnapshot["dataGaps"];
   throughputPoints: ThroughputDataPoint[];
+  showQuality?: boolean;
 };
 
 export function KpiRibbon({
@@ -77,6 +78,7 @@ export function KpiRibbon({
   plant,
   dataGaps,
   throughputPoints,
+  showQuality = false,
 }: Props) {
   const spark = throughputPoints.map((p) => p.bagsPerHour);
   const target = shiftStatus.target;
@@ -118,10 +120,11 @@ export function KpiRibbon({
   const firstGap = dataGaps.find((g) => g.status !== "ok");
 
   return (
-    <div
-      className="flex gap-2 px-3 py-2 overflow-x-auto border-b border-white/[0.06] bg-[#0b0e14]/95 shrink-0"
-      aria-label="Shift KPIs"
-    >
+    <div className="shrink-0 border-b border-white/[0.06] bg-[#0b0e14]/95">
+      <div
+        className="flex gap-2 px-3 py-2 overflow-x-auto"
+        aria-label="Shift KPIs"
+      >
       <KpiCard
         label="Output today"
         value={outputValue}
@@ -199,6 +202,35 @@ export function KpiRibbon({
         }
         accent={criticalGaps > 0 ? "crit" : openGaps > 0 ? "warn" : "good"}
       />
+      </div>
+      {showQuality && (
+        <div className="flex gap-2 overflow-x-auto border-t border-white/[0.04] px-3 py-1.5">
+          {plant.avgYieldPctShift != null && (
+            <KpiCard
+              label="Shift yield"
+              value={`${plant.avgYieldPctShift.toFixed(1)}%`}
+              sub="finalized bags this shift"
+              accent="neutral"
+            />
+          )}
+          {plant.damageRatePctShift != null && (
+            <KpiCard
+              label="Damage rate"
+              value={`${plant.damageRatePctShift.toFixed(1)}%`}
+              sub="damaged + ripped"
+              accent={plant.damageRatePctShift > 3 ? "warn" : "neutral"}
+            />
+          )}
+          {plant.damageClusterActive && (
+            <KpiCard
+              label="Quality alert"
+              value="Damage cluster"
+              sub="check packaging station"
+              accent="crit"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

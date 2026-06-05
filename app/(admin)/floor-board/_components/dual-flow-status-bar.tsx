@@ -98,16 +98,23 @@ type Props = {
   rows: StationCommandRow[];
   lineView: LineViewMode;
   onLineViewChange: (mode: LineViewMode) => void;
+  queueRail?: React.ReactNode;
 };
 
-export function DualFlowStatusBar({ rows, lineView, onLineViewChange }: Props) {
+export function DualFlowStatusBar({
+  rows,
+  lineView,
+  onLineViewChange,
+  queueRail,
+}: Props) {
   const activeCard =
     lineView === "card_route" || lineView === "auto" || lineView === "both";
   const activeBottle =
     lineView === "bottle_route" || lineView === "both";
 
   return (
-    <div className="flex shrink-0 flex-col gap-1.5 border-b border-white/[0.06] bg-[#0a0d12] px-3 py-2 sm:flex-row sm:items-center">
+    <div className="flex shrink-0 flex-col border-b border-white/[0.06] bg-[#0a0d12]">
+      <div className="flex flex-col gap-1.5 px-3 py-2 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 gap-2">
         <FlowLine
           line={CARD_PRODUCTION_LINE}
@@ -131,6 +138,15 @@ export function DualFlowStatusBar({ rows, lineView, onLineViewChange }: Props) {
         />
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        {lineView !== "auto" && (
+          <button
+            type="button"
+            onClick={() => onLineViewChange("auto")}
+            className="min-h-[36px] rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-sky-300 hover:bg-sky-500/20"
+          >
+            ← Auto
+          </button>
+        )}
         {(
           [
             ["auto", "Auto"],
@@ -154,6 +170,8 @@ export function DualFlowStatusBar({ rows, lineView, onLineViewChange }: Props) {
           </button>
         ))}
       </div>
+      </div>
+      {queueRail}
     </div>
   );
 }

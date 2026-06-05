@@ -174,6 +174,7 @@ export function FloorCommandClient({
               mode={mode}
               shiftStatus={shiftStatus}
               kpiData={kpiData}
+              productionIntelligence={productionIntelligence}
               managerSnapshot={managerSnapshot}
               actNowItems={actNowItems}
               widgetData={widgetData}

@@ -17,9 +17,13 @@ import type { StationCommandRow } from "@/lib/production/floor-manager-snapshot-
 import { formatWeightKg } from "@/lib/ui/luma-display";
 import { cn } from "@/lib/utils";
 
+import type { LineViewMode } from "./dual-flow-status-bar";
+
 type Props = {
   rows: StationCommandRow[];
   displayLine: ProductionLineDefinition;
+  lineView?: LineViewMode;
+  onLineViewChange?: (mode: LineViewMode) => void;
   fillViewport?: boolean;
   dense?: boolean;
 };
@@ -431,13 +435,22 @@ function LineFlowGrid({
 function SecondaryLineStrip({
   line,
   rows,
+  onSelectLine,
 }: {
   line: ProductionLineDefinition;
   rows: StationCommandRow[];
+  onSelectLine?: () => void;
 }) {
   const active = rows.filter((r) => r.workflowBagId).length;
   return (
-    <div className="flex h-14 shrink-0 items-center gap-3 overflow-x-auto border-t border-white/[0.06] bg-[#0a0d12] px-3">
+    <button
+      type="button"
+      onClick={onSelectLine}
+      className={cn(
+        "flex h-14 shrink-0 items-center gap-3 overflow-x-auto border-t border-white/[0.06] bg-[#0a0d12] px-3 text-left w-full",
+        onSelectLine && "hover:bg-white/[0.03] cursor-pointer",
+      )}
+    >
       <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
         {line.shortName}
       </span>
@@ -465,16 +478,34 @@ function SecondaryLineStrip({
           );
         })}
       </div>
-    </div>
+      {onSelectLine && (
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-sky-400">
+          View →
+        </span>
+      )}
+    </button>
   );
 }
 
 export function MachineCommandGrid({
   rows,
   displayLine,
+  lineView = "auto",
+  onLineViewChange,
   fillViewport = false,
   dense = false,
 }: Props) {
+  const showBoth = lineView === "both";
+
+  const cardGroups = useMemo(
+    () => buildLineStepGroupsForLine(CARD_PRODUCTION_LINE, rows),
+    [rows],
+  );
+  const bottleGroups = useMemo(
+    () => buildLineStepGroupsForLine(BOTTLE_PRODUCTION_LINE, rows),
+    [rows],
+  );
+
   const groups = useMemo(
     () => buildLineStepGroupsForLine(displayLine, rows),
     [displayLine, rows],
@@ -506,10 +537,45 @@ export function MachineCommandGrid({
         fillViewport ? "h-full flex-1" : "flex-1",
       )}
     >
-      <LineFlowGrid groups={groups} {...(dense ? { dense: true } : {})} />
-
-      {secondaryRows.length > 0 && dense && (
-        <SecondaryLineStrip line={secondaryLine} rows={secondaryRows} />
+      {showBoth ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col border-b border-white/[0.06]">
+            <div className="shrink-0 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-400/80">
+              Card line
+            </div>
+            <div className="flex min-h-0 flex-1">
+              <LineFlowGrid groups={cardGroups} {...(dense ? { dense: true } : {})} />
+            </div>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-sky-400/80">
+              Bottle line
+            </div>
+            <div className="flex min-h-0 flex-1">
+              <LineFlowGrid groups={bottleGroups} {...(dense ? { dense: true } : {})} />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <LineFlowGrid groups={groups} {...(dense ? { dense: true } : {})} />
+          {secondaryRows.length > 0 && dense && (
+            <SecondaryLineStrip
+              line={secondaryLine}
+              rows={secondaryRows}
+              {...(onLineViewChange
+                ? {
+                    onSelectLine: () =>
+                      onLineViewChange(
+                        displayLine.id === CARD_PRODUCTION_LINE.id
+                          ? "bottle_route"
+                          : "card_route",
+                      ),
+                  }
+                : {})}
+            />
+          )}
+        </>
       )}
     </section>
   );
