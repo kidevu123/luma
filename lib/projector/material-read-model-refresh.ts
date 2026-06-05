@@ -10,7 +10,6 @@ import {
 } from "@/lib/projector/material-reconciliation-v2";
 import { rebuildMaterialRecommendations } from "@/lib/projector/packtrack-recommendations";
 import { refreshRollDerivedReadModels } from "@/lib/projector/roll-derived-read-models";
-import { rebuildRollUsage } from "@/lib/projector/roll-usage";
 import { getActiveRollLotIdsForStation } from "@/lib/production/active-roll-lot-ids";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
@@ -47,13 +46,13 @@ export async function refreshMaterialReadModelsAfterConsumption(
   }
 }
 
-/** Lighter refresh after each blister complete (segments + runway). */
+/** Lighter refresh after each blister complete (segments + runway + learning). */
 export async function refreshMaterialReadModelsAfterBlister(
   tx: Tx,
   stationId: string,
 ): Promise<void> {
   const lotIds = await getActiveRollLotIdsForStation(stationId);
-  await rebuildRollUsage(tx);
+  await refreshRollDerivedReadModels(tx);
   await rebuildMaterialBurn(tx);
   await refreshReconciliationV2ForLots(tx, lotIds);
 }

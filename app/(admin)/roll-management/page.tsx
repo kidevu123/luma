@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MaterialsTabs } from "@/components/ui/materials-tabs";
 import { FLOOR_ROLL_STATION_KINDS } from "@/lib/production/floor-station-mobile-nav";
 import { ExternalLink } from "lucide-react";
+import { getRollYieldSummary } from "@/lib/production/roll-yield-summary";
+import { RollYieldAnswerCard } from "@/app/(admin)/settings/blister-standards/_components/roll-yield-answer-card";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,8 @@ const ROLL_STATION_KINDS = [...FLOOR_ROLL_STATION_KINDS] as string[];
 
 export default async function RollManagementPage() {
   await requireAdmin();
+
+  const rollYieldAnswers = await getRollYieldSummary();
 
   const stationRows = await db
     .select({
@@ -43,6 +47,8 @@ export default async function RollManagementPage() {
         description="Mount, weigh, unmount, and change PVC/foil rolls at blister-room stations. Each link opens the same floor roll page operators use from the station supervisor tools."
       />
       <MaterialsTabs />
+
+      <RollYieldAnswerCard answers={rollYieldAnswers} compact />
 
       <Card>
         <CardHeader>

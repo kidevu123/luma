@@ -30,11 +30,15 @@ import {
   rebuildBlisterLearningAction,
   rebuildAllMaterialProjectionsAction,
 } from "./actions";
+import { getRollYieldSummary } from "@/lib/production/roll-yield-summary";
+import { RollYieldAnswerCard } from "./_components/roll-yield-answer-card";
 
 export const dynamic = "force-dynamic";
 
 export default async function BlisterStandardsPage() {
   await requireAdmin();
+
+  const rollYieldAnswers = await getRollYieldSummary();
 
   const [
     learnedRows,
@@ -161,8 +165,10 @@ export default async function BlisterStandardsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Blister roll yield"
-        description="The system learns grams-per-blister automatically from completed rolls. No manual entry needed to start."
+        description="How many blisters you get per kg and per full roll — PVC and foil."
       />
+
+      <RollYieldAnswerCard answers={rollYieldAnswers} />
 
       {/* How this works */}
       <Card>
@@ -336,6 +342,7 @@ export default async function BlisterStandardsPage() {
                   <TH>Role</TH>
                   <TH>Product</TH>
                   <TH className="text-right">Avg g/blister</TH>
+                  <TH className="text-right">Blisters/kg</TH>
                   <TH className="text-right">Median</TH>
                   <TH className="text-right">Total blisters</TH>
                   <TH className="text-right">Rolls used</TH>
@@ -359,6 +366,12 @@ export default async function BlisterStandardsPage() {
                     <TD className="text-right font-mono tabular-nums">
                       {r.avgWeightPerBlister != null
                         ? `${Number(r.avgWeightPerBlister).toFixed(4)} g`
+                        : "—"}
+                    </TD>
+                    <TD className="text-right font-mono tabular-nums text-brand-accent">
+                      {r.avgWeightPerBlister != null &&
+                      Number(r.avgWeightPerBlister) > 0
+                        ? (1000 / Number(r.avgWeightPerBlister)).toFixed(1)
                         : "—"}
                     </TD>
                     <TD className="text-right font-mono tabular-nums text-text-muted">

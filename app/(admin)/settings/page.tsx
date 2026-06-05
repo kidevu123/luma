@@ -124,8 +124,8 @@ export default async function SettingsPage() {
         <ConfigLink
           href="/settings/blister-standards"
           icon={Activity}
-          label="Blister standards"
-          hint="PVC and foil consumption rates per blister"
+          label="Blister roll yield"
+          hint="How many blisters per kg and per full PVC/foil roll — start here"
         />
       </Section>
 
