@@ -33,6 +33,7 @@ export type StationScanRow = {
   stationId: string;
   label: string;
   kind: string;
+  machineId: string | null;
   machineName: string | null;
   /** What is scanned / active at this station right now. */
   receiptNumber: string | null;
@@ -47,6 +48,62 @@ export type StationScanRow = {
   lastEventAt: string | null;
   busyForSeconds: number | null;
   idleMinutes: number | null;
+};
+
+export type MachineRollRow = {
+  packagingLotId: string;
+  rollNumber: string | null;
+  materialRole: "PVC" | "FOIL" | string | null;
+  materialKind: string | null;
+  materialName: string | null;
+  mountedAt: string | null;
+  startingWeightGrams: number | null;
+  projectedRemainingGrams: number | null;
+  projectedBlistersRemaining: number | null;
+  confidence: string;
+};
+
+export type StationCommandRow = {
+  stationId: string;
+  stationLabel: string;
+  stationKind: string;
+  machineId: string | null;
+  machineName: string | null;
+  machineKind: string | null;
+  cardsPerTurn: number | null;
+  targetBagsPerHour: number | null;
+  workflowBagId: string | null;
+  bagLabel: string | null;
+  bagLabelSecondary: string | null;
+  receiptNumber: string | null;
+  productName: string | null;
+  poNumber: string | null;
+  cardLabel: string | null;
+  stage: string | null;
+  startedAt: string | null;
+  elapsedSeconds: number | null;
+  operatorName: string | null;
+  operatorCode: string | null;
+  activeOperatorName: string | null;
+  activeOperatorSource: string | null;
+  isPaused: boolean;
+  isOnHold: boolean;
+  reworkPending: boolean;
+  lastEventType: string | null;
+  lastEventAt: string | null;
+  busyForSeconds: number | null;
+  idleMinutes: number | null;
+  queueWip: number | null;
+  queueOldestMinutes: number | null;
+  queueStatus: string | null;
+  activeRolls: MachineRollRow[];
+  todayFinalized: number;
+  todayUnits: number;
+  todayBlistered: number;
+  todaySealed: number;
+  todayPackaged: number;
+  avgCycleSecShift: number | null;
+  avgCycleSec7d: number | null;
 };
 
 export type ProductMaterialYieldRow = {
@@ -131,6 +188,7 @@ export type FloorManagerSnapshot = {
     laneImbalanceLabel: string | null;
     damageClusterActive: boolean;
   };
+  stationCommandRows: StationCommandRow[];
   machines: MachineProductionRow[];
   stations: StationScanRow[];
   products: ProductMaterialYieldRow[];

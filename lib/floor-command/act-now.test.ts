@@ -33,6 +33,7 @@ function minimalSnapshot(
       laneImbalanceLabel: null,
       damageClusterActive: false,
     },
+    stationCommandRows: [],
     machines: [],
     stations: [],
     products: [],

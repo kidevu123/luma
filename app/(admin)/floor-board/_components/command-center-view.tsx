@@ -11,7 +11,7 @@ import { ActNowPanel } from "./act-now-panel";
 import { CommandCenterCharts } from "./command-center-charts";
 import { CommandCenterHeader } from "./command-center-header";
 import { KpiRibbon } from "./kpi-ribbon";
-import { LineFlowStrip } from "./line-flow-strip";
+import { MachineCommandGrid } from "./machine-command-grid";
 import { OperationsPulseStrip } from "./operations-pulse-strip";
 import { CommandCenterProductionAnswers } from "./command-center-production-answers";
 
@@ -66,11 +66,7 @@ export function CommandCenterView({
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <div className="flex flex-col flex-1 min-w-0 min-h-0 border-r border-white/[0.06] overflow-y-auto overflow-x-hidden">
-          <LineFlowStrip
-            stations={widgetData.stations}
-            machines={managerSnapshot.machines}
-            stationScans={managerSnapshot.stations}
-          />
+          <MachineCommandGrid rows={managerSnapshot.stationCommandRows} />
           <div className="shrink-0 relative z-0 bg-[#07090d] border-t border-white/[0.06]">
             <CommandCenterCharts
               throughputPoints={widgetData.throughputPoints}

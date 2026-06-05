@@ -21,9 +21,11 @@ import { buildFloorDataGaps } from "@/lib/floor-command/data-gaps";
 import type {
   FloorManagerSnapshot,
   StageCycleBenchmarkRow,
+  StationCommandRow,
   WipStageRow,
 } from "@/lib/production/floor-manager-snapshot-types";
 import { humanStage } from "@/lib/floor-command/floor-display";
+import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
@@ -47,6 +49,7 @@ export async function getFloorManagerSnapshot(
 
   const [
     machinesRows,
+    stationCommandRows,
     stationsRows,
     productsRows,
     plantRows,
@@ -64,6 +67,7 @@ export async function getFloorManagerSnapshot(
     operatorRows,
   ] = await Promise.all([
     loadMachineProduction(shiftStartIso, since7d, shiftDayKey),
+    loadStationCommandRows(now, shiftDayKey),
     loadStationScans(now),
     loadProductMaterialYield(shiftStartUtc),
     loadPlantShiftStats(shiftStartUtc),
@@ -104,6 +108,7 @@ export async function getFloorManagerSnapshot(
       laneImbalanceLabel: laneLabel,
       damageClusterActive: damageClusterRow.isCluster,
     },
+    stationCommandRows,
     machines: machinesRows,
     stations: stationsRows,
     products: productsRows,
@@ -302,12 +307,326 @@ async function loadMachineProduction(
   });
 }
 
+function queueKeyForStationKind(kind: string): string | null {
+  switch (kind) {
+    case "BLISTER":
+    case "HANDPACK_BLISTER":
+      return "BLISTER_QUEUE";
+    case "SEALING":
+      return "SEALING_QUEUE";
+    case "PACKAGING":
+      return "PACKAGING_QUEUE";
+    case "BOTTLE_HANDPACK":
+      return "BOTTLE_FILL_QUEUE";
+    case "BOTTLE_CAP_SEAL":
+      return "BOTTLE_STICKER_QUEUE";
+    case "BOTTLE_STICKER":
+      return "BOTTLE_INDUCTION_QUEUE";
+    default:
+      return null;
+  }
+}
+
+async function loadStationCommandRows(
+  now: Date,
+  shiftDayKey: string,
+): Promise<StationCommandRow[]> {
+  const [stationRows, rollRows, queueRows] = await Promise.all([
+    db.execute(sql`
+      WITH machine_today AS (
+        SELECT
+          machine_id,
+          COALESCE(SUM(bags_finalized), 0)::int AS finalized,
+          COALESCE(SUM(units_produced), 0)::int AS units,
+          COALESCE(SUM(bags_blistered), 0)::int AS blistered,
+          COALESCE(SUM(bags_sealed), 0)::int AS sealed,
+          COALESCE(SUM(bags_packaged), 0)::int AS packaged
+        FROM read_daily_throughput
+        WHERE day = ${shiftDayKey}::date
+        GROUP BY machine_id
+      )
+      SELECT
+        s.id::text AS station_id,
+        s.label AS station_label,
+        s.kind::text AS station_kind,
+        s.machine_id::text AS machine_id,
+        m.name AS machine_name,
+        m.kind::text AS machine_kind,
+        m.cards_per_turn,
+        m.target_bags_per_hour,
+        rsl.current_workflow_bag_id::text AS workflow_bag_id,
+        rsl.current_employee_name AS operator_name,
+        rsl.last_event_type,
+        rsl.last_event_at,
+        rsl.busy_for_seconds,
+        rbs.stage,
+        COALESCE(rbs.is_paused, false) AS is_paused,
+        COALESCE(rbs.is_on_hold, false) AS is_on_hold,
+        COALESCE(rbs.rework_pending, false) AS rework_pending,
+        rbs.current_operator_code,
+        wb.receipt_number,
+        wb.started_at,
+        wb.bag_number AS workflow_bag_number,
+        p.name AS product_name,
+        qc.label AS card_label,
+        ib.internal_receipt_number,
+        ib.bag_number AS inventory_bag_number,
+        tt.name AS tablet_type_name,
+        po.po_number,
+        sos.employee_name_snapshot AS active_operator_name,
+        sos.accountability_source AS active_operator_source,
+        COALESCE(mt.finalized, 0) AS today_finalized,
+        COALESCE(mt.units, 0) AS today_units,
+        COALESCE(mt.blistered, 0) AS today_blistered,
+        COALESCE(mt.sealed, 0) AS today_sealed,
+        COALESCE(mt.packaged, 0) AS today_packaged,
+        (
+          SELECT ROUND(AVG(rbm.total_seconds))::int
+          FROM read_bag_metrics rbm
+          WHERE s.machine_id IS NOT NULL
+            AND s.machine_id = ANY(rbm.machine_ids)
+            AND rbm.finalized_at >= ${shiftDayKey}::date
+        ) AS avg_cycle_shift,
+        (
+          SELECT ROUND(AVG(rbm.total_seconds))::int
+          FROM read_bag_metrics rbm
+          WHERE s.machine_id IS NOT NULL
+            AND s.machine_id = ANY(rbm.machine_ids)
+            AND rbm.finalized_at >= now() - INTERVAL '7 days'
+        ) AS avg_cycle_7d
+      FROM stations s
+      LEFT JOIN machines m ON m.id = s.machine_id
+      LEFT JOIN read_station_live rsl ON rsl.station_id = s.id
+      LEFT JOIN workflow_bags wb ON wb.id = rsl.current_workflow_bag_id
+      LEFT JOIN read_bag_state rbs ON rbs.workflow_bag_id = rsl.current_workflow_bag_id
+      LEFT JOIN products p ON p.id = wb.product_id
+      LEFT JOIN LATERAL (
+        SELECT label
+        FROM qr_cards
+        WHERE assigned_workflow_bag_id = wb.id
+        ORDER BY label
+        LIMIT 1
+      ) qc ON true
+      LEFT JOIN inventory_bags ib ON ib.id = wb.inventory_bag_id
+      LEFT JOIN tablet_types tt ON tt.id = ib.tablet_type_id
+      LEFT JOIN small_boxes sb ON sb.id = ib.small_box_id
+      LEFT JOIN receives rec ON rec.id = sb.receive_id
+      LEFT JOIN purchase_orders po ON po.id = rec.po_id
+      LEFT JOIN station_operator_sessions sos
+        ON sos.station_id = s.id
+       AND sos.closed_at IS NULL
+      LEFT JOIN machine_today mt ON mt.machine_id = s.machine_id
+      WHERE s.is_active = true
+      ORDER BY s.label
+    `),
+    db.execute(sql`
+      SELECT
+        rru.machine_id::text AS machine_id,
+        rru.packaging_lot_id::text AS packaging_lot_id,
+        rru.roll_number,
+        rru.material_role,
+        rru.material_kind,
+        pm.name AS material_name,
+        rru.mounted_at,
+        rru.starting_weight_grams,
+        rru.projected_remaining_grams,
+        rru.projected_blisters_remaining,
+        rru.confidence
+      FROM read_roll_usage rru
+      LEFT JOIN packaging_lots pl ON pl.id = rru.packaging_lot_id
+      LEFT JOIN packaging_materials pm ON pm.id = pl.packaging_material_id
+      WHERE rru.machine_id IS NOT NULL
+        AND rru.mounted_at IS NOT NULL
+        AND rru.unmounted_at IS NULL
+      ORDER BY rru.material_role, rru.mounted_at DESC
+    `),
+    db.execute(sql`
+      SELECT
+        stage_key,
+        wip,
+        oldest_age_seconds,
+        queue_status
+      FROM read_queue_state
+    `),
+  ]);
+
+  type StationRow = {
+    station_id: string;
+    station_label: string;
+    station_kind: string;
+    machine_id: string | null;
+    machine_name: string | null;
+    machine_kind: string | null;
+    cards_per_turn: number | null;
+    target_bags_per_hour: number | null;
+    workflow_bag_id: string | null;
+    operator_name: string | null;
+    last_event_type: string | null;
+    last_event_at: string | Date | null;
+    busy_for_seconds: number | null;
+    stage: string | null;
+    is_paused: boolean;
+    is_on_hold: boolean;
+    rework_pending: boolean;
+    current_operator_code: string | null;
+    receipt_number: string | null;
+    started_at: string | Date | null;
+    workflow_bag_number: number | null;
+    product_name: string | null;
+    card_label: string | null;
+    internal_receipt_number: string | null;
+    inventory_bag_number: number | null;
+    tablet_type_name: string | null;
+    po_number: string | null;
+    active_operator_name: string | null;
+    active_operator_source: string | null;
+    today_finalized: number;
+    today_units: number;
+    today_blistered: number;
+    today_sealed: number;
+    today_packaged: number;
+    avg_cycle_shift: number | null;
+    avg_cycle_7d: number | null;
+  };
+
+  type RollRow = {
+    machine_id: string | null;
+    packaging_lot_id: string;
+    roll_number: string | null;
+    material_role: string | null;
+    material_kind: string | null;
+    material_name: string | null;
+    mounted_at: string | Date | null;
+    starting_weight_grams: number | null;
+    projected_remaining_grams: number | null;
+    projected_blisters_remaining: number | null;
+    confidence: string;
+  };
+
+  type QueueRow = {
+    stage_key: string;
+    wip: number;
+    oldest_age_seconds: number | null;
+    queue_status: string;
+  };
+
+  const rollsByMachine = new Map<string, StationCommandRow["activeRolls"]>();
+  for (const roll of rollRows as unknown as RollRow[]) {
+    if (!roll.machine_id) continue;
+    const list = rollsByMachine.get(roll.machine_id) ?? [];
+    list.push({
+      packagingLotId: roll.packaging_lot_id,
+      rollNumber: roll.roll_number,
+      materialRole: roll.material_role,
+      materialKind: roll.material_kind,
+      materialName: roll.material_name,
+      mountedAt: iso(roll.mounted_at ? new Date(roll.mounted_at) : null),
+      startingWeightGrams:
+        roll.starting_weight_grams != null
+          ? Number(roll.starting_weight_grams)
+          : null,
+      projectedRemainingGrams:
+        roll.projected_remaining_grams != null
+          ? Number(roll.projected_remaining_grams)
+          : null,
+      projectedBlistersRemaining:
+        roll.projected_blisters_remaining != null
+          ? Number(roll.projected_blisters_remaining)
+          : null,
+      confidence: roll.confidence,
+    });
+    rollsByMachine.set(roll.machine_id, list);
+  }
+
+  const queueByKey = new Map(
+    (queueRows as unknown as QueueRow[]).map((row) => [row.stage_key, row]),
+  );
+
+  return (stationRows as unknown as StationRow[]).map((row) => {
+    const startedAt = row.started_at ? new Date(row.started_at) : null;
+    const lastAt = row.last_event_at ? new Date(row.last_event_at) : null;
+    const idleMinutes =
+      lastAt && !row.workflow_bag_id
+        ? Math.floor((now.getTime() - lastAt.getTime()) / 60000)
+        : null;
+    const queue = queueByKey.get(queueKeyForStationKind(row.station_kind) ?? "");
+    const label = row.workflow_bag_id
+      ? buildCurrentBagDisplayLabel({
+          cardLabel: row.card_label,
+          poNumber: row.po_number,
+          tabletTypeName: row.tablet_type_name,
+          productName: row.product_name,
+          inventoryBagNumber: row.inventory_bag_number,
+          workflowBagNumber: row.workflow_bag_number,
+        })
+      : null;
+
+    return {
+      stationId: row.station_id,
+      stationLabel: row.station_label,
+      stationKind: row.station_kind,
+      machineId: row.machine_id,
+      machineName: row.machine_name,
+      machineKind: row.machine_kind,
+      cardsPerTurn:
+        row.cards_per_turn != null ? Number(row.cards_per_turn) : null,
+      targetBagsPerHour:
+        row.target_bags_per_hour != null
+          ? Number(row.target_bags_per_hour)
+          : null,
+      workflowBagId: row.workflow_bag_id,
+      bagLabel: label?.primary ?? null,
+      bagLabelSecondary: label?.secondary ?? null,
+      receiptNumber: row.receipt_number ?? row.internal_receipt_number,
+      productName: row.product_name,
+      poNumber: row.po_number,
+      cardLabel: row.card_label,
+      stage: row.stage,
+      startedAt: iso(startedAt),
+      elapsedSeconds:
+        startedAt != null
+          ? Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / 1000))
+          : null,
+      operatorName: row.operator_name,
+      operatorCode: row.current_operator_code,
+      activeOperatorName: row.active_operator_name,
+      activeOperatorSource: row.active_operator_source,
+      isPaused: row.is_paused,
+      isOnHold: row.is_on_hold,
+      reworkPending: row.rework_pending,
+      lastEventType: row.last_event_type,
+      lastEventAt: iso(lastAt),
+      busyForSeconds:
+        row.busy_for_seconds != null ? Number(row.busy_for_seconds) : null,
+      idleMinutes,
+      queueWip: queue ? Number(queue.wip) || 0 : null,
+      queueOldestMinutes:
+        queue?.oldest_age_seconds != null
+          ? Math.floor(Number(queue.oldest_age_seconds) / 60)
+          : null,
+      queueStatus: queue?.queue_status ?? null,
+      activeRolls: row.machine_id
+        ? (rollsByMachine.get(row.machine_id) ?? [])
+        : [],
+      todayFinalized: Number(row.today_finalized) || 0,
+      todayUnits: Number(row.today_units) || 0,
+      todayBlistered: Number(row.today_blistered) || 0,
+      todaySealed: Number(row.today_sealed) || 0,
+      todayPackaged: Number(row.today_packaged) || 0,
+      avgCycleSecShift:
+        row.avg_cycle_shift != null ? Number(row.avg_cycle_shift) : null,
+      avgCycleSec7d: row.avg_cycle_7d != null ? Number(row.avg_cycle_7d) : null,
+    };
+  });
+}
+
 async function loadStationScans(now: Date) {
   const rows = (await db.execute(sql`
     SELECT
       s.id AS station_id,
       s.label,
       s.kind::text AS kind,
+      s.machine_id,
       m.name AS machine_name,
       rsl.current_workflow_bag_id AS bag_id,
       wb.receipt_number,
@@ -332,6 +651,7 @@ async function loadStationScans(now: Date) {
     station_id: string;
     label: string;
     kind: string;
+    machine_id: string | null;
     machine_name: string | null;
     bag_id: string | null;
     receipt_number: string | null;
@@ -356,6 +676,7 @@ async function loadStationScans(now: Date) {
       stationId: r.station_id,
       label: r.label,
       kind: r.kind,
+      machineId: r.machine_id,
       machineName: r.machine_name,
       receiptNumber: r.receipt_number,
       productName: r.product_name,
