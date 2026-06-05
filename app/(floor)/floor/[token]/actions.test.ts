@@ -277,10 +277,12 @@ describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () =
   it("chains maybeAutoFinalizeAfterPackagingComplete after PACKAGING_COMPLETE on PACKAGING stations", () => {
     expect(actionsSrc).toMatch(/station\.kind === "PACKAGING"/);
     expect(actionsSrc).toMatch(/maybeAutoFinalizeAfterPackagingComplete/);
+    expect(actionsSrc).toMatch(/autoCreateAndReleaseFinishedLotForWorkflowBag/);
     const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
     const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
     const block = actionsSrc.slice(pkgIdx, lookupIdx);
     expect(block).toMatch(/maybeAutoFinalizeAfterPackagingComplete/);
+    expect(block).toMatch(/runFinishedLotPostCommitEffects/);
     expect(block).toMatch(/emitCountBasedPackagingConsumption/);
   });
 
@@ -308,12 +310,33 @@ describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () =
     expect(block).not.toMatch(/COMBINED[\s\S]{0,40}maybeAutoFinalizeAfterPackagingComplete/);
   });
 
+  it("only auto-creates and releases finished lots after successful full packaging auto-finalize", () => {
+    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
+    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
+    const block = actionsSrc.slice(pkgIdx, lookupIdx);
+    expect(block).toMatch(/if \(station\.kind === "PACKAGING" && !emitPartialPackaging\)/);
+    expect(block).toMatch(/const didFinalize = await maybeAutoFinalizeAfterPackagingComplete/);
+    expect(block).toMatch(/if \(didFinalize\)[\s\S]*autoCreateAndReleaseFinishedLotForWorkflowBag/);
+    expect(block).not.toMatch(/emitPartialPackaging[\s\S]{0,120}autoCreateAndReleaseFinishedLotForWorkflowBag/);
+  });
+
+  it("audits auto finished lot exceptions without rolling back packaging completion", () => {
+    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
+    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
+    const block = actionsSrc.slice(pkgIdx, lookupIdx);
+    expect(block).toMatch(/finished_lot\.auto_create_blocked/);
+    expect(block).toMatch(/targetType: "WorkflowBag"/);
+    expect(block).toMatch(/reason: autoLot\.reason/);
+  });
+
   it("auto-finalize guards on PACKAGED stage, not finalized, and station pin", () => {
     const helperIdx = actionsSrc.indexOf("function maybeAutoFinalizeAfterPackagingComplete");
-    const helperBlock = actionsSrc.slice(helperIdx, helperIdx + 1200);
+    const helperBlock = actionsSrc.slice(helperIdx, helperIdx + 1800);
     expect(helperBlock).toMatch(/stage !== "PACKAGED"/);
     expect(helperBlock).toMatch(/isFinalized/);
     expect(helperBlock).toMatch(/currentWorkflowBagId/);
+    expect(helperBlock).toMatch(/Promise<boolean>/);
+    expect(helperBlock).toMatch(/return true/);
   });
 
   it("packaging payload keys unchanged", () => {

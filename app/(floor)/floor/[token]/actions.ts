@@ -70,6 +70,11 @@ import {
 } from "@/lib/production/sealing-partial-closeout";
 import { maybeReturnInventoryAfterPartialPackaging } from "@/lib/production/partial-bag-inventory-lifecycle";
 import {
+  autoCreateAndReleaseFinishedLotForWorkflowBag,
+  runFinishedLotPostCommitEffects,
+  type FinishedLotPostCommitEffect,
+} from "@/lib/db/queries/finished-lots";
+import {
   lookupProductMatchedBlisterCardLot,
   issueHandpackBlisterCardMaterial,
   emitHandpackBlisterEstimatedMaterial,
@@ -1917,6 +1922,7 @@ export async function packagingCompleteAction(
       return { error: prereq.reason };
     }
 
+    const finishedLotEffects: FinishedLotPostCommitEffect[] = [];
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: parsed.data.stationId,
@@ -1987,7 +1993,7 @@ export async function packagingCompleteAction(
         });
       }
       if (station.kind === "PACKAGING" && !emitPartialPackaging) {
-        await maybeAutoFinalizeAfterPackagingComplete(tx, {
+        const didFinalize = await maybeAutoFinalizeAfterPackagingComplete(tx, {
           workflowBagId: parsed.data.workflowBagId,
           stationId: parsed.data.stationId,
           stationKind: station.kind,
@@ -1996,8 +2002,44 @@ export async function packagingCompleteAction(
             ? { clientEventId: parsed.data.clientEventId }
             : {}),
         });
+        if (didFinalize) {
+          const autoLot = await autoCreateAndReleaseFinishedLotForWorkflowBag(tx, {
+            workflowBagId: parsed.data.workflowBagId,
+            packagedAt: occurredAt,
+            counts: {
+              masterCases: parsed.data.masterCases,
+              displaysMade: parsed.data.displaysMade,
+              looseCards: parsed.data.looseCards,
+            },
+            actor: {
+              id: accountability.enteredByUserId,
+              role: "STAFF",
+            },
+          });
+          if (autoLot.ok) {
+            finishedLotEffects.push(...autoLot.effects);
+          } else {
+            await writeAudit(
+              {
+                actorId: accountability.enteredByUserId,
+                actorRole: "STAFF",
+                action: "finished_lot.auto_create_blocked",
+                targetType: "WorkflowBag",
+                targetId: parsed.data.workflowBagId,
+                after: {
+                  reason: autoLot.reason,
+                  message: autoLot.message,
+                  packaging_complete_client_event_id:
+                    parsed.data.clientEventId ?? null,
+                },
+              },
+              tx,
+            );
+          }
+        }
       }
     });
+    await runFinishedLotPostCommitEffects(finishedLotEffects);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Failed." };
   }
@@ -2558,9 +2600,9 @@ async function maybeAutoFinalizeAfterPackagingComplete(
     clientEventId?: string | null | undefined;
     accountability: StationAccountability;
   },
-): Promise<void> {
+): Promise<boolean> {
   if (!AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS.has(args.stationKind)) {
-    return;
+    return false;
   }
 
   const [afterComplete] = await tx
@@ -2570,14 +2612,14 @@ async function maybeAutoFinalizeAfterPackagingComplete(
     })
     .from(readBagState)
     .where(eq(readBagState.workflowBagId, args.workflowBagId));
-  if (afterComplete?.stage !== "PACKAGED") return;
-  if (afterComplete?.isFinalized) return;
+  if (afterComplete?.stage !== "PACKAGED") return false;
+  if (afterComplete?.isFinalized) return false;
 
   const [live] = await tx
     .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
     .from(readStationLive)
     .where(eq(readStationLive.stationId, args.stationId));
-  if (live?.currentWorkflowBagId !== args.workflowBagId) return;
+  if (live?.currentWorkflowBagId !== args.workflowBagId) return false;
 
   const finalizeClientEventId = args.clientEventId
     ? `${args.clientEventId}-auto-finalize`
@@ -2589,6 +2631,7 @@ async function maybeAutoFinalizeAfterPackagingComplete(
     accountability: args.accountability,
     ...(finalizeClientEventId ? { clientEventId: finalizeClientEventId } : {}),
   });
+  return true;
 }
 
 const releaseSchema = z.object({

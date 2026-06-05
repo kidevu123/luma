@@ -29,7 +29,7 @@ describe("material read model refresh wiring", () => {
       "utf8",
     );
     expect(src).toMatch(/refreshMaterialReadModelsAfterBlister/);
-    expect(src).toMatch(/rebuildRollUsage/);
+    expect(src).toMatch(/refreshRollDerivedReadModels/);
     expect(src).toMatch(/getActiveRollLotIdsForStation/);
   });
 

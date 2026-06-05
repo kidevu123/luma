@@ -3,12 +3,14 @@
 // Calls the existing planner + enqueue service only. No Zoho HTTP, no worker.
 
 import { writeAudit } from "@/lib/db/audit";
-import type { CurrentUser } from "@/lib/auth";
 import { enqueueZohoAssemblyOpsForFinishedLot } from "./assembly-enqueue";
 
 export type ZohoEnqueueAfterLotCreateInput = {
   finishedLotId: string;
-  actor: Pick<CurrentUser, "id" | "role">;
+  actor: {
+    id: string | null;
+    role: "OWNER" | "ADMIN" | "MANAGER" | "LEAD" | "STAFF" | null;
+  };
 };
 
 export type ZohoEnqueueAfterLotCreateResult =

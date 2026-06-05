@@ -2,7 +2,7 @@
 //
 // derivePackagingMetrics + deriveFinishedGoodsMetrics unchanged.
 // Pack-out queue added at the top (before stats) — shows:
-//   1. Finalized bags without a finished lot (actionable — "Issue lot")
+//   1. Finalized bags without a finished lot (actionable — "Review / issue lot")
 //   2. PACKAGED (not finalized) bags (informational — "Awaiting finalization")
 
 import Link from "next/link";
@@ -233,7 +233,7 @@ export default async function PackagingOutputPage() {
               : "All clear"}
           </h2>
           <p className="text-[11px] text-text-muted mt-0.5">
-            Finalized bags must have a finished lot before they can be released. PACKAGED bags are still on the floor awaiting finalization.
+            Full-bag packaging normally creates and releases the finished lot automatically. Rows here need admin review because a prerequisite was missing or the bag predates automation. PACKAGED bags are still on the floor awaiting finalization.
           </p>
         </div>
         <div className="px-4 py-4">
@@ -249,7 +249,7 @@ export default async function PackagingOutputPage() {
               <div>
                 <div className="flex items-baseline gap-2 mb-2">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
-                    Finalized — awaiting lot
+                    Finalized — needs lot review
                   </div>
                   {awaitingLot.some((b) => !b.productName) && (
                     <span className="text-[10px] text-text-subtle">· product blank = bag not yet mapped via PRODUCT_MAPPED event</span>
@@ -303,7 +303,7 @@ export default async function PackagingOutputPage() {
                                 href="/finished-lots/new"
                                 className="inline-flex items-center gap-1 rounded-md border border-warn-500/40 bg-warn-50/60 px-2.5 py-1 text-[11.5px] font-medium text-warn-700 hover:bg-warn-50 transition-colors"
                               >
-                                Issue lot
+                                Review / issue lot
                               </Link>
                             </td>
                           </tr>

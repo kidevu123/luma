@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.106] — 2026-06-05
+
+### Added (AUTO-FINISHED-LOT-RELEASE-1)
+- **Packaging close-out release:** Full-bag packaging close-out now keeps `PACKAGING_COMPLETE` and auto `BAG_FINALIZED`, then creates and releases a linked finished lot using the source receipt number as the lot/trace code.
+- **Exception safety:** Partial packaging is excluded, and missing receipt/shelf-life/open allocation cases leave the bag finalized with an audit exception instead of fabricating a finished lot.
+
 ## [0.4.105] — 2026-06-04
 
 ### Fixed (PRODUCTION-OUTPUT-RECEIPT-1)

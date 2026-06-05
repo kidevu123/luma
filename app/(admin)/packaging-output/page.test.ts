@@ -18,4 +18,12 @@ describe("packaging-output page receipt wiring", () => {
       /leftJoin\(inventoryBags,\s*eq\(inventoryBags\.id,\s*workflowBags\.inventoryBagId\)\)/,
     );
   });
+
+  it("labels finalized bags without lots as admin review exceptions", () => {
+    expect(pageSrc).toContain(
+      "Full-bag packaging normally creates and releases the finished lot automatically.",
+    );
+    expect(pageSrc).toContain("Finalized — needs lot review");
+    expect(pageSrc).toContain("Review / issue lot");
+  });
 });
