@@ -10,8 +10,8 @@
 // 3. Timestamptz everywhere. Display tz is `company.timezone`.
 // 4. Soft-delete only. `voidedAt` flags rows; nothing leaves the DB.
 // 5. Every batch has a status lifecycle. Production cannot consume a
-//    batch that is not RELEASED. Enforced at the projector + at the
-//    write-path action layer.
+//    batch that is not RELEASED (quarantine/hold/recall are exceptions).
+//    Enforced at the projector + at the write-path action layer.
 // 6. Every finished lot records its complete batch genealogy. Recall
 //    queries are a single recursive CTE join, not a forensic dig.
 
@@ -149,8 +149,8 @@ export const packagingReceiptSourceEnum = pgEnum("packaging_receipt_source", [
 export const batchKindEnum = pgEnum("batch_kind", ["TABLET", "PACKAGING"]);
 
 export const batchStatusEnum = pgEnum("batch_status", [
-  "QUARANTINE", // newly received, awaiting QA
-  "RELEASED",   // QA-released, eligible for production
+  "QUARANTINE", // exception: blocked for review before use
+  "RELEASED",   // available for production (normal intake default)
   "ON_HOLD",    // mid-life hold (QA finds an issue)
   "RECALLED",   // recalled by vendor or internal decision
   "EXPIRED",    // past expiry_date
@@ -984,8 +984,9 @@ export const materialInventoryEvents = pgTable(
 // Context 3 — Batches & Lots (the traceability spine)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Every tablet shipment AND every packaging lot has exactly one batch
- *  row. Status drives whether production can consume it. */
+/** Internal input lots: raw tablet shipments and packaging material lots.
+ *  Not customer-facing batch numbers — finished lots / recall passport
+ *  are used for Nexus complaint and shipment traceability. */
 export const batches = pgTable(
   "batches",
   {
@@ -1001,7 +1002,7 @@ export const batches = pgTable(
     vendorLotNumber: text("vendor_lot_number"),
     manufacturedAt: date("manufactured_at"),
     expiryDate: date("expiry_date"),
-    status: batchStatusEnum("status").notNull().default("QUARANTINE"),
+    status: batchStatusEnum("status").notNull().default("RELEASED"),
     statusChangedAt: timestamp("status_changed_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

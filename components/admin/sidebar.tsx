@@ -55,7 +55,7 @@ const SECTIONS: Section[] = [
       { href: "/roll-management",    label: "Roll management", icon: Wrench },
       { href: "/finished-lots",       label: "Finished lots", icon: PackageCheck },
       { href: "/zoho-production-operations", label: "Zoho output", icon: CloudUpload },
-      { href: "/batches",             label: "Batches",       icon: ShieldCheck },
+      { href: "/batches",             label: "Input lots",    icon: ShieldCheck },
       { href: "/workflow-submissions", label: "Workflows",    icon: ClipboardList },
       { href: "/recall",              label: "Find lot",      icon: Search },
     ],

@@ -15,6 +15,7 @@ import {
   buildInternalReceiptNumber,
   buildRawBagQrPayload,
 } from "@/lib/production/recall-passport";
+import { DEFAULT_INTAKE_BATCH_STATUS } from "@/lib/production/batch-production-guard";
 import { validateQrCardForRawBag } from "@/lib/db/queries/bag-edits";
 import {
   type AddBagToReceiveInput,
@@ -108,7 +109,7 @@ export async function addBagToReceive(
               kind: "TABLET" as const,
               batchNumber: supplierLot,
               tabletTypeId,
-              status: "QUARANTINE" as const,
+              status: DEFAULT_INTAKE_BATCH_STATUS,
               statusChangedById: actor.id,
               qtyReceived: 0,
               qtyOnHand: 0,

@@ -21,6 +21,7 @@ import {
 import { canResumeFinalizedWorkflowOnInventoryBag } from "@/lib/production/partial-bag-restart";
 import type { PartialBagSession } from "@/lib/production/partial-bags";
 import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
+import { batchProductionBlockReason } from "@/lib/production/batch-production-guard";
 import { loadRawBagStartClassificationForScan, RAW_BAG_START_OPERATOR_MESSAGES } from "@/lib/production/floor-partial-bag-start-resolution";
 import {
   floorScanInputMatchesCard,
@@ -1787,15 +1788,14 @@ export async function verifyVendorBarcodeAction(
     }
   }
   const blocked = batchStatus !== "RELEASED";
+  const blockReason = batchProductionBlockReason(batchStatus, batchNumber);
   return {
     ok: true,
     inventoryBagId: hit.inventoryBagId,
     ...(batchNumber ? { batchNumber } : {}),
     batchStatus,
     blocked,
-    ...(blocked
-      ? { reason: `Batch ${batchNumber ?? ""} is ${batchStatus}, not RELEASED.` }
-      : {}),
+    ...(blocked && blockReason ? { reason: blockReason } : {}),
   };
 }
 

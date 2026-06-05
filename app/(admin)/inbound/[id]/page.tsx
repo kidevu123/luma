@@ -348,8 +348,8 @@ export default async function ReceiveDetailPage({
                 value={formatDateTimeEst(r.receive.receivedAt as unknown as string)}
               />
               <p className="text-[11px] text-text-subtle pt-2 border-t border-border/60">
-                Each box created (or reused) a batch in <span className="font-mono">QUARANTINE</span>.
-                Release in the Batches tab once QA signs off.
+                Received lots are available for production automatically. Use Input lots to
+                quarantine or hold only when material should be blocked.
               </p>
             </CardContent>
           </Card>
@@ -372,7 +372,7 @@ export default async function ReceiveDetailPage({
 
           <Button asChild variant="secondary" className="w-full">
             <Link href="/batches">
-              <BoxIcon className="h-4 w-4" /> Open batches
+              <BoxIcon className="h-4 w-4" /> Open input lots
             </Link>
           </Button>
         </div>
@@ -399,7 +399,19 @@ function BatchStatus({ status }: { status: string }) {
     EXPIRED: "danger",
     DEPLETED: "neutral",
   };
-  return <StatusPill kind={map[status] ?? "neutral"}>{status}</StatusPill>;
+  const labels: Record<string, string> = {
+    RELEASED: "Available",
+    QUARANTINE: "Blocked",
+    ON_HOLD: "On hold",
+    RECALLED: "Recalled",
+    EXPIRED: "Expired",
+    DEPLETED: "Depleted",
+  };
+  return (
+    <StatusPill kind={map[status] ?? "neutral"}>
+      {labels[status] ?? status}
+    </StatusPill>
+  );
 }
 
 function BagStatus({ status }: { status: string }) {

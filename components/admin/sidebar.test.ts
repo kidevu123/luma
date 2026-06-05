@@ -101,8 +101,12 @@ describe("NAV-REDESIGN-1 · Inventory entries", () => {
   it("Finished lots is in Inventory", () => {
     expect(inInventory('"/finished-lots"')).toBe(true);
   });
-  it("Batches is in Inventory", () => {
+  it("Input lots is in Inventory", () => {
     expect(inInventory('"/batches"')).toBe(true);
+    expect(inInventory('"Input lots"')).toBe(true);
+  });
+  it("Batches label was renamed to Input lots", () => {
+    expect(src).not.toMatch(/label:\s*"Batches"/);
   });
   it("Workflows is in Inventory", () => {
     expect(inInventory('"/workflow-submissions"')).toBe(true);

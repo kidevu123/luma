@@ -321,8 +321,8 @@ export function ReceiveWizard({
                 }
               />
               <p className="text-[11px] text-text-subtle">
-                New batches are created in <span className="font-mono">QUARANTINE</span>.
-                Release them after QA receives the COA.
+                Successful intake creates lots that are available for production immediately.
+                Use quarantine or hold only when material should not be used.
               </p>
             </CardContent>
           </Card>
@@ -360,7 +360,7 @@ export function ReceiveWizard({
             }}
             className="w-full"
           >
-            <Save className="h-4 w-4" /> {pending ? "Saving…" : "Save receive"}
+            <Save className="h-4 w-4" /> {pending ? "Saving…" : "Save receive — available for production"}
           </Button>
         </div>
       </div>

@@ -16,6 +16,7 @@ import {
   buildInternalReceiptNumber,
   buildRawBagQrPayload,
 } from "@/lib/production/recall-passport";
+import { DEFAULT_INTAKE_BATCH_STATUS } from "@/lib/production/batch-production-guard";
 import { randomUUID } from "node:crypto";
 
 export async function listReceives() {
@@ -200,7 +201,7 @@ export async function createReceiveWithBoxes(
               expiryDate: b.expiryDate ?? null,
               qtyReceived: b.bagCount * (b.pillCountPerBag ?? 0),
               qtyOnHand: b.bagCount * (b.pillCountPerBag ?? 0),
-              status: "QUARANTINE" as const,
+              status: DEFAULT_INTAKE_BATCH_STATUS,
               statusChangedById: actor.id,
             }),
           )

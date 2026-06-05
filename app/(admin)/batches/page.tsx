@@ -1,30 +1,46 @@
-// Batches list — the traceability spine. Status filters along the top
-// (one click switches the view), inline status transitions on each row,
-// "release" is gated to RELEASE-from-QUARANTINE only when a COA is on
-// file (next phase).
+// Input lots — material availability and exception controls for production.
 
 import Link from "next/link";
-import { ShieldCheck, Plus } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
 import { listBatches, batchStatusCounts } from "@/lib/db/queries/batches";
 import { listTabletTypes } from "@/lib/db/queries/tablet-types";
 import { listPackagingMaterials } from "@/lib/db/queries/packaging";
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { CreateBatchDialog } from "./create-batch-dialog";
 import { StatusActions } from "./status-actions";
+import { BulkReleasePanel } from "./bulk-release-panel";
 
 export const dynamic = "force-dynamic";
 
-const STATUSES = [
-  ["", "All"],
-  ["QUARANTINE", "Quarantine"],
-  ["RELEASED", "Released"],
-  ["ON_HOLD", "On hold"],
-  ["RECALLED", "Recalled"],
-  ["EXPIRED", "Expired"],
-  ["DEPLETED", "Depleted"],
+type FilterKey =
+  | ""
+  | "AVAILABLE"
+  | "BLOCKED"
+  | "ON_HOLD"
+  | "RECALLED"
+  | "EXPIRED"
+  | "DEPLETED";
+
+const FILTERS: ReadonlyArray<[FilterKey, string, string | undefined]> = [
+  ["", "All", undefined],
+  ["AVAILABLE", "Available", "RELEASED"],
+  ["BLOCKED", "Blocked / Needs review", "QUARANTINE"],
+  ["ON_HOLD", "On hold", "ON_HOLD"],
+  ["RECALLED", "Recalled", "RECALLED"],
+  ["EXPIRED", "Expired", "EXPIRED"],
+  ["DEPLETED", "Depleted", "DEPLETED"],
 ] as const;
+
+const VALID_FILTER_KEYS = new Set(FILTERS.map(([k]) => k));
+
+function resolveFilter(raw?: string): { key: FilterKey; status?: typeof FILTERS[number][2] } {
+  const key = VALID_FILTER_KEYS.has(raw as FilterKey) ? (raw as FilterKey) : "";
+  const match = FILTERS.find(([k]) => k === key);
+  const status = match?.[2];
+  return status ? { key, status } : { key };
+}
 
 export default async function BatchesPage({
   searchParams,
@@ -33,17 +49,7 @@ export default async function BatchesPage({
 }) {
   await requireSession();
   const params = await searchParams;
-  const validStatuses = [
-    "QUARANTINE",
-    "RELEASED",
-    "ON_HOLD",
-    "RECALLED",
-    "EXPIRED",
-    "DEPLETED",
-  ] as const;
-  const status = (validStatuses as readonly string[]).includes(params.status ?? "")
-    ? (params.status as (typeof validStatuses)[number])
-    : undefined;
+  const { key: filterKey, status } = resolveFilter(params.status);
   const kind =
     params.kind === "TABLET" || params.kind === "PACKAGING" ? params.kind : undefined;
 
@@ -54,16 +60,24 @@ export default async function BatchesPage({
     listPackagingMaterials(),
   ]);
 
+  const totalCount = Object.values(counts).reduce((a, b) => a + b, 0);
+  const quarantineCount = counts.QUARANTINE ?? 0;
+
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Batches"
-        description="Every tablet shipment and every packaging lot is one batch row. Production refuses to consume any batch that is not RELEASED — quarantine is the default."
-        actions={<CreateBatchDialog tabletTypes={tabletTypes} materials={materials} />}
+        title="Input lots"
+        description="Successfully received tablet and packaging lots are available for production automatically. Use hold, quarantine, or recall only when a lot should be blocked."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <BulkReleasePanel quarantineCount={quarantineCount} />
+            <CreateBatchDialog tabletTypes={tabletTypes} materials={materials} />
+          </div>
+        }
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        {STATUSES.map(([value, label]) => {
+        {FILTERS.map(([value, label, statusValue]) => {
           const href =
             "/batches" +
             (value || kind
@@ -73,11 +87,13 @@ export default async function BatchesPage({
                   ...(kind ? { kind } : {}),
                 }).toString()
               : "");
-          const active = (status ?? "") === value;
-          const n = value ? counts[value as keyof typeof counts] ?? 0 : Object.values(counts).reduce((a, b) => a + b, 0);
+          const active = filterKey === value;
+          const n = statusValue
+            ? counts[statusValue as keyof typeof counts] ?? 0
+            : totalCount;
           return (
             <Link
-              key={value}
+              key={value || "all"}
               href={href}
               className={
                 "inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-medium transition-colors " +
@@ -87,7 +103,11 @@ export default async function BatchesPage({
               }
             >
               {label}
-              <span className={active ? "text-white/80 tabular-nums" : "text-text-subtle tabular-nums"}>
+              <span
+                className={
+                  active ? "text-white/80 tabular-nums" : "text-text-subtle tabular-nums"
+                }
+              >
                 {n}
               </span>
             </Link>
@@ -101,52 +121,48 @@ export default async function BatchesPage({
       <DataTable>
         <THead>
           <TR>
-            <TH>Batch</TH>
+            <TH>Lot #</TH>
             <TH>Kind</TH>
             <TH>Material</TH>
             <TH>Vendor</TH>
+            <TH>Supplier lot</TH>
+            <TH className="text-right">Qty received</TH>
             <TH className="text-right">Qty on hand</TH>
             <TH>Expiry</TH>
             <TH>Status</TH>
+            <TH>Last change</TH>
             <TH className="text-right">Actions</TH>
           </TR>
         </THead>
         <tbody>
           {rows.length === 0 ? (
             <TR>
-              <TD colSpan={8} className="text-center py-10 text-text-subtle">
-                No batches match this filter.
+              <TD colSpan={11} className="text-center py-10 text-text-subtle">
+                No lots match this filter.
               </TD>
             </TR>
           ) : (
             rows.map((b) => (
               <TR key={b.id}>
-                <TD className="font-mono text-xs">
-                  <Link
-                    href={`/batches?focus=${b.id}`}
-                    className="hover:underline"
-                  >
-                    {b.batchNumber}
-                  </Link>
-                </TD>
+                <TD className="font-mono text-xs">{b.batchNumber}</TD>
                 <TD>
                   <StatusPill kind={b.kind === "TABLET" ? "info" : "neutral"}>
-                    {b.kind}
+                    {b.kind === "TABLET" ? "Tablet" : "Packaging"}
                   </StatusPill>
                 </TD>
                 <TD className="text-text-muted">{b.materialName ?? "—"}</TD>
-                <TD className="text-text-muted">
-                  {b.vendorName ?? "—"}
-                  {b.vendorLotNumber ? (
-                    <span className="block font-mono text-[10px] text-text-subtle">
-                      {b.vendorLotNumber}
-                    </span>
-                  ) : null}
+                <TD className="text-text-muted">{b.vendorName ?? "—"}</TD>
+                <TD className="font-mono text-[10px] text-text-muted">
+                  {b.vendorLotNumber ?? "—"}
                 </TD>
+                <TD className="text-right tabular-nums">{b.qtyReceived}</TD>
                 <TD className="text-right tabular-nums">{b.qtyOnHand}</TD>
                 <TD className="text-text-muted">{b.expiryDate ?? "—"}</TD>
                 <TD>
                   <StatusBadge status={b.status} />
+                </TD>
+                <TD className="text-text-muted text-xs whitespace-nowrap">
+                  {formatDateTimeEst(b.statusChangedAt)}
                 </TD>
                 <TD className="text-right">
                   <StatusActions batchId={b.id} status={b.status} />
@@ -163,18 +179,23 @@ export default async function BatchesPage({
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, "ok" | "warn" | "danger" | "info" | "neutral"> = {
     RELEASED: "ok",
-    QUARANTINE: "info",
+    QUARANTINE: "warn",
     ON_HOLD: "warn",
     RECALLED: "danger",
     EXPIRED: "danger",
     DEPLETED: "neutral",
   };
+  const labels: Record<string, string> = {
+    RELEASED: "Available",
+    QUARANTINE: "Blocked",
+    ON_HOLD: "On hold",
+    RECALLED: "Recalled",
+    EXPIRED: "Expired",
+    DEPLETED: "Depleted",
+  };
   return (
     <StatusPill kind={map[status] ?? "neutral"}>
-      {status.replace("_", " ")}
+      {labels[status] ?? status.replace("_", " ")}
     </StatusPill>
   );
 }
-
-void ShieldCheck;
-void Plus;

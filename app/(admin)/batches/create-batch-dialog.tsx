@@ -22,7 +22,7 @@ export function CreateBatchDialog({
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New batch
+        <Plus className="h-4 w-4" /> New input lot
       </Button>
 
       {open && (
@@ -37,7 +37,7 @@ export function CreateBatchDialog({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-border/60">
-              <h3 className="text-sm font-semibold tracking-tight">New batch</h3>
+              <h3 className="text-sm font-semibold tracking-tight">New input lot</h3>
               <button
                 aria-label="Close"
                 onClick={() => !pending && setOpen(false)}
@@ -79,7 +79,7 @@ export function CreateBatchDialog({
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="batchNumber">Batch number</Label>
+                  <Label htmlFor="batchNumber">Lot number</Label>
                   <Input id="batchNumber" name="batchNumber" required autoFocus />
                 </div>
               </div>
@@ -116,7 +116,7 @@ export function CreateBatchDialog({
                   <Input id="vendorName" name="vendorName" placeholder="optional" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="vendorLotNumber">Vendor lot #</Label>
+                  <Label htmlFor="vendorLotNumber">Supplier lot #</Label>
                   <Input id="vendorLotNumber" name="vendorLotNumber" placeholder="optional" />
                 </div>
               </div>
@@ -141,9 +141,20 @@ export function CreateBatchDialog({
                 <Textarea id="notes" name="notes" rows={2} placeholder="optional" />
               </div>
 
+              <label className="flex items-start gap-2 text-xs text-text-muted cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="blockForReview"
+                  value="on"
+                  className="mt-0.5 rounded border-border"
+                />
+                <span>
+                  Block for review (quarantine) — only check if this lot should not be used yet.
+                </span>
+              </label>
+
               <p className="text-[11px] text-text-subtle">
-                New batches are created in <span className="font-mono">QUARANTINE</span>.
-                A manager releases them once the COA is on file.
+                Lots are available for production immediately unless blocked above.
               </p>
 
               {error && (
@@ -157,7 +168,7 @@ export function CreateBatchDialog({
                   Cancel
                 </Button>
                 <Button type="submit" disabled={pending}>
-                  {pending ? "Saving…" : "Create batch"}
+                  {pending ? "Saving…" : "Create lot"}
                 </Button>
               </div>
             </form>

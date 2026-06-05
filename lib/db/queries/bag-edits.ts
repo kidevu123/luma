@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
+import { DEFAULT_INTAKE_BATCH_STATUS } from "@/lib/production/batch-production-guard";
 
 export type BagSnapshot = {
   id: string;
@@ -262,7 +263,7 @@ export async function editInventoryBag(
                 kind: "TABLET" as const,
                 batchNumber: newLot,
                 tabletTypeId,
-                status: "QUARANTINE" as const,
+                status: DEFAULT_INTAKE_BATCH_STATUS,
                 statusChangedById: actor.id,
                 qtyReceived: 0,
                 qtyOnHand: 0,

@@ -15,6 +15,7 @@
 //     surface.
 
 import { and, eq, inArray, or } from "drizzle-orm";
+import { DEFAULT_INTAKE_BATCH_STATUS } from "@/lib/production/batch-production-guard";
 import { db } from "@/lib/db";
 import {
   batches,
@@ -310,7 +311,7 @@ export async function createRawBagIntakeAtomic(
               vendorLotNumber: lot,
               qtyReceived: lotDeclared,
               qtyOnHand: lotDeclared,
-              status: "QUARANTINE" as const,
+              status: DEFAULT_INTAKE_BATCH_STATUS,
               statusChangedById: actor.id,
             }),
           )
