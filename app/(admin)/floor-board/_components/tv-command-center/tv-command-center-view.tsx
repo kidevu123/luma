@@ -16,7 +16,8 @@ import {
 } from "@/lib/floor-command/production-lines";
 import type { ShiftStatusData } from "@/lib/floor-command/types";
 import type { FloorLiveStatus } from "@/app/(admin)/floor-board/_hooks/use-floor-live-refresh";
-import { computeShiftProgress, type KpiStripData } from "@/lib/production/floor-command";
+import type { KpiStripData } from "@/lib/production/floor-command";
+import { computeShiftProgress } from "@/lib/production/shift-window";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import type { FloorProductionIntelligence } from "@/lib/production/floor-production-intelligence-types";
 import type { StationCommandRow } from "@/lib/production/floor-manager-snapshot-types";
