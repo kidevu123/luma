@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.105] — 2026-06-04
+
+### Fixed (PRODUCTION-OUTPUT-RECEIPT-1)
+- **Output queue receipt column:** Production output now shows receipt numbers from `inventory_bags.internal_receipt_number` (with legacy `workflow_bags.receipt_number` fallback) instead of blank dashes for new Luma workflows.
+
 ## [0.4.104] — 2026-06-04
 
 ### Fixed (QR-ACTIVE-WORKFLOW-CONTEXT-1)

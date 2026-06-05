@@ -19,6 +19,7 @@ import {
   readBagState,
   readBagMetrics,
   finishedLots,
+  inventoryBags,
 } from "@/lib/db/schema";
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import { MetricCard } from "@/components/production/metric-card";
@@ -51,7 +52,7 @@ export default async function PackagingOutputPage() {
     db
       .select({
         id: workflowBags.id,
-        receiptNumber: workflowBags.receiptNumber,
+        receiptNumber: sql<string | null>`COALESCE(${inventoryBags.internalReceiptNumber}, ${workflowBags.receiptNumber})`,
         finalizedAt: workflowBags.finalizedAt,
         productName: products.name,
         productSku: products.sku,
@@ -61,6 +62,7 @@ export default async function PackagingOutputPage() {
         unitsYielded: readBagMetrics.unitsYielded,
       })
       .from(workflowBags)
+      .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
       .leftJoin(products, eq(products.id, workflowBags.productId))
       .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
       .leftJoin(finishedLots, eq(finishedLots.workflowBagId, workflowBags.id))
@@ -72,7 +74,7 @@ export default async function PackagingOutputPage() {
     db
       .select({
         id: workflowBags.id,
-        receiptNumber: workflowBags.receiptNumber,
+        receiptNumber: sql<string | null>`COALESCE(${inventoryBags.internalReceiptNumber}, ${workflowBags.receiptNumber})`,
         startedAt: workflowBags.startedAt,
         productName: products.name,
         productSku: products.sku,
@@ -82,6 +84,7 @@ export default async function PackagingOutputPage() {
         operatorCode: readBagState.currentOperatorCode,
       })
       .from(workflowBags)
+      .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
       .leftJoin(products, eq(products.id, workflowBags.productId))
       .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
       .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
