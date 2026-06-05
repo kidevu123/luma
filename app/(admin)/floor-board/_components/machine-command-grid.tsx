@@ -1,15 +1,10 @@
 "use client";
 
 import {
-  Activity,
   AlertTriangle,
-  ArrowRight,
   CheckCircle2,
   Clock,
-  Gauge,
-  Layers3,
   Package,
-  PauseCircle,
   UserRound,
 } from "lucide-react";
 import {
@@ -31,6 +26,10 @@ import { cn } from "@/lib/utils";
 
 type Props = {
   rows: StationCommandRow[];
+  /** Fill all remaining viewport height with the line grid. */
+  fillViewport?: boolean;
+  /** Denser station cards for floor / TV. */
+  dense?: boolean;
 };
 
 type CardState = "running" | "warning" | "paused" | "idle" | "down";
@@ -278,7 +277,13 @@ function StatCell({
   );
 }
 
-function StationCommandCard({ row }: { row: StationCommandRow }) {
+function StationCommandCard({
+  row,
+  dense = false,
+}: {
+  row: StationCommandRow;
+  dense?: boolean;
+}) {
   const actions = actionItems(row);
   const state = cardState(row, actions);
   const style = stateStyles[state];
@@ -386,61 +391,67 @@ function StationCommandCard({ row }: { row: StationCommandRow }) {
         </div>
       </section>
 
-      <section className="grid grid-cols-3 gap-2">
+      <section className={cn("grid gap-2", dense ? "grid-cols-2" : "grid-cols-3")}>
         <StatCell
           label="Elapsed"
           value={formatDuration(row.elapsedSeconds)}
-          sub={row.startedAt ? `started ${formatTime(row.startedAt)}` : "not active"}
+          sub={dense ? undefined : row.startedAt ? `started ${formatTime(row.startedAt)}` : "not active"}
         />
         <StatCell
           label="Queue"
           value={queueLabel}
           sub={
-            row.queueOldestMinutes != null && row.queueOldestMinutes > 0
+            !dense && row.queueOldestMinutes != null && row.queueOldestMinutes > 0
               ? `oldest ${formatWait(row.queueOldestMinutes)}`
               : row.queueStatus ?? undefined
           }
         />
-        <StatCell
-          label={throughput.label}
-          value={throughput.value.toLocaleString()}
-          sub={throughput.sub}
-        />
+        {!dense && (
+          <StatCell
+            label={throughput.label}
+            value={throughput.value.toLocaleString()}
+            sub={throughput.sub}
+          />
+        )}
       </section>
 
-      <section className="grid grid-cols-2 gap-2">
-        <StatCell
-          label="Cycle"
-          value={formatCycleSec(trustedCycleSec(row.avgCycleSecShift))}
-          sub={cycleDelta(row)}
-        />
-        <StatCell
-          label="Target"
-          value={target ?? "-"}
-          sub={
-            elapsedMin != null && elapsedMin > 0
-              ? `${formatWait(elapsedMin)} on current bag`
-              : "idle timer clear"
-          }
-        />
-      </section>
+      {!dense && (
+        <section className="grid grid-cols-2 gap-2">
+          <StatCell
+            label="Cycle"
+            value={formatCycleSec(trustedCycleSec(row.avgCycleSecShift))}
+            sub={cycleDelta(row)}
+          />
+          <StatCell
+            label="Target"
+            value={target ?? "-"}
+            sub={
+              elapsedMin != null && elapsedMin > 0
+                ? `${formatWait(elapsedMin)} on current bag`
+                : "idle timer clear"
+            }
+          />
+        </section>
+      )}
 
-      <section className="grid grid-cols-2 gap-2 text-[11px]">
-        <div className="flex min-w-0 items-center gap-2 rounded-md border border-white/[0.07] bg-black/15 px-2 py-1.5">
-          <UserRound size={14} className="shrink-0 text-slate-500" />
-          <span className="truncate text-slate-300">
-            {operator ?? "No operator session"}
-          </span>
-        </div>
-        <div className="flex min-w-0 items-center gap-2 rounded-md border border-white/[0.07] bg-black/15 px-2 py-1.5">
-          <Clock size={14} className="shrink-0 text-slate-500" />
-          <span className="truncate text-slate-300">
-            {row.lastEventType
-              ? `${row.lastEventType} · ${formatTime(row.lastEventAt)}`
-              : "No live event"}
-          </span>
-        </div>
-      </section>
+      {!dense && (
+        <section className="grid grid-cols-2 gap-2 text-[11px]">
+          <div className="flex min-w-0 items-center gap-2 rounded-md border border-white/[0.07] bg-black/15 px-2 py-1.5">
+            <UserRound size={14} className="shrink-0 text-slate-500" />
+            <span className="truncate text-slate-300">
+              {operator ?? "No operator session"}
+            </span>
+          </div>
+          <div className="flex min-w-0 items-center gap-2 rounded-md border border-white/[0.07] bg-black/15 px-2 py-1.5">
+            <Clock size={14} className="shrink-0 text-slate-500" />
+            <span className="truncate text-slate-300">
+              {row.lastEventType
+                ? `${row.lastEventType} · ${formatTime(row.lastEventAt)}`
+                : "No live event"}
+            </span>
+          </div>
+        </section>
+      )}
 
       <section className="mt-auto flex flex-wrap gap-1.5">
         {actions.length > 0 ? (
@@ -469,73 +480,75 @@ function LineStepColumn({
   stepLabel,
   stepRole,
   stations,
+  dense,
 }: {
   stepNumber: number;
   stepLabel: string;
   stepRole: string;
   stations: StationCommandRow[];
+  dense?: boolean;
 }) {
   return (
-    <div className="flex h-full min-w-[min(100%,380px)] max-w-[440px] flex-1 flex-col px-2">
-      <header className="mb-2 shrink-0 border-b border-white/[0.06] pb-2">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-400/90">
-          Step {stepNumber} · {stepLabel}
-        </p>
-        <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-slate-500">
-          {stepRole}
-        </p>
+    <div className="flex min-h-0 flex-col border-r border-white/[0.08] last:border-r-0">
+      <header className="shrink-0 border-b border-white/[0.06] bg-[#0a0d12] px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/10 text-xs font-bold text-amber-300">
+            {stepNumber}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold uppercase tracking-[0.1em] text-slate-100">
+              {stepLabel}
+            </p>
+            <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-slate-500">
+              {stepRole}
+            </p>
+          </div>
+        </div>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-2">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {stations.map((row) => (
-          <StationCommandCard key={row.stationId} row={row} />
+          <StationCommandCard key={row.stationId} row={row} {...(dense ? { dense: true } : {})} />
         ))}
       </div>
     </div>
   );
 }
 
-function LineFlowRow({
-  title,
+function LineFlowGrid({
   groups,
+  dense,
 }: {
-  title: string;
   groups: ReturnType<typeof groupsForPrimaryLine>;
+  dense?: boolean;
 }) {
   if (groups.length === 0) return null;
 
   return (
-    <div className="min-h-0 shrink-0">
-      <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-        {title}
-      </p>
-      <div className="flex min-h-[320px] items-stretch overflow-x-auto pb-2">
-        {groups.map((group, index) => (
-          <div
-            key={`${group.line.id}-${group.step.key}`}
-            className="flex shrink-0 items-stretch"
-          >
-            <LineStepColumn
-              stepNumber={group.step.step}
-              stepLabel={group.step.label}
-              stepRole={group.step.role}
-              stations={group.stations}
-            />
-            {index < groups.length - 1 && (
-              <div
-                className="flex w-8 shrink-0 items-center justify-center self-center text-slate-600"
-                aria-hidden
-              >
-                <ArrowRight size={20} strokeWidth={1.5} />
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+    <div
+      className="grid h-full min-h-0 flex-1"
+      style={{
+        gridTemplateColumns: `repeat(${Math.max(groups.length, 1)}, minmax(0, 1fr))`,
+      }}
+    >
+      {groups.map((group) => (
+        <LineStepColumn
+          key={`${group.line.id}-${group.step.key}`}
+          stepNumber={group.step.step}
+          stepLabel={group.step.label}
+          stepRole={group.step.role}
+          stations={group.stations}
+          {...(dense ? { dense: true } : {})}
+        />
+      ))}
     </div>
   );
 }
 
-export function MachineCommandGrid({ rows }: Props) {
+export function MachineCommandGrid({
+  rows,
+  fillViewport = false,
+  dense = false,
+}: Props) {
   const primaryGroups = groupsForPrimaryLine(rows);
   const secondaryGroups = otherLineGroups(rows);
   const unmapped = rows.filter((r) => !resolveLinePlacement(r.stationKind));
@@ -555,58 +568,54 @@ export function MachineCommandGrid({ rows }: Props) {
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#07090d]">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-3 py-2">
-        <div>
-          <h2 className="text-[12px] font-bold uppercase tracking-[0.18em] text-amber-300">
-            Live line — left to right
-          </h2>
-          <p className="mt-1 text-[11px] text-slate-500">
-            {running} active · {warnings} exceptions · {queue} queued · blister
-            → seal → pack
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-          <span className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1">
-            <Layers3 size={13} aria-hidden />
-            rolls
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1">
-            <Activity size={13} aria-hidden />
-            station state
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1">
-            <Gauge size={13} aria-hidden />
-            pace
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1">
-            <PauseCircle size={13} aria-hidden />
-            holds
-          </span>
-        </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1 pt-2">
-        <LineFlowRow
-          title={primaryGroups[0]?.line.shortName ?? "Primary line"}
-          groups={primaryGroups}
-        />
-        {secondaryGroups.length > 0 && (
-          <LineFlowRow title="Other lines" groups={secondaryGroups} />
-        )}
-        {unmapped.length > 0 && (
-          <div className="mt-3 border-t border-white/[0.06] px-2 pt-3">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-              Unmapped stations
+    <section
+      className={cn(
+        "flex min-h-0 flex-col overflow-hidden bg-[#07090d]",
+        fillViewport ? "h-full flex-1" : "flex-1",
+      )}
+    >
+      {!fillViewport && (
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-3 py-2">
+          <div>
+            <h2 className="text-[12px] font-bold uppercase tracking-[0.18em] text-amber-300">
+              Live line
+            </h2>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {running} active · {warnings} exceptions · {queue} queued
             </p>
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
-              {unmapped.map((row) => (
-                <StationCommandCard key={row.stationId} row={row} />
-              ))}
-            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      <LineFlowGrid groups={primaryGroups} {...(dense ? { dense: true } : {})} />
+
+      {secondaryGroups.length > 0 && (
+        <div className="shrink-0 border-t border-white/[0.06] p-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+            Other lines
+          </p>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {secondaryGroups.flatMap((g) =>
+              g.stations.map((row) => (
+                <StationCommandCard key={row.stationId} row={row} {...(dense ? { dense: true } : {})} />
+              )),
+            )}
+          </div>
+        </div>
+      )}
+
+      {unmapped.length > 0 && (
+        <div className="shrink-0 border-t border-white/[0.06] p-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+            Unmapped stations
+          </p>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {unmapped.map((row) => (
+              <StationCommandCard key={row.stationId} row={row} {...(dense ? { dense: true } : {})} />
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
