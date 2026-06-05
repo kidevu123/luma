@@ -3,6 +3,10 @@
 import { Monitor, User, Users } from "lucide-react";
 import type { FloorBoardMode } from "@/lib/floor-command/floor-board-mode";
 import { formatWait } from "@/lib/floor-command/floor-display";
+import {
+  lineFlowLabel,
+  type ProductionLineDefinition,
+} from "@/lib/floor-command/production-lines";
 import { partitionWip } from "@/lib/floor-command/wip-partition";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import { FloorLiveIndicator } from "./floor-board-ui";
@@ -23,6 +27,7 @@ type Props = {
   onModeChange: (mode: FloorBoardMode) => void;
   showControls?: boolean;
   snapshot?: FloorManagerSnapshot;
+  displayLine?: ProductionLineDefinition;
 };
 
 export function CommandCenterHeader({
@@ -30,6 +35,7 @@ export function CommandCenterHeader({
   onModeChange,
   showControls = true,
   snapshot,
+  displayLine,
 }: Props) {
   const now = new Date();
   const dateStr = now.toLocaleDateString(undefined, {
@@ -80,7 +86,9 @@ export function CommandCenterHeader({
           <FloorLiveIndicator />
           <span className="hidden text-[10px] text-slate-600 sm:inline">·</span>
           <span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-amber-400/80 sm:inline">
-            Blister → Seal → Pack
+            {displayLine
+              ? `${displayLine.shortName.toUpperCase()} · ${lineFlowLabel(displayLine)}`
+              : "Blister → Seal → Pack"}
           </span>
         </div>
         <h1 className="text-base font-semibold tracking-tight text-slate-50 sm:text-lg">

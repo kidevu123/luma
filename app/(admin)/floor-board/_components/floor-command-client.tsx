@@ -56,6 +56,8 @@ export function FloorCommandClient({
   const isTv = mode === "tv";
   const isOwner = mode === "owner";
   const isManager = mode === "manager";
+  const isLead = mode === "lead";
+  const showCommandFooters = !isLead && !isTv;
 
   const [layout, setLayout] = useState<WidgetLayout[]>(
     savedLayout.length > 0 ? savedLayout : DEFAULT_LAYOUT,
@@ -258,7 +260,7 @@ export function FloorCommandClient({
         </>
       )}
 
-      {!isTv && showCommandCenter && (
+      {!isTv && showCommandCenter && showCommandFooters && (
         <div className="flex items-center justify-end gap-3 px-3 py-1 border-t border-white/[0.06] bg-slate-950/90 shrink-0">
           <button
             type="button"
@@ -277,11 +279,11 @@ export function FloorCommandClient({
         </div>
       )}
 
-      {!isTv && (
+      {showCommandFooters && !isTv && (
         <OwnerPulseStrip snapshot={managerSnapshot} emphasized={isOwner} />
       )}
 
-      {!isTv && (
+      {showCommandFooters && !isTv && (
         <div className="flex-shrink-0 border-t border-white/10 bg-slate-950">
           <button
             type="button"

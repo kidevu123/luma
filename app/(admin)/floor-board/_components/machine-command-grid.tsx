@@ -1,155 +1,60 @@
 "use client";
 
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  Package,
-  UserRound,
-} from "lucide-react";
-import {
-  formatCycleSec,
-  formatWait,
-  trustedCycleSec,
-} from "@/lib/floor-command/floor-display";
-import {
-  groupsForPrimaryLine,
-  otherLineGroups,
-  resolveLinePlacement,
-} from "@/lib/floor-command/production-lines";
+import { AlertTriangle, ChevronRight } from "lucide-react";
+import { Fragment, useMemo } from "react";
+import { formatWait } from "@/lib/floor-command/floor-display";
 import type {
-  MachineRollRow,
-  StationCommandRow,
-} from "@/lib/production/floor-manager-snapshot-types";
-import { formatWeightKg, LUMA_TIMEZONE } from "@/lib/ui/luma-display";
+  LineStepGroup,
+  ProductionLineDefinition,
+} from "@/lib/floor-command/production-lines";
+import {
+  BOTTLE_PRODUCTION_LINE,
+  buildLineStepGroupsForLine,
+  CARD_PRODUCTION_LINE,
+  lineMismatchInfo,
+  secondaryLineRows,
+} from "@/lib/floor-command/production-lines";
+import type { StationCommandRow } from "@/lib/production/floor-manager-snapshot-types";
+import { formatWeightKg } from "@/lib/ui/luma-display";
 import { cn } from "@/lib/utils";
 
 type Props = {
   rows: StationCommandRow[];
-  /** Fill all remaining viewport height with the line grid. */
+  displayLine: ProductionLineDefinition;
   fillViewport?: boolean;
-  /** Denser station cards for floor / TV. */
   dense?: boolean;
+  onSwitchLine?: (lineId: string) => void;
 };
 
 type CardState = "running" | "warning" | "paused" | "idle" | "down";
 
-function minutesFromSeconds(seconds: number | null): number | null {
-  if (seconds == null) return null;
-  return Math.floor(seconds / 60);
-}
-
-function formatDuration(seconds: number | null): string {
-  if (seconds == null) return "-";
-  const total = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(total / 60);
-  const remaining = total % 60;
-  if (minutes < 60) return `${minutes}m ${remaining}s`;
-  const hours = Math.floor(minutes / 60);
-  const leftMinutes = minutes % 60;
-  return leftMinutes > 0 ? `${hours}h ${leftMinutes}m` : `${hours}h`;
-}
-
-function formatTime(value: string | null): string {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: LUMA_TIMEZONE,
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(date);
-}
-
-function stationDisplayKind(kind: string): string {
-  return kind.replace(/_/g, " ").toLowerCase();
-}
-
-function cycleDelta(row: StationCommandRow): string {
-  const shift = trustedCycleSec(row.avgCycleSecShift);
-  const base = trustedCycleSec(row.avgCycleSec7d);
-  if (shift == null || base == null || base <= 0) return "no shift baseline";
-  const ratio = shift / base;
-  if (ratio > 1.2) return `${Math.round((ratio - 1) * 100)}% slow vs 7d`;
-  if (ratio < 0.85) return `${Math.round((1 - ratio) * 100)}% fast vs 7d`;
-  return "near 7d pace";
-}
-
-function throughputForStation(row: StationCommandRow): {
-  label: string;
-  value: number;
-  sub: string;
-} {
-  if (row.stationKind === "BLISTER" || row.stationKind === "HANDPACK_BLISTER") {
-    return {
-      label: "Blistered",
-      value: row.todayBlistered,
-      sub: `${row.todayUnits.toLocaleString()} units out`,
-    };
-  }
-  if (row.stationKind === "SEALING") {
-    return {
-      label: "Sealed",
-      value: row.todaySealed,
-      sub: `${row.todayFinalized} finalized`,
-    };
-  }
-  if (row.stationKind === "PACKAGING") {
-    return {
-      label: "Packaged",
-      value: row.todayPackaged,
-      sub: `${row.todayFinalized} finalized`,
-    };
-  }
-  return {
-    label: "Finalized",
-    value: row.todayFinalized,
-    sub: `${row.todayUnits.toLocaleString()} units out`,
-  };
-}
-
-function rollRoleLabel(roll: MachineRollRow): string {
-  if (roll.materialRole) return roll.materialRole;
-  if (roll.materialKind?.includes("FOIL")) return "FOIL";
-  if (roll.materialKind?.includes("PVC")) return "PVC";
-  return "ROLL";
-}
-
-function sortRolls(rolls: MachineRollRow[]): MachineRollRow[] {
-  const weight = (role: string | null) => {
-    if (role === "PVC") return 0;
-    if (role === "FOIL") return 1;
-    return 2;
-  };
-  return [...rolls].sort(
-    (a, b) => weight(a.materialRole) - weight(b.materialRole),
-  );
-}
-
-function rollMissing(row: StationCommandRow, role: "PVC" | "FOIL"): boolean {
-  const needsBlisterRolls =
-    row.stationKind === "BLISTER" || row.stationKind === "HANDPACK_BLISTER";
-  if (!needsBlisterRolls || !row.machineId) return false;
-  return !row.activeRolls.some((r) => rollRoleLabel(r) === role);
-}
-
 function actionItems(row: StationCommandRow): string[] {
   const items: string[] = [];
-  if (row.isPaused) items.push("Paused bag");
+  if (row.isPaused) items.push("Paused");
   if (row.isOnHold) items.push("On hold");
   if (row.reworkPending) items.push("Rework pending");
   if (row.workflowBagId && !row.productName) items.push("Product not selected");
-  if (row.workflowBagId && !row.activeOperatorName && !row.operatorName) {
-    items.push("No operator session");
+  if (
+    row.workflowBagId &&
+    !row.activeOperatorName &&
+    !row.operatorName
+  ) {
+    items.push("No operator");
   }
-  if (rollMissing(row, "PVC")) items.push("PVC roll missing");
-  if (rollMissing(row, "FOIL")) items.push("Foil roll missing");
-  const elapsedMin = minutesFromSeconds(row.elapsedSeconds);
-  if (elapsedMin != null && elapsedMin >= 45) items.push("Long active bag");
+  const needsBlister =
+    row.stationKind === "BLISTER" || row.stationKind === "HANDPACK_BLISTER";
+  if (needsBlister && row.machineId) {
+    const hasPvc = row.activeRolls.some(
+      (r) => r.materialRole === "PVC" || r.materialKind?.includes("PVC"),
+    );
+    const hasFoil = row.activeRolls.some(
+      (r) => r.materialRole === "FOIL" || r.materialKind?.includes("FOIL"),
+    );
+    if (!hasPvc) items.push("PVC roll missing");
+    if (!hasFoil) items.push("Foil roll missing");
+  }
   if (!row.workflowBagId && (row.queueWip ?? 0) > 0) items.push("Queue waiting");
   if (!row.machineId && row.stationKind !== "PACKAGING") items.push("No machine");
-  if (row.targetBagsPerHour == null && row.machineId) items.push("No target");
   return items;
 }
 
@@ -166,13 +71,7 @@ function cardState(row: StationCommandRow, actions: string[]): CardState {
 
 const stateStyles: Record<
   CardState,
-  {
-    label: string;
-    border: string;
-    badge: string;
-    glow: string;
-    dot: string;
-  }
+  { label: string; border: string; badge: string; glow: string; dot: string }
 > = {
   running: {
     label: "Running",
@@ -197,7 +96,7 @@ const stateStyles: Record<
   },
   idle: {
     label: "Idle",
-    border: "border-white/[0.09]",
+    border: "border-white/[0.08]",
     badge: "bg-white/[0.05] text-slate-400 border-white/[0.10]",
     glow: "",
     dot: "bg-slate-600",
@@ -211,304 +110,288 @@ const stateStyles: Record<
   },
 };
 
-function RollCard({ roll }: { roll: MachineRollRow }) {
-  const runway =
-    roll.projectedBlistersRemaining != null
-      ? `${roll.projectedBlistersRemaining.toLocaleString()} blisters left`
-      : roll.projectedRemainingGrams != null
-        ? `${formatWeightKg(roll.projectedRemainingGrams)} left`
-        : "remaining unknown";
-
-  return (
-    <div className="rounded-md border border-white/[0.08] bg-black/20 px-2.5 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
-          {rollRoleLabel(roll)}
-        </span>
-        <span className="text-[10px] text-slate-600">{roll.confidence}</span>
-      </div>
-      <p className="mt-1 truncate text-[15px] font-semibold text-slate-100">
-        {roll.rollNumber ?? "Unnumbered roll"}
-      </p>
-      <p className="truncate text-[11px] text-slate-400">
-        {roll.materialName ?? roll.materialKind ?? "Material unknown"}
-      </p>
-      <p className="mt-1.5 text-[10px] text-slate-500">{runway}</p>
-    </div>
-  );
+function shiftTotalLabel(row: StationCommandRow): string {
+  if (row.stationKind === "BLISTER" || row.stationKind === "HANDPACK_BLISTER") {
+    return `${row.todayBlistered.toLocaleString()} blistered`;
+  }
+  if (row.stationKind === "SEALING" || row.stationKind === "COMBINED") {
+    return `${row.todaySealed.toLocaleString()} sealed`;
+  }
+  if (row.stationKind === "PACKAGING") {
+    return `${row.todayPackaged.toLocaleString()} packaged`;
+  }
+  if (row.stationKind === "BOTTLE_HANDPACK") {
+    return `${row.todayFinalized.toLocaleString()} filled`;
+  }
+  return `${row.todayFinalized.toLocaleString()} done`;
 }
 
-function MissingRollCard({ role }: { role: "PVC" | "FOIL" }) {
-  return (
-    <div className="rounded-md border border-amber-500/30 bg-amber-500/[0.07] px-2.5 py-2">
-      <div className="flex items-center gap-1.5 text-amber-200">
-        <AlertTriangle size={13} aria-hidden />
-        <span className="text-[10px] font-bold uppercase tracking-[0.16em]">
-          {role}
-        </span>
-      </div>
-      <p className="mt-1 text-[13px] font-semibold text-amber-100">
-        No active roll
-      </p>
-      <p className="text-[10px] text-amber-200/70">Mount event not open</p>
-    </div>
-  );
+function formatDuration(seconds: number | null): string {
+  if (seconds == null) return "—";
+  const total = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const left = minutes % 60;
+  return left > 0 ? `${hours}h ${left}m` : `${hours}h`;
 }
 
-function StatCell({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string | undefined;
-}) {
-  return (
-    <div className="min-w-0 rounded-md border border-white/[0.07] bg-white/[0.025] px-2 py-1.5">
-      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-        {label}
-      </p>
-      <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-slate-100">
-        {value}
-      </p>
-      {sub && <p className="truncate text-[10px] text-slate-500">{sub}</p>}
-    </div>
-  );
+function machineSubtitle(row: StationCommandRow): string {
+  const parts = [
+    row.machineName ?? row.machineKind ?? row.stationKind.replace(/_/g, " "),
+  ];
+  if (row.cardsPerTurn) parts.push(`${row.cardsPerTurn} cards/turn`);
+  return parts.join(" · ");
 }
 
-function StationCommandCard({
-  row,
-  dense = false,
-}: {
-  row: StationCommandRow;
-  dense?: boolean;
-}) {
+function StationFloorTile({ row }: { row: StationCommandRow }) {
   const actions = actionItems(row);
   const state = cardState(row, actions);
   const style = stateStyles[state];
-  const throughput = throughputForStation(row);
-  const sortedRolls = sortRolls(row.activeRolls);
-  const elapsedMin = minutesFromSeconds(row.elapsedSeconds);
-  const queueLabel =
-    row.queueWip != null
-      ? `${row.queueWip} waiting`
-      : row.stationKind === "PACKAGING"
-        ? "shared"
-        : "-";
-  const operator =
-    row.activeOperatorName ?? row.operatorName ?? row.operatorCode ?? null;
-  const target =
-    row.targetBagsPerHour != null ? `${row.targetBagsPerHour}/hr target` : null;
+  const isActive =
+    state === "running" ||
+    state === "warning" ||
+    state === "paused" ||
+    (state === "down" && row.stationKind === "PACKAGING");
+
   const bagTitle =
     row.bagLabel ??
-    (row.workflowBagId ? row.receiptNumber ?? "Active bag" : "No bag scanned");
-  const productLine = row.productName ?? "No product selected yet";
+    (row.workflowBagId ? (row.receiptNumber ?? "Active bag") : null);
 
   return (
     <article
       className={cn(
-        "min-w-0 rounded-lg border bg-slate-950/90 p-3",
-        "flex flex-col gap-3",
+        "flex min-h-[96px] min-w-0 flex-1 flex-col rounded-lg border transition-shadow duration-150",
+        isActive ? "p-3 bg-slate-950/90" : "p-2.5 bg-[#0a0d12]/80",
         style.border,
-        style.glow,
+        isActive && style.glow,
       )}
     >
-      <header className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className={cn("h-2.5 w-2.5 rounded-full", style.dot)} />
-            <h3 className="truncate text-sm font-bold uppercase tracking-[0.12em] text-slate-100">
-              {row.stationLabel}
-            </h3>
-          </div>
-          <p className="mt-1 truncate text-[11px] text-slate-500">
-            {row.machineName ?? "No machine bound"} ·{" "}
-            {row.machineKind ?? stationDisplayKind(row.stationKind)}
-            {row.cardsPerTurn ? ` · ${row.cardsPerTurn} cards/turn` : ""}
-          </p>
+      <header className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", style.dot)} />
+          <h3 className="truncate text-[13px] font-bold uppercase tracking-[0.1em] text-slate-100">
+            {row.stationLabel}
+          </h3>
         </div>
         <span
           className={cn(
-            "shrink-0 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em]",
+            "shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em]",
             style.badge,
           )}
         >
           {style.label}
         </span>
       </header>
+      <p className="mt-0.5 truncate text-[10px] text-slate-500">
+        {machineSubtitle(row)}
+      </p>
 
-      <section className="grid grid-cols-2 gap-2">
-        {sortedRolls.map((roll) => (
-          <RollCard key={roll.packagingLotId} roll={roll} />
-        ))}
-        {rollMissing(row, "PVC") && <MissingRollCard role="PVC" />}
-        {rollMissing(row, "FOIL") && <MissingRollCard role="FOIL" />}
-        {sortedRolls.length === 0 &&
-          !rollMissing(row, "PVC") &&
-          !rollMissing(row, "FOIL") && (
-            <div className="col-span-2 rounded-md border border-white/[0.07] bg-black/15 px-2.5 py-2 text-[11px] text-slate-600">
-              No machine roll is mounted for this station.
-            </div>
-          )}
-      </section>
-
-      <section className="rounded-md border border-white/[0.08] bg-white/[0.03] p-3">
-        <div className="flex items-start gap-2">
-          <Package size={16} className="mt-0.5 shrink-0 text-slate-500" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-bold text-slate-50">
+      {state === "down" ? (
+        <p className="flex flex-1 items-center justify-center text-[11px] font-medium uppercase tracking-[0.14em] text-red-300/80">
+          No machine bound
+        </p>
+      ) : isActive ? (
+        <div className="mt-2 min-h-0 flex-1 space-y-2">
+          {bagTitle && (
+            <p className="truncate font-mono text-[15px] font-bold text-slate-50 lg:text-[17px]">
               {bagTitle}
             </p>
-            {row.bagLabelSecondary && (
-              <p className="truncate text-[11px] text-slate-500">
-                {row.bagLabelSecondary}
-              </p>
-            )}
-            <div
-              className={cn(
-                "mt-2 rounded-md border px-2.5 py-2",
-                row.productName
-                  ? "border-emerald-500/20 bg-emerald-500/[0.05]"
-                  : "border-amber-400/45 bg-amber-500/[0.08]",
+          )}
+          {row.productName ? (
+            <p className="truncate text-[12px] font-semibold text-emerald-100">
+              {row.productName}
+              {row.elapsedSeconds != null && (
+                <span className="font-normal text-slate-400">
+                  {" "}
+                  · {formatDuration(row.elapsedSeconds)}
+                </span>
               )}
-            >
-              <p
-                className={cn(
-                  "text-[12px] font-semibold",
-                  row.productName ? "text-emerald-100" : "text-amber-100",
+            </p>
+          ) : row.workflowBagId ? (
+            <p className="text-[11px] font-medium text-amber-200/90">
+              Product chosen at seal
+            </p>
+          ) : state === "warning" && (row.queueWip ?? 0) > 0 ? (
+            <p className="text-[12px] text-amber-200">
+              {row.queueWip} bags waiting
+              {row.queueOldestMinutes != null && row.queueOldestMinutes > 0
+                ? ` · oldest ${formatWait(row.queueOldestMinutes)}`
+                : ""}
+            </p>
+          ) : state === "paused" ? (
+            <p className="text-[12px] font-medium uppercase tracking-wide text-orange-200">
+              Paused
+            </p>
+          ) : null}
+
+          {(row.stationKind === "BLISTER" ||
+            row.stationKind === "HANDPACK_BLISTER") &&
+            row.machineId && (
+              <div className="flex flex-wrap gap-1">
+                {row.activeRolls.slice(0, 2).map((roll) => (
+                  <span
+                    key={roll.packagingLotId}
+                    className="inline-flex items-center gap-1 rounded border border-white/[0.08] bg-black/25 px-2 py-0.5 text-[10px] text-slate-400"
+                  >
+                    {roll.materialRole ?? "ROLL"}{" "}
+                    {roll.rollNumber ?? "?"}
+                    {roll.projectedRemainingGrams != null &&
+                      ` · ${formatWeightKg(roll.projectedRemainingGrams)}`}
+                  </span>
+                ))}
+                {actions.includes("PVC roll missing") && (
+                  <span className="inline-flex rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">
+                    PVC missing
+                  </span>
                 )}
-              >
-                {productLine}
-              </p>
-              {!row.productName && row.workflowBagId && (
-                <p className="text-[11px] text-amber-200/75">
-                  Finished product will be chosen at sealing.
-                </p>
-              )}
+                {actions.includes("Foil roll missing") && (
+                  <span className="inline-flex rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">
+                    Foil missing
+                  </span>
+                )}
+              </div>
+            )}
+
+          {actions.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {actions.slice(0, 2).map((item) => (
+                <span
+                  key={item}
+                  className="inline-flex items-center gap-1 rounded border border-amber-400/30 bg-amber-500/[0.08] px-1.5 py-0.5 text-[9px] font-semibold text-amber-100"
+                >
+                  <AlertTriangle size={10} aria-hidden />
+                  {item}
+                </span>
+              ))}
             </div>
-          </div>
+          )}
         </div>
-      </section>
-
-      <section className={cn("grid gap-2", dense ? "grid-cols-2" : "grid-cols-3")}>
-        <StatCell
-          label="Elapsed"
-          value={formatDuration(row.elapsedSeconds)}
-          sub={dense ? undefined : row.startedAt ? `started ${formatTime(row.startedAt)}` : "not active"}
-        />
-        <StatCell
-          label="Queue"
-          value={queueLabel}
-          sub={
-            !dense && row.queueOldestMinutes != null && row.queueOldestMinutes > 0
-              ? `oldest ${formatWait(row.queueOldestMinutes)}`
-              : row.queueStatus ?? undefined
-          }
-        />
-        {!dense && (
-          <StatCell
-            label={throughput.label}
-            value={throughput.value.toLocaleString()}
-            sub={throughput.sub}
-          />
-        )}
-      </section>
-
-      {!dense && (
-        <section className="grid grid-cols-2 gap-2">
-          <StatCell
-            label="Cycle"
-            value={formatCycleSec(trustedCycleSec(row.avgCycleSecShift))}
-            sub={cycleDelta(row)}
-          />
-          <StatCell
-            label="Target"
-            value={target ?? "-"}
-            sub={
-              elapsedMin != null && elapsedMin > 0
-                ? `${formatWait(elapsedMin)} on current bag`
-                : "idle timer clear"
-            }
-          />
-        </section>
+      ) : (
+        <p className="flex flex-1 items-center justify-center text-[11px] uppercase tracking-[0.2em] text-slate-700">
+          — idle —
+        </p>
       )}
 
-      {!dense && (
-        <section className="grid grid-cols-2 gap-2 text-[11px]">
-          <div className="flex min-w-0 items-center gap-2 rounded-md border border-white/[0.07] bg-black/15 px-2 py-1.5">
-            <UserRound size={14} className="shrink-0 text-slate-500" />
-            <span className="truncate text-slate-300">
-              {operator ?? "No operator session"}
-            </span>
-          </div>
-          <div className="flex min-w-0 items-center gap-2 rounded-md border border-white/[0.07] bg-black/15 px-2 py-1.5">
-            <Clock size={14} className="shrink-0 text-slate-500" />
-            <span className="truncate text-slate-300">
-              {row.lastEventType
-                ? `${row.lastEventType} · ${formatTime(row.lastEventAt)}`
-                : "No live event"}
-            </span>
-          </div>
-        </section>
-      )}
-
-      <section className="mt-auto flex flex-wrap gap-1.5">
-        {actions.length > 0 ? (
-          actions.slice(0, 5).map((item) => (
-            <span
-              key={item}
-              className="inline-flex items-center gap-1 rounded-md border border-amber-400/30 bg-amber-500/[0.08] px-2 py-1 text-[10px] font-semibold text-amber-100"
-            >
-              <AlertTriangle size={12} aria-hidden />
-              {item}
-            </span>
-          ))
-        ) : (
-          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-500/[0.08] px-2 py-1 text-[10px] font-semibold text-emerald-100">
-            <CheckCircle2 size={12} aria-hidden />
-            Clear
-          </span>
-        )}
-      </section>
+      <footer className="mt-auto flex items-center justify-between gap-2 border-t border-white/[0.05] pt-2 text-[10px] tabular-nums text-slate-500">
+        <span>Q {row.queueWip ?? 0}</span>
+        <span className="truncate">{shiftTotalLabel(row)}</span>
+      </footer>
     </article>
   );
 }
 
-function LineStepColumn({
-  stepNumber,
+function StepEmptyState({
   stepLabel,
-  stepRole,
-  stations,
+  queueWip,
+  queueOldestMinutes,
+}: {
+  stepLabel: string;
+  queueWip: number;
+  queueOldestMinutes: number | null;
+}) {
+  if (queueWip > 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-amber-500/25 bg-amber-500/[0.04] p-4 m-1">
+        <p className="text-4xl font-bold tabular-nums text-amber-300">
+          {queueWip}
+        </p>
+        <p className="mt-1 text-[12px] font-medium text-slate-400">
+          bags waiting
+        </p>
+        {queueOldestMinutes != null && queueOldestMinutes > 0 && (
+          <p className="mt-0.5 text-[10px] text-slate-500">
+            oldest · {formatWait(queueOldestMinutes)}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-white/[0.08] bg-white/[0.02] p-4 m-1">
+      <p className="text-[12px] font-medium text-slate-500">No station here</p>
+      <p className="mt-1 text-center text-[10px] text-slate-600">
+        Configure a {stepLabel.toLowerCase()} station in admin
+      </p>
+    </div>
+  );
+}
+
+function StepConnector({ queueWip }: { queueWip: number }) {
+  return (
+    <div className="flex w-10 shrink-0 flex-col items-center justify-center gap-1 self-stretch">
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-600 to-transparent" />
+      {queueWip > 0 ? (
+        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold tabular-nums text-amber-200">
+          {queueWip}
+        </span>
+      ) : (
+        <ChevronRight size={16} className="text-slate-700" aria-hidden />
+      )}
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-600 to-transparent" />
+    </div>
+  );
+}
+
+function LineStepColumn({
+  group,
   dense,
 }: {
-  stepNumber: number;
-  stepLabel: string;
-  stepRole: string;
-  stations: StationCommandRow[];
+  group: LineStepGroup;
   dense?: boolean;
 }) {
+  const stepQueue = group.stations.reduce(
+    (sum, s) => sum + (s.queueWip ?? 0),
+    0,
+  );
+  const oldestQueue = group.stations.reduce(
+    (m, s) => Math.max(m, s.queueOldestMinutes ?? 0),
+    0,
+  );
+
   return (
-    <div className="flex min-h-0 flex-col border-r border-white/[0.08] last:border-r-0">
-      <header className="shrink-0 border-b border-white/[0.06] bg-[#0a0d12] px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/10 text-xs font-bold text-amber-300">
-            {stepNumber}
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold uppercase tracking-[0.1em] text-slate-100">
-              {stepLabel}
+    <div className="flex min-h-0 flex-col bg-[#07090d]">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-[#0a0d12] px-3">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/10 text-xs font-bold text-amber-300">
+          {group.step.step}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-bold uppercase tracking-[0.08em] text-slate-100">
+            {group.step.label}
+          </p>
+          {!dense && (
+            <p className="hidden truncate text-[10px] text-slate-600 lg:block">
+              {group.step.role}
             </p>
-            <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-slate-500">
-              {stepRole}
-            </p>
-          </div>
+          )}
+        </div>
+        <div className="shrink-0 text-right text-[10px] tabular-nums text-slate-500">
+          {stepQueue > 0 && <span className="text-amber-300/90">Q {stepQueue}</span>}
+          {group.stations.length > 0 && (
+            <span className={stepQueue > 0 ? "ml-2" : ""}>
+              {group.stations.length} stn
+            </span>
+          )}
         </div>
       </header>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-        {stations.map((row) => (
-          <StationCommandCard key={row.stationId} row={row} {...(dense ? { dense: true } : {})} />
-        ))}
+      <div
+        className="grid min-h-0 flex-1 gap-2 overflow-y-auto p-2"
+        style={{
+          gridTemplateRows: `repeat(${Math.max(group.stations.length, 1)}, minmax(0, 1fr))`,
+        }}
+      >
+        {group.stations.length === 0 ? (
+          <StepEmptyState
+            stepLabel={group.step.label}
+            queueWip={stepQueue}
+            queueOldestMinutes={oldestQueue > 0 ? oldestQueue : null}
+          />
+        ) : (
+          group.stations.map((row) => (
+            <StationFloorTile key={row.stationId} row={row} />
+          ))
+        )}
       </div>
     </div>
   );
@@ -518,44 +401,118 @@ function LineFlowGrid({
   groups,
   dense,
 }: {
-  groups: ReturnType<typeof groupsForPrimaryLine>;
+  groups: LineStepGroup[];
   dense?: boolean;
 }) {
   if (groups.length === 0) return null;
 
   return (
-    <div
-      className="grid h-full min-h-0 flex-1"
-      style={{
-        gridTemplateColumns: `repeat(${Math.max(groups.length, 1)}, minmax(0, 1fr))`,
-      }}
-    >
-      {groups.map((group) => (
-        <LineStepColumn
-          key={`${group.line.id}-${group.step.key}`}
-          stepNumber={group.step.step}
-          stepLabel={group.step.label}
-          stepRole={group.step.role}
-          stations={group.stations}
-          {...(dense ? { dense: true } : {})}
-        />
+    <div className="flex h-full min-h-0 flex-1">
+      {groups.map((group, index) => (
+        <Fragment key={`${group.line.id}-${group.step.key}`}>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <LineStepColumn
+              group={group}
+              {...(dense ? { dense: true } : {})}
+            />
+          </div>
+          {index < groups.length - 1 && (
+            <StepConnector
+              queueWip={group.stations.reduce(
+                (sum, s) => sum + (s.queueWip ?? 0),
+                0,
+              )}
+            />
+          )}
+        </Fragment>
       ))}
+    </div>
+  );
+}
+
+function SecondaryLineStrip({
+  line,
+  rows,
+}: {
+  line: ProductionLineDefinition;
+  rows: StationCommandRow[];
+}) {
+  const active = rows.filter((r) => r.workflowBagId).length;
+  return (
+    <div className="flex h-14 shrink-0 items-center gap-3 overflow-x-auto border-t border-white/[0.06] bg-[#0a0d12] px-3">
+      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+        {line.shortName}
+      </span>
+      <span className="shrink-0 text-[10px] text-slate-600">
+        {rows.length} stations · {active} active
+      </span>
+      <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto">
+        {rows.map((row) => {
+          const state = cardState(row, actionItems(row));
+          return (
+            <div
+              key={row.stationId}
+              className="flex h-10 w-36 shrink-0 items-center gap-2 rounded border border-white/[0.08] bg-black/20 px-2"
+            >
+              <span
+                className={cn(
+                  "h-2 w-2 shrink-0 rounded-full",
+                  stateStyles[state].dot,
+                )}
+              />
+              <span className="truncate text-[10px] font-medium text-slate-300">
+                {row.stationLabel}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LineMismatchBanner({
+  info,
+  onSwitchLine,
+}: {
+  info: NonNullable<ReturnType<typeof lineMismatchInfo>>;
+  onSwitchLine: (lineId: string) => void;
+}) {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-500/30 bg-amber-500/[0.06] px-4 py-2">
+      <AlertTriangle size={14} className="shrink-0 text-amber-400" />
+      <p className="min-w-0 flex-1 text-[11px] text-amber-100">
+        Mixed lines · showing{" "}
+        <span className="font-semibold">{info.primary.shortName}</span> (
+        {info.cardCount} card · {info.bottleCount} bottle stations)
+      </p>
+      <button
+        type="button"
+        onClick={() => onSwitchLine(info.secondary.id)}
+        className="shrink-0 rounded border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-amber-200 hover:bg-amber-500/20"
+      >
+        View {info.secondary.shortName}
+      </button>
     </div>
   );
 }
 
 export function MachineCommandGrid({
   rows,
+  displayLine,
   fillViewport = false,
   dense = false,
+  onSwitchLine,
 }: Props) {
-  const primaryGroups = groupsForPrimaryLine(rows);
-  const secondaryGroups = otherLineGroups(rows);
-  const unmapped = rows.filter((r) => !resolveLinePlacement(r.stationKind));
-
-  const running = rows.filter((r) => r.workflowBagId).length;
-  const warnings = rows.filter((r) => actionItems(r).length > 0).length;
-  const queue = rows.reduce((sum, r) => sum + (r.queueWip ?? 0), 0);
+  const groups = useMemo(
+    () => buildLineStepGroupsForLine(displayLine, rows),
+    [displayLine, rows],
+  );
+  const mismatch = useMemo(() => lineMismatchInfo(rows), [rows]);
+  const secondaryRows = useMemo(
+    () => secondaryLineRows(rows, displayLine),
+    [rows, displayLine],
+  );
 
   if (rows.length === 0) {
     return (
@@ -567,6 +524,11 @@ export function MachineCommandGrid({
     );
   }
 
+  const secondaryLine =
+    displayLine.id === CARD_PRODUCTION_LINE.id
+      ? BOTTLE_PRODUCTION_LINE
+      : CARD_PRODUCTION_LINE;
+
   return (
     <section
       className={cn(
@@ -574,47 +536,14 @@ export function MachineCommandGrid({
         fillViewport ? "h-full flex-1" : "flex-1",
       )}
     >
-      {!fillViewport && (
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-3 py-2">
-          <div>
-            <h2 className="text-[12px] font-bold uppercase tracking-[0.18em] text-amber-300">
-              Live line
-            </h2>
-            <p className="mt-1 text-[11px] text-slate-500">
-              {running} active · {warnings} exceptions · {queue} queued
-            </p>
-          </div>
-        </div>
+      {mismatch?.hasMismatch && onSwitchLine && (
+        <LineMismatchBanner info={mismatch} onSwitchLine={onSwitchLine} />
       )}
 
-      <LineFlowGrid groups={primaryGroups} {...(dense ? { dense: true } : {})} />
+      <LineFlowGrid groups={groups} {...(dense ? { dense: true } : {})} />
 
-      {secondaryGroups.length > 0 && (
-        <div className="shrink-0 border-t border-white/[0.06] p-3">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-            Other lines
-          </p>
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {secondaryGroups.flatMap((g) =>
-              g.stations.map((row) => (
-                <StationCommandCard key={row.stationId} row={row} {...(dense ? { dense: true } : {})} />
-              )),
-            )}
-          </div>
-        </div>
-      )}
-
-      {unmapped.length > 0 && (
-        <div className="shrink-0 border-t border-white/[0.06] p-3">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-            Unmapped stations
-          </p>
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {unmapped.map((row) => (
-              <StationCommandCard key={row.stationId} row={row} {...(dense ? { dense: true } : {})} />
-            ))}
-          </div>
-        </div>
+      {secondaryRows.length > 0 && dense && (
+        <SecondaryLineStrip line={secondaryLine} rows={secondaryRows} />
       )}
     </section>
   );

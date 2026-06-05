@@ -2,13 +2,17 @@
 
 import type { ActNowItem } from "@/lib/floor-command/act-now";
 import type { FloorBoardMode } from "@/lib/floor-command/floor-board-mode";
+import {
+  primaryLineForRows,
+  PRODUCTION_LINES,
+} from "@/lib/floor-command/production-lines";
 import type { ShiftStatusData } from "@/lib/floor-command/types";
 import type { KpiStripData } from "@/lib/production/floor-command";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import type { WidgetGridData } from "./widget-grid";
 import type { PauseReasonRow } from "../_loaders";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ActNowPanel } from "./act-now-panel";
 import { CommandCenterCharts } from "./command-center-charts";
 import { CommandCenterHeader } from "./command-center-header";
@@ -42,8 +46,25 @@ export function CommandCenterView({
 }: Props) {
   const isTv = mode === "tv";
   const isLead = mode === "lead";
-  const isManager = mode === "manager" || mode === "owner";
+  const isManager = mode === "manager";
+  const isOwner = mode === "owner";
+  const showManagerChrome = isManager || isOwner;
   const [metricsOpen, setMetricsOpen] = useState(isManager);
+  const [lineOverrideId, setLineOverrideId] = useState<string | null>(null);
+
+  const inferredLine = useMemo(
+    () => primaryLineForRows(managerSnapshot.stationCommandRows),
+    [managerSnapshot.stationCommandRows],
+  );
+
+  const displayLine = useMemo(() => {
+    if (lineOverrideId) {
+      return (
+        PRODUCTION_LINES.find((l) => l.id === lineOverrideId) ?? inferredLine
+      );
+    }
+    return inferredLine;
+  }, [lineOverrideId, inferredLine]);
 
   return (
     <div
@@ -56,10 +77,11 @@ export function CommandCenterView({
         mode={mode}
         onModeChange={onModeChange}
         showControls={!isTv}
-        {...(isLead ? { snapshot: managerSnapshot } : {})}
+        displayLine={displayLine}
+        {...(isLead || isTv ? { snapshot: managerSnapshot } : {})}
       />
 
-      {isManager && (
+      {showManagerChrome && (
         <>
           <OperationsPulseStrip snapshot={managerSnapshot} />
           <CommandCenterProductionAnswers snapshot={managerSnapshot} />
@@ -76,7 +98,7 @@ export function CommandCenterView({
             )}
           </button>
           {metricsOpen && (
-            <div className="max-h-[38vh] shrink-0 overflow-y-auto border-b border-white/[0.06]">
+            <div className="max-h-[32vh] shrink-0 overflow-y-auto border-b border-white/[0.06]">
               <KpiRibbon
                 shiftStatus={shiftStatus}
                 kpiData={kpiData}
@@ -99,8 +121,10 @@ export function CommandCenterView({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <MachineCommandGrid
           rows={managerSnapshot.stationCommandRows}
+          displayLine={displayLine}
           fillViewport
           dense={isLead || isTv}
+          onSwitchLine={setLineOverrideId}
         />
         {!isTv && (
           <aside

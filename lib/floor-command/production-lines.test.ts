@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  groupStationCommandRowsByLine,
+  buildLineStepGroupsForLine,
+  CARD_PRODUCTION_LINE,
+  BOTTLE_PRODUCTION_LINE,
+  primaryLineForRows,
   sortStationCommandRowsByLine,
 } from "./production-lines";
 import type { StationCommandRow } from "@/lib/production/floor-manager-snapshot-types";
@@ -69,16 +72,41 @@ describe("production-lines", () => {
     ]);
   });
 
-  it("groups by line step", () => {
-    const groups = groupStationCommandRowsByLine([
+  it("buildLineStepGroupsForLine always returns all steps", () => {
+    const groups = buildLineStepGroupsForLine(CARD_PRODUCTION_LINE, [
       row("Blister Room", "BLISTER"),
       row("Sealing Station 3", "SEALING"),
-      row("Packaging Station", "PACKAGING"),
     ]);
     expect(groups.map((g) => g.step.key)).toEqual([
       "blister",
       "sealing",
       "packaging",
     ]);
+    expect(groups[2]?.stations).toHaveLength(0);
+  });
+
+  it("does not pick card line from packaging station alone", () => {
+    const line = primaryLineForRows([
+      row("Packaging Station", "PACKAGING"),
+      row("Bottle Sealer", "BOTTLE_CAP_SEAL"),
+      row("Bottle Stickering", "BOTTLE_STICKER"),
+    ]);
+    expect(line.id).toBe("bottle_route");
+  });
+
+  it("picks card line when card production stations exist", () => {
+    const line = primaryLineForRows([
+      row("Blister Room", "BLISTER"),
+      row("Packaging Station", "PACKAGING"),
+    ]);
+    expect(line.id).toBe("card_route");
+  });
+
+  it("bottle line has four steps including empty packaging", () => {
+    const groups = buildLineStepGroupsForLine(BOTTLE_PRODUCTION_LINE, [
+      row("Bottle Stickering", "BOTTLE_STICKER"),
+    ]);
+    expect(groups).toHaveLength(4);
+    expect(groups[2]?.stations[0]?.stationLabel).toBe("Bottle Stickering");
   });
 });

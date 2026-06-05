@@ -189,28 +189,122 @@ export function groupStationCommandRowsByLine(
   return groups;
 }
 
-/** Primary line shown on command center when any card-route station exists. */
+const CARD_PRODUCTION_KINDS: StationKind[] = [
+  "BLISTER",
+  "HANDPACK_BLISTER",
+  "SEALING",
+  "COMBINED",
+];
+
+const BOTTLE_PRODUCTION_KINDS: StationKind[] = [
+  "BOTTLE_HANDPACK",
+  "BOTTLE_CAP_SEAL",
+  "BOTTLE_STICKER",
+];
+
+function countProductionKinds(
+  rows: StationCommandRow[],
+  kinds: StationKind[],
+): number {
+  return rows.filter((r) => kinds.includes(r.stationKind as StationKind))
+    .length;
+}
+
+/** Abbreviated flow for header, e.g. "Blister → Seal → Pack". */
+export function lineFlowLabel(line: ProductionLineDefinition): string {
+  return line.steps.map((s) => s.label.split("/")[0]?.trim() ?? s.label).join(" → ");
+}
+
+export type LineMismatchInfo = {
+  hasMismatch: boolean;
+  primary: ProductionLineDefinition;
+  cardCount: number;
+  bottleCount: number;
+  secondary: ProductionLineDefinition;
+};
+
+/** Primary line — do not infer card line from a lone PACKAGING station. */
 export function primaryLineForRows(
   rows: StationCommandRow[],
 ): ProductionLineDefinition {
-  const hasCard = rows.some((r) =>
-    CARD_PRODUCTION_LINE.steps.some((s) =>
-      s.stationKinds.includes(r.stationKind as StationKind),
-    ),
-  );
-  return hasCard ? CARD_PRODUCTION_LINE : BOTTLE_PRODUCTION_LINE;
+  const cardCount = countProductionKinds(rows, CARD_PRODUCTION_KINDS);
+  const bottleCount = countProductionKinds(rows, BOTTLE_PRODUCTION_KINDS);
+
+  if (cardCount > 0 && bottleCount === 0) return CARD_PRODUCTION_LINE;
+  if (bottleCount > 0 && cardCount === 0) return BOTTLE_PRODUCTION_LINE;
+  if (bottleCount > cardCount) return BOTTLE_PRODUCTION_LINE;
+  if (cardCount > bottleCount) return CARD_PRODUCTION_LINE;
+  return CARD_PRODUCTION_LINE;
+}
+
+export function lineMismatchInfo(
+  rows: StationCommandRow[],
+): LineMismatchInfo | null {
+  const cardCount = countProductionKinds(rows, CARD_PRODUCTION_KINDS);
+  const bottleCount = countProductionKinds(rows, BOTTLE_PRODUCTION_KINDS);
+  if (cardCount === 0 || bottleCount === 0) return null;
+
+  const primary = primaryLineForRows(rows);
+  const secondary =
+    primary.id === CARD_PRODUCTION_LINE.id
+      ? BOTTLE_PRODUCTION_LINE
+      : CARD_PRODUCTION_LINE;
+
+  return {
+    hasMismatch: true,
+    primary,
+    cardCount,
+    bottleCount,
+    secondary,
+  };
+}
+
+/** All steps for a line, including empty steps (for full column layout). */
+export function buildLineStepGroupsForLine(
+  line: ProductionLineDefinition,
+  rows: StationCommandRow[],
+): LineStepGroup[] {
+  return line.steps.map((step) => ({
+    line,
+    step,
+    stations: rows.filter((r) => {
+      const placement = resolveLinePlacement(r.stationKind);
+      return (
+        placement?.line.id === line.id && placement.step.key === step.key
+      );
+    }),
+  }));
 }
 
 export function groupsForPrimaryLine(
   rows: StationCommandRow[],
 ): LineStepGroup[] {
   const line = primaryLineForRows(rows);
-  return groupStationCommandRowsByLine(rows).filter((g) => g.line.id === line.id);
+  return buildLineStepGroupsForLine(line, rows);
+}
+
+export function groupsForLine(
+  line: ProductionLineDefinition,
+  rows: StationCommandRow[],
+): LineStepGroup[] {
+  return buildLineStepGroupsForLine(line, rows);
 }
 
 export function otherLineGroups(
   rows: StationCommandRow[],
 ): LineStepGroup[] {
   const primary = primaryLineForRows(rows);
-  return groupStationCommandRowsByLine(rows).filter((g) => g.line.id !== primary.id);
+  return groupStationCommandRowsByLine(rows).filter(
+    (g) => g.line.id !== primary.id,
+  );
+}
+
+export function secondaryLineRows(
+  rows: StationCommandRow[],
+  line: ProductionLineDefinition,
+): StationCommandRow[] {
+  return rows.filter((r) => {
+    const placement = resolveLinePlacement(r.stationKind);
+    return placement?.line.id !== line.id;
+  });
 }
