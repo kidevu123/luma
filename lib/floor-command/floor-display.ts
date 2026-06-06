@@ -29,13 +29,33 @@ export function formatWait(minutes: number): string {
 export const MAX_TRUSTED_CYCLE_SEC = 8 * 3600;
 
 export function trustedCycleSec(sec: number | null | undefined): number | null {
-  if (sec == null || sec <= 0 || sec > MAX_TRUSTED_CYCLE_SEC) return null;
-  return sec;
+  const v = asFiniteNumber(sec);
+  if (v == null || v <= 0 || v > MAX_TRUSTED_CYCLE_SEC) return null;
+  return v;
 }
 
 export function formatCycleSec(sec: number | null): string {
   if (sec == null || sec <= 0) return "—";
   return formatWait(Math.floor(sec / 60));
+}
+
+/** Coerce postgres numeric / string values to a finite number. */
+export function asFiniteNumber(n: unknown): number | null {
+  if (n == null) return null;
+  const v = Number(n);
+  return Number.isFinite(v) ? v : null;
+}
+
+export function fmtPct(n: unknown): string {
+  const v = asFiniteNumber(n);
+  if (v == null) return "—";
+  return `${v.toFixed(1)}%`;
+}
+
+export function fmtDecimal(n: unknown, digits = 1): string {
+  const v = asFiniteNumber(n);
+  if (v == null) return "—";
+  return v.toFixed(digits);
 }
 
 export function receiptLabel(

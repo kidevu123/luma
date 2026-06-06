@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  asFiniteNumber,
+  fmtDecimal,
+  fmtPct,
+} from "@/lib/floor-command/floor-display";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
@@ -252,7 +257,4 @@ export function fmtCycle(sec: number | null): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function fmtPct(n: number | null): string {
-  if (n == null) return "—";
-  return `${n.toFixed(1)}%`;
-}
+export { asFiniteNumber, fmtDecimal, fmtPct };

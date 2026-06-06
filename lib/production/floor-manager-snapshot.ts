@@ -14,7 +14,8 @@ import {
   workflowBags,
   workflowEvents,
 } from "@/lib/db/schema";
-import { computeShiftProgress } from "@/lib/production/floor-command";
+import { computeShiftProgress } from "@/lib/production/shift-window";
+import { asFiniteNumber } from "@/lib/floor-command/floor-display";
 import { deriveOperatorRows } from "@/lib/production/metrics";
 import { lastNDays } from "@/lib/production/time";
 import { buildFloorDataGaps } from "@/lib/floor-command/data-gaps";
@@ -107,12 +108,12 @@ export async function getFloorManagerSnapshot(
       bagsInFlow: wipRow[0]?.n ?? 0,
       bagsFinalizedShift: plant?.bags ?? 0,
       unitsYieldedShift: plant?.units ?? 0,
-      avgCycleSecShift: plant?.avg_cycle ?? null,
-      avgYieldPctShift: plant?.avg_yield ?? null,
-      damageRatePctShift: plant?.damage_rate ?? null,
-      pauseCostUsdToday: pauseStats.costUsd,
+      avgCycleSecShift: asFiniteNumber(plant?.avg_cycle),
+      avgYieldPctShift: asFiniteNumber(plant?.avg_yield),
+      damageRatePctShift: asFiniteNumber(plant?.damage_rate),
+      pauseCostUsdToday: asFiniteNumber(pauseStats.costUsd) ?? 0,
       pauseMinutesToday: Math.round(pauseStats.pausedSeconds / 60),
-      materialRunwayDays: runwayRow,
+      materialRunwayDays: asFiniteNumber(runwayRow),
       laneImbalanceLabel: laneLabel,
       damageClusterActive: damageClusterRow.isCluster,
     },

@@ -3,8 +3,11 @@
 import type { ActNowItem, ActNowSeverity } from "@/lib/floor-command/act-now";
 import type { FloorBoardMode } from "@/lib/floor-command/floor-board-mode";
 import {
+  asFiniteNumber,
   formatCycleSec,
   formatWait,
+  fmtDecimal,
+  fmtPct,
   trustedCycleSec,
 } from "@/lib/floor-command/floor-display";
 import {
@@ -272,7 +275,13 @@ export function TvCommandCenterView({
       ? Math.round(((avgCycle - cycle7d) / cycle7d) * 100)
       : null;
 
-  const yieldPct = plant.avgYieldPctShift ?? kpiData.firstPassYieldPct;
+  const yieldPct =
+    asFiniteNumber(plant.avgYieldPctShift) ??
+    asFiniteNumber(kpiData.firstPassYieldPct);
+  const damageRate = asFiniteNumber(plant.damageRatePctShift);
+  const pauseCost = asFiniteNumber(plant.pauseCostUsdToday);
+  const materialRunway = asFiniteNumber(plant.materialRunwayDays);
+  const fpy = asFiniteNumber(kpiData.firstPassYieldPct);
   const waitingWip = Math.max(
     0,
     shiftActivity.bagsInFlow - shiftActivity.atStation,
@@ -437,16 +446,14 @@ export function TvCommandCenterView({
         <div className="tv-kpi" style={{ "--tv-accent": "#45d49d" } as React.CSSProperties}>
           <div className="tv-kpi-label">Quality</div>
           <div className="tv-kpi-main">
-            {yieldPct != null ? `${yieldPct.toFixed(1)}%` : "—"}
+            {fmtPct(yieldPct)}
             <small> yield</small>
           </div>
           <div className="tv-kpi-sub">
-            {kpiData.firstPassYieldPct != null && (
-              <span>FPY {kpiData.firstPassYieldPct.toFixed(1)}%</span>
-            )}
-            {plant.damageRatePctShift != null && (
-              <span className={plant.damageRatePctShift > 5 ? "warn" : ""}>
-                {plant.damageRatePctShift.toFixed(1)}% damage
+            {fpy != null && <span>FPY {fmtPct(fpy)}</span>}
+            {damageRate != null && (
+              <span className={damageRate > 5 ? "warn" : ""}>
+                {fmtPct(damageRate)} damage
               </span>
             )}
           </div>
@@ -476,14 +483,14 @@ export function TvCommandCenterView({
             <small> paused</small>
           </div>
           <div className="tv-kpi-sub">
-            {plant.pauseCostUsdToday > 0 && (
-              <span className="warn">${plant.pauseCostUsdToday.toFixed(0)} pause cost</span>
+            {pauseCost != null && pauseCost > 0 && (
+              <span className="warn">${fmtDecimal(pauseCost, 0)} pause cost</span>
             )}
-            {plant.materialRunwayDays != null && (
+            {materialRunway != null && (
               <span>
-                {plant.materialRunwayDays < 1
-                  ? `${Math.round(plant.materialRunwayDays * 24)}h`
-                  : `${plant.materialRunwayDays.toFixed(1)}-day`}{" "}
+                {materialRunway < 1
+                  ? `${Math.round(materialRunway * 24)}h`
+                  : `${fmtDecimal(materialRunway, 1)}-day`}{" "}
                 material runway
               </span>
             )}
