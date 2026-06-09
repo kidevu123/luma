@@ -14,6 +14,9 @@ import {
   workflowBags,
 } from "@/lib/db/schema";
 import { fetchAllocationLedgerRows } from "@/lib/zoho/assembly-planner";
+import type { ComponentBatchPayloadEntry } from "@/lib/zoho/production-output-source-allocations";
+import type { LumaOperationSnapshot } from "@/lib/zoho/luma-operation-snapshot";
+import { resolveProductFamily } from "@/lib/zoho/product-family";
 import { stableStringifyProductionOutputPreview } from "@/lib/zoho/production-output-preview";
 
 export const LUMA_PRODUCTION_OUTPUT_SOURCE = "LUMA" as const;
@@ -61,6 +64,10 @@ export type LumaProductionOutputPayload = {
     packed_at: string | null;
     receive_date: string;
   };
+  /** v1.20.6 — batch-tracked component consumption for Zoho assembly. */
+  component_batches: ComponentBatchPayloadEntry[];
+  /** v1.20.6 — persisted operation verification snapshot (from DB only). */
+  luma_operation_snapshot?: LumaOperationSnapshot;
   idempotency_key: string;
   warehouse_id?: string;
 };
@@ -145,6 +152,8 @@ type BuildInput = {
     zohoPoId: string | null;
     zohoLineItemId: string | null;
   }>;
+  componentBatches?: ComponentBatchPayloadEntry[];
+  requireComponentBatches?: boolean;
   warehouseId: string | null;
 };
 
@@ -234,6 +243,14 @@ export function buildLumaProductionOutputPayloadFromContext(
     );
   }
 
+  const componentBatches = input.componentBatches ?? [];
+  if (input.requireComponentBatches === true && input.ledgerRows.length > 0 && componentBatches.length === 0) {
+    add(
+      "MISSING_COMPONENT_BATCHES",
+      "Batch-tracked component_batches are required but no resolved Zoho batch IDs were provided.",
+    );
+  }
+
   const metricsState: "HIGH" | "MISSING" =
     input.metrics != null && input.workflowBagId != null ? "HIGH" : "MISSING";
   const genealogyState: "HIGH" | "MISSING" =
@@ -259,6 +276,7 @@ export function buildLumaProductionOutputPayloadFromContext(
       case_composite_item_id: caseComposite,
     },
     source_receipts: sourceReceipts,
+    component_batches: componentBatches,
     output: {
       units_produced: input.unitsProduced,
       displays_produced: input.displaysProduced,
@@ -290,7 +308,10 @@ export function buildLumaProductionOutputPayloadFromContext(
 
 export async function loadAndBuildLumaProductionOutputPayload(
   finishedLotId: string,
-  opts?: { warehouseId?: string | null },
+  opts?: {
+    warehouseId?: string | null;
+    componentBatches?: ComponentBatchPayloadEntry[];
+  },
 ): Promise<LumaProductionOutputBuildResult & { finishedLotId: string }> {
   const [lotRow] = await db
     .select({ lot: finishedLots, product: products })
@@ -416,6 +437,8 @@ export async function loadAndBuildLumaProductionOutputPayload(
       : null,
     metrics,
     ledgerRows,
+    componentBatches: opts?.componentBatches ?? [],
+    requireComponentBatches: product?.kind === "VARIETY",
     warehouseId: opts?.warehouseId ?? null,
   });
 

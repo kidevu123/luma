@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { listConsolidatedProductionOutputOps } from "@/lib/db/queries/zoho-production-output-consolidated";
 import { isConsolidatedProductionOutputEnabled } from "@/lib/zoho/production-output-config";
+import { deriveUiOperationStatus } from "@/lib/zoho/production-output-v1206-readiness";
 import {
   processNextQueuedProductionOutputAction,
   processProductionOutputOpAction,
@@ -11,18 +12,22 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function StatusChip({ status }: { status: string }) {
+function StatusChip({ status, uiStatus }: { status: string; uiStatus: string }) {
   const tone =
-    status === "COMMITTED"
+    uiStatus === "committed"
       ? "bg-green-50 text-green-800 border-green-200"
-      : status === "FAILED" || status === "NEEDS_MAPPING"
+      : uiStatus === "blocked" || uiStatus === "preview failed" || uiStatus === "partial failure"
         ? "bg-red-50 text-red-800 border-red-200"
-        : status === "QUEUED" || status === "COMMITTING"
-          ? "bg-amber-50 text-amber-900 border-amber-200"
-          : "bg-surface-2 text-text-muted border-border";
+        : uiStatus === "human review required"
+          ? "bg-orange-50 text-orange-900 border-orange-200"
+          : uiStatus === "commit pending" || status === "QUEUED" || status === "COMMITTING"
+            ? "bg-amber-50 text-amber-900 border-amber-200"
+            : uiStatus === "ready"
+              ? "bg-blue-50 text-blue-900 border-blue-200"
+              : "bg-surface-2 text-text-muted border-border";
   return (
     <span className={`inline-flex rounded border px-2 py-0.5 text-[10px] font-medium ${tone}`}>
-      {status}
+      {uiStatus}
     </span>
   );
 }
@@ -61,7 +66,9 @@ export default async function ZohoProductionOperationsPage() {
             <thead>
               <tr className="border-b border-border/60 text-left">
                 <th className="px-4 py-2 font-medium text-text-muted">Lot</th>
-                <th className="px-4 py-2 font-medium text-text-muted">Status</th>
+                <th className="px-4 py-2 font-medium text-text-muted">SKU</th>
+                <th className="px-4 py-2 font-medium text-text-muted">UI status</th>
+                <th className="px-4 py-2 font-medium text-text-muted">DB status</th>
                 <th className="px-4 py-2 font-medium text-text-muted">Units</th>
                 <th className="px-4 py-2 font-medium text-text-muted">Attempts</th>
                 <th className="px-4 py-2 font-medium text-text-muted">External ref</th>
@@ -72,12 +79,20 @@ export default async function ZohoProductionOperationsPage() {
             <tbody>
               {ops.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-text-muted">
+                  <td colSpan={9} className="px-4 py-8 text-center text-text-muted">
                     No consolidated production-output ops yet.
                   </td>
                 </tr>
               ) : (
-                ops.map((op) => (
+                ops.map((op) => {
+                  const uiStatus = deriveUiOperationStatus({
+                    status: op.status as "READY",
+                    previewStatus: op.previewStatus,
+                    humanReviewRequired: op.humanReviewRequired,
+                    partialFailure: op.partialFailure,
+                    voidedAt: op.voidedAt,
+                  });
+                  return (
                   <tr key={op.id} className="border-b border-border/30 last:border-0">
                     <td className="px-4 py-2">
                       <Link
@@ -87,20 +102,27 @@ export default async function ZohoProductionOperationsPage() {
                         {op.finishedLotId.slice(0, 8)}
                       </Link>
                     </td>
-                    <td className="px-4 py-2">
-                      <StatusChip status={op.status} />
+                    <td className="px-4 py-2 font-mono text-[10px]">
+                      {op.finishedSku ?? "—"}
                     </td>
+                    <td className="px-4 py-2">
+                      <StatusChip status={op.status} uiStatus={uiStatus} />
+                    </td>
+                    <td className="px-4 py-2 text-[10px] text-text-muted">{op.status}</td>
                     <td className="px-4 py-2 tabular-nums">{op.quantityGood}</td>
                     <td className="px-4 py-2 tabular-nums">{op.commitAttemptCount}</td>
                     <td className="px-4 py-2 font-mono text-[10px]">
                       {op.externalReferenceId ?? "—"}
                     </td>
                     <td className="px-4 py-2 text-[11px] text-red-700 max-w-xs truncate">
-                      {op.commitError ?? (op.mappingBlockers ? JSON.stringify(op.mappingBlockers) : "—")}
+                      {op.commitError ??
+                        (op.mappingBlockers
+                          ? JSON.stringify(op.mappingBlockers)
+                          : op.previewStatus ?? "—")}
                     </td>
                     <td className="px-4 py-2">
                       <div className="flex flex-wrap gap-2">
-                        {op.status === "READY" ? (
+                        {op.status === "READY" && uiStatus === "ready" ? (
                           <form action={queueProductionOutputOpAction}>
                             <input type="hidden" name="opId" value={op.id} />
                             <button type="submit" className="text-[11px] underline">
@@ -108,7 +130,9 @@ export default async function ZohoProductionOperationsPage() {
                             </button>
                           </form>
                         ) : null}
-                        {op.status === "QUEUED" || op.status === "FAILED" ? (
+                        {(op.status === "QUEUED" || op.status === "FAILED") &&
+                        !op.humanReviewRequired &&
+                        !op.partialFailure ? (
                           <form action={processProductionOutputOpAction}>
                             <input type="hidden" name="opId" value={op.id} />
                             <button type="submit" className="text-[11px] underline">
@@ -119,7 +143,8 @@ export default async function ZohoProductionOperationsPage() {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

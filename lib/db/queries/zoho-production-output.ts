@@ -564,6 +564,10 @@ export async function completeZohoProductionOutputCommitSuccess(
   input: {
     commitResponse: unknown;
     externalReferenceId?: string | null;
+    zohoReceiveId?: string | null;
+    zohoBundleIds?: string[];
+    humanReviewRequired?: boolean;
+    partialFailure?: boolean;
   },
 ): Promise<
   | { ok: true; op: ZohoProductionOutputOpRow }
@@ -573,12 +577,19 @@ export async function completeZohoProductionOutputCommitSuccess(
   const [updated] = await db
     .update(zohoProductionOutputOps)
     .set({
-      status: "COMMITTED",
-      committedAt: now,
+      status: input.partialFailure ? "FAILED" : "COMMITTED",
+      committedAt: input.partialFailure ? null : now,
       commitFinishedAt: now,
       commitResponse: input.commitResponse,
       externalReferenceId: input.externalReferenceId ?? null,
-      commitError: null,
+      zohoReceiveId: input.zohoReceiveId ?? null,
+      zohoBundleIds: input.zohoBundleIds ?? [],
+      humanReviewRequired: input.humanReviewRequired ?? false,
+      partialFailure: input.partialFailure ?? false,
+      commitStatus: input.partialFailure ? "partial_failure" : "committed",
+      commitError: input.partialFailure
+        ? "Zoho commit returned partial_failure — human review required."
+        : null,
       updatedAt: now,
     })
     .where(

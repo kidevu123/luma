@@ -85,6 +85,34 @@ safe replays and return the prior success response when applicable
     "packed_at": "ISO-8601 or null",
     "receive_date": "YYYY-MM-DD"
   },
+  "component_batches": [
+    {
+      "item_id": "<Zoho component item ID>",
+      "source_bag_id": "<Luma raw bag UUID>",
+      "human_lot_number": "<batches.vendor_lot_number or batch_number>",
+      "batches": [{ "batch_id": "<resolved via POST /zoho/items/batches/resolve>", "out_quantity": 2 }]
+    }
+  ],
+  "luma_operation_snapshot": {
+    "luma_operation_id": "luma-production-output:<finishedLotId>",
+    "status": "finalized",
+    "finalized_at": "<ISO-8601 from persisted op>",
+    "product_id": "<Luma products.id UUID — not a Zoho item ID>",
+    "product_family": "HYROXI_MIT_B",
+    "finished_sku": "453535",
+    "unit_composite_item_id": "<Zoho finished-good unit composite item ID>",
+    "workflow_bag_id": "<uuid>",
+    "finished_lot_id": "<uuid>",
+    "source_allocations": [
+      {
+        "source_bag_id": "<inventory_bags.id>",
+        "item_id": "<Zoho raw component item ID>",
+        "human_lot_number": "<vendor lot>",
+        "quantity": 900
+      }
+    ]
+  },
+  "verification": { "mode": "snapshot" },
   "idempotency_key": "luma-production-output:<finishedLotId>",
   "warehouse_id": "<optional>"
 }
@@ -164,3 +192,96 @@ Consolidated commit is blocked if legacy assembly ops or successful legacy
 
 Preview path (admin manual) remains at `/finished-lots/[id]` using
 `/zoho/luma/production-output/preview` — separate from consolidated commit.
+
+## Batch resolution (v1.20.6)
+
+```
+POST ${ZOHO_SERVICE_BASE_URL}/zoho/items/batches/resolve
+```
+
+Request:
+
+```json
+{
+  "item_id": "<Zoho raw component item ID>",
+  "human_lot_number": "<physical lot from batches.vendor_lot_number>"
+}
+```
+
+Success (HTTP 200):
+
+```json
+{
+  "resolved": true,
+  "resolution": "unique",
+  "batch_id": "...",
+  "batch_number": "...",
+  "available_balance": 42.5
+}
+```
+
+Missing (HTTP 404, `error.code = BATCH_NOT_FOUND`):
+
+```json
+{
+  "resolved": false,
+  "resolution": "missing",
+  "error": { "code": "BATCH_NOT_FOUND" }
+}
+```
+
+Ambiguous (HTTP 422, `error.code = BATCH_MATCH_AMBIGUOUS`):
+
+```json
+{
+  "resolved": false,
+  "resolution": "ambiguous",
+  "error": { "code": "BATCH_MATCH_AMBIGUOUS" },
+  "candidates": [{ "batch_id": "...", "human_lot_number": "..." }]
+}
+```
+
+Luma accepts transitional responses with `resolution: "unique"` (without
+`resolved: true`) but normalizes internally to `UNIQUE | MISSING | AMBIGUOUS |
+OPERATOR_SELECTED`. Luma never auto-selects from ambiguous candidates.
+
+### Snapshot identifier semantics
+
+- `product_id` in `luma_operation_snapshot` is the **Luma internal UUID**
+  (`products.id`), not a Zoho item ID.
+- `unit_composite_item_id` is the Zoho finished-good composite item ID
+  (`products.zoho_item_id_unit`).
+- Zoho must not compare `product_id` directly with `unit_composite_item_id`.
+
+### Component batch quantity semantics
+
+- `unit_assembly_quantity` = number of finished composite units to build
+  (`finished_lots.units_produced`).
+- `component_batches[].batches[].out_quantity` = raw component inventory consumed.
+- **Required rule:**
+
+```
+out_quantity = bom_quantity_per_unit × unit_assembly_quantity
+```
+
+Luma must not hard-code `out_quantity` without deriving it from the live/normalized
+Zoho BOM. Allocation ledger consumed quantity must match the derived value.
+
+**Choco Drift (SKU 453535) — confirmed live BOM (non-batch-tracked):**
+
+| Component | Zoho item ID | Qty per finished single |
+|-----------|--------------|-------------------------|
+| Blister card (packaging) | `5254962000005277428` | 1 |
+| Raw tablet (Chocolate Brown) | `5254962000005946408` | 4 |
+
+- `component_batches` must be `[]` or omitted.
+- Do **not** call batch resolve for this SKU.
+- Human lot (`152-000166`) stays in Luma snapshot/audit only — not as a Zoho batch.
+- Source allocation quantity for raw tablets = `4 × unit_assembly_quantity`.
+
+### Source bag identifier semantics
+
+- `component_batches[].source_bag_id` and
+  `luma_operation_snapshot.source_allocations[].source_bag_id` must be
+  `inventory_bags.id` from a **closed** `raw_bag_allocation_sessions` row.
+- Never use `workflow_bags.id`, receipt labels, or fixture UUIDs as `source_bag_id`.

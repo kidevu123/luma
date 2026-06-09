@@ -13,6 +13,7 @@ export type ProductRow = {
   sku: string;
   name: string;
   kind: "CARD" | "BOTTLE" | "VARIETY";
+  productFamily: string | null;
   tabletsPerUnit: number | null;
   unitsPerDisplay: number | null;
   displaysPerCase: number | null;

@@ -385,6 +385,8 @@ export const tabletTypes = pgTable(
      *  bag estimation when count isn't directly known. */
     defaultMgPerTablet: integer("default_mg_per_tablet"),
     zohoItemId: text("zoho_item_id"),
+    /** ZOHO-PRODUCTION-OUTPUT-V1206 — stable family for PO/output validation. */
+    productFamily: text("product_family"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -414,6 +416,8 @@ export const products = pgTable(
     zohoItemIdUnit:    text("zoho_item_id_unit"),
     zohoItemIdDisplay: text("zoho_item_id_display"),
     zohoItemIdCase:    text("zoho_item_id_case"),
+    /** ZOHO-PRODUCTION-OUTPUT-V1206 — stable family for PO/output validation. */
+    productFamily: text("product_family"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     dailyUnitGoal: integer("daily_unit_goal"),
@@ -1430,6 +1434,25 @@ export const zohoProductionOutputOps = pgTable(
       onDelete: "set null",
     }),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
+    /** ZOHO-PRODUCTION-OUTPUT-V1206 — floor output finalized timestamp snapshot. */
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    productFamily: text("product_family"),
+    finishedSku: text("finished_sku"),
+    varietyRunId: uuid("variety_run_id").references(() => varietyRuns.id, {
+      onDelete: "set null",
+    }),
+    zohoReceiveId: text("zoho_receive_id"),
+    zohoBundleIds: jsonb("zoho_bundle_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    humanReviewRequired: boolean("human_review_required").notNull().default(false),
+    partialFailure: boolean("partial_failure").notNull().default(false),
+    previewStatus: text("preview_status"),
+    commitStatus: text("commit_status"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1447,6 +1470,58 @@ export const zohoProductionOutputOps = pgTable(
     uniqueIndex("zoho_prod_output_ops_committed_lot_unique")
       .on(t.finishedLotId)
       .where(sql`status = 'COMMITTED'`),
+  ],
+);
+
+// ZOHO-PRODUCTION-OUTPUT-V1206 — durable per-component source bag + batch linkage.
+export const zohoProductionOutputSourceAllocations = pgTable(
+  "zoho_production_output_source_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    zohoProductionOutputOpId: uuid("zoho_production_output_op_id")
+      .notNull()
+      .references(() => zohoProductionOutputOps.id, { onDelete: "cascade" }),
+    zohoComponentItemId: text("zoho_component_item_id").notNull(),
+    lumaInventoryBagId: uuid("luma_inventory_bag_id")
+      .notNull()
+      .references(() => inventoryBags.id, { onDelete: "restrict" }),
+    humanLotNumber: text("human_lot_number").notNull(),
+    componentRole: text("component_role"),
+    quantityAllocated: numeric("quantity_allocated", {
+      precision: 20,
+      scale: 6,
+    }).notNull(),
+    allocationSessionId: uuid("allocation_session_id").references(
+      () => rawBagAllocationSessions.id,
+      { onDelete: "set null" },
+    ),
+    workflowBagId: uuid("workflow_bag_id").references(() => workflowBags.id, {
+      onDelete: "set null",
+    }),
+    varietyRunId: uuid("variety_run_id").references(() => varietyRuns.id, {
+      onDelete: "set null",
+    }),
+    parentScanToken: text("parent_scan_token"),
+    manufactureDate: date("manufacture_date"),
+    expiryDate: date("expiry_date"),
+    zohoBatchId: text("zoho_batch_id"),
+    batchResolutionStatus: text("batch_resolution_status")
+      .notNull()
+      .default("UNRESOLVED"),
+    outQuantity: integer("out_quantity"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("zoho_prod_output_source_op_idx").on(t.zohoProductionOutputOpId),
+    index("zoho_prod_output_source_bag_idx").on(t.lumaInventoryBagId),
+    index("zoho_prod_output_source_session_idx")
+      .on(t.allocationSessionId)
+      .where(sql`allocation_session_id IS NOT NULL`),
   ],
 );
 
@@ -3768,6 +3843,8 @@ export type WorkflowBag = typeof workflowBags.$inferSelect;
 export type WorkflowEvent = typeof workflowEvents.$inferSelect;
 export type ZohoPush = typeof zohoPushes.$inferSelect;
 export type ZohoProductionOutputOp = typeof zohoProductionOutputOps.$inferSelect;
+export type ZohoProductionOutputSourceAllocation =
+  typeof zohoProductionOutputSourceAllocations.$inferSelect;
 export type ReadStationLive = typeof readStationLive.$inferSelect;
 export type ReadBagState = typeof readBagState.$inferSelect;
 export type ReadDailyThroughput = typeof readDailyThroughput.$inferSelect;

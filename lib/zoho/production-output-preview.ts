@@ -22,6 +22,32 @@ export type ProductionOutputPreviewPayload = {
   luma_bag_id?: string;
   luma_workflow_session_id?: string;
   notes?: string;
+  component_batches?: Array<{
+    item_id: string;
+    source_bag_id: string;
+    human_lot_number: string;
+    batches: Array<{ batch_id: string; out_quantity: number }>;
+  }>;
+  luma_operation_snapshot?: {
+    luma_operation_id: string;
+    status: "finalized";
+    finalized_at: string;
+    /** Luma internal products.id UUID. */
+    product_id: string;
+    product_family: string;
+    finished_sku: string;
+    /** Zoho finished-good unit composite item ID. */
+    unit_composite_item_id: string;
+    workflow_bag_id: string;
+    finished_lot_id: string;
+    source_allocations: Array<{
+      source_bag_id: string;
+      item_id: string;
+      human_lot_number: string;
+      quantity: number;
+    }>;
+  };
+  verification?: { mode: "snapshot" };
 };
 
 export type ProductionOutputPreviewBuildInput = {
