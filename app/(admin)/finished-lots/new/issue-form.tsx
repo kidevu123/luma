@@ -8,10 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { createFinishedLotAndRedirect, issueFinishedLotWithAllocationAndRedirect } from "../actions";
-import {
-  computeExpectedTabletConsumption,
-} from "@/lib/production/issue-lot-with-allocation-closeout";
-import { isChocoDriftSku } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
+import { isChocoDriftSku, computeExpectedTabletConsumption } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 
 type Product = {
   id: string;

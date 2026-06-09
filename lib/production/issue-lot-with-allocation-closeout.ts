@@ -20,9 +20,7 @@ import {
   openAllocationSessionInTx,
 } from "@/lib/production/raw-bag-allocation-lifecycle";
 import {
-  CHOCO_DRIFT_RAW_TABLET_BOM_QUANTITY_PER_UNIT,
-  CHOCO_DRIFT_SKU,
-  isChocoDriftSku,
+  computeExpectedTabletConsumption,
 } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 import { runProductionOutputEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-production-output-after-lot-create";
 import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
@@ -53,14 +51,6 @@ export type IssueLotWithAllocationResult =
       productionOutputOpId: string | null;
     }
   | { ok: false; error: string; code?: string };
-
-export function computeExpectedTabletConsumption(
-  sku: string,
-  unitsProduced: number,
-): number | null {
-  if (!isChocoDriftSku(sku)) return null;
-  return CHOCO_DRIFT_RAW_TABLET_BOM_QUANTITY_PER_UNIT * unitsProduced;
-}
 
 export async function issueFinishedLotWithAllocationCloseout(
   input: IssueLotWithAllocationInput,

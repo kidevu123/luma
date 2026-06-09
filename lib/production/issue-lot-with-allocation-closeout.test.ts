@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeExpectedTabletConsumption,
-} from "@/lib/production/issue-lot-with-allocation-closeout";
+} from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 import { CHOCO_DRIFT_SKU } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 
 describe("computeExpectedTabletConsumption", () => {

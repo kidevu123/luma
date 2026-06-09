@@ -73,6 +73,14 @@ export function isChocoDriftSku(sku: string): boolean {
   return sku === CHOCO_DRIFT_SKU;
 }
 
+export function computeExpectedTabletConsumption(
+  sku: string,
+  unitsProduced: number,
+): number | null {
+  if (!isChocoDriftSku(sku)) return null;
+  return CHOCO_DRIFT_RAW_TABLET_BOM_QUANTITY_PER_UNIT * unitsProduced;
+}
+
 export function chocoDriftRequiresComponentBatches(): boolean {
   return false;
 }
