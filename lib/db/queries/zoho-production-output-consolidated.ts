@@ -18,7 +18,10 @@ import {
   chocoDriftSourceAllocationBuildOpts,
   isChocoDriftSku,
 } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
-import { callProductionOutputPreview } from "@/lib/zoho/production-output-preview";
+import {
+  buildProductionOutputPreviewIdempotencyKey,
+  callProductionOutputPreview,
+} from "@/lib/zoho/production-output-preview";
 import {
   attachSnapshotToPayload,
   buildLumaOperationSnapshotFromOpRow,
@@ -172,7 +175,12 @@ function opValuesFromPayload(
 export async function upsertConsolidatedProductionOutputOpForLot(
   finishedLotId: string,
   actor: Pick<CurrentUser, "id"> | null,
-  opts?: { autoQueue?: boolean; warehouseId?: string | null },
+  opts?: {
+    autoQueue?: boolean;
+    warehouseId?: string | null;
+    /** Re-run Zoho preview with a fresh idempotency key (same op row). */
+    previewRetry?: boolean;
+  },
 ): Promise<
   | { ok: true; opId: string; status: string; queued: boolean }
   | { ok: false; reason: string }
@@ -584,7 +592,9 @@ export async function upsertConsolidatedProductionOutputOpForLot(
 
     const preview = await callProductionOutputPreview({
       payload: previewPayload,
-      idempotencyKey: `luma-production-output-preview:${finishedLotId}`,
+      idempotencyKey: opts?.previewRetry
+        ? `${buildProductionOutputPreviewIdempotencyKey(finishedLotId, previewPayload)}-retry-${now.getTime()}`
+        : buildProductionOutputPreviewIdempotencyKey(finishedLotId, previewPayload),
     });
 
     const previewBlockers: Array<{ code: string; message: string }> = [];
@@ -648,6 +658,70 @@ export async function upsertConsolidatedProductionOutputOpForLot(
       status: finalStatus,
       queued: finalStatus === "QUEUED",
     };
+  });
+}
+
+/** Re-run Zoho preview for an existing consolidated op (same op id, fresh preview key). */
+export async function retryConsolidatedProductionOutputPreview(
+  opId: string,
+  actor: Pick<CurrentUser, "id"> | null,
+): Promise<
+  | { ok: true; opId: string; status: string; queued: boolean }
+  | { ok: false; reason: string }
+> {
+  if (!isProductionOutputPreviewEnabled()) {
+    return {
+      ok: false,
+      reason: "ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED is false — preview retry is disabled.",
+    };
+  }
+
+  const [op] = await db
+    .select({
+      id: zohoProductionOutputOps.id,
+      finishedLotId: zohoProductionOutputOps.finishedLotId,
+      status: zohoProductionOutputOps.status,
+      voidedAt: zohoProductionOutputOps.voidedAt,
+      payloadKind: zohoProductionOutputOps.payloadKind,
+    })
+    .from(zohoProductionOutputOps)
+    .where(eq(zohoProductionOutputOps.id, opId))
+    .limit(1);
+
+  if (!op) {
+    return { ok: false, reason: "Production output operation not found." };
+  }
+  if (op.voidedAt) {
+    return { ok: false, reason: "Operation is voided; preview retry is not allowed." };
+  }
+  if (op.payloadKind !== "consolidated") {
+    return {
+      ok: false,
+      reason: "Only consolidated production-output ops support preview retry.",
+    };
+  }
+  if (
+    op.status === "COMMITTED" ||
+    op.status === "COMMITTING" ||
+    op.status === "QUEUED"
+  ) {
+    return {
+      ok: false,
+      reason: `Operation status is ${op.status}; preview retry is not allowed.`,
+    };
+  }
+
+  await writeAudit({
+    actorId: actor?.id ?? null,
+    actorRole: null,
+    action: "zoho_production_output_op.preview_retry",
+    targetType: "ZohoProductionOutputOp",
+    targetId: opId,
+    after: { finishedLotId: op.finishedLotId },
+  });
+
+  return upsertConsolidatedProductionOutputOpForLot(op.finishedLotId, actor, {
+    previewRetry: true,
   });
 }
 

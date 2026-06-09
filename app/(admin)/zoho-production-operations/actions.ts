@@ -6,6 +6,7 @@ import {
   processConsolidatedProductionOutputCommit,
   processNextQueuedConsolidatedProductionOutputCommit,
   queueConsolidatedProductionOutputOp,
+  retryConsolidatedProductionOutputPreview,
 } from "@/lib/db/queries/zoho-production-output-consolidated";
 import { revalidatePath } from "next/cache";
 
@@ -44,4 +45,16 @@ export async function queueProductionOutputOpAction(
 export async function loadConsolidatedProductionOutputOpsAction() {
   await requireSession();
   return listConsolidatedProductionOutputOps(100);
+}
+
+export async function retryPreviewProductionOutputOpAction(
+  formData: FormData,
+): Promise<void> {
+  const session = await requireSession();
+  if (session.role !== "OWNER" && session.role !== "ADMIN") return;
+  const opId = String(formData.get("opId") ?? "");
+  if (!opId) return;
+
+  await retryConsolidatedProductionOutputPreview(opId, session);
+  revalidatePath("/zoho-production-operations");
 }

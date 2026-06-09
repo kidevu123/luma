@@ -8,12 +8,31 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  buildPrintPayload,
-  deriveContributingBags,
-  deriveOutputRows,
   deriveTraceCodeForLot,
+  deriveOutputRows,
+  deriveContributingBags,
+  buildPrintPayload,
   summarizePassportConfidence,
+  bindTimestamptz,
 } from "./finished-lot-passport";
+
+describe("bindTimestamptz", () => {
+  it("returns ISO string for Date (postgres.js sql binding)", () => {
+    const d = new Date("2026-06-02T14:30:00.000Z");
+    expect(bindTimestamptz(d)).toBe("2026-06-02T14:30:00.000Z");
+  });
+
+  it("returns null for null and undefined", () => {
+    expect(bindTimestamptz(null)).toBeNull();
+    expect(bindTimestamptz(undefined)).toBeNull();
+  });
+
+  it("never returns a raw Date instance", () => {
+    const bound = bindTimestamptz(new Date());
+    expect(bound).not.toBeInstanceOf(Date);
+    expect(typeof bound).toBe("string");
+  });
+});
 
 describe("deriveTraceCodeForLot", () => {
   it("preserves an existing trace_code unchanged", () => {

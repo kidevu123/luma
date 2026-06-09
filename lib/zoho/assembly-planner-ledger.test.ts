@@ -1,5 +1,7 @@
 // ZOHO-FINISHED-GOODS-OUTBOX-1 — ledger lookup fallback via workflow_bag_id.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockSelect = vi.fn();
@@ -84,5 +86,55 @@ describe("fetchAllocationLedgerRows", () => {
 
     expect(rows).toEqual([]);
     expect(mockSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("joins purchase_orders through receives.po_id (not session.po_id)", () => {
+    const src = readFileSync(
+      join(process.cwd(), "lib/zoho/assembly-planner.ts"),
+      "utf8",
+    );
+    expect(src).toMatch(/leftJoin\(purchaseOrders,\s*eq\(receives\.poId,\s*purchaseOrders\.id\)\)/);
+    expect(src).not.toMatch(/eq\(rawBagAllocationSessions\.poId,\s*purchaseOrders\.id\)/);
+  });
+
+  it("returns zohoPoId from receive PO mapping when session po_id would be null", async () => {
+    const row = {
+      inventoryBagId: BAG_ID,
+      consumedQty: 40,
+      tabletTypeId: "tt-choco",
+      tabletZohoItemId: "ZTAB-CHOCO",
+      tabletName: "MIT B Chocolate Brown",
+      receivePoLineId: "pl-receive",
+      zohoLineItemId: "ZLINE-453535",
+      zohoPoId: "ZPO-FROM-RECEIVE",
+      componentRole: null,
+    };
+    mockSelect.mockReturnValueOnce(makeChain([row]));
+
+    const rows = await fetchAllocationLedgerRows(LOT_ID, BAG_ID);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.zohoPoId).toBe("ZPO-FROM-RECEIVE");
+    expect(rows[0]?.zohoLineItemId).toBe("ZLINE-453535");
+  });
+
+  it("surfaces null zohoPoId when receive has no authoritative PO mapping", async () => {
+    const row = {
+      inventoryBagId: BAG_ID,
+      consumedQty: 40,
+      tabletTypeId: "tt-1",
+      tabletZohoItemId: "ZTAB",
+      tabletName: "DHA",
+      receivePoLineId: null,
+      zohoLineItemId: null,
+      zohoPoId: null,
+      componentRole: null,
+    };
+    mockSelect.mockReturnValueOnce(makeChain([row]));
+
+    const rows = await fetchAllocationLedgerRows(LOT_ID, BAG_ID);
+
+    expect(rows[0]?.zohoPoId).toBeNull();
+    expect(rows[0]?.zohoLineItemId).toBeNull();
   });
 });

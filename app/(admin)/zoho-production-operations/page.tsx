@@ -15,6 +15,7 @@ import {
   processNextQueuedProductionOutputAction,
   processProductionOutputOpAction,
   queueProductionOutputOpAction,
+  retryPreviewProductionOutputOpAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -187,6 +188,19 @@ export default async function ZohoProductionOperationsPage() {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex flex-wrap gap-2">
+                          {previewOn &&
+                          persistOn &&
+                          op.status !== "COMMITTED" &&
+                          op.status !== "COMMITTING" &&
+                          op.status !== "QUEUED" &&
+                          !op.voidedAt ? (
+                            <form action={retryPreviewProductionOutputOpAction}>
+                              <input type="hidden" name="opId" value={op.id} />
+                              <button type="submit" className="text-[11px] underline">
+                                Retry preview
+                              </button>
+                            </form>
+                          ) : null}
                           {commitOn &&
                           op.status === "READY" &&
                           uiStatus === "ready" ? (

@@ -12,6 +12,12 @@ APP_PORT="${APP_PORT:-3000}"
 
 cd "$LUMA_DIR"
 
+# Ensure compose reads the canonical env file (git deploy must not overwrite secrets).
+if [ ! -L "$LUMA_DIR/.env" ] || [ "$(readlink "$LUMA_DIR/.env")" != "/etc/luma/.env" ]; then
+  echo "linking ${LUMA_DIR}/.env -> /etc/luma/.env"
+  ln -sf /etc/luma/.env "$LUMA_DIR/.env"
+fi
+
 /usr/bin/git fetch --quiet origin "$LUMA_BRANCH"
 before=$(/usr/bin/git rev-parse HEAD)
 /usr/bin/git reset --hard --quiet "origin/$LUMA_BRANCH"

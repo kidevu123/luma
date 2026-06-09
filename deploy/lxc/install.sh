@@ -38,6 +38,7 @@ else
 fi
 
 # Symlink .env into the project so docker-compose picks it up.
+# /etc/luma/.env is canonical; /opt/luma/.env must remain a symlink (never copied by git deploy).
 ln -sf /etc/luma/.env "${DIR}/.env"
 
 echo "[install] enabling deploy timer…"

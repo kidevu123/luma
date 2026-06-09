@@ -76,6 +76,12 @@ export type ContributingBagLink = {
 
 // ─── Pure helpers (tested directly) ───────────────────────────────────
 
+/** Serialize Date for postgres.js tagged sql timestamptz columns. Never pass raw Date. */
+export function bindTimestamptz(value: Date | null | undefined): string | null {
+  if (value == null) return null;
+  return value.toISOString();
+}
+
 /** Decide what trace_code a finished_lots row should carry. Preserves
  *  an existing value; falls back to `FL-<finishedLotNumber>` for new
  *  / null trace codes. */
@@ -599,7 +605,7 @@ async function runPackagingLotsProjection(
         ${finishedLotId}, ${row.packagingLotId}, ${row.materialId},
         ${row.qtySum > 0 ? row.qtySum : null}, ${row.unit},
         'HIGH', 'PROJECTOR',
-        ${row.firstUsedAt}, ${row.lastUsedAt}, NOW(), NOW()
+        ${bindTimestamptz(row.firstUsedAt)}, ${bindTimestamptz(row.lastUsedAt)}, NOW(), NOW()
       )
       ON CONFLICT (finished_lot_id, packaging_lot_id)
       DO UPDATE SET
@@ -622,8 +628,14 @@ async function runQcEventsProjection(
   contributingWorkflowBags: string[],
 ): Promise<number> {
   if (contributingWorkflowBags.length === 0) return 0;
-  // Single INSERT … SELECT keeps the round-trip count to one and
-  // sidesteps drizzle's strict pg-enum inArray typing.
+  const bagIdList = sql.join(
+    contributingWorkflowBags.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+  const qcTypeList = sql.join(
+    QC_EVENT_TYPES.map((t) => sql`${t}::text`),
+    sql`, `,
+  );
   const inserted = (await tx.execute(sql`
     INSERT INTO finished_lot_qc_events (
       finished_lot_id, workflow_event_id, event_type, occurred_at, created_at
@@ -631,8 +643,8 @@ async function runQcEventsProjection(
     SELECT
       ${finishedLotId}, e.id, e.event_type::text, e.occurred_at, NOW()
     FROM workflow_events e
-    WHERE e.workflow_bag_id = ANY(${contributingWorkflowBags}::uuid[])
-      AND e.event_type::text = ANY(${QC_EVENT_TYPES as unknown as string[]}::text[])
+    WHERE e.workflow_bag_id IN (${bagIdList})
+      AND e.event_type::text IN (${qcTypeList})
     ON CONFLICT (finished_lot_id, workflow_event_id) DO NOTHING
     RETURNING 1
   `)) as unknown as Array<unknown>;

@@ -457,7 +457,7 @@ export async function fetchAllocationLedgerRows(
       .innerJoin(smallBoxes, eq(inventoryBags.smallBoxId, smallBoxes.id))
       .innerJoin(receives, eq(smallBoxes.receiveId, receives.id))
       .leftJoin(poLines, eq(receives.poLineId, poLines.id))
-      .leftJoin(purchaseOrders, eq(rawBagAllocationSessions.poId, purchaseOrders.id));
+      .leftJoin(purchaseOrders, eq(receives.poId, purchaseOrders.id));
 
   const byLotId = await baseQuery().where(
     and(
