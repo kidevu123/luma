@@ -6,6 +6,7 @@ import {
   type LumaProductionOutputPayload,
 } from "@/lib/zoho/luma-production-output-payload";
 import {
+  isProductionOutputCommitEnabled,
   redactProductionOutputServiceHeaders,
   validateProductionOutputServiceConfig,
 } from "@/lib/zoho/production-output-config";
@@ -97,14 +98,14 @@ export async function callProductionOutputCommit(opts: {
     };
   }
 
-  if (!config.productionOutputEnabled) {
+  if (!isProductionOutputCommitEnabled(opts.env ?? process.env)) {
     return {
       ok: false,
       kind: "guard",
       httpStatus: null,
       body: null,
       message:
-        "ZOHO_PRODUCTION_OUTPUT_ENABLED is false — live production-output commit is disabled.",
+        "ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED is false — live production-output commit is disabled.",
       idempotencyReplay: null,
     };
   }

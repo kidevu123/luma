@@ -48,6 +48,7 @@ import {
   patchPackagingCompleteConsumptionSummary,
 } from "@/lib/production/packaging-consumption-summary";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
+import { ensureOpenAllocationForProductionStartInTx } from "@/lib/production/raw-bag-allocation-lifecycle";
 import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
 import {
   computeSealedCountFromCounter,
@@ -380,6 +381,14 @@ export async function scanCardAction(
           },
           tx,
         );
+        if (productIdToSet) {
+          const alloc = await ensureOpenAllocationForProductionStartInTx(tx, {
+            inventoryBagId: inventoryLink.inventoryBagId,
+            workflowBagId: bag.id,
+            productId: productIdToSet,
+          });
+          if (!alloc.ok) throw new Error(alloc.error);
+        }
         return;
       }
 
@@ -527,6 +536,14 @@ export async function scanCardAction(
             },
             tx,
           );
+          if (productIdToSet) {
+            const alloc = await ensureOpenAllocationForProductionStartInTx(tx, {
+              inventoryBagId: inventoryLink.inventoryBagId,
+              workflowBagId: restartBag.id,
+              productId: productIdToSet,
+            });
+            if (!alloc.ok) throw new Error(alloc.error);
+          }
           return;
         }
         if (state?.isFinalized) {

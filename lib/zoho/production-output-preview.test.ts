@@ -42,6 +42,8 @@ const VALID_ENV = {
   ZOHO_SERVICE_BEARER_SECRET: "secret-prefix-rest",
   ZOHO_BRAND: "haute_brands",
   ZOHO_WAREHOUSE_ID: "warehouse-env",
+  ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED: "true",
+  ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED: "true",
 };
 
 describe("buildProductionOutputPreviewPayload", () => {
@@ -321,5 +323,13 @@ describe("validateProductionOutputPreviewConfig", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.defaultWarehouseId).toBe("warehouse-env");
+  });
+
+  it("fails when preview gate is disabled", () => {
+    const result = validateProductionOutputPreviewConfig({
+      ...VALID_ENV,
+      ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED: "false",
+    });
+    expect(result.ok).toBe(false);
   });
 });

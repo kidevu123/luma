@@ -40,8 +40,8 @@ describe("finished lot issue prefill", () => {
     expect(formSrc).toContain("setCases(b.masterCases ?? 0)");
   });
 
-  it("shows the bag-derived source context instead of a blank manual form", () => {
-    expect(formSrc).toContain("Prefilled from selected bag");
-    expect(formSrc).toContain("The bag from the review link is no longer awaiting lot issue.");
+  it("shows coordinated lot + allocation closeout flow", () => {
+    expect(formSrc).toContain("issueFinishedLotWithAllocationAndRedirect");
+    expect(formSrc).toContain("Issue lot and close allocation");
   });
 });

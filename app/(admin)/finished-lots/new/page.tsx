@@ -5,6 +5,13 @@ import { listProducts } from "@/lib/db/queries/products";
 import { listFinalizedBagsWithoutLot } from "@/lib/db/queries/finished-lots";
 import { PageHeader } from "@/components/ui/page-header";
 import { IssueLotForm } from "./issue-form";
+import { db } from "@/lib/db";
+import { and, eq } from "drizzle-orm";
+import {
+  inventoryBags,
+  products as productsTable,
+  rawBagAllocationSessions,
+} from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +29,51 @@ export default async function NewFinishedLotPage({
     listProducts(),
     listFinalizedBagsWithoutLot(),
   ]);
+
+  const bagIds = finalizedBags.map((r) => r.bag.id);
+  const allocationHints: Record<
+    string,
+    {
+      sessionId: string;
+      startingBalanceQty: number | null;
+      receiptNumber: string | null;
+      inventoryBagId: string;
+      productSku: string | null;
+    }
+  > = {};
+
+  if (bagIds.length > 0) {
+    const rows = await db
+      .select({
+        workflowBagId: rawBagAllocationSessions.workflowBagId,
+        sessionId: rawBagAllocationSessions.id,
+        startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
+        receiptNumber: inventoryBags.internalReceiptNumber,
+        inventoryBagId: rawBagAllocationSessions.inventoryBagId,
+        productSku: productsTable.sku,
+      })
+      .from(rawBagAllocationSessions)
+      .innerJoin(
+        inventoryBags,
+        eq(inventoryBags.id, rawBagAllocationSessions.inventoryBagId),
+      )
+      .leftJoin(productsTable, eq(productsTable.id, rawBagAllocationSessions.productId))
+      .where(
+        and(eq(rawBagAllocationSessions.allocationStatus, "OPEN")),
+      );
+
+    for (const row of rows) {
+      if (!row.workflowBagId || !bagIds.includes(row.workflowBagId)) continue;
+      allocationHints[row.workflowBagId] = {
+        sessionId: row.sessionId,
+        startingBalanceQty: row.startingBalanceQty,
+        receiptNumber: row.receiptNumber,
+        inventoryBagId: row.inventoryBagId,
+        productSku: row.productSku,
+      };
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -33,7 +85,7 @@ export default async function NewFinishedLotPage({
         </Link>
         <PageHeader
           title="Issue finished lot"
-          description="Pick a finalized bag (optional) and fill in the lot details. Genealogy is inferred from the bag's consumption events."
+          description="For workflow bags, issue the lot and close raw-bag allocation in one step. LEAD confirms actual tablet consumption."
         />
       </div>
       <IssueLotForm
@@ -58,6 +110,7 @@ export default async function NewFinishedLotPage({
           looseCards: r.metrics?.looseCards ?? null,
           unitsYielded: r.metrics?.unitsYielded ?? null,
         }))}
+        allocationHints={allocationHints}
         initialBagId={requestedBagId ?? null}
       />
     </div>

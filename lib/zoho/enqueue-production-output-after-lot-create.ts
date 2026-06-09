@@ -1,10 +1,10 @@
 // Consolidated production-output enqueue after finished lot creation.
-// Replaces live legacy assembly enqueue when ZOHO_PRODUCTION_OUTPUT_ENABLED=true.
+// Runs when ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED=true (independent of commit).
 
 import { writeAudit } from "@/lib/db/audit";
 import { upsertConsolidatedProductionOutputOpForLot } from "@/lib/db/queries/zoho-production-output-consolidated";
 import {
-  isConsolidatedProductionOutputEnabled,
+  isProductionOutputPersistEnabled,
   validateProductionOutputServiceConfig,
 } from "@/lib/zoho/production-output-config";
 
@@ -23,8 +23,8 @@ export type ProductionOutputEnqueueAfterLotCreateResult =
 export async function runProductionOutputEnqueueAfterLotCreate(
   input: ProductionOutputEnqueueAfterLotCreateInput,
 ): Promise<ProductionOutputEnqueueAfterLotCreateResult> {
-  if (!isConsolidatedProductionOutputEnabled()) {
-    return { ok: false, reason: "consolidated production output disabled" };
+  if (!isProductionOutputPersistEnabled()) {
+    return { ok: false, reason: "consolidated production output persistence disabled" };
   }
 
   const config = validateProductionOutputServiceConfig();

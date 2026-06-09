@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isProductionOutputPreviewEnabled } from "@/lib/zoho/production-output-config";
 
 export const PRODUCTION_OUTPUT_PREVIEW_PATH =
   "/zoho/luma/production-output/preview";
@@ -288,6 +289,14 @@ export function validateProductionOutputPreviewConfig(
     return {
       ok: false,
       reason: "ZOHO_SERVICE_BEARER_SECRET is not configured.",
+    };
+  }
+
+  if (!isProductionOutputPreviewEnabled(env)) {
+    return {
+      ok: false,
+      reason:
+        "ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED is false (or preview/persist gate combination is invalid).",
     };
   }
 

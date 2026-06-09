@@ -10,6 +10,7 @@ import {
   type FinishedLotStatus,
 } from "@/lib/db/queries/finished-lots";
 import { compact } from "@/lib/db/compact";
+import { issueFinishedLotWithAllocationCloseout } from "@/lib/production/issue-lot-with-allocation-closeout";
 
 const lotSchema = z.object({
   productId: z.string().uuid(),
@@ -51,6 +52,48 @@ export async function createFinishedLotAndRedirect(payload: unknown) {
   const r = await createFinishedLotAction(payload);
   if (r && "error" in r && r.error) return { error: r.error };
   if (r && "ok" in r && r.id) redirect(`/finished-lots/${r.id}`);
+}
+
+const coordinatedLotSchema = lotSchema.extend({
+  workflowBagId: z.string().uuid(),
+  consumedQty: z.coerce.number().int().positive(),
+  endingBalanceQty: z.coerce.number().int().min(0),
+});
+
+/** LEAD: create finished lot + close allocation in one transaction. */
+export async function issueFinishedLotWithAllocationAndRedirect(payload: unknown) {
+  const actor = await requireLead();
+  const parsed = coordinatedLotSchema.safeParse(payload);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+  try {
+    const result = await issueFinishedLotWithAllocationCloseout(
+      {
+        productId: d.productId,
+        workflowBagId: d.workflowBagId,
+        finishedLotNumber: d.finishedLotNumber,
+        producedOn: d.producedOn,
+        expiryDate: d.expiryDate,
+        unitsProduced: d.unitsProduced,
+        displaysProduced: d.displaysProduced ?? null,
+        casesProduced: d.casesProduced ?? null,
+        notes: d.notes ?? null,
+        consumedQty: d.consumedQty,
+        endingBalanceQty: d.endingBalanceQty,
+      },
+      actor,
+    );
+    if (!result.ok) return { error: result.error };
+    revalidatePath("/finished-lots");
+    revalidatePath("/floor-board");
+    revalidatePath("/packaging-output");
+    revalidatePath("/zoho-production-operations");
+    redirect(`/finished-lots/${result.finishedLotId}`);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Issue lot failed." };
+  }
 }
 
 const statusSchema = z.object({

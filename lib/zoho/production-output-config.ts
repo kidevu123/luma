@@ -1,12 +1,29 @@
-// ZOHO-PRODUCTION-OUTPUT-CONFIG — feature flags and env validation for
-// consolidated production-output commits via the shared Zoho service.
+// ZOHO-PRODUCTION-OUTPUT-CONFIG — split persist / preview / commit gates.
 
+export const ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED_ENV =
+  "ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED";
+export const ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED_ENV =
+  "ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED";
+export const ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED_ENV =
+  "ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED";
+
+/** @deprecated Use split flags. Never maps to commit. */
 export const ZOHO_PRODUCTION_OUTPUT_ENABLED_ENV =
   "ZOHO_PRODUCTION_OUTPUT_ENABLED";
+
 export const ZOHO_PRODUCTION_OUTPUT_AUTO_QUEUE_ENV =
   "ZOHO_PRODUCTION_OUTPUT_AUTO_QUEUE";
 export const ZOHO_LEGACY_ASSEMBLY_ENQUEUE_ENABLED_ENV =
   "ZOHO_LEGACY_ASSEMBLY_ENQUEUE_ENABLED";
+
+export type ProductionOutputGateConfig = {
+  persistEnabled: boolean;
+  previewEnabled: boolean;
+  commitEnabled: boolean;
+  /** Legacy ZOHO_PRODUCTION_OUTPUT_ENABLED=true was seen (maps persist+preview only). */
+  legacyEnabledFlagSeen: boolean;
+  invalidCombination: string | null;
+};
 
 export type ProductionOutputServiceConfig =
   | {
@@ -14,7 +31,7 @@ export type ProductionOutputServiceConfig =
       baseUrl: string;
       bearerSecret: string;
       brand: string;
-      productionOutputEnabled: boolean;
+      gates: ProductionOutputGateConfig;
       autoQueueEnabled: boolean;
       legacyAssemblyEnqueueEnabled: boolean;
       defaultWarehouseId: string | null;
@@ -33,17 +50,102 @@ export function isTruthyEnv(
   return env[key] === "true";
 }
 
-/** Consolidated production-output path replaces live legacy assembly enqueue. */
+function splitFlagExplicitlySet(
+  env: Record<string, string | undefined>,
+): boolean {
+  return (
+    env[ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED_ENV] !== undefined ||
+    env[ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED_ENV] !== undefined ||
+    env[ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED_ENV] !== undefined
+  );
+}
+
+/** Resolve persist / preview / commit from env. Preview requires persist. */
+export function resolveProductionOutputGateConfig(
+  env: Record<string, string | undefined> = process.env,
+): ProductionOutputGateConfig {
+  const legacy = isTruthyEnv(env, ZOHO_PRODUCTION_OUTPUT_ENABLED_ENV);
+  const hasSplit = splitFlagExplicitlySet(env);
+
+  let persistEnabled: boolean;
+  let previewEnabled: boolean;
+  let commitEnabled: boolean;
+  let legacyEnabledFlagSeen = false;
+
+  if (hasSplit) {
+    persistEnabled = isTruthyEnv(env, ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED_ENV);
+    previewEnabled = isTruthyEnv(env, ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED_ENV);
+    commitEnabled = isTruthyEnv(env, ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED_ENV);
+  } else if (legacy) {
+    legacyEnabledFlagSeen = true;
+    persistEnabled = true;
+    previewEnabled = true;
+    commitEnabled = false;
+  } else {
+    persistEnabled = false;
+    previewEnabled = false;
+    commitEnabled = false;
+  }
+
+  let invalidCombination: string | null = null;
+  if (previewEnabled && !persistEnabled) {
+    invalidCombination =
+      "ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED requires ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED.";
+  }
+  if (commitEnabled && !previewEnabled) {
+    invalidCombination =
+      invalidCombination ??
+      "ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED requires preview to be enabled first.";
+  }
+
+  return {
+    persistEnabled,
+    previewEnabled,
+    commitEnabled,
+    legacyEnabledFlagSeen,
+    invalidCombination,
+  };
+}
+
+export function isProductionOutputPersistEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return resolveProductionOutputGateConfig(env).persistEnabled;
+}
+
+export function isProductionOutputPreviewEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const gates = resolveProductionOutputGateConfig(env);
+  return gates.previewEnabled && gates.persistEnabled && gates.invalidCombination == null;
+}
+
+export function isProductionOutputCommitEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const gates = resolveProductionOutputGateConfig(env);
+  return (
+    gates.commitEnabled &&
+    gates.previewEnabled &&
+    gates.persistEnabled &&
+    gates.invalidCombination == null
+  );
+}
+
+/**
+ * @deprecated Prefer isProductionOutputPersistEnabled.
+ * True when consolidated op persistence path is active (not live commit).
+ */
 export function isConsolidatedProductionOutputEnabled(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  return isTruthyEnv(env, ZOHO_PRODUCTION_OUTPUT_ENABLED_ENV);
+  return isProductionOutputPersistEnabled(env);
 }
 
 export function isLegacyAssemblyEnqueueEnabled(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  if (isConsolidatedProductionOutputEnabled(env)) {
+  if (isProductionOutputPersistEnabled(env)) {
     return isTruthyEnv(env, ZOHO_LEGACY_ASSEMBLY_ENQUEUE_ENABLED_ENV);
   }
   return true;
@@ -84,12 +186,14 @@ export function validateProductionOutputServiceConfig(
     };
   }
 
+  const gates = resolveProductionOutputGateConfig(env);
+
   return {
     ok: true,
     baseUrl,
     bearerSecret: rawBearer.trim(),
     brand: present(rawBrand) ?? "haute_brands",
-    productionOutputEnabled: isConsolidatedProductionOutputEnabled(env),
+    gates,
     autoQueueEnabled: isTruthyEnv(env, ZOHO_PRODUCTION_OUTPUT_AUTO_QUEUE_ENV),
     legacyAssemblyEnqueueEnabled: isLegacyAssemblyEnqueueEnabled(env),
     defaultWarehouseId: present(rawWarehouseId),

@@ -75,6 +75,8 @@ import { ElapsedTimer } from "./elapsed-timer";
 import { formatFloorTimeEastern } from "@/lib/floor-time";
 import { STATION_INACTIVE_FLOOR_MESSAGE } from "@/lib/production/station-management";
 import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
+import { loadFloorAllocationPanelForWorkflowBag } from "@/lib/production/floor-allocation-display";
+import { RawBagAllocationPanel } from "./raw-bag-allocation-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -839,6 +841,15 @@ export default async function FloorStationPage({
     };
   }
 
+  const allocationPanelData =
+    currentAtStation?.bag.inventoryBagId != null
+      ? await loadFloorAllocationPanelForWorkflowBag(
+          db,
+          currentAtStation.bag.id,
+          currentAtStation.bag.inventoryBagId,
+        )
+      : null;
+
   return (
     <main className="min-h-dvh bg-page px-4 pt-2 sm:px-6 sm:pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-3">
       <header className="space-y-0.5">
@@ -982,6 +993,23 @@ export default async function FloorStationPage({
                   <div className="font-semibold">{unmappedProductBanner.title}</div>
                   <div>{unmappedProductBanner.detail}</div>
                 </div>
+              ) : null}
+              {allocationPanelData ? (
+                <RawBagAllocationPanel
+                  receiptLabel={allocationPanelData.receiptLabel}
+                  humanLot={allocationPanelData.humanLot}
+                  startingBalanceQty={allocationPanelData.startingBalanceQty}
+                  consumedQtyEstimate={allocationPanelData.consumedQtyEstimate}
+                  endingBalanceEstimate={allocationPanelData.endingBalanceEstimate}
+                  sessionStatus={
+                    allocationPanelData.sessionStatus === "OPEN" ||
+                    allocationPanelData.sessionStatus === "CLOSED" ||
+                    allocationPanelData.sessionStatus === "DEPLETED" ||
+                    allocationPanelData.sessionStatus === "RETURNED_TO_STOCK"
+                      ? allocationPanelData.sessionStatus
+                      : null
+                  }
+                />
               ) : null}
               <p className="text-xs text-text-muted mt-2">
                 {stationTimerPickedUpAt ? (

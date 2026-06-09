@@ -20,7 +20,7 @@ import { projectEvent } from "@/lib/projector";
 import { projectFinishedLotPassportForLot } from "@/lib/projector/finished-lot-passport";
 import { runZohoAssemblyEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-after-lot-create";
 import { runProductionOutputEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-production-output-after-lot-create";
-import { isConsolidatedProductionOutputEnabled } from "@/lib/zoho/production-output-config";
+import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type FinishedLotAuditActor = {
@@ -282,7 +282,7 @@ export function resolveFinishedLotTabletQty(
 /** Create a finished lot transactionally: insert the lot row, copy
  *  inputs (explicit OR derived from inventory_bags linked to the
  *  workflow_bag's consumption events), and write audit. */
-async function createFinishedLotInTx(
+export async function createFinishedLotInTx(
   tx: DbTx,
   input: CreateFinishedLotInput,
   actor: FinishedLotAuditActor,
@@ -291,6 +291,9 @@ async function createFinishedLotInTx(
     traceCode?: string | null;
     packedAt?: Date | null;
     expiresAt?: Date | null;
+    /** Coordinated closeout closes the session in the same transaction. */
+    skipOpenAllocationSessionCheck?: boolean;
+    skipAllocationSessionLink?: boolean;
   },
 ) {
   const [lot] = await tx
@@ -348,19 +351,21 @@ async function createFinishedLotInTx(
           ),
         );
       if (invBag?.batchId) {
-        // Check for OPEN allocation session — block lot creation if bag is mid-count.
-        const [openSession] = await tx
-          .select({ id: rawBagAllocationSessions.id })
-          .from(rawBagAllocationSessions)
-          .where(
-            and(
-              eq(rawBagAllocationSessions.inventoryBagId, bagRow.inventoryBagId),
-              eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
-            ),
-          )
-          .limit(1);
+        let openSession: { id: string } | undefined;
+        if (!options?.skipOpenAllocationSessionCheck) {
+          const rows = await tx
+            .select({ id: rawBagAllocationSessions.id })
+            .from(rawBagAllocationSessions)
+            .where(
+              and(
+                eq(rawBagAllocationSessions.inventoryBagId, bagRow.inventoryBagId),
+                eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+              ),
+            )
+            .limit(1);
+          openSession = rows[0];
+        }
 
-        // Find the most recent CLOSED or DEPLETED session for this bag.
         const [closedSession] = await tx
           .select({ consumedQty: rawBagAllocationSessions.consumedQty })
           .from(rawBagAllocationSessions)
@@ -375,7 +380,11 @@ async function createFinishedLotInTx(
 
         inputRows.push({
           batchId: invBag.batchId,
-          qtyConsumed: resolveFinishedLotTabletQty(openSession, closedSession, invBag.pillCount),
+          qtyConsumed: resolveFinishedLotTabletQty(
+            openSession ?? null,
+            closedSession,
+            invBag.pillCount,
+          ),
           eventId: finalizedEv?.id ?? null,
         });
       }
@@ -465,7 +474,7 @@ async function createFinishedLotInTx(
 
     // ZOHO-FINISHED-GOODS-OUTBOX-1 — link closed allocation sessions to
     // this lot so the assembly planner can resolve PO receive details.
-  if (input.workflowBagId) {
+  if (input.workflowBagId && !options?.skipAllocationSessionLink) {
     await tx
       .update(rawBagAllocationSessions)
       .set({ finishedLotId: lot.id })
@@ -972,7 +981,7 @@ export async function runFinishedLotPostCommitEffects(
   for (const effect of effects) {
     if (effect.kind === "created") {
       try {
-        if (isConsolidatedProductionOutputEnabled()) {
+        if (isProductionOutputPersistEnabled()) {
           await runProductionOutputEnqueueAfterLotCreate({
             finishedLotId: effect.finishedLotId,
             actor: effect.actor,

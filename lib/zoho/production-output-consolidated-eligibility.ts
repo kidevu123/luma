@@ -69,8 +69,8 @@ export function evaluateConsolidatedProductionOutputProcessCommitEligibility(
   }
   if (!op.productionOutputEnabled) {
     add(
-      "PRODUCTION_OUTPUT_DISABLED",
-      "ZOHO_PRODUCTION_OUTPUT_ENABLED is false — live commit is disabled.",
+      "PRODUCTION_OUTPUT_COMMIT_DISABLED",
+      "ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED is false — live commit is disabled.",
     );
   }
 

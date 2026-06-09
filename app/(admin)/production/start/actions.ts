@@ -46,6 +46,7 @@ import {
   type PartialBagSession,
 } from "@/lib/production/partial-bag-restart";
 import { loadRawBagStartClassificationForScan } from "@/lib/production/floor-partial-bag-start-resolution";
+import { ensureOpenAllocationForProductionStartInTx } from "@/lib/production/raw-bag-allocation-lifecycle";
 
 export type StartProductionResult =
   | {
@@ -328,6 +329,14 @@ export async function startProductionForRawBagAction(
       },
       tx,
     );
+
+    const alloc = await ensureOpenAllocationForProductionStartInTx(tx, {
+      inventoryBagId: bag.id,
+      workflowBagId: wfBag.id,
+      productId: product.id,
+      actor,
+    });
+    if (!alloc.ok) throw new Error(alloc.error);
 
     revalidatePath("/production/start");
     revalidatePath("/floor-board");

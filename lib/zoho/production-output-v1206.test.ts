@@ -309,7 +309,7 @@ describe("simple product candidate readiness shape", () => {
       productionOutputEnabled: false,
       previewWritesAllowed: true,
     });
-    expect(readiness.blockers.some((b) => b.code === "PRODUCTION_OUTPUT_DISABLED")).toBe(
+    expect(readiness.blockers.some((b) => b.code === "PRODUCTION_OUTPUT_COMMIT_DISABLED")).toBe(
       true,
     );
     expect(readiness.blockers.some((b) => b.code === "MISSING_COMPONENT_BATCHES")).toBe(

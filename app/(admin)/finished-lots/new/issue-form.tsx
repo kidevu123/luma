@@ -7,7 +7,11 @@ import { Save, AlertCircle } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { createFinishedLotAndRedirect } from "../actions";
+import { createFinishedLotAndRedirect, issueFinishedLotWithAllocationAndRedirect } from "../actions";
+import {
+  computeExpectedTabletConsumption,
+} from "@/lib/production/issue-lot-with-allocation-closeout";
+import { isChocoDriftSku } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 
 type Product = {
   id: string;
@@ -34,13 +38,23 @@ type FinalizedBag = {
 // Expiry auto-derives from product.defaultShelfLifeDays + producedOn
 // the first time the operator picks a product, then becomes manual.
 
+type AllocationHint = {
+  sessionId: string;
+  startingBalanceQty: number | null;
+  receiptNumber: string | null;
+  inventoryBagId: string;
+  productSku: string | null;
+};
+
 export function IssueLotForm({
   products,
   finalizedBags,
+  allocationHints,
   initialBagId,
 }: {
   products: Product[];
   finalizedBags: FinalizedBag[];
+  allocationHints: Record<string, AllocationHint>;
   initialBagId?: string | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -59,6 +73,8 @@ export function IssueLotForm({
   const [displays, setDisplays] = React.useState(initialBag?.displaysMade ?? 0);
   const [cases, setCases] = React.useState(initialBag?.masterCases ?? 0);
   const [notes, setNotes] = React.useState("");
+  const [consumedQty, setConsumedQty] = React.useState(0);
+  const [endingBalanceQty, setEndingBalanceQty] = React.useState(0);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [autoExpiryTouched, setAutoExpiryTouched] = React.useState(false);
@@ -66,6 +82,30 @@ export function IssueLotForm({
     initialBag?.receiptNumber ?? null,
   );
   const selectedBag = bagId ? finalizedBags.find((x) => x.id === bagId) : null;
+  const allocationHint = bagId ? allocationHints[bagId] ?? null : null;
+  const selectedProduct = products.find((x) => x.id === productId);
+  const expectedTablets =
+    selectedProduct?.sku != null
+      ? computeExpectedTabletConsumption(selectedProduct.sku, units)
+      : null;
+  const consumptionVariance =
+    expectedTablets != null ? consumedQty - expectedTablets : null;
+
+  React.useEffect(() => {
+    if (!selectedProduct?.sku || units <= 0) return;
+    const expected = computeExpectedTabletConsumption(selectedProduct.sku, units);
+    if (expected != null) {
+      setConsumedQty(expected);
+      const start = allocationHint?.startingBalanceQty;
+      if (start != null) setEndingBalanceQty(Math.max(0, start - expected));
+    }
+  }, [units, selectedProduct?.sku, allocationHint?.startingBalanceQty]);
+
+  React.useEffect(() => {
+    const start = allocationHint?.startingBalanceQty;
+    if (start == null) return;
+    setEndingBalanceQty(Math.max(0, start - consumedQty));
+  }, [consumedQty, allocationHint?.startingBalanceQty]);
 
   // When the bag changes, snap the lot form to the row the admin clicked.
   // The receipt number is the finished-lot number used by the automated path.
@@ -141,17 +181,29 @@ export function IssueLotForm({
                 When set, input batches auto-derive from the bag's consumption events.
               </p>
             </div>
-            {selectedBag ? (
-              <div className="rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2 text-xs text-brand-900">
-                <div className="font-semibold">Prefilled from selected bag</div>
-                <div className="mt-1 grid gap-1 sm:grid-cols-2">
-                  <span>Receipt: {selectedBag.receiptNumber ?? "—"}</span>
-                  <span>Product: {selectedBag.productName ?? "—"}</span>
-                  <span>Cases: {(selectedBag.masterCases ?? 0).toLocaleString()}</span>
-                  <span>Displays: {(selectedBag.displaysMade ?? 0).toLocaleString()}</span>
-                  <span>Loose: {(selectedBag.looseCards ?? 0).toLocaleString()}</span>
-                  <span>Units: {(selectedBag.unitsYielded ?? 0).toLocaleString()}</span>
+            {selectedBag && allocationHint ? (
+              <div className="rounded-lg border border-brand-200 bg-brand-50/40 px-3 py-2 text-xs text-brand-900 space-y-1">
+                <div className="font-semibold">Raw bag allocation (open)</div>
+                <div className="grid gap-1 sm:grid-cols-2">
+                  <span>Receipt: {allocationHint.receiptNumber ?? "—"}</span>
+                  <span>
+                    Starting balance:{" "}
+                    {allocationHint.startingBalanceQty?.toLocaleString() ?? "—"} tablets
+                  </span>
                 </div>
+                {expectedTablets != null ? (
+                  <p className="text-brand-800/90">
+                    Expected consumption: {expectedTablets.toLocaleString()} tablets
+                    {isChocoDriftSku(selectedProduct?.sku ?? "")
+                      ? ` (4 × ${units} units)`
+                      : null}
+                  </p>
+                ) : null}
+              </div>
+            ) : selectedBag ? (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                No open allocation session for this bag. Floor production start should
+                open one automatically; contact ops if this persists.
               </div>
             ) : initialBagId ? (
               <div className="rounded-lg border border-warn-300 bg-warn-50 px-3 py-2 text-xs text-warn-800">
@@ -251,6 +303,43 @@ export function IssueLotForm({
                 />
               </div>
             </div>
+            {bagId ? (
+              <div className="rounded-lg border border-border/80 bg-surface-2/40 p-3 space-y-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                  Close allocation (LEAD)
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="consumedQty">Tablets consumed</Label>
+                    <Input
+                      id="consumedQty"
+                      type="number"
+                      min={1}
+                      value={consumedQty}
+                      onChange={(e) => setConsumedQty(Number(e.target.value) || 0)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="endingBalanceQty">Ending balance</Label>
+                    <Input
+                      id="endingBalanceQty"
+                      type="number"
+                      min={0}
+                      value={endingBalanceQty}
+                      onChange={(e) => setEndingBalanceQty(Number(e.target.value) || 0)}
+                      required
+                    />
+                  </div>
+                </div>
+                {consumptionVariance != null && consumptionVariance !== 0 ? (
+                  <p className="text-xs text-amber-800">
+                    Variance vs expected: {consumptionVariance > 0 ? "+" : ""}
+                    {consumptionVariance.toLocaleString()} tablets
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
               <Textarea
@@ -283,9 +372,17 @@ export function IssueLotForm({
                   : "manual"
               }
             />
+            {bagId ? (
+              <>
+                <Row label="Consumed" value={consumedQty.toLocaleString()} />
+                <Row label="Ending bal." value={endingBalanceQty.toLocaleString()} />
+              </>
+            ) : null}
             <p className="text-[11px] text-text-subtle pt-2 border-t border-border/60">
-              Lot is created in <span className="font-mono">PENDING_QC</span>. Release
-              after QA signs off — releasing without QA is the audit trail's job to flag.
+              {bagId
+                ? "Issues the lot and closes raw-bag allocation in one step."
+                : "Manual lot — no workflow bag linkage."}{" "}
+              Status starts as <span className="font-mono">PENDING_QC</span>.
             </p>
           </CardContent>
         </Card>
@@ -299,11 +396,17 @@ export function IssueLotForm({
 
         <Button
           size="lg"
-          disabled={pending || !productId || !lotNumber || !expiryDate}
+          disabled={
+            pending ||
+            !productId ||
+            !lotNumber ||
+            !expiryDate ||
+            (bagId ? consumedQty <= 0 || endingBalanceQty < 0 : false)
+          }
           onClick={async () => {
             setPending(true);
             setError(null);
-            const r = await createFinishedLotAndRedirect({
+            const payload = {
               productId,
               workflowBagId: bagId || null,
               finishedLotNumber: lotNumber,
@@ -313,13 +416,22 @@ export function IssueLotForm({
               displaysProduced: displays || null,
               casesProduced: cases || null,
               notes: notes || null,
-            });
+            };
+            const r = bagId
+              ? await issueFinishedLotWithAllocationAndRedirect({
+                  ...payload,
+                  workflowBagId: bagId,
+                  consumedQty,
+                  endingBalanceQty,
+                })
+              : await createFinishedLotAndRedirect(payload);
             setPending(false);
             if (r?.error) setError(r.error);
           }}
           className="w-full"
         >
-          <Save className="h-4 w-4" /> {pending ? "Saving…" : "Issue lot"}
+          <Save className="h-4 w-4" />{" "}
+          {pending ? "Saving…" : bagId ? "Issue lot and close allocation" : "Issue lot"}
         </Button>
       </div>
     </div>

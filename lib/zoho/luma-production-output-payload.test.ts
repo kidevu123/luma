@@ -161,7 +161,9 @@ describe("callProductionOutputCommit", () => {
     ZOHO_SERVICE_BASE_URL: "http://zoho-service.test",
     ZOHO_SERVICE_BEARER_SECRET: "secret",
     ZOHO_BRAND: "haute_brands",
-    ZOHO_PRODUCTION_OUTPUT_ENABLED: "true",
+    ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED: "true",
+    ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED: "true",
+    ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED: "true",
   };
 
   beforeEach(() => {
@@ -180,13 +182,16 @@ describe("callProductionOutputCommit", () => {
     vi.unstubAllGlobals();
   });
 
-  it("returns guard failure when production output disabled", async () => {
+  it("returns guard failure when commit disabled", async () => {
     const built = buildLumaProductionOutputPayloadFromContext(buildInput());
     if (!built.ok) throw new Error("expected ok");
     const r = await callProductionOutputCommit({
       payload: built.payload,
       idempotencyKey: "luma-production-output:lot-1",
-      env: { ...env, ZOHO_PRODUCTION_OUTPUT_ENABLED: "false" },
+      env: {
+        ...env,
+        ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED: "false",
+      },
     });
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -208,10 +213,10 @@ describe("callProductionOutputCommit", () => {
 });
 
 describe("legacy assembly enqueue gate", () => {
-  it("disables legacy enqueue when consolidated enabled without override", () => {
+  it("disables legacy enqueue when consolidated persist enabled without override", () => {
     expect(
       isLegacyAssemblyEnqueueEnabled({
-        ZOHO_PRODUCTION_OUTPUT_ENABLED: "true",
+        ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED: "true",
         ZOHO_LEGACY_ASSEMBLY_ENQUEUE_ENABLED: "false",
       }),
     ).toBe(false);

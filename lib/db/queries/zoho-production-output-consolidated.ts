@@ -47,7 +47,9 @@ import {
   firstSourceReceiptPoLineId,
 } from "@/lib/zoho/production-output-consolidated-eligibility";
 import {
-  isConsolidatedProductionOutputEnabled,
+  isProductionOutputCommitEnabled,
+  isProductionOutputPersistEnabled,
+  isProductionOutputPreviewEnabled,
   validateProductionOutputServiceConfig,
 } from "@/lib/zoho/production-output-config";
 import {
@@ -175,8 +177,8 @@ export async function upsertConsolidatedProductionOutputOpForLot(
   | { ok: true; opId: string; status: string; queued: boolean }
   | { ok: false; reason: string }
 > {
-  if (!isConsolidatedProductionOutputEnabled()) {
-    return { ok: false, reason: "consolidated production output disabled" };
+  if (!isProductionOutputPersistEnabled()) {
+    return { ok: false, reason: "consolidated production output persistence disabled" };
   }
 
   const [lotRow] = await db
@@ -468,6 +470,27 @@ export async function upsertConsolidatedProductionOutputOpForLot(
 
     await persistSourceAllocationsForOp(opId, sourceWithPo.rows, tx);
 
+    if (!isProductionOutputPreviewEnabled()) {
+      await tx
+        .update(zohoProductionOutputOps)
+        .set({
+          requestPayload: payloadWithBatches,
+          previewStatus: "pending",
+          previewHttpStatus: null,
+          previewResponse: null,
+          mappingBlockers: null,
+          status: "READY",
+          updatedAt: now,
+        })
+        .where(eq(zohoProductionOutputOps.id, opId));
+      return {
+        ok: true,
+        opId,
+        status: "READY",
+        queued: false,
+      };
+    }
+
     const snapshotBuilt = buildLumaOperationSnapshotFromOpRow(
       {
         lumaOperationId: buildLumaProductionOutputOperationId(finishedLotId),
@@ -644,6 +667,14 @@ export async function claimConsolidatedProductionOutputOpForCommit(
   | { ok: true; op: ConsolidatedProductionOutputOpRow }
   | { ok: false; error: string }
 > {
+  if (!isProductionOutputCommitEnabled()) {
+    return {
+      ok: false,
+      error:
+        "ZOHO_PRODUCTION_OUTPUT_COMMIT_ENABLED is false — live commit is disabled.",
+    };
+  }
+
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select()
@@ -700,7 +731,7 @@ export async function claimConsolidatedProductionOutputOpForCommit(
       ambiguousBatchCount: Number(sourceStats?.ambiguous ?? 0),
       humanReviewRequired: row.humanReviewRequired,
       partialFailure: row.partialFailure,
-      productionOutputEnabled: config.ok && config.productionOutputEnabled,
+      productionOutputEnabled: config.ok && isProductionOutputCommitEnabled(),
     });
 
     const legacyEligibility = evaluateConsolidatedProductionOutputProcessCommitEligibility({
@@ -714,7 +745,7 @@ export async function claimConsolidatedProductionOutputOpForCommit(
       committedOpExists: Number(committedCount?.n ?? 0) > 0,
       legacyAssemblyOpExists: legacy.legacyAssemblyOpExists,
       legacyZohoPushExists: legacy.legacyZohoPushExists,
-      productionOutputEnabled: config.ok && config.productionOutputEnabled,
+      productionOutputEnabled: config.ok && isProductionOutputCommitEnabled(),
     });
 
     const blockers = [...v1206.blockers, ...legacyEligibility.blockers];
