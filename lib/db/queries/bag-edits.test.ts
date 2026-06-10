@@ -218,43 +218,56 @@ describe("validateQrCardForRawBag", () => {
 });
 
 describe("shouldReleaseQrAtBagEdit", () => {
-  it("returns true for intake-reserved card (ASSIGNED + null workflowBagId)", () => {
-    expect(
-      shouldReleaseQrAtBagEdit({
-        cardType: "RAW_BAG",
-        status: "ASSIGNED",
-        assignedWorkflowBagId: null,
-      }),
-    ).toBe(true);
+  const intakeReserved = {
+    cardType: "RAW_BAG" as const,
+    status: "ASSIGNED" as const,
+    assignedWorkflowBagId: null,
+  };
+
+  it("returns false while bag remains AVAILABLE — intake reservation persists", () => {
+    expect(shouldReleaseQrAtBagEdit(intakeReserved, "AVAILABLE")).toBe(false);
+  });
+
+  it("returns true for intake-reserved card when bag is no longer AVAILABLE", () => {
+    expect(shouldReleaseQrAtBagEdit(intakeReserved, "DEPLETED")).toBe(true);
   });
 
   it("returns false for IDLE card — not yet linked, nothing to release", () => {
     expect(
-      shouldReleaseQrAtBagEdit({
-        cardType: "RAW_BAG",
-        status: "IDLE",
-        assignedWorkflowBagId: null,
-      }),
+      shouldReleaseQrAtBagEdit(
+        {
+          cardType: "RAW_BAG",
+          status: "IDLE",
+          assignedWorkflowBagId: null,
+        },
+        "AVAILABLE",
+      ),
     ).toBe(false);
   });
 
   it("returns false for mid-production card (ASSIGNED + workflowBagId) — must not touch", () => {
     expect(
-      shouldReleaseQrAtBagEdit({
-        cardType: "RAW_BAG",
-        status: "ASSIGNED",
-        assignedWorkflowBagId: "wfb-uuid-123",
-      }),
+      shouldReleaseQrAtBagEdit(
+        {
+          cardType: "RAW_BAG",
+          status: "ASSIGNED",
+          assignedWorkflowBagId: "wfb-uuid-123",
+        },
+        "DEPLETED",
+      ),
     ).toBe(false);
   });
 
   it("returns false for RETIRED card", () => {
     expect(
-      shouldReleaseQrAtBagEdit({
-        cardType: "RAW_BAG",
-        status: "RETIRED",
-        assignedWorkflowBagId: null,
-      }),
+      shouldReleaseQrAtBagEdit(
+        {
+          cardType: "RAW_BAG",
+          status: "RETIRED",
+          assignedWorkflowBagId: null,
+        },
+        "DEPLETED",
+      ),
     ).toBe(false);
   });
 });

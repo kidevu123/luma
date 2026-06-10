@@ -97,8 +97,18 @@ export function validateQrCardForRawBag(
   return { ok: true };
 }
 
-export function shouldReleaseQrAtBagEdit(card: QrCardForValidation): boolean {
-  return card.status === "ASSIGNED" && card.assignedWorkflowBagId === null;
+/** Release intake-reserved QR only when the bag is no longer AVAILABLE for floor start. */
+export function shouldReleaseQrAtBagEdit(
+  card: QrCardForValidation,
+  bagStatus: string,
+): boolean {
+  if (card.status !== "ASSIGNED" || card.assignedWorkflowBagId !== null) {
+    return false;
+  }
+  if (bagStatus === "AVAILABLE") {
+    return false;
+  }
+  return true;
 }
 
 export async function getBagForEdit(bagId: string) {
@@ -160,7 +170,7 @@ export async function editInventoryBag(
             .select()
             .from(qrCards)
             .where(eq(qrCards.scanToken, bag.bagQrCode));
-          if (oldCard && shouldReleaseQrAtBagEdit(oldCard)) {
+          if (oldCard && shouldReleaseQrAtBagEdit(oldCard, bag.status)) {
             await tx
               .update(qrCards)
               .set({ status: "IDLE" as const })

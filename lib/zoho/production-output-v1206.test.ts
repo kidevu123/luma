@@ -283,6 +283,58 @@ describe("UI operation status", () => {
   });
 });
 
+describe("source receipt evidence commit gate", () => {
+  it("blocks commit when source bag Zoho receipt is unconfirmed", () => {
+    const built = buildLumaProductionOutputPayloadFromContext(basePayloadInput);
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+
+    const payload: LumaProductionOutputPayload = {
+      ...built.payload,
+      source_receipt_evidence: [
+        {
+          source_bag_id: "4a02fc5b-27e4-412e-888a-bf24f84b7d38",
+          internal_receipt_number: "352176",
+          zoho_purchase_receive_id: null,
+          received_quantity: null,
+          purchaseorder_id: "po-1",
+          purchaseorder_line_item_id: "line-1",
+          raw_item_id: "raw-1",
+          api_receive_status: "unknown",
+          api_reconciliation_status: "reconciliation_required",
+          received_at: null,
+          has_durable_row: false,
+        },
+      ],
+    };
+
+    const readiness = evaluateV1206ProductionOutputCommitReadiness({
+      opExists: true,
+      status: "QUEUED",
+      voidedAt: null,
+      payloadKind: "consolidated",
+      requestPayload: payload,
+      previewHttpStatus: 200,
+      previewResponse: { ok: true, writes_allowed: true },
+      previewStatus: "ready",
+      commitIdempotencyKey: payload.idempotency_key,
+      finishedLotExists: true,
+      workflowBagId: "wfb-1",
+      sourceAllocationCount: 1,
+      unresolvedBatchCount: 0,
+      ambiguousBatchCount: 0,
+      humanReviewRequired: false,
+      partialFailure: false,
+      productionOutputEnabled: true,
+      previewWritesAllowed: true,
+    });
+
+    expect(
+      readiness.blockers.some((b) => b.code === "SOURCE_BAG_ZOHO_RECEIPT_UNCONFIRMED"),
+    ).toBe(true);
+  });
+});
+
 describe("simple product candidate readiness shape", () => {
   it("single-SKU payload can reach ready when ledger + preview present", () => {
     const built = buildLumaProductionOutputPayloadFromContext(basePayloadInput);

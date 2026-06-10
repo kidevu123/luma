@@ -18,6 +18,7 @@ import type { ComponentBatchPayloadEntry } from "@/lib/zoho/production-output-so
 import type { LumaOperationSnapshot } from "@/lib/zoho/luma-operation-snapshot";
 import { resolveProductFamily } from "@/lib/zoho/product-family";
 import { stableStringifyProductionOutputPreview } from "@/lib/zoho/production-output-preview";
+import type { SourceReceiptEvidence } from "@/lib/zoho/source-receipt-evidence";
 
 export const LUMA_PRODUCTION_OUTPUT_SOURCE = "LUMA" as const;
 export const PRODUCTION_OUTPUT_COMMIT_PATH =
@@ -36,6 +37,9 @@ export type LumaProductionOutputSourceReceipt = {
   quantity_consumed: number;
 };
 
+/** Internal evidence — serialize as canonical `source_receipts` for Zoho. */
+export type LumaProductionOutputSourceReceiptEvidence = SourceReceiptEvidence;
+
 export type LumaProductionOutputPayload = {
   source: typeof LUMA_PRODUCTION_OUTPUT_SOURCE;
   luma_finished_lot_id: string;
@@ -51,6 +55,7 @@ export type LumaProductionOutputPayload = {
     case_composite_item_id: string | null;
   };
   source_receipts: LumaProductionOutputSourceReceipt[];
+  source_receipt_evidence?: LumaProductionOutputSourceReceiptEvidence[];
   output: {
     units_produced: number;
     displays_produced: number | null;

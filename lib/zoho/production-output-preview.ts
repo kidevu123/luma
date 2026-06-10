@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isProductionOutputPreviewEnabled } from "@/lib/zoho/production-output-config";
+import { mapProductionOutputPreviewQuantities } from "@/lib/zoho/production-output-preview-quantities";
 
 export const PRODUCTION_OUTPUT_PREVIEW_PATH =
   "/zoho/luma/production-output/preview";
@@ -49,6 +50,21 @@ export type ProductionOutputPreviewPayload = {
     }>;
   };
   verification?: { mode: "snapshot" };
+  /** When true, Zoho Integration skips purchase receive (raw intake already received). */
+  assembly_only?: boolean;
+  /** Canonical Zoho Integration v1.20.8 field — not source_receipt_evidence. */
+  source_receipts?: Array<{
+    source_bag_id: string;
+    purchaseorder_id: string | null;
+    purchaseorder_line_item_id: string | null;
+    raw_item_id: string | null;
+    zoho_purchase_receive_id: string | null;
+    received_quantity: number | null;
+    receive_status: string;
+    reconciliation_status: string;
+    received_at: string | null;
+    receive_idempotency_key: string;
+  }>;
 };
 
 export type ProductionOutputPreviewBuildInput = {
@@ -160,20 +176,27 @@ export function buildProductionOutputPreviewPayload(
 
   if (blockers.length > 0) return { ok: false, blockers };
 
+  const mappedQty = mapProductionOutputPreviewQuantities({
+    unitsProduced: input.unitsProduced,
+    displaysProduced: displayAssemblyQuantity,
+    casesProduced: caseAssemblyQuantity,
+    looseCards: input.metrics?.looseCards ?? null,
+  });
+
   const payload: ProductionOutputPreviewPayload = {
     purchaseorder_id: purchaseorderId as string,
     purchaseorder_line_item_id: purchaseorderLineItemId as string,
-    quantity_good: input.unitsProduced,
+    quantity_good: mappedQty.quantity_good,
     receive_date: input.producedOn,
     warehouse_id: warehouseId as string,
     unit_composite_item_id: unitCompositeItemId as string,
-    unit_assembly_quantity: input.unitsProduced,
+    unit_assembly_quantity: mappedQty.unit_assembly_quantity,
     luma_operation_id: buildProductionOutputOperationId(input.finishedLotId),
     quantity_damaged: input.metrics?.damagedPackaging ?? 0,
     quantity_ripped: input.metrics?.rippedCards ?? 0,
-    quantity_loose: input.metrics?.looseCards ?? 0,
-    display_assembly_quantity: displayAssemblyQuantity,
-    case_assembly_quantity: caseAssemblyQuantity,
+    quantity_loose: mappedQty.quantity_loose,
+    display_assembly_quantity: mappedQty.display_assembly_quantity,
+    case_assembly_quantity: mappedQty.case_assembly_quantity,
   };
 
   if (displayAssemblyQuantity > 0 && displayCompositeItemId) {

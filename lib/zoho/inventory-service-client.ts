@@ -456,3 +456,31 @@ export async function listWarehouses(opts?: {
     meta: result.meta,
   };
 }
+
+// ─── Public API: getInventoryPurchaseReceive ────────────────────────────────
+
+/**
+ * GET /zoho/purchase_receives/get/:purchaseReceiveId
+ *
+ * Read-only verification of an existing Zoho Inventory purchase receive.
+ * Used for historical reconciliation — never writes to Zoho.
+ */
+export async function getInventoryPurchaseReceive(
+  purchaseReceiveId: string,
+  opts?: {
+    env?: Record<string, string | undefined>;
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+  },
+): Promise<InventoryServiceReadResult<unknown>> {
+  const env = opts?.env ?? process.env;
+  const fetchImpl = opts?.fetchImpl ?? fetch;
+  const timeoutMs = opts?.timeoutMs ?? 15_000;
+
+  return getInventoryEndpoint({
+    path: `/zoho/purchase_receives/get/${encodeURIComponent(purchaseReceiveId)}`,
+    env,
+    fetchImpl,
+    timeoutMs,
+  });
+}

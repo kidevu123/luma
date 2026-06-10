@@ -19,6 +19,7 @@ import {
   isChocoDriftSku,
   skuRequiresComponentBatchesUntilBomConfirmed,
 } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
+import { evaluateSourceReceiptEvidenceForProductionOutput } from "@/lib/zoho/source-receipt-evidence";
 
 export type V1206ReadinessBlocker = {
   code: string;
@@ -155,6 +156,17 @@ export function evaluateV1206ProductionOutputCommitReadiness(
       add("MISSING_IDEMPOTENCY_KEY", "Commit idempotency key is missing.");
     } else if (input.commitIdempotencyKey !== payload.idempotency_key) {
       add("IDEMPOTENCY_KEY_MISMATCH", "Commit idempotency key does not match payload.");
+    }
+
+    if (payload.source_receipt_evidence && payload.source_receipt_evidence.length > 0) {
+      const receiptGate = evaluateSourceReceiptEvidenceForProductionOutput(
+        payload.source_receipt_evidence,
+      );
+      if (!receiptGate.ok) {
+        for (const blocker of receiptGate.blockers) {
+          add(blocker.code, blocker.message);
+        }
+      }
     }
   }
 

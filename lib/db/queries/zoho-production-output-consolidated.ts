@@ -58,6 +58,12 @@ import {
 import {
   callProductionOutputCommit,
 } from "@/lib/zoho/production-output-service-client";
+import { mapProductionOutputPreviewQuantities } from "@/lib/zoho/production-output-preview-quantities";
+import { buildOutboundSourceReceipts } from "@/lib/zoho/source-receipt-contract";
+import {
+  evaluateSourceReceiptEvidenceForProductionOutput,
+  loadSourceReceiptEvidenceForBags,
+} from "@/lib/zoho/source-receipt-evidence";
 import {
   completeZohoProductionOutputCommitFailure,
   completeZohoProductionOutputCommitSuccess,
@@ -139,7 +145,14 @@ function opValuesFromPayload(
     caseAssemblyQuantity: payload.output.cases_produced ?? 0,
     quantityDamaged: metricsKnown ? payload.output.damaged_packaging : null,
     quantityRipped: metricsKnown ? payload.output.ripped_cards : null,
-    quantityLoose: metricsKnown ? payload.output.loose_cards : null,
+    quantityLoose: metricsKnown
+      ? mapProductionOutputPreviewQuantities({
+          unitsProduced: payload.output.units_produced,
+          displaysProduced: payload.output.displays_produced,
+          casesProduced: payload.output.cases_produced,
+          looseCards: payload.output.loose_cards,
+        }).quantity_loose
+      : null,
     quantityBasis: {
       units_produced: payload.output.units_produced,
       displays_produced: payload.output.displays_produced,
@@ -414,9 +427,20 @@ export async function upsertConsolidatedProductionOutputOpForLot(
       };
     }
 
+    const sourceBagIds = [
+      ...new Set(built.payload.source_receipts.map((r) => r.luma_inventory_bag_id)),
+    ];
+    const evidenceByBag = await loadSourceReceiptEvidenceForBags(sourceBagIds);
+    const evidenceRows = [...evidenceByBag.values()];
+    const outboundSourceReceipts = buildOutboundSourceReceipts(evidenceRows);
+    const receiptGate = evaluateSourceReceiptEvidenceForProductionOutput(
+      evidenceRows,
+    );
+
     const payloadWithBatches: LumaProductionOutputPayload = {
       ...built.payload,
       component_batches: sourceWithPo.componentBatches,
+      source_receipt_evidence: evidenceRows,
     };
 
     const statusDraft =
@@ -561,24 +585,35 @@ export async function upsertConsolidatedProductionOutputOpForLot(
       };
     }
 
+    const mappedQty = mapProductionOutputPreviewQuantities({
+      unitsProduced: built.payload.output.units_produced,
+      displaysProduced: built.payload.output.displays_produced,
+      casesProduced: built.payload.output.cases_produced,
+      looseCards: built.payload.output.loose_cards,
+    });
+
+    const receiptBlockers = receiptGate.ok ? [] : receiptGate.blockers;
+
     const previewPayload: Parameters<typeof callProductionOutputPreview>[0]["payload"] = {
       purchaseorder_id: firstSourceReceiptPoId(built.payload) ?? "",
       purchaseorder_line_item_id: primaryPo ?? "",
-      quantity_good: built.payload.output.units_produced,
+      quantity_good: mappedQty.quantity_good,
       receive_date: built.payload.production_dates.receive_date,
       warehouse_id: built.payload.warehouse_id ?? "",
       unit_composite_item_id: built.payload.product.unit_composite_item_id ?? "",
-      unit_assembly_quantity: built.payload.output.units_produced,
+      unit_assembly_quantity: mappedQty.unit_assembly_quantity,
       luma_operation_id: buildLumaProductionOutputOperationId(finishedLotId),
       quantity_damaged: built.payload.output.damaged_packaging ?? 0,
       quantity_ripped: built.payload.output.ripped_cards ?? 0,
-      quantity_loose: built.payload.output.loose_cards ?? 0,
-      display_assembly_quantity: built.payload.output.displays_produced ?? 0,
-      case_assembly_quantity: built.payload.output.cases_produced ?? 0,
+      quantity_loose: mappedQty.quantity_loose,
+      display_assembly_quantity: mappedQty.display_assembly_quantity,
+      case_assembly_quantity: mappedQty.case_assembly_quantity,
       notes: "Luma consolidated production-output preview",
       component_batches: sourceWithPo.componentBatches,
       luma_operation_snapshot: snapshotBuilt.snapshot,
       verification: { mode: "snapshot" },
+      source_receipts: outboundSourceReceipts,
+      assembly_only: receiptGate.ok ? receiptGate.assemblyOnly : false,
     };
     if (built.payload.product.display_composite_item_id) {
       previewPayload.display_composite_item_id = built.payload.product.display_composite_item_id;
@@ -590,14 +625,16 @@ export async function upsertConsolidatedProductionOutputOpForLot(
       previewPayload.luma_bag_id = built.payload.luma_workflow_bag_id;
     }
 
+    const previewBlockers: Array<{ code: string; message: string }> = [
+      ...receiptBlockers.map((b) => ({ code: b.code, message: b.message })),
+    ];
+
     const preview = await callProductionOutputPreview({
       payload: previewPayload,
       idempotencyKey: opts?.previewRetry
         ? `${buildProductionOutputPreviewIdempotencyKey(finishedLotId, previewPayload)}-retry-${now.getTime()}`
         : buildProductionOutputPreviewIdempotencyKey(finishedLotId, previewPayload),
     });
-
-    const previewBlockers: Array<{ code: string; message: string }> = [];
     if (!preview.ok) {
       previewBlockers.push({
         code: "PREVIEW_FAILED",

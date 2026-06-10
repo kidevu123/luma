@@ -29,7 +29,7 @@ import { SyncPoButton } from "./sync-po-button";
 export const dynamic = "force-dynamic";
 
 export default async function ReceiveRawBagsPage() {
-  await requireLead();
+  const actor = await requireLead();
 
   // Load PO picker data + tablet types + available QR cards in parallel.
   const [pos, lines, tablets, availableQrCards] = await Promise.all([
@@ -159,6 +159,7 @@ export default async function ReceiveRawBagsPage() {
         tabletTypes={tablets}
         availableQrCards={availableQrCards.map((c) => ({ scanToken: c.scanToken }))}
         lineReceiveTotals={lineReceiveTotals}
+        viewerRole={actor.role}
       />
     </div>
   );

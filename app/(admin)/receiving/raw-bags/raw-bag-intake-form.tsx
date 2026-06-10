@@ -43,6 +43,8 @@ import {
   loadIntakeBagReadinessAction,
   lookupRawBagAction,
 } from "./actions";
+import { RawBagZohoReceivePanel } from "@/components/admin/raw-bag-zoho-receive-panel";
+import { IntakeReceiveZohoSummaryBanner } from "@/components/admin/intake-receive-zoho-summary";
 
 type PO = { id: string; poNumber: string; vendorName: string | null; status: string };
 type PoLine = {
@@ -57,18 +59,22 @@ type PoLineReceiveTotal = { poLineId: string; bagCount: number; receiveCount: nu
 
 type PoMode = "LOCAL_PO" | "MANUAL_REFERENCE";
 
+type ViewerRole = "OWNER" | "ADMIN" | "MANAGER" | "LEAD" | "STAFF";
+
 export function RawBagIntakeForm({
   purchaseOrders,
   poLines,
   tabletTypes,
   availableQrCards,
   lineReceiveTotals = [],
+  viewerRole,
 }: {
   purchaseOrders: PO[];
   poLines: PoLine[];
   tabletTypes: TabletType[];
   availableQrCards: { scanToken: string }[];
   lineReceiveTotals?: PoLineReceiveTotal[];
+  viewerRole: ViewerRole;
 }) {
   const [poMode, setPoMode] = React.useState<PoMode>(
     purchaseOrders.length > 0 ? "LOCAL_PO" : "MANUAL_REFERENCE",
@@ -241,7 +247,13 @@ export function RawBagIntakeForm({
   );
 
   if (result?.ok) {
-    return <SaveResultPanel result={result} onAnother={handleAnother} />;
+    return (
+      <SaveResultPanel
+        result={result}
+        onAnother={handleAnother}
+        viewerRole={viewerRole}
+      />
+    );
   }
 
   return (
@@ -603,7 +615,7 @@ export function RawBagIntakeForm({
         </ProductionSection>
       ) : null}
 
-      <LookupCard />
+      <LookupCard viewerRole={viewerRole} />
     </div>
   );
 }
@@ -776,7 +788,7 @@ function PoLineCards({
   );
 }
 
-function LookupCard() {
+function LookupCard({ viewerRole }: { viewerRole: ViewerRole }) {
   const [value, setValue] = React.useState("");
   const [pending, setPending] = React.useState(false);
   type LookupResult = Awaited<ReturnType<typeof lookupRawBagAction>>;
@@ -856,6 +868,11 @@ function LookupCard() {
                 {result.warnings.join(" · ")}
               </div>
             ) : null}
+            <RawBagZohoReceivePanel
+              inventoryBagId={result.bag.id}
+              viewerRole={viewerRole}
+              compact
+            />
           </div>
         ) : result && !result.found ? (
           <div className="text-text-muted">{result.warnings.join(" · ")}</div>
@@ -868,9 +885,11 @@ function LookupCard() {
 function SaveResultPanel({
   result,
   onAnother,
+  viewerRole,
 }: {
   result: Extract<Awaited<ReturnType<typeof createRawBagIntakeAction>>, { ok: true }>;
   onAnother: () => void;
+  viewerRole: ViewerRole;
 }) {
   const [readinessRows, setReadinessRows] = React.useState<
     Awaited<ReturnType<typeof loadIntakeBagReadinessAction>>
@@ -974,6 +993,27 @@ function SaveResultPanel({
             </table>
           </div>
         )}
+      </div>
+
+      <IntakeReceiveZohoSummaryBanner
+        receiveId={result.receiveId}
+        bagIds={result.bagIds}
+      />
+
+      <div className="mt-4 space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Zoho purchase receive — per physical bag
+        </p>
+        <div className="space-y-3">
+          {result.bagIds.map((bagId) => (
+            <RawBagZohoReceivePanel
+              key={bagId}
+              inventoryBagId={bagId}
+              viewerRole={viewerRole}
+              compact
+            />
+          ))}
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">

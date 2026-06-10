@@ -1265,6 +1265,66 @@ export const zohoCredentials = pgTable(
   ],
 );
 
+// ZOHO-RAW-BAG-RECEIVE-1 — Path B intake owns Zoho purchase receiving per bag.
+export const zohoRawBagReceiveStatusEnum = pgEnum("zoho_raw_bag_receive_status", [
+  "PENDING",
+  "PREVIEWED",
+  "COMMITTED",
+  "FAILED",
+]);
+
+export const zohoRawBagReconciliationStatusEnum = pgEnum(
+  "zoho_raw_bag_reconciliation_status",
+  ["UNCONFIRMED", "CONFIRMED_EXISTING", "RECEIVED_BY_LUMA", "RECONCILIATION_REQUIRED"],
+);
+
+export const zohoRawBagReceives = pgTable(
+  "zoho_raw_bag_receives",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    inventoryBagId: uuid("inventory_bag_id")
+      .notNull()
+      .references(() => inventoryBags.id, { onDelete: "restrict" }),
+    receiveId: uuid("receive_id")
+      .notNull()
+      .references(() => receives.id, { onDelete: "restrict" }),
+    zohoPurchaseorderId: text("zoho_purchaseorder_id"),
+    zohoPurchaseorderLineItemId: text("zoho_purchaseorder_line_item_id"),
+    zohoPurchaseReceiveId: text("zoho_purchase_receive_id"),
+    zohoReceivedQuantity: integer("zoho_received_quantity"),
+    zohoReceiveStatus: zohoRawBagReceiveStatusEnum("zoho_receive_status")
+      .notNull()
+      .default("PENDING"),
+    zohoReceiveError: text("zoho_receive_error"),
+    zohoReceivedAt: timestamp("zoho_received_at", { withTimezone: true }),
+    zohoReceiveIdempotencyKey: text("zoho_receive_idempotency_key").notNull(),
+    reconciliationStatus: zohoRawBagReconciliationStatusEnum("reconciliation_status")
+      .notNull()
+      .default("UNCONFIRMED"),
+    previewHttpStatus: integer("preview_http_status"),
+    previewResponse: jsonb("preview_response"),
+    zohoReceiveNumber: text("zoho_receive_number"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
+    reconciledBy: uuid("reconciled_by"),
+    reconciliationNote: text("reconciliation_note"),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("zoho_raw_bag_receives_bag_unique").on(t.inventoryBagId),
+    uniqueIndex("zoho_raw_bag_receives_idem_unique").on(t.zohoReceiveIdempotencyKey),
+    uniqueIndex("zoho_raw_bag_receives_zoho_pr_unique")
+      .on(t.zohoPurchaseReceiveId)
+      .where(sql`${t.zohoPurchaseReceiveId} is not null`),
+    index("zoho_raw_bag_receives_receive_idx").on(t.receiveId),
+    index("zoho_raw_bag_receives_status_idx").on(t.zohoReceiveStatus),
+    index("zoho_raw_bag_receives_reconciliation_idx").on(t.reconciliationStatus),
+    index("zoho_raw_bag_receives_zoho_pr_idx").on(t.zohoPurchaseReceiveId),
+  ],
+);
+
 export const zohoPushes = pgTable(
   "zoho_pushes",
   {
@@ -3842,6 +3902,7 @@ export type QrCard = typeof qrCards.$inferSelect;
 export type WorkflowBag = typeof workflowBags.$inferSelect;
 export type WorkflowEvent = typeof workflowEvents.$inferSelect;
 export type ZohoPush = typeof zohoPushes.$inferSelect;
+export type ZohoRawBagReceive = typeof zohoRawBagReceives.$inferSelect;
 export type ZohoProductionOutputOp = typeof zohoProductionOutputOps.$inferSelect;
 export type ZohoProductionOutputSourceAllocation =
   typeof zohoProductionOutputSourceAllocations.$inferSelect;

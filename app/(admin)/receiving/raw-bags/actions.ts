@@ -18,6 +18,23 @@ import {
 } from "@/lib/production/floor-readiness-loaders";
 import type { FloorReadinessEvaluation } from "@/lib/production/floor-readiness";
 import { inArray } from "drizzle-orm";
+import {
+  previewRawBagIntakeReceive,
+  commitRawBagIntakeReceive,
+  setRawBagReconciliationStatus,
+} from "@/lib/zoho/raw-bag-intake-receive";
+import {
+  loadIntakeReceiveZohoSummary,
+  loadIntakeReceiveZohoSummaryForBags,
+  loadRawBagZohoReceivePanel,
+  type IntakeReceiveZohoSummary,
+  type RawBagZohoReceivePanelData,
+} from "@/lib/zoho/raw-bag-receive-panel";
+import {
+  confirmHistoricalZohoReceive,
+  verifyRawBagHistoricalZohoReceive,
+} from "@/lib/zoho/raw-bag-intake-receive";
+import type { PurchaseReceiveVerificationResult } from "@/lib/zoho/purchase-receive-verification";
 
 export async function createRawBagIntakeAction(
   raw: unknown,
@@ -80,6 +97,114 @@ export async function loadIntakeBagReadinessAction(
       };
     })
     .filter((r): r is IntakeBagReadinessSummary => r != null);
+}
+
+export async function loadIntakeReceiveZohoSummaryAction(input: {
+  receiveId?: string;
+  bagIds?: readonly string[];
+}): Promise<IntakeReceiveZohoSummary | null> {
+  await requireLead();
+  if (input.receiveId) {
+    return loadIntakeReceiveZohoSummary(input.receiveId);
+  }
+  if (input.bagIds && input.bagIds.length > 0) {
+    return loadIntakeReceiveZohoSummaryForBags(input.bagIds);
+  }
+  return null;
+}
+
+export async function verifyHistoricalZohoReceiveAction(
+  inventoryBagId: string,
+  candidateZohoPurchaseReceiveId: string,
+): Promise<
+  | { ok: true; result: Extract<PurchaseReceiveVerificationResult, { ok: true }> }
+  | { ok: false; error: string }
+> {
+  await requireAdmin();
+  const result = await verifyRawBagHistoricalZohoReceive(
+    inventoryBagId,
+    candidateZohoPurchaseReceiveId,
+  );
+  if (!result.ok) {
+    return { ok: false, error: result.reason };
+  }
+  return { ok: true, result };
+}
+
+export async function loadRawBagZohoReceivePanelAction(
+  inventoryBagId: string,
+): Promise<RawBagZohoReceivePanelData | null> {
+  await requireLead();
+  return loadRawBagZohoReceivePanel(inventoryBagId);
+}
+
+export async function previewRawBagZohoReceiveAction(
+  inventoryBagId: string,
+): Promise<
+  | { ok: true; httpStatus: number; body: unknown }
+  | { ok: false; error: string }
+> {
+  const actor = await requireLead();
+  const result = await previewRawBagIntakeReceive(inventoryBagId, actor);
+  if (result.ok) {
+    revalidatePath("/receiving/raw-bags");
+    return result;
+  }
+  return { ok: false, error: result.reason };
+}
+
+export async function commitRawBagZohoReceiveAction(
+  inventoryBagId: string,
+): Promise<
+  | { ok: true; zohoPurchaseReceiveId: string }
+  | { ok: false; error: string }
+> {
+  const actor = await requireAdmin();
+  const result = await commitRawBagIntakeReceive(inventoryBagId, actor);
+  if (result.ok) {
+    revalidatePath("/receiving/raw-bags");
+    revalidatePath("/zoho-production-operations");
+    return result;
+  }
+  return { ok: false, error: result.reason };
+}
+
+export async function markReconciliationRequiredAction(
+  inventoryBagId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await requireAdmin();
+  const result = await setRawBagReconciliationStatus(
+    inventoryBagId,
+    "RECONCILIATION_REQUIRED",
+    actor,
+  );
+  if (result.ok) {
+    revalidatePath("/receiving/raw-bags");
+    revalidatePath("/zoho-production-operations");
+    return result;
+  }
+  return { ok: false, error: result.reason };
+}
+
+export async function confirmHistoricalZohoReceiveAction(
+  inventoryBagId: string,
+  input: {
+    zohoPurchaseReceiveId: string;
+    reconciliationNotes?: string | null;
+  },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await requireAdmin();
+  const result = await confirmHistoricalZohoReceive(
+    inventoryBagId,
+    input,
+    actor,
+  );
+  if (result.ok) {
+    revalidatePath("/receiving/raw-bags");
+    revalidatePath("/zoho-production-operations");
+    return result;
+  }
+  return { ok: false, error: result.reason };
 }
 
 export async function syncPurchaseOrdersFromZohoAction(): Promise<

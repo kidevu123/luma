@@ -6,6 +6,10 @@ const formSrc = readFileSync(
   join(__dirname, "raw-bag-intake-form.tsx"),
   "utf8",
 );
+const panelSrc = readFileSync(
+  join(__dirname, "../../../../components/admin/raw-bag-zoho-receive-panel.tsx"),
+  "utf8",
+);
 const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
 
 describe("RAW-BAGS-READINESS-BADGES-1 · intake form wiring", () => {
@@ -35,5 +39,17 @@ describe("RAW-BAGS-READINESS-BADGES-1 · intake form wiring", () => {
     expect(formSrc).not.toMatch(/saveSealingProductAction/);
     expect(actionsSrc).not.toMatch(/scanCardAction/);
     expect(actionsSrc).not.toMatch(/fireStageEventAction/);
+  });
+
+  it("wires Zoho receive panel on save and lookup", () => {
+    expect(formSrc).toMatch(/RawBagZohoReceivePanel/);
+    expect(formSrc).toMatch(/Zoho purchase receive — per physical bag/);
+    expect(actionsSrc).toMatch(/previewRawBagZohoReceiveAction/);
+    expect(actionsSrc).toMatch(/requireAdmin\(\)/);
+    expect(actionsSrc).toMatch(/confirmHistoricalZohoReceiveAction/);
+    expect(actionsSrc).toMatch(/verifyHistoricalZohoReceiveAction/);
+    expect(formSrc).toMatch(/IntakeReceiveZohoSummaryBanner/);
+    expect(panelSrc).toMatch(/Luma receipt/);
+    expect(panelSrc).toMatch(/Zoho purchase receive ID/);
   });
 });

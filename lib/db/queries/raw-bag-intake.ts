@@ -38,6 +38,10 @@ import {
   preflightRawBagIntake,
   type RawBagIntakeInput,
 } from "@/lib/production/raw-bag-intake";
+import {
+  seedPendingRawBagReceiveRows,
+  type PendingRawBagReceiveSeed,
+} from "@/lib/zoho/raw-bag-intake-receive";
 
 // ─── createRawBagIntakeAtomic ─────────────────────────────────────────
 
@@ -80,10 +84,18 @@ export async function createRawBagIntakeAtomic(
   }
   const input = pre.input;
 
-  return db.transaction(async (tx) => {
+  type IntakeTxSuccess = Extract<CreateRawBagIntakeResult, { ok: true }> & {
+    pendingReceiveSeeds: readonly PendingRawBagReceiveSeed[];
+  };
+
+  const txResult = await db.transaction(async (tx): Promise<
+    CreateRawBagIntakeResult | IntakeTxSuccess
+  > => {
     // ── Resolve PO + vendor + ordered qty ────────────────────────
     let resolvedPoId: string | null = null;
     let resolvedPoLineId: string | null = null;
+    let resolvedZohoPoId: string | null = null;
+    let resolvedZohoLineItemId: string | null = null;
     let resolvedPoNumber = "";
     let resolvedVendor: string | null = null;
     let orderedQuantity: number | null = input.orderedQuantity ?? null;
@@ -138,6 +150,7 @@ export async function createRawBagIntakeAtomic(
           id: purchaseOrders.id,
           poNumber: purchaseOrders.poNumber,
           vendorName: purchaseOrders.vendorName,
+          zohoPoId: purchaseOrders.zohoPoId,
         })
         .from(purchaseOrders)
         .where(eq(purchaseOrders.id, resolvedPoId))
@@ -147,12 +160,14 @@ export async function createRawBagIntakeAtomic(
       }
       resolvedPoNumber = poRow.poNumber;
       resolvedVendor = poRow.vendorName;
+      resolvedZohoPoId = poRow.zohoPoId ?? null;
       if (input.poLineId) {
         const [lineRow] = await tx
           .select({
             id: poLines.id,
             qtyOrdered: poLines.qtyOrdered,
             tabletTypeId: poLines.tabletTypeId,
+            zohoLineItemId: poLines.zohoLineItemId,
           })
           .from(poLines)
           .where(eq(poLines.id, input.poLineId))
@@ -167,6 +182,7 @@ export async function createRawBagIntakeAtomic(
           };
         }
         resolvedPoLineId = lineRow.id;
+        resolvedZohoLineItemId = lineRow.zohoLineItemId ?? null;
         if (orderedQuantity == null) orderedQuantity = lineRow.qtyOrdered;
       }
     }
@@ -461,8 +477,16 @@ export async function createRawBagIntakeAtomic(
     }
 
     const receiptValues = bagRows.map((r) => r.internalReceiptNumber);
+    const pendingReceiveSeeds = inserted.map((row, index) => ({
+      inventoryBagId: row.id,
+      receiveId: receiveRow.id,
+      declaredPillCount: bagRows[index]?.declaredPillCount ?? 0,
+      zohoPoId: resolvedZohoPoId,
+      zohoLineItemId: resolvedZohoLineItemId,
+    }));
+
     return {
-      ok: true,
+      ok: true as const,
       receiveId: receiveRow.id,
       receiveName,
       poId: resolvedPoId,
@@ -486,8 +510,21 @@ export async function createRawBagIntakeAtomic(
       receivedQuantity: totalDeclared,
       variance: orderedQuantity == null ? null : totalDeclared - orderedQuantity,
       bagIds: inserted.map((r) => r.id),
+      pendingReceiveSeeds,
     };
   });
+
+  if (!txResult.ok) {
+    return txResult;
+  }
+
+  if (!("pendingReceiveSeeds" in txResult)) {
+    return txResult;
+  }
+
+  await seedPendingRawBagReceiveRows(txResult.pendingReceiveSeeds, actor);
+  const { pendingReceiveSeeds: _seeds, ...publicResult } = txResult;
+  return publicResult;
 }
 
 // Small helper — Drizzle's `inArray` shape varies between versions; we
