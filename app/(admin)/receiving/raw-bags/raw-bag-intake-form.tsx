@@ -43,7 +43,7 @@ import {
   loadIntakeBagReadinessAction,
   lookupRawBagAction,
 } from "./actions";
-import { RawBagZohoReceivePanel } from "@/components/admin/raw-bag-zoho-receive-panel";
+import { RawBagZohoReceivePendingBanner } from "@/components/admin/raw-bag-zoho-receive-pending-banner";
 import { IntakeReceiveZohoSummaryBanner } from "@/components/admin/intake-receive-zoho-summary";
 
 type PO = { id: string; poNumber: string; vendorName: string | null; status: string };
@@ -868,10 +868,9 @@ function LookupCard({ viewerRole }: { viewerRole: ViewerRole }) {
                 {result.warnings.join(" · ")}
               </div>
             ) : null}
-            <RawBagZohoReceivePanel
+            <RawBagZohoReceivePendingBanner
               inventoryBagId={result.bag.id}
-              viewerRole={viewerRole}
-              compact
+              lumaReceipt={result.bag.internalReceiptNumber}
             />
           </div>
         ) : result && !result.found ? (
@@ -1002,16 +1001,11 @@ function SaveResultPanel({
 
       <div className="mt-4 space-y-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Zoho purchase receive — per physical bag
+          Zoho receive — pending until each bag is finished on the floor
         </p>
         <div className="space-y-3">
           {result.bagIds.map((bagId) => (
-            <RawBagZohoReceivePanel
-              key={bagId}
-              inventoryBagId={bagId}
-              viewerRole={viewerRole}
-              compact
-            />
+            <RawBagZohoReceivePendingBanner key={bagId} inventoryBagId={bagId} />
           ))}
         </div>
       </div>

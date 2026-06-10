@@ -1,18 +1,18 @@
-// ZOHO-RAW-BAG-RECEIPT — receipt granularity policy (locked for v1.20.8).
+// ZOHO-RAW-BAG-RECEIPT — bag-finish receive granularity (v1.21).
 
 /**
- * Policy A: one Zoho purchase receive per physical inventory bag.
+ * Policy: one Zoho purchase receive per physical inventory bag, committed at
+ * bag finish/close/deplete — not at intake and not from production-output qty.
  *
- * Rationale: each Path B bag has its own declared physical quantity, QR
- * reservation, and floor allocation. Zoho Inventory receives post per bag
- * at full declaredPillCount. Intake receive groups bags for operator UX only.
- *
- * Policy B (one receive per Luma intake receive) is NOT supported in v1.20.8.
+ * Same PO line + item + batch/lot may have many physical bags; each bag is
+ * tracked and received separately in Luma and Zoho.
  */
 export const RAW_BAG_RECEIPT_GRANULARITY = {
-  policy: "ONE_ZOHO_RECEIVE_PER_PHYSICAL_BAG" as const,
+  policy: "ONE_ZOHO_RECEIVE_PER_PHYSICAL_BAG_AT_FINISH" as const,
+  timing: "bag_finish_close_deplete" as const,
   operatorSummary:
-    "Each physical bag commits as its own Zoho purchase receive. A 6-bag intake creates up to 6 Zoho PRs when all bags are committed.",
+    "Each physical bag gets its own Zoho purchase receive when the bag is finished or depleted on the floor. A 6-bag intake may create up to 6 Zoho PRs — one per bag — after each bag's production cycle completes.",
   idempotencyScope: "inventory_bag_id",
+  idempotencyKeyPrefix: "luma-bag-finish-receive",
   zohoReceiveIdUnique: true,
 } as const;

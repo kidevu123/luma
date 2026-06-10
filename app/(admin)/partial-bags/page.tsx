@@ -205,6 +205,12 @@ export default async function PartialBagsPage() {
                             </Link>
                           ) : null}
                           <Link
+                            href={`/partial-bags/${row.bagId}/zoho-receive`}
+                            className="inline-flex items-center px-2 py-1 rounded border border-sky-300 bg-sky-50 text-sky-800 text-[11px] font-medium hover:bg-sky-100 transition-colors"
+                          >
+                            Zoho receive
+                          </Link>
+                          <Link
                             href="/floor-board"
                             className="inline-flex items-center px-2 py-1 rounded border border-border bg-surface text-[11px] font-medium hover:bg-surface-2 transition-colors"
                           >

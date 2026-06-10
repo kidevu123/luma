@@ -41,9 +41,9 @@ describe("RAW-BAGS-READINESS-BADGES-1 · intake form wiring", () => {
     expect(actionsSrc).not.toMatch(/fireStageEventAction/);
   });
 
-  it("wires Zoho receive panel on save and lookup", () => {
-    expect(formSrc).toMatch(/RawBagZohoReceivePanel/);
-    expect(formSrc).toMatch(/Zoho purchase receive — per physical bag/);
+  it("wires Zoho pending banner on save and lookup (bag-finish receive)", () => {
+    expect(formSrc).toMatch(/RawBagZohoReceivePendingBanner/);
+    expect(formSrc).toMatch(/pending until each bag is finished/);
     expect(actionsSrc).toMatch(/previewRawBagZohoReceiveAction/);
     expect(actionsSrc).toMatch(/requireAdmin\(\)/);
     expect(actionsSrc).toMatch(/confirmHistoricalZohoReceiveAction/);
@@ -51,5 +51,6 @@ describe("RAW-BAGS-READINESS-BADGES-1 · intake form wiring", () => {
     expect(formSrc).toMatch(/IntakeReceiveZohoSummaryBanner/);
     expect(panelSrc).toMatch(/Luma receipt/);
     expect(panelSrc).toMatch(/Zoho purchase receive ID/);
+    expect(panelSrc).toMatch(/Zoho receive qty/);
   });
 });

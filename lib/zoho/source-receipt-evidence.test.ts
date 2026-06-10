@@ -122,7 +122,7 @@ describe("evaluateSourceReceiptEvidenceForProductionOutput", () => {
         "4a02fc5b-27e4-412e-888a-bf24f84b7d38",
       ),
     ).toBe(
-      "luma-raw-bag-receive:4a02fc5b-27e4-412e-888a-bf24f84b7d38",
+      "luma-bag-finish-receive:4a02fc5b-27e4-412e-888a-bf24f84b7d38",
     );
   });
 });

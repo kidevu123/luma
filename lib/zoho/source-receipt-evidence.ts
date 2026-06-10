@@ -131,7 +131,7 @@ export function evaluateSourceReceiptEvidenceForProductionOutput(
     if (!isSourceReceiptConfirmedForAssembly(row)) {
       blockers.push({
         code: "SOURCE_BAG_ZOHO_RECEIPT_UNCONFIRMED",
-        message: `Source bag ${row.internal_receipt_number ?? row.source_bag_id.slice(0, 8)} has no confirmed Zoho purchase receive. Reconcile raw intake before production output.`,
+        message: `Source bag ${row.internal_receipt_number ?? row.source_bag_id.slice(0, 8)} has no confirmed Zoho purchase receive. Complete bag-finish receive before production output.`,
         source_bag_id: row.source_bag_id,
       });
     }
@@ -144,6 +144,12 @@ export function evaluateSourceReceiptEvidenceForProductionOutput(
   return { ok: true, assemblyOnly: true };
 }
 
+/** @deprecated Use buildBagFinishReceiveIdempotencyKey — bag-finish policy v1.21. */
 export function buildRawBagReceiveIdempotencyKey(inventoryBagId: string): string {
-  return `luma-raw-bag-receive:${inventoryBagId}`;
+  return buildBagFinishReceiveIdempotencyKey(inventoryBagId);
+}
+
+/** One Zoho purchase receive per physical bag; idempotency scoped to inventory_bag_id. */
+export function buildBagFinishReceiveIdempotencyKey(inventoryBagId: string): string {
+  return `luma-bag-finish-receive:${inventoryBagId}`;
 }

@@ -16,10 +16,8 @@ import {
 import {
   buildRawBagReceiveIdempotencyKey,
 } from "@/lib/zoho/source-receipt-evidence";
-import {
-  callZohoAssemblyService,
-  type AssemblyServiceCallResult,
-} from "@/lib/zoho/assembly-service-client";
+export { parseZohoPurchaseReceiveId } from "@/lib/zoho/zoho-purchase-receive-id";
+import { previewBagFinishReceive, commitBagFinishReceive } from "@/lib/zoho/bag-finish-receive";
 import { validateZohoPurchaseReceiveIdCandidate } from "@/lib/zoho/receipt-id-validation";
 import { verifyHistoricalZohoPurchaseReceive } from "@/lib/zoho/purchase-receive-verification";
 
@@ -60,19 +58,6 @@ export function buildRawBagIntakeReceivePayload(
     payload.warehouse_id = input.warehouseId;
   }
   return payload;
-}
-
-export function parseZohoPurchaseReceiveId(body: unknown): string | null {
-  if (body == null || typeof body !== "object") return null;
-  const o = body as Record<string, unknown>;
-  const direct = o.receive_id ?? o.purchase_receive_id;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-  const nested = o.receive;
-  if (nested != null && typeof nested === "object") {
-    const id = (nested as Record<string, unknown>).receive_id;
-    if (typeof id === "string" && id.trim()) return id.trim();
-  }
-  return null;
 }
 
 async function loadRawBagReceiveContext(inventoryBagId: string) {
@@ -192,23 +177,6 @@ async function upsertRawBagReceiveRow(
   return { ok: true as const, rowId: inserted!.id };
 }
 
-async function persistPreviewResult(
-  inventoryBagId: string,
-  result: AssemblyServiceCallResult,
-) {
-  await db
-    .update(zohoRawBagReceives)
-    .set({
-      zohoReceiveStatus: result.ok ? "PREVIEWED" : "FAILED",
-      zohoReceiveError: result.ok ? null : result.message,
-      previewHttpStatus: result.httpStatus,
-      previewResponse: result.body as object,
-      lastAttemptAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(zohoRawBagReceives.inventoryBagId, inventoryBagId));
-}
-
 export async function previewRawBagIntakeReceive(
   inventoryBagId: string,
   actor: Pick<CurrentUser, "id"> | null,
@@ -216,25 +184,7 @@ export async function previewRawBagIntakeReceive(
   | { ok: true; httpStatus: number; body: unknown }
   | { ok: false; reason: string }
 > {
-  const ctx = await loadRawBagReceiveContext(inventoryBagId);
-  if (!ctx.ok) return ctx;
-
-  const upsert = await upsertRawBagReceiveRow(ctx.buildInput, actor);
-  if (!upsert.ok) return upsert;
-
-  const payload = buildRawBagIntakeReceivePayload(ctx.buildInput, { dryRun: true });
-  const result = await callZohoAssemblyService({
-    path: "/zoho/purchase_receives/create",
-    payload,
-    idempotencyKey: `${buildRawBagReceiveIdempotencyKey(inventoryBagId)}-preview`,
-  });
-
-  await persistPreviewResult(inventoryBagId, result);
-
-  if (!result.ok) {
-    return { ok: false, reason: result.message };
-  }
-  return { ok: true, httpStatus: result.httpStatus, body: result.body };
+  return previewBagFinishReceive(inventoryBagId, actor);
 }
 
 export async function commitRawBagIntakeReceive(
@@ -244,103 +194,7 @@ export async function commitRawBagIntakeReceive(
   | { ok: true; zohoPurchaseReceiveId: string }
   | { ok: false; reason: string }
 > {
-  const ctx = await loadRawBagReceiveContext(inventoryBagId);
-  if (!ctx.ok) return ctx;
-
-  const [existing] = await db
-    .select()
-    .from(zohoRawBagReceives)
-    .where(
-      and(
-        eq(zohoRawBagReceives.inventoryBagId, inventoryBagId),
-        eq(zohoRawBagReceives.zohoReceiveStatus, "COMMITTED"),
-      ),
-    )
-    .limit(1);
-
-  if (existing?.zohoPurchaseReceiveId) {
-    return {
-      ok: false,
-      reason: "Zoho purchase receive already committed for this bag.",
-    };
-  }
-
-  await upsertRawBagReceiveRow(ctx.buildInput, actor);
-
-  const payload = buildRawBagIntakeReceivePayload(ctx.buildInput, { dryRun: false });
-  const idempotencyKey = buildRawBagReceiveIdempotencyKey(inventoryBagId);
-  const result = await callZohoAssemblyService({
-    path: "/zoho/purchase_receives/create",
-    payload,
-    idempotencyKey,
-  });
-
-  if (!result.ok) {
-    await db
-      .update(zohoRawBagReceives)
-      .set({
-        zohoReceiveStatus: "FAILED",
-        zohoReceiveError: result.message,
-        previewHttpStatus: result.httpStatus,
-        previewResponse: result.body as object,
-        lastAttemptAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(zohoRawBagReceives.inventoryBagId, inventoryBagId));
-    return { ok: false, reason: result.message };
-  }
-
-  const zohoPurchaseReceiveId = parseZohoPurchaseReceiveId(result.body);
-  if (!zohoPurchaseReceiveId) {
-    return {
-      ok: false,
-      reason: "Zoho response did not include purchase_receive_id.",
-    };
-  }
-
-  const [bagMeta] = await db
-    .select({ internalReceiptNumber: inventoryBags.internalReceiptNumber })
-    .from(inventoryBags)
-    .where(eq(inventoryBags.id, inventoryBagId))
-    .limit(1);
-  const idCheck = validateZohoPurchaseReceiveIdCandidate(
-    zohoPurchaseReceiveId,
-    bagMeta?.internalReceiptNumber ?? null,
-  );
-  if (!idCheck.ok) {
-    return { ok: false, reason: idCheck.reason };
-  }
-
-  const now = new Date();
-  await db
-    .update(zohoRawBagReceives)
-    .set({
-      zohoReceiveStatus: "COMMITTED",
-      zohoPurchaseReceiveId,
-      zohoReceivedQuantity: ctx.buildInput.declaredPillCount,
-      zohoReceivedAt: now,
-      reconciliationStatus: "RECEIVED_BY_LUMA",
-      zohoReceiveError: null,
-      previewHttpStatus: result.httpStatus,
-      previewResponse: result.body as object,
-      lastAttemptAt: now,
-      updatedAt: now,
-    })
-    .where(eq(zohoRawBagReceives.inventoryBagId, inventoryBagId));
-
-  await writeAudit({
-    actorId: actor?.id ?? null,
-    actorRole: null,
-    action: "zoho_raw_bag_receive.committed",
-    targetType: "ZohoRawBagReceive",
-    targetId: inventoryBagId,
-    after: {
-      zohoPurchaseReceiveId,
-      quantity: ctx.buildInput.declaredPillCount,
-    },
-  });
-
-  return { ok: true, zohoPurchaseReceiveId };
+  return commitBagFinishReceive(inventoryBagId, actor);
 }
 
 export async function verifyRawBagHistoricalZohoReceive(

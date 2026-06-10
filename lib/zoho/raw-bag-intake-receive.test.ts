@@ -25,7 +25,7 @@ describe("buildRawBagIntakeReceivePayload", () => {
     expect(lineItems[0]?.quantity).toBe(7219);
     expect(payload.dry_run).toBe(true);
     expect(payload.luma_operation_id).toBe(
-      "luma-raw-bag-receive:4a02fc5b-27e4-412e-888a-bf24f84b7d38",
+      "luma-bag-finish-receive:4a02fc5b-27e4-412e-888a-bf24f84b7d38",
     );
   });
 

@@ -1,24 +1,23 @@
-// ZOHO-RAW-BAG-RECEIVE-UI — panel data for Path B Zoho receive workflow.
+// ZOHO-RAW-BAG-RECEIVE-UI — panel data for bag-finish Zoho receive workflow.
 
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
-  batches,
   inventoryBags,
-  poLines,
-  purchaseOrders,
   receives,
   smallBoxes,
-  tabletTypes,
   zohoRawBagReceives,
 } from "@/lib/db/schema";
+import {
+  buildBagFinishReceivePayload,
+  loadBagFinishReceiveContext,
+} from "@/lib/zoho/bag-finish-receive";
 import { RAW_BAG_RECEIPT_GRANULARITY } from "@/lib/zoho/raw-bag-receipt-granularity";
 import {
   mapDbReceiveStatusToApi,
   mapDbReconciliationToApi,
 } from "@/lib/zoho/source-receipt-contract";
 import { deriveLegacyBagReconciliationStatus } from "@/lib/zoho/source-receipt-evidence";
-import { buildRawBagIntakeReceivePayload } from "@/lib/zoho/raw-bag-intake-receive";
 
 export type IntakeReceiveZohoSummary = {
   receiveId: string;
@@ -37,11 +36,16 @@ export type IntakeReceiveZohoSummary = {
 
 export type RawBagZohoReceivePanelData = {
   inventoryBagId: string;
-  /** Luma operator receipt number — not a Zoho entity ID. */
   lumaReceipt: string | null;
   internalReceiptNumber: string | null;
   humanLotNumber: string | null;
   declaredQuantity: number;
+  finalPillCount: number | null;
+  consumedQuantity: number;
+  endingBalance: number | null;
+  zohoReceiveQuantity: number;
+  quantitySource: string;
+  siblingBagsOnPoLine: number;
   poNumber: string | null;
   zohoPoId: string | null;
   zohoLineItemId: string | null;
@@ -57,43 +61,20 @@ export type RawBagZohoReceivePanelData = {
   previewHttpStatus: number | null;
   previewPlannedQuantity: number | null;
   isLiveReceiveCommitted: boolean;
+  bagFinishEligible: boolean;
+  bagFinishIneligibleReason: string | null;
   canPreview: boolean;
   canCommit: boolean;
   canRetry: boolean;
   canReconcileHistorical: boolean;
+  granularityNote: string;
 };
 
 export async function loadRawBagZohoReceivePanel(
   inventoryBagId: string,
 ): Promise<RawBagZohoReceivePanelData | null> {
-  const [row] = await db
-    .select({
-      bagId: inventoryBags.id,
-      internalReceiptNumber: inventoryBags.internalReceiptNumber,
-      declaredPillCount: inventoryBags.declaredPillCount,
-      pillCount: inventoryBags.pillCount,
-      batchNumber: batches.batchNumber,
-      poNumber: purchaseOrders.poNumber,
-      zohoPoId: purchaseOrders.zohoPoId,
-      zohoLineItemId: poLines.zohoLineItemId,
-      tabletName: tabletTypes.name,
-      tabletZohoItemId: tabletTypes.zohoItemId,
-      receiveId: receives.id,
-      receivedAt: receives.receivedAt,
-    })
-    .from(inventoryBags)
-    .innerJoin(smallBoxes, eq(inventoryBags.smallBoxId, smallBoxes.id))
-    .innerJoin(receives, eq(smallBoxes.receiveId, receives.id))
-    .leftJoin(batches, eq(inventoryBags.batchId, batches.id))
-    .leftJoin(purchaseOrders, eq(receives.poId, purchaseOrders.id))
-    .leftJoin(poLines, eq(receives.poLineId, poLines.id))
-    .innerJoin(tabletTypes, eq(inventoryBags.tabletTypeId, tabletTypes.id))
-    .where(eq(inventoryBags.id, inventoryBagId))
-    .limit(1);
-
-  if (!row) return null;
-
-  const declaredQuantity = row.declaredPillCount ?? row.pillCount ?? 0;
+  const ctx = await loadBagFinishReceiveContext(inventoryBagId);
+  if (!ctx.ok) return null;
 
   const [durable] = await db
     .select()
@@ -104,53 +85,40 @@ export async function loadRawBagZohoReceivePanel(
   const reconciliationDb =
     durable?.reconciliationStatus ??
     deriveLegacyBagReconciliationStatus(durable != null) ??
-    "RECONCILIATION_REQUIRED";
+    "UNCONFIRMED";
 
   const receiveStatus = durable
     ? mapDbReceiveStatusToApi(durable.zohoReceiveStatus)
-    : "unknown";
+    : "pending";
 
   const isLiveReceiveCommitted =
     durable?.zohoReceiveStatus === "COMMITTED" &&
     !!durable.zohoPurchaseReceiveId?.trim();
 
-  const hasZohoMapping =
-    !!row.zohoPoId?.trim() &&
-    !!row.zohoLineItemId?.trim() &&
-    !!row.tabletZohoItemId?.trim();
+  const bagFinishEligible = ctx.eligibility.eligible;
+  const bagFinishIneligibleReason = ctx.eligibility.eligible
+    ? null
+    : ctx.eligibility.reason;
 
-  let previewPlannedQuantity: number | null = null;
-  if (hasZohoMapping && declaredQuantity > 0) {
-    const payload = buildRawBagIntakeReceivePayload(
-      {
-        inventoryBagId: row.bagId,
-        lumaReceiveId: row.receiveId,
-        internalReceiptNumber: row.internalReceiptNumber,
-        declaredPillCount: declaredQuantity,
-        zohoPoId: row.zohoPoId!,
-        zohoLineItemId: row.zohoLineItemId!,
-        zohoTabletItemId: row.tabletZohoItemId!,
-        receiveDate: row.receivedAt
-          ? row.receivedAt.toISOString().slice(0, 10)
-          : new Date().toISOString().slice(0, 10),
-      },
-      { dryRun: true },
-    );
-    const lineItems = payload.line_items as Array<{ quantity: number }> | undefined;
-    previewPlannedQuantity = lineItems?.[0]?.quantity ?? null;
-  }
+  const previewPayload = buildBagFinishReceivePayload(ctx.buildInput);
 
   return {
-    inventoryBagId: row.bagId,
-    lumaReceipt: row.internalReceiptNumber,
-    internalReceiptNumber: row.internalReceiptNumber,
-    humanLotNumber: row.batchNumber ?? null,
-    declaredQuantity,
-    poNumber: row.poNumber ?? null,
-    zohoPoId: row.zohoPoId ?? null,
-    zohoLineItemId: row.zohoLineItemId ?? null,
-    rawItemId: row.tabletZohoItemId ?? null,
-    rawItemName: row.tabletName ?? null,
+    inventoryBagId: ctx.buildInput.inventoryBagId,
+    lumaReceipt: ctx.buildInput.internalReceiptNumber,
+    internalReceiptNumber: ctx.buildInput.internalReceiptNumber,
+    humanLotNumber: ctx.buildInput.humanLotNumber,
+    declaredQuantity: ctx.declaredPillCount ?? ctx.buildInput.receivedQuantity,
+    finalPillCount: ctx.pillCount,
+    consumedQuantity: ctx.allocation.totalConsumedQty,
+    endingBalance: ctx.allocation.lastEndingBalanceQty,
+    zohoReceiveQuantity: ctx.buildInput.receivedQuantity,
+    quantitySource: ctx.buildInput.quantitySource,
+    siblingBagsOnPoLine: ctx.buildInput.siblingBagsOnPoLine,
+    poNumber: ctx.poNumber ?? null,
+    zohoPoId: ctx.buildInput.zohoPoId,
+    zohoLineItemId: ctx.buildInput.zohoLineItemId,
+    rawItemId: ctx.buildInput.zohoTabletItemId,
+    rawItemName: ctx.rawItemName ?? null,
     receiveStatus,
     reconciliationStatus: mapDbReconciliationToApi(reconciliationDb),
     zohoPurchaseReceiveId: durable?.zohoPurchaseReceiveId ?? null,
@@ -159,18 +127,19 @@ export async function loadRawBagZohoReceivePanel(
     receivedAt: durable?.zohoReceivedAt?.toISOString() ?? null,
     lastPreviewError: durable?.zohoReceiveError ?? null,
     previewHttpStatus: durable?.previewHttpStatus ?? null,
-    previewPlannedQuantity,
+    previewPlannedQuantity: previewPayload.received_quantity,
     isLiveReceiveCommitted,
-    canPreview: hasZohoMapping && !isLiveReceiveCommitted && declaredQuantity > 0,
+    bagFinishEligible,
+    bagFinishIneligibleReason,
+    canPreview: bagFinishEligible && !isLiveReceiveCommitted,
     canCommit:
-      hasZohoMapping &&
+      bagFinishEligible &&
       !isLiveReceiveCommitted &&
-      declaredQuantity > 0 &&
       (receiveStatus === "previewed" || receiveStatus === "failed"),
     canRetry: receiveStatus === "failed",
     canReconcileHistorical:
-      !isLiveReceiveCommitted &&
-      reconciliationDb !== "RECEIVED_BY_LUMA",
+      !isLiveReceiveCommitted && reconciliationDb !== "RECEIVED_BY_LUMA",
+    granularityNote: RAW_BAG_RECEIPT_GRANULARITY.operatorSummary,
   };
 }
 
@@ -194,7 +163,6 @@ export async function loadIntakeReceiveZohoSummary(
       internalReceiptNumber: inventoryBags.internalReceiptNumber,
       declaredPillCount: inventoryBags.declaredPillCount,
       pillCount: inventoryBags.pillCount,
-      smallBoxId: inventoryBags.smallBoxId,
     })
     .from(inventoryBags)
     .innerJoin(smallBoxes, eq(inventoryBags.smallBoxId, smallBoxes.id))
@@ -218,7 +186,8 @@ export async function loadIntakeReceiveZohoSummary(
     totalDeclaredQuantity,
     zohoTransactionsOnFullCommit: perBagQuantities.length,
     granularityPolicy: RAW_BAG_RECEIPT_GRANULARITY.policy,
-    granularityDescription: RAW_BAG_RECEIPT_GRANULARITY.operatorSummary,
+    granularityDescription:
+      "Each bag will receive into Zoho separately when finished or depleted on the floor.",
     perBagQuantities,
   };
 }
@@ -236,4 +205,18 @@ export async function loadIntakeReceiveZohoSummaryForBags(
     .limit(1);
   if (!firstBag) return null;
   return loadIntakeReceiveZohoSummary(firstBag.receiveId);
+}
+
+/** Count other physical bags on the same PO line (same flavor/item). */
+export async function countBagsOnPoLine(
+  poLineId: string,
+  excludeBagId?: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(inventoryBags)
+    .innerJoin(smallBoxes, eq(inventoryBags.smallBoxId, smallBoxes.id))
+    .innerJoin(receives, eq(smallBoxes.receiveId, receives.id))
+    .where(excludeBagId ? and(eq(receives.poLineId, poLineId), ne(inventoryBags.id, excludeBagId)) : eq(receives.poLineId, poLineId));
+  return row?.count ?? 0;
 }

@@ -35,7 +35,7 @@ describe("production output outbound source_receipts", () => {
       "reconciliation_required",
     );
     expect(previewPayload.source_receipts[0]?.receive_idempotency_key).toBe(
-      "luma-raw-bag-receive:4a02fc5b-27e4-412e-888a-bf24f84b7d38",
+      "luma-bag-finish-receive:4a02fc5b-27e4-412e-888a-bf24f84b7d38",
     );
   });
 

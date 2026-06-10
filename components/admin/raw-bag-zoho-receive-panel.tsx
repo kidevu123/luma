@@ -159,6 +159,15 @@ export function RawBagZohoReceivePanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
+        {!panel.bagFinishEligible && panel.bagFinishIneligibleReason ? (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-amber-900 text-xs">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            {panel.bagFinishIneligibleReason}
+          </div>
+        ) : null}
+
+        <p className="text-xs text-text-muted">{panel.granularityNote}</p>
+
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-0">
             <StatusChip label="Luma receipt" value={panel.lumaReceipt ?? "—"} />
@@ -167,10 +176,31 @@ export function RawBagZohoReceivePanel({
               label="Declared qty"
               value={panel.declaredQuantity.toLocaleString()}
             />
+            <StatusChip
+              label="Consumed (floor)"
+              value={panel.consumedQuantity.toLocaleString()}
+            />
+            <StatusChip
+              label="Ending balance"
+              value={
+                panel.endingBalance != null
+                  ? panel.endingBalance.toLocaleString()
+                  : "—"
+              }
+            />
             <StatusChip label="PO" value={panel.poNumber ?? "—"} />
             <StatusChip label="Raw item" value={panel.rawItemName ?? "—"} />
           </div>
           <div className="space-y-0">
+            <StatusChip
+              label="Zoho receive qty"
+              value={panel.zohoReceiveQuantity.toLocaleString()}
+            />
+            <StatusChip label="Qty source" value={panel.quantitySource} />
+            <StatusChip
+              label="Other bags on PO line"
+              value={String(panel.siblingBagsOnPoLine)}
+            />
             <StatusChip
               label="Zoho receive"
               value={panel.receiveStatus}
@@ -302,7 +332,9 @@ export function RawBagZohoReceivePanel({
               </span>{" "}
               tablets to Zoho PO line{" "}
               <span className="font-mono">{panel.zohoLineItemId ?? "—"}</span>.
-              This creates one Zoho purchase receive for this physical bag only.
+              This creates one Zoho purchase receive for this physical bag only
+              ({panel.zohoReceiveQuantity.toLocaleString()} tablets — not production
+              output quantity).
             </p>
             <div className="flex gap-2">
               <Button

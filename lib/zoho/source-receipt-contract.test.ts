@@ -59,7 +59,7 @@ describe("source-receipt-contract", () => {
       reconciliation_status: "received_by_luma",
       received_at: "2026-05-22T12:00:00.000Z",
       receive_idempotency_key:
-        "luma-raw-bag-receive:4a02fc5b-27e4-412e-888a-bf24f84b7d38",
+        "luma-bag-finish-receive:4a02fc5b-27e4-412e-888a-bf24f84b7d38",
     });
   });
 
