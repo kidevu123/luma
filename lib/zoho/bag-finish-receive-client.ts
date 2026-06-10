@@ -6,6 +6,15 @@ import {
   validateAssemblyServiceConfig,
 } from "@/lib/zoho/assembly-service-client";
 
+export const ZOHO_BAG_FINISH_RECEIVE_COMMIT_ENABLED_ENV =
+  "ZOHO_BAG_FINISH_RECEIVE_COMMIT_ENABLED";
+
+export function isBagFinishReceiveCommitEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return env[ZOHO_BAG_FINISH_RECEIVE_COMMIT_ENABLED_ENV] === "true";
+}
+
 type FetchLike = typeof fetch;
 
 export type BagFinishReceiveRequest = {
@@ -147,11 +156,12 @@ export async function callBagFinishReceiveCommit(
     timeoutMs?: number;
   },
 ): Promise<AssemblyServiceCallResult> {
+  const env = opts?.env ?? process.env;
   return postBagFinishReceive({
     path: "/zoho/luma/bag-receive/commit",
     payload,
-    requireLiveWriteGate: true,
-    ...(opts?.env ? { env: opts.env } : {}),
+    requireLiveWriteGate: !isBagFinishReceiveCommitEnabled(env),
+    env,
     ...(opts?.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
     ...(opts?.timeoutMs != null ? { timeoutMs: opts.timeoutMs } : {}),
   });

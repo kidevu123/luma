@@ -254,6 +254,7 @@ describe("bag-finish preview client", () => {
           ZOHO_SERVICE_BASE_URL: "http://zoho.test",
           ZOHO_SERVICE_BEARER_SECRET: "secret",
           ZOHO_DRY_RUN_WRITES_ENABLED: "true",
+          ZOHO_BAG_FINISH_RECEIVE_COMMIT_ENABLED: "false",
         },
       },
     );
@@ -261,6 +262,41 @@ describe("bag-finish preview client", () => {
     if (!result.ok) {
       expect(result.guardBlocked).toBe(true);
     }
+  });
+
+  it("commit reaches gateway when PM commit gate is enabled", async () => {
+    const { callBagFinishReceiveCommit } = await import("./bag-finish-receive-client");
+    const fetchImpl = vi.fn().mockResolvedValue({
+      status: 200,
+      json: async () => ({ data: { purchase_receive_id: "pr-test" } }),
+    });
+    const result = await callBagFinishReceiveCommit(
+      {
+        source_bag_id: BAG_A,
+        internal_receipt_number: "352177",
+        purchaseorder_id: "po-1",
+        purchaseorder_line_item_id: "line-1",
+        raw_item_id: "raw-1",
+        human_lot_number: "152-000161",
+        received_quantity: 7884,
+        receive_date: "2026-05-22",
+        idempotency_key: buildBagFinishReceiveIdempotencyKey(BAG_A),
+      },
+      {
+        env: {
+          ZOHO_SERVICE_BASE_URL: "http://zoho.test",
+          ZOHO_SERVICE_BEARER_SECRET: "secret",
+          ZOHO_DRY_RUN_WRITES_ENABLED: "true",
+          ZOHO_BAG_FINISH_RECEIVE_COMMIT_ENABLED: "true",
+        },
+        fetchImpl,
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://zoho.test/zoho/luma/bag-receive/commit",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });
 
