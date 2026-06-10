@@ -75,6 +75,8 @@ export function assertNotProductionOutputReceiveQuantity(
     unitAssemblyQuantity?: number | null;
     looseCards?: number | null;
     consumedAllocationQty?: number | null;
+    /** When set, full-bag floor deplete may legitimately match consumed allocation. */
+    declaredPhysicalQty?: number | null;
   },
 ): { ok: true } | { ok: false; reason: string } {
   const checks: Array<[string, number | null | undefined]> = [
@@ -85,6 +87,13 @@ export function assertNotProductionOutputReceiveQuantity(
   ];
   for (const [label, value] of checks) {
     if (value != null && value > 0 && candidate === value) {
+      if (
+        label === "consumed_allocation_qty" &&
+        forbidden.declaredPhysicalQty != null &&
+        candidate === forbidden.declaredPhysicalQty
+      ) {
+        continue;
+      }
       return {
         ok: false,
         reason: `Receive quantity must not equal production ${label} (${value}). Use physical bag quantity.`,

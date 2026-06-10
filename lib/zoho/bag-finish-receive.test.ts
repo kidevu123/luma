@@ -51,11 +51,20 @@ describe("bag-finish receive quantity", () => {
     }
   });
 
-  it("blocks receive quantity that equals production output qty", () => {
+  it("blocks receive quantity that equals partial consumed allocation only", () => {
     const guard = assertNotProductionOutputReceiveQuantity(40, {
       consumedAllocationQty: 40,
+      declaredPhysicalQty: 7219,
     });
     expect(guard.ok).toBe(false);
+  });
+
+  it("allows full-bag deplete when consumed allocation matches declared physical qty", () => {
+    const guard = assertNotProductionOutputReceiveQuantity(7884, {
+      consumedAllocationQty: 7884,
+      declaredPhysicalQty: 7884,
+    });
+    expect(guard.ok).toBe(true);
   });
 });
 

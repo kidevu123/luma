@@ -181,6 +181,7 @@ export async function loadBagFinishReceiveContext(inventoryBagId: string) {
 
   const qtyGuard = assertNotProductionOutputReceiveQuantity(qty.quantity, {
     consumedAllocationQty: allocation.totalConsumedQty,
+    declaredPhysicalQty: row.declaredPillCount ?? row.pillCount,
   });
   if (!qtyGuard.ok) return qtyGuard;
 
