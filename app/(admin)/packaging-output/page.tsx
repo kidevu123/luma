@@ -27,6 +27,8 @@ import { MetricCard } from "@/components/production/metric-card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { Package, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
+import { evaluateBacklogAutoIssueForWorkflowBag } from "@/lib/db/queries/finished-lots";
+import { AutoIssueAllButton, IssueLotButton } from "./auto-issue-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +78,7 @@ export default async function PackagingOutputPage() {
         ),
       )
       .orderBy(desc(workflowBags.finalizedAt))
-      .limit(20),
+      .limit(100),
 
     // PACKAGED (not finalized) bags.
     db
@@ -150,6 +152,23 @@ export default async function PackagingOutputPage() {
         : "Missing data";
 
   const hasQueue = awaitingLot.length > 0 || awaitingFinalize.length > 0;
+
+  // P0-LOT-BACKLOG — per-row auto-issue readiness with explicit
+  // blockers (missing receipt / product / BOM / shelf life / allocation
+  // session / counts). Drives the Ready chips, per-row Issue lot, and
+  // the bulk sweep button.
+  const autoIssueEvaluations = new Map(
+    (
+      await Promise.all(
+        awaitingLot.map((bag) =>
+          evaluateBacklogAutoIssueForWorkflowBag(bag.id),
+        ),
+      )
+    ).map((e) => [e.workflowBagId, e] as const),
+  );
+  const autoIssueReadyCount = [...autoIssueEvaluations.values()].filter(
+    (e) => e.ok,
+  ).length;
 
   type MaterialBurnRow = {
     packaging_material_id: string;
@@ -260,12 +279,17 @@ export default async function PackagingOutputPage() {
             <div className="space-y-5">
               {/* Sub-section 1: Finalized bags awaiting lot */}
               <div>
-                <div className="flex items-baseline gap-2 mb-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
-                    Finalized — needs lot review
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <div className="flex items-baseline gap-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
+                      Finalized — needs lot review
+                    </div>
+                    {awaitingLot.some((b) => !b.productName) && (
+                      <span className="text-[10px] text-text-subtle">· product blank = bag not yet mapped via PRODUCT_MAPPED event</span>
+                    )}
                   </div>
-                  {awaitingLot.some((b) => !b.productName) && (
-                    <span className="text-[10px] text-text-subtle">· product blank = bag not yet mapped via PRODUCT_MAPPED event</span>
+                  {awaitingLot.length > 0 && (
+                    <AutoIssueAllButton readyCount={autoIssueReadyCount} />
                   )}
                 </div>
                 {awaitingLot.length === 0 ? (
@@ -280,13 +304,16 @@ export default async function PackagingOutputPage() {
                           <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Cases</th>
                           <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Displays</th>
                           <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Loose</th>
-                          <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Units</th>
+                          <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Sellable units</th>
                           <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Finalized at</th>
+                          <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Auto-issue status</th>
                           <th className="text-left py-1.5 font-medium text-text-muted text-[11px] uppercase tracking-wide">Action</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {awaitingLot.map((bag) => (
+                        {awaitingLot.map((bag) => {
+                          const evaluation = autoIssueEvaluations.get(bag.id);
+                          return (
                           <tr key={bag.id} className="border-b border-border/30 last:border-0">
                             <td className="py-2 pr-4 font-mono text-[11.5px] text-text-strong">
                               {bag.receiptNumber ?? <span className="text-text-subtle">—</span>}
@@ -311,16 +338,37 @@ export default async function PackagingOutputPage() {
                                   })
                                 : "—"}
                             </td>
+                            <td className="py-2 pr-4">
+                              {evaluation?.ok ? (
+                                <span className="inline-flex rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-800">
+                                  Ready · lot {evaluation.finishedLotNumber}
+                                </span>
+                              ) : (
+                                <div className="max-w-[18rem]">
+                                  <span className="inline-flex rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900">
+                                    {evaluation?.reason?.replace(/_/g, " ").toLowerCase() ?? "unknown"}
+                                  </span>
+                                  <p className="mt-0.5 text-[10px] text-text-muted leading-snug">
+                                    {evaluation?.message}
+                                  </p>
+                                </div>
+                              )}
+                            </td>
                             <td className="py-2">
-                              <Link
-                                href={`/finished-lots/new?bagId=${encodeURIComponent(bag.id)}`}
-                                className="inline-flex items-center gap-1 rounded-md border border-warn-500/40 bg-warn-50/60 px-2.5 py-1 text-[11.5px] font-medium text-warn-700 hover:bg-warn-50 transition-colors"
-                              >
-                                Review / issue lot
-                              </Link>
+                              {evaluation?.ok ? (
+                                <IssueLotButton workflowBagId={bag.id} />
+                              ) : (
+                                <Link
+                                  href={`/finished-lots/new?bagId=${encodeURIComponent(bag.id)}`}
+                                  className="inline-flex items-center gap-1 rounded-md border border-warn-500/40 bg-warn-50/60 px-2.5 py-1 text-[11.5px] font-medium text-warn-700 hover:bg-warn-50 transition-colors"
+                                >
+                                  Review / issue lot
+                                </Link>
+                              )}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
