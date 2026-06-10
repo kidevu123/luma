@@ -3,7 +3,8 @@
 export function parseZohoPurchaseReceiveId(body: unknown): string | null {
   if (body == null || typeof body !== "object") return null;
   const o = body as Record<string, unknown>;
-  const direct = o.receive_id ?? o.purchase_receive_id;
+  const direct =
+    o.zoho_purchase_receive_id ?? o.receive_id ?? o.purchase_receive_id;
   if (typeof direct === "string" && direct.trim()) return direct.trim();
   const nested = o.receive;
   if (nested != null && typeof nested === "object") {

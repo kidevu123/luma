@@ -57,4 +57,14 @@ describe("parseZohoPurchaseReceiveId", () => {
       }),
     ).toBe(ZOHO_ENTITY_ID);
   });
+
+  it("extracts zoho_purchase_receive_id from bag-receive commit response", () => {
+    expect(
+      parseZohoPurchaseReceiveId({
+        committed: true,
+        zoho_purchase_receive_id: ZOHO_ENTITY_ID,
+        receive_number: "PR-00600",
+      }),
+    ).toBe(ZOHO_ENTITY_ID);
+  });
 });
