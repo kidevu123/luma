@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth-guards";
-import { loadPartialBagAdminRows } from "@/lib/production/partial-bags";
+import {
+  loadActiveRunsMissingAllocation,
+  loadPartialBagAdminRows,
+} from "@/lib/production/partial-bags";
 import {
   labelPartialBagConfidence,
   labelPartialBagEndingBalanceSource,
@@ -38,7 +41,10 @@ function eligibilityClass(eligibility: string): string {
 
 export default async function PartialBagsPage() {
   await requireAdmin();
-  const rows = await loadPartialBagAdminRows();
+  const [rows, missingAllocationRuns] = await Promise.all([
+    loadPartialBagAdminRows(),
+    loadActiveRunsMissingAllocation(),
+  ]);
 
   const readyCount = rows.filter((r) => r.eligibility === "ready").length;
   const reviewCount = rows.length - readyCount;
@@ -55,6 +61,65 @@ export default async function PartialBagsPage() {
         title="Available Partial Bags"
         description="Raw bags that have been partially consumed and may be reused. Ready rows can start a new run immediately. Review rows need allocation closeout or inventory linkage before restart."
       />
+
+      {/* P0-ALLOC-REPAIR — admin visibility for runs whose source
+          allocation is missing (legacy starts or data bugs). Mirrors
+          the floor's yellow warning so leads don't have to discover
+          these at the station. */}
+      {missingAllocationRuns.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-amber-800">
+              {missingAllocationRuns.length} active run
+              {missingAllocationRuns.length === 1 ? "" : "s"} missing source
+              allocation
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-text-muted mb-3">
+              These in-flight runs have no allocation session on their raw
+              bag, so consumption is not landing on the ledger. A lead can
+              repair each one from the station screen (yellow warning →
+              Repair allocation), or it will be forced to a closeout at run
+              end.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-text-muted uppercase text-[10px] tracking-wide border-b border-border">
+                  <tr>
+                    <th className="text-left py-2 pr-3">Bag QR</th>
+                    <th className="text-left py-2 pr-3">Receipt #</th>
+                    <th className="text-left py-2 pr-3">Tablet type</th>
+                    <th className="text-left py-2 pr-3">Product</th>
+                    <th className="text-left py-2 pr-3">Stage</th>
+                    <th className="text-left py-2">Started</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {missingAllocationRuns.map((run) => (
+                    <tr key={run.workflowBagId}>
+                      <td className="py-2 pr-3 font-mono text-[11px]">
+                        {run.bagQrCode ?? "—"}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {run.internalReceiptNumber ?? "—"}
+                      </td>
+                      <td className="py-2 pr-3">{run.tabletTypeName ?? "—"}</td>
+                      <td className="py-2 pr-3">{run.productName ?? "—"}</td>
+                      <td className="py-2 pr-3">{run.stage ?? "—"}</td>
+                      <td className="py-2">
+                        {run.startedAt
+                          ? run.startedAt.toLocaleDateString("en-CA")
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

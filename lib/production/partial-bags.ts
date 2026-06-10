@@ -477,6 +477,75 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
   return adminRows;
 }
 
+// ── P0-ALLOC-REPAIR · active runs missing source allocation ─────────
+//
+// Admin visibility for the floor's "Source bag allocation missing"
+// warning: every unfinalized workflow bag whose inventory bag has NO
+// allocation session linked to that run. Legacy bags (started before
+// allocation auto-open) land here until a lead repairs them from the
+// station screen or an admin resolves the partial inventory.
+
+export type ActiveRunMissingAllocationRow = {
+  workflowBagId: string;
+  inventoryBagId: string;
+  bagQrCode: string | null;
+  internalReceiptNumber: string | null;
+  tabletTypeName: string | null;
+  productName: string | null;
+  stage: string | null;
+  startedAt: Date | null;
+};
+
+export async function loadActiveRunsMissingAllocation(): Promise<
+  ActiveRunMissingAllocationRow[]
+> {
+  const candidates = await db
+    .select({
+      workflowBagId: workflowBags.id,
+      inventoryBagId: workflowBags.inventoryBagId,
+      bagQrCode: inventoryBags.bagQrCode,
+      internalReceiptNumber: inventoryBags.internalReceiptNumber,
+      tabletTypeName: tabletTypes.name,
+      productName: products.name,
+      stage: readBagState.stage,
+      startedAt: workflowBags.startedAt,
+    })
+    .from(workflowBags)
+    .innerJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .innerJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+    .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+    .leftJoin(products, eq(products.id, workflowBags.productId))
+    .where(eq(readBagState.isFinalized, false));
+  if (candidates.length === 0) return [];
+
+  const linked = await db
+    .select({ workflowBagId: rawBagAllocationSessions.workflowBagId })
+    .from(rawBagAllocationSessions)
+    .where(
+      inArray(
+        rawBagAllocationSessions.workflowBagId,
+        candidates.map((c) => c.workflowBagId),
+      ),
+    );
+  const linkedIds = new Set(linked.map((l) => l.workflowBagId));
+
+  return candidates
+    .filter((c) => !linkedIds.has(c.workflowBagId))
+    .map((c) => ({
+      workflowBagId: c.workflowBagId,
+      inventoryBagId: c.inventoryBagId as string,
+      bagQrCode: c.bagQrCode,
+      internalReceiptNumber: c.internalReceiptNumber,
+      tabletTypeName: c.tabletTypeName ?? null,
+      productName: c.productName ?? null,
+      stage: c.stage ?? null,
+      startedAt: c.startedAt as Date | null,
+    }))
+    .sort(
+      (a, b) => (b.startedAt?.getTime() ?? 0) - (a.startedAt?.getTime() ?? 0),
+    );
+}
+
 function sessionsByBagToPartial(
   sessions: Array<{
     allocationStatus: AllocationStatus;

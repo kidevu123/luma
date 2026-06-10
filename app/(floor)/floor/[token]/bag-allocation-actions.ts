@@ -30,6 +30,10 @@ import {
   withAccountabilityPayload,
 } from "@/lib/production/station-operator-session";
 import { resolveReopenStartingBalance, checkOverAllocation, deriveBagStatusAfterClose } from "@/lib/production/bag-allocation";
+import {
+  AllocationOpenBlockedError,
+  openAllocationSessionForBagStart,
+} from "@/lib/production/bag-allocation-auto-open";
 import { writeAudit } from "@/lib/db/audit";
 
 const UUID_RE =
@@ -580,6 +584,86 @@ export async function markBagDepletedAction(
     return { ok: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Deplete failed." };
+  }
+}
+
+// ── repairSourceAllocationAction ───────────────────────────────
+//
+// P0-ALLOC-REPAIR — Lead action on the station screen: open (or
+// reopen) the source allocation session for the CURRENT run when the
+// "Source bag allocation missing" warning shows. Requires a lead badge
+// so the repair carries named accountability. Uses the same shared
+// open helper as every start path — never a bespoke ledger write.
+
+const repairSchema = z.object({
+  token: z.string().regex(UUID_RE),
+  stationId: z.string().uuid(),
+  workflowBagId: z.string().uuid(),
+  inventoryBagId: z.string().uuid(),
+  leadCode: z.string().min(1).max(40),
+  clientEventId: z.string().regex(UUID_RE).optional(),
+});
+
+export async function repairSourceAllocationAction(
+  formData: FormData,
+): Promise<{ ok?: true; error?: string; sessionId?: string }> {
+  const parsed = repairSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    workflowBagId: formData.get("workflowBagId"),
+    inventoryBagId: formData.get("inventoryBagId"),
+    leadCode: formData.get("leadCode"),
+    clientEventId: formData.get("clientEventId") || undefined,
+  });
+  if (!parsed.success) {
+    return { error: "Enter the lead badge code to repair the allocation." };
+  }
+  const d = parsed.data;
+  try {
+    await authStation(d.token, d.stationId);
+    let sessionId = "";
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: d.stationId,
+        overrideEmployeeCode: d.leadCode,
+        sourceHint: "SUPERVISOR_OVERRIDE",
+      });
+      if (!accountability.accountableEmployeeId) {
+        throw new Error(
+          "Lead badge code not recognized — check the code and try again.",
+        );
+      }
+      const result = await openAllocationSessionForBagStart(tx, {
+        inventoryBagId: d.inventoryBagId,
+        workflowBagId: d.workflowBagId,
+        accountability,
+        source: "LEAD_REPAIR",
+        ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
+      });
+      sessionId = result.sessionId;
+      await writeAudit(
+        {
+          actorId: accountability.enteredByUserId ?? null,
+          actorRole: null,
+          action: "raw_bag.allocation_repaired",
+          targetType: "RawBagAllocationSession",
+          targetId: result.sessionId,
+          after: {
+            workflow_bag_id: d.workflowBagId,
+            inventory_bag_id: d.inventoryBagId,
+            reused_existing_session: result.reused,
+            lead_employee_id: accountability.accountableEmployeeId,
+          },
+        },
+        tx,
+      );
+    });
+    return { ok: true, sessionId };
+  } catch (err) {
+    if (err instanceof AllocationOpenBlockedError) {
+      return { error: err.message };
+    }
+    return { error: err instanceof Error ? err.message : "Repair failed." };
   }
 }
 
