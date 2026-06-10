@@ -9,11 +9,13 @@ function read(rel: string): string {
 }
 
 describe("partial-bags admin resolve workflow", () => {
-  it("partial-bags page shows Resolve inventory for Needs review rows", () => {
+  it("workbench shows Resolve inventory for missing-linkage rows", () => {
+    // P1-PARTIAL: page rebuilt as the sectioned Partial Bag Workbench —
+    // non-ready rows get a resolve action, never a Start run button.
     const page = read("app/(admin)/partial-bags/page.tsx");
     expect(page).toContain("Resolve inventory");
-    expect(page).toContain('row.eligibility === "missing_linkage"');
-    expect(page).toContain("Start run blocked");
+    expect(page).toContain('variant === "missing_linkage"');
+    expect(page).toContain('eligibility === "missing_linkage"');
   });
 
   it("resolve page requires lead access and shows context", () => {

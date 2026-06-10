@@ -2,9 +2,11 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ScanLine, Camera } from "lucide-react";
+import { ScanLine, Camera, RotateCcw } from "lucide-react";
 import { scanCardAction, lookupCardByTokenAction } from "./actions";
 import { CameraScanner } from "./camera-scanner";
+import { formatRemainingEstimate } from "@/lib/production/partial-bag-lifecycle";
+import type { PartialReuseContext } from "@/lib/production/partial-bags";
 
 export type EligibleCard = {
   id: string;
@@ -71,6 +73,15 @@ export function ScanCardForm({
   const [selectedCardId, setSelectedCardId] = React.useState("");
   const [productId, setProductId] = React.useState("");
 
+  // P1-PARTIAL — partial reuse confirmation panel state. Set when the
+  // server reports a partial bag needing explicit confirmation.
+  const [partialConfirm, setPartialConfirm] = React.useState<{
+    cardId: string;
+    productId: string | null;
+    context: PartialReuseContext;
+  } | null>(null);
+  const [partialSupervisorCode, setPartialSupervisorCode] = React.useState("");
+
   // Text scanner state
   const [scanInput, setScanInput] = React.useState("");
   const [scanError, setScanError] = React.useState<string | null>(null);
@@ -136,7 +147,11 @@ export function ScanCardForm({
   // explicitProductId overrides the productId state for the stale-closure
   // case (single auto-selected product called before setProductId settles).
   const submitWithCardId = React.useCallback(
-    async (cardId: string, explicitProductId?: string) => {
+    async (
+      cardId: string,
+      explicitProductId?: string,
+      partialReuse?: { confirm: true; supervisorCode: string },
+    ) => {
       setPending(true);
       setError(null);
       try {
@@ -146,9 +161,31 @@ export function ScanCardForm({
         fd.set("cardId", cardId);
         const pid = explicitProductId ?? productId;
         if (pid) fd.set("productId", pid);
+        if (partialReuse) {
+          fd.set("confirmPartialReuse", "true");
+          if (partialReuse.supervisorCode.trim()) {
+            fd.set(
+              "partialReuseSupervisorCode",
+              partialReuse.supervisorCode.trim(),
+            );
+          }
+        }
         const r = await scanCardAction(fd);
-        if (r?.error) setError(r.error);
-        else router.refresh();
+        if (r && "partialReuseConfirmationRequired" in r && r.partialContext) {
+          // P1-PARTIAL — show the confirmation panel; the operator
+          // reviews the bag's history then confirms the start.
+          setPartialConfirm({
+            cardId,
+            productId: pid || null,
+            context: r.partialContext,
+          });
+        } else if (r?.error) {
+          setError(r.error);
+        } else {
+          setPartialConfirm(null);
+          setPartialSupervisorCode("");
+          router.refresh();
+        }
       } catch {
         setError("Start failed — please try again or refresh the page.");
       } finally {
@@ -286,8 +323,23 @@ export function ScanCardForm({
           }
           try {
             const r = await scanCardAction(form);
-            if (r?.error) setError(r.error);
-            else router.refresh();
+            if (
+              r &&
+              "partialReuseConfirmationRequired" in r &&
+              r.partialContext
+            ) {
+              const cardId = String(form.get("cardId") ?? "");
+              setPartialConfirm({
+                cardId,
+                productId: productId || null,
+                context: r.partialContext,
+              });
+            } else if (r?.error) {
+              setError(r.error);
+            } else {
+              setPartialConfirm(null);
+              router.refresh();
+            }
           } catch {
             setError("Start failed — please try again or refresh the page.");
           } finally {
@@ -350,6 +402,103 @@ export function ScanCardForm({
               <span className="font-semibold">Scanned: </span>
               {scannedContext.detail}
             </p>
+          </div>
+        )}
+
+        {/* P1-PARTIAL — explicit partial reuse confirmation */}
+        {partialConfirm && (
+          <div className="rounded-lg border-2 border-amber-300 bg-amber-50/70 p-3 space-y-2">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+              <RotateCcw className="h-4 w-4" />
+              This is a partial bag
+            </p>
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-amber-900">
+              <dt className="text-amber-800/70">Previous product</dt>
+              <dd>{partialConfirm.context.previousProductName ?? "—"}</dd>
+              <dt className="text-amber-800/70">Previously consumed</dt>
+              <dd className="tabular-nums">
+                {partialConfirm.context.lastConsumedQty != null
+                  ? partialConfirm.context.lastConsumedQty.toLocaleString()
+                  : "unknown"}
+              </dd>
+              <dt className="text-amber-800/70">Estimated remaining</dt>
+              <dd className="tabular-nums font-medium">
+                {formatRemainingEstimate({
+                  remainingEstimate: partialConfirm.context.remainingEstimate,
+                  confidence: partialConfirm.context.remainingConfidence,
+                  source: partialConfirm.context.remainingSource,
+                })}
+              </dd>
+              <dt className="text-amber-800/70">Confidence</dt>
+              <dd>{partialConfirm.context.remainingConfidence ?? "—"}</dd>
+              <dt className="text-amber-800/70">Supplier lot</dt>
+              <dd className="font-mono text-[11px]">
+                {partialConfirm.context.supplierLot ?? "—"}
+              </dd>
+              <dt className="text-amber-800/70">Allocation history</dt>
+              <dd>
+                {partialConfirm.context.closedSessionCount} closed session
+                {partialConfirm.context.closedSessionCount === 1 ? "" : "s"}
+                {partialConfirm.context.lastClosedAt
+                  ? ` · last ${new Date(partialConfirm.context.lastClosedAt).toLocaleDateString("en-CA")}`
+                  : ""}
+              </dd>
+            </dl>
+            {(partialConfirm.context.remainingEstimate == null ||
+              partialConfirm.context.remainingConfidence === "LOW") && (
+              <p className="text-xs font-medium text-amber-900 bg-amber-100 border border-amber-300 rounded px-2 py-1.5">
+                Remaining quantity is{" "}
+                {partialConfirm.context.remainingEstimate == null
+                  ? "unknown"
+                  : "low confidence"}{" "}
+                — double-check the physical bag before starting.
+              </p>
+            )}
+            {partialConfirm.context.remainingConfidence === "LOW" && (
+              <label className="block">
+                <span className="block text-[11px] font-medium text-amber-900 mb-1">
+                  Supervisor badge code (required for low confidence)
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={partialSupervisorCode}
+                  onChange={(e) => setPartialSupervisorCode(e.target.value)}
+                  className="block w-full h-11 px-3 rounded-lg bg-surface border border-amber-300 text-base tabular-nums"
+                />
+              </label>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  setPartialConfirm(null);
+                  setPartialSupervisorCode("");
+                }}
+                className="h-11 rounded-lg border border-border bg-surface text-sm font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  pending ||
+                  (partialConfirm.context.remainingConfidence === "LOW" &&
+                    !partialSupervisorCode.trim())
+                }
+                onClick={async () => {
+                  await submitWithCardId(
+                    partialConfirm.cardId,
+                    partialConfirm.productId ?? undefined,
+                    { confirm: true, supervisorCode: partialSupervisorCode },
+                  );
+                }}
+                className="h-11 rounded-lg bg-amber-700 text-white text-sm font-semibold disabled:opacity-60"
+              >
+                {pending ? "Starting…" : "Confirm — start from partial"}
+              </button>
+            </div>
           </div>
         )}
 

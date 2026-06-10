@@ -27,12 +27,14 @@ describe("partial-bags resolve page", () => {
 });
 
 describe("partial-bags list page", () => {
-  it("handles null remaining source and confidence for Needs review rows", () => {
+  it("handles null remaining source and confidence honestly (workbench)", () => {
+    // P1-PARTIAL: the workbench renders remaining quantities via the
+    // honest formatter — unknowns say "closeout required" instead of a
+    // fake integer; non-HIGH values carry their provenance.
     const page = read("app/(admin)/partial-bags/page.tsx");
     expect(page).toMatch(/labelPartialBagEndingBalanceSource/);
-    expect(page).toMatch(/row\.eligibility === "ready" && sourceLabel/);
+    expect(page).toMatch(/formatRemainingEstimate/);
     expect(page).toMatch(/remainingEstimate == null/);
-    expect(page).toMatch(/Start run blocked/);
     expect(page).toMatch(/Resolve inventory/);
   });
 });

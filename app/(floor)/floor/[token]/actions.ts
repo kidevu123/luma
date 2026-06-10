@@ -19,7 +19,11 @@ import {
   workflowEvents,
 } from "@/lib/db/schema";
 import { canResumeFinalizedWorkflowOnInventoryBag } from "@/lib/production/partial-bag-restart";
-import type { PartialBagSession } from "@/lib/production/partial-bags";
+import {
+  loadPartialReuseContext,
+  type PartialBagSession,
+  type PartialReuseContext,
+} from "@/lib/production/partial-bags";
 import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
 import { batchProductionBlockReason } from "@/lib/production/batch-production-guard";
 import { loadRawBagStartClassificationForScan, RAW_BAG_START_OPERATOR_MESSAGES } from "@/lib/production/floor-partial-bag-start-resolution";
@@ -205,20 +209,91 @@ const scanSchema = z.object({
    *  resolver. When omitted the active station-operator-session
    *  defaults the accountable employee. */
   overrideEmployeeCode: z.string().max(40).optional().nullable(),
+  /** P1-PARTIAL — starting from a partial bag is an explicit flow:
+   *  the first scan returns the partial context and the operator must
+   *  confirm before the run opens. */
+  confirmPartialReuse: z.string().optional().nullable(),
+  /** Required when the partial's remaining confidence is LOW —
+   *  supervisor badge confirming the reuse. */
+  partialReuseSupervisorCode: z.string().max(40).optional().nullable(),
 });
+
+/** Thrown inside the scan transaction when a partial bag start needs
+ *  operator confirmation. Caught by scanCardAction and returned as a
+ *  structured response (NOT an error) so the floor shows the
+ *  confirmation panel. */
+class PartialReuseConfirmationRequiredError extends Error {
+  readonly context: PartialReuseContext;
+  constructor(context: PartialReuseContext) {
+    super("Partial bag — confirmation required before starting.");
+    this.name = "PartialReuseConfirmationRequiredError";
+    this.context = context;
+  }
+}
+
+/** P1-PARTIAL — gate for every partial-bag start path. Throws the
+ *  confirmation error on the first (unconfirmed) attempt, and enforces
+ *  the confidence model: LOW remaining requires a supervisor badge.
+ *  (MISSING/unknown remaining never reaches here — the restart guards
+ *  refuse it upstream.) */
+async function enforcePartialReuseConfirmation(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  args: {
+    inventoryBagId: string;
+    stationId: string;
+    confirmed: boolean;
+    supervisorCode: string | null;
+  },
+): Promise<void> {
+  const context = await loadPartialReuseContext(tx, args.inventoryBagId);
+  if (!args.confirmed) {
+    throw new PartialReuseConfirmationRequiredError(context);
+  }
+  if (context.remainingConfidence === "LOW") {
+    if (!args.supervisorCode?.trim()) {
+      throw new Error(
+        "This partial bag's remaining count is low confidence — a supervisor badge code is required to reuse it.",
+      );
+    }
+    const supervisor = await resolveStationAccountability(tx, {
+      stationId: args.stationId,
+      overrideEmployeeCode: args.supervisorCode,
+      sourceHint: "SUPERVISOR_OVERRIDE",
+    });
+    if (!supervisor.accountableEmployeeId) {
+      throw new Error(
+        "Supervisor badge code not recognized — check the code and try again.",
+      );
+    }
+  }
+}
 
 export async function scanCardAction(
   formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
+): Promise<
+  | {
+      error?: string;
+      ok?: true;
+      partialReuseConfirmationRequired?: true;
+      partialContext?: PartialReuseContext;
+    }
+  | void
+> {
   const parsed = scanSchema.safeParse({
     token: formData.get("token"),
     stationId: formData.get("stationId"),
     cardId: formData.get("cardId"),
     productId: formData.get("productId") || undefined,
     overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
+    confirmPartialReuse: formData.get("confirmPartialReuse") || undefined,
+    partialReuseSupervisorCode:
+      formData.get("partialReuseSupervisorCode") || undefined,
   });
   if (!parsed.success) return { error: "Invalid input." };
   const { token, stationId, cardId, overrideEmployeeCode } = parsed.data;
+  const partialReuseConfirmed = parsed.data.confirmPartialReuse === "true";
+  const partialReuseSupervisorCode =
+    parsed.data.partialReuseSupervisorCode ?? null;
   const pickedProductId =
     parsed.data.productId && parsed.data.productId !== ""
       ? parsed.data.productId
@@ -300,6 +375,16 @@ export async function scanCardAction(
 
         const partialRestart =
           idleLinkedStart?.status === "PARTIAL_READY";
+        if (partialRestart && idleLinkedStart?.inventoryBagId) {
+          // P1-PARTIAL — explicit reuse confirmation + LOW-confidence
+          // supervisor gate before the run opens.
+          await enforcePartialReuseConfirmation(tx, {
+            inventoryBagId: idleLinkedStart.inventoryBagId,
+            stationId: station.id,
+            confirmed: partialReuseConfirmed,
+            supervisorCode: partialReuseSupervisorCode,
+          });
+        }
         const readiness = await evaluateQrCardReadinessById(tx, cardId, {
           allowPartialBagRestart: partialRestart,
         });
@@ -426,6 +511,16 @@ export async function scanCardAction(
             throw new Error(
               RAW_BAG_START_OPERATOR_MESSAGES.PARTIAL_READY_WRONG_STATION,
             );
+          }
+          if (partialStart.inventoryBagId) {
+            // P1-PARTIAL — explicit reuse confirmation + LOW-confidence
+            // supervisor gate before the restart run opens.
+            await enforcePartialReuseConfirmation(tx, {
+              inventoryBagId: partialStart.inventoryBagId,
+              stationId: station.id,
+              confirmed: partialReuseConfirmed,
+              supervisorCode: partialReuseSupervisorCode,
+            });
           }
           const productLookup = pickedProductId
             ? (
@@ -586,6 +681,15 @@ export async function scanCardAction(
               "Bag is already finalized — scan a fresh card to start a new bag.",
             );
           }
+
+          // P1-PARTIAL — finalized-bag resume is a partial reuse too:
+          // confirmation + LOW-confidence supervisor gate.
+          await enforcePartialReuseConfirmation(tx, {
+            inventoryBagId: inventoryLinkForResume.inventoryBagId,
+            stationId: station.id,
+            confirmed: partialReuseConfirmed,
+            supervisorCode: partialReuseSupervisorCode,
+          });
 
           // Partial-bag resume: new workflow_bag; never copy product_id from
           // the finalized bag. Product is chosen at first-op or sealing.
@@ -873,6 +977,14 @@ export async function scanCardAction(
       throw new Error(`Card status ${card.status.toLowerCase()} is not scannable.`);
     });
   } catch (err) {
+    if (err instanceof PartialReuseConfirmationRequiredError) {
+      // Not a failure — the floor shows the partial confirmation panel
+      // and re-submits with confirmPartialReuse=true.
+      return {
+        partialReuseConfirmationRequired: true,
+        partialContext: err.context,
+      };
+    }
     return { error: err instanceof Error ? err.message : "Scan failed." };
   }
 

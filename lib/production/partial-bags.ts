@@ -477,6 +477,178 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
   return adminRows;
 }
 
+// ── P1-PARTIAL · explicit reuse confirmation context ────────────────
+//
+// Starting from a partial bag is an explicit flow: the operator must
+// see what the bag is before a new run opens. This context feeds the
+// floor confirmation panel (previous product/run, consumed, remaining
+// + confidence/source, supplier lot, allocation history).
+
+export type PartialReuseContext = {
+  previousProductName: string | null;
+  lastConsumedQty: number | null;
+  remainingEstimate: number | null;
+  remainingConfidence: string | null;
+  remainingSource: string | null;
+  supplierLot: string | null;
+  declaredPillCount: number | null;
+  closedSessionCount: number;
+  /** ISO string for client serialization. */
+  lastClosedAt: string | null;
+};
+
+// Accepts a transaction or the root db handle.
+type AnyDb = Pick<typeof db, "select">;
+
+export async function loadPartialReuseContext(
+  tx: AnyDb,
+  inventoryBagId: string,
+): Promise<PartialReuseContext> {
+  const sessionRows = await tx
+    .select({
+      allocationStatus: rawBagAllocationSessions.allocationStatus,
+      endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+      endingBalanceSource: rawBagAllocationSessions.endingBalanceSource,
+      confidence: rawBagAllocationSessions.confidence,
+      consumedQty: rawBagAllocationSessions.consumedQty,
+      closedAt: rawBagAllocationSessions.closedAt,
+      productName: products.name,
+    })
+    .from(rawBagAllocationSessions)
+    .leftJoin(products, eq(products.id, rawBagAllocationSessions.productId))
+    .where(eq(rawBagAllocationSessions.inventoryBagId, inventoryBagId))
+    .orderBy(asc(rawBagAllocationSessions.openedAt));
+
+  const [bagRow] = await tx
+    .select({
+      declaredPillCount: inventoryBags.declaredPillCount,
+      supplierLot: batches.batchNumber,
+    })
+    .from(inventoryBags)
+    .leftJoin(batches, eq(batches.id, inventoryBags.batchId))
+    .where(eq(inventoryBags.id, inventoryBagId))
+    .limit(1);
+
+  const sessions = sessionsByBagToPartial(
+    sessionRows.map((s) => ({
+      allocationStatus: s.allocationStatus as AllocationStatus,
+      endingBalanceQty: s.endingBalanceQty,
+      endingBalanceSource: s.endingBalanceSource,
+      confidence: s.confidence,
+      closedAt: s.closedAt,
+    })),
+  );
+  const provenance = deriveRemainingProvenance(sessions);
+  const closed = sessionRows
+    .filter(
+      (s) =>
+        s.allocationStatus === "CLOSED" ||
+        s.allocationStatus === "RETURNED_TO_STOCK" ||
+        s.allocationStatus === "DEPLETED",
+    )
+    .sort(
+      (a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0),
+    );
+  const last = closed[0] ?? null;
+
+  return {
+    previousProductName: last?.productName ?? null,
+    lastConsumedQty: last?.consumedQty ?? null,
+    remainingEstimate: deriveRemainingEstimate(sessions),
+    remainingConfidence: provenance.confidence,
+    remainingSource: provenance.source,
+    supplierLot: bagRow?.supplierLot ?? null,
+    declaredPillCount: bagRow?.declaredPillCount ?? null,
+    closedSessionCount: closed.length,
+    lastClosedAt: last?.closedAt ? last.closedAt.toISOString() : null,
+  };
+}
+
+// ── P1-PARTIAL · held / void / recently depleted bags ───────────────
+//
+// Workbench sections beyond the reusable set: bags on QA hold, voided
+// records, and recently depleted bags (14-day window so the section
+// stays scannable). Only bags with ≥1 allocation session OR a blocked
+// status are listed — fresh AVAILABLE bags don't belong here.
+
+export type HeldOrDepletedPartialBagRow = {
+  bagId: string;
+  bagQrCode: string | null;
+  internalReceiptNumber: string | null;
+  tabletTypeName: string | null;
+  supplierLot: string | null;
+  inventoryStatus: string;
+  lastNote: string | null;
+  lastClosedAt: Date | null;
+};
+
+export async function loadHeldAndDepletedPartialBags(): Promise<{
+  held: HeldOrDepletedPartialBagRow[];
+  depleted: HeldOrDepletedPartialBagRow[];
+}> {
+  const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({
+      bagId: inventoryBags.id,
+      bagQrCode: inventoryBags.bagQrCode,
+      internalReceiptNumber: inventoryBags.internalReceiptNumber,
+      tabletTypeName: tabletTypes.name,
+      supplierLot: batches.batchNumber,
+      inventoryStatus: inventoryBags.status,
+      lastNote: rawBagAllocationSessions.notes,
+      lastClosedAt: rawBagAllocationSessions.closedAt,
+    })
+    .from(inventoryBags)
+    .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+    .leftJoin(batches, eq(batches.id, inventoryBags.batchId))
+    .leftJoin(
+      rawBagAllocationSessions,
+      eq(rawBagAllocationSessions.inventoryBagId, inventoryBags.id),
+    )
+    .where(
+      inArray(inventoryBags.status, ["QUARANTINED", "VOID", "EMPTIED"]),
+    );
+
+  // Collapse the session join to the most recent closed session per bag.
+  const byBag = new Map<string, HeldOrDepletedPartialBagRow>();
+  for (const row of rows) {
+    const existing = byBag.get(row.bagId);
+    if (
+      !existing ||
+      (row.lastClosedAt?.getTime() ?? 0) >
+        (existing.lastClosedAt?.getTime() ?? 0)
+    ) {
+      byBag.set(row.bagId, {
+        bagId: row.bagId,
+        bagQrCode: row.bagQrCode,
+        internalReceiptNumber: row.internalReceiptNumber,
+        tabletTypeName: row.tabletTypeName ?? null,
+        supplierLot: row.supplierLot ?? null,
+        inventoryStatus: row.inventoryStatus,
+        lastNote: row.lastNote ?? null,
+        lastClosedAt: row.lastClosedAt ?? null,
+      });
+    }
+  }
+  const all = [...byBag.values()];
+  const held = all.filter(
+    (r) => r.inventoryStatus === "QUARANTINED" || r.inventoryStatus === "VOID",
+  );
+  const depleted = all.filter(
+    (r) =>
+      r.inventoryStatus === "EMPTIED" &&
+      r.lastClosedAt != null &&
+      r.lastClosedAt.getTime() >= cutoff.getTime(),
+  );
+  const byRecency = (
+    a: HeldOrDepletedPartialBagRow,
+    b: HeldOrDepletedPartialBagRow,
+  ) => (b.lastClosedAt?.getTime() ?? 0) - (a.lastClosedAt?.getTime() ?? 0);
+  held.sort(byRecency);
+  depleted.sort(byRecency);
+  return { held, depleted };
+}
+
 // ── P0-ALLOC-REPAIR · active runs missing source allocation ─────────
 //
 // Admin visibility for the floor's "Source bag allocation missing"

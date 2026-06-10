@@ -41,7 +41,7 @@ const SECTIONS: Section[] = [
   {
     heading: "Operations",
     items: [
-      { href: "/partial-bags",       label: "Available Partial Bags", icon: Archive },
+      { href: "/partial-bags",       label: "Partial Bag Workbench", icon: Archive },
       { href: "/inbound",            label: "Receiving",             icon: Inbox },
       { href: "/packaging-output",   label: "Production output",     icon: Package },
       { href: "/qc-review",          label: "QC review",             icon: ShieldAlert },
@@ -57,7 +57,7 @@ const SECTIONS: Section[] = [
       { href: "/zoho-production-operations", label: "Zoho output", icon: CloudUpload },
       { href: "/batches",             label: "Input lots",    icon: ShieldCheck },
       { href: "/workflow-submissions", label: "Workflows",    icon: ClipboardList },
-      { href: "/recall",              label: "Find lot",      icon: Search },
+      { href: "/recall",              label: "Traceability lookup", icon: Search },
     ],
   },
   {

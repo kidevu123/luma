@@ -172,6 +172,12 @@ export async function startProductionForRawBagAction(
     return { ok: false, error: "This raw bag has no QR card assigned. Assign a QR card at receiving before starting production." };
   }
   const partialSessions = await loadPartialBagSessionsForInventory(bag.id);
+  // P1-PARTIAL — admin starts are lead-gated (requireLead above), so a
+  // lead clicking Start IS the supervisor confirmation the confidence
+  // model requires for LOW partials. The Partial Bag Workbench shows
+  // the full reuse context (remaining, confidence, source, history)
+  // before this action is reachable. MISSING remaining never gets here:
+  // canRestartAvailablePartialRawBag refuses unknown ending balances.
   const partialBagRestart = canRestartAvailablePartialRawBag({
     inventoryStatus: bag.status,
     sessions: partialSessions,
