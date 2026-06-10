@@ -1,4 +1,4 @@
-// ZOHO-PURCHASE-RECEIVE-ID — parse purchase_receive_id from gateway responses.
+// ZOHO-PURCHASE-RECEIVE-ID — parse purchase receive fields from gateway responses.
 
 export function parseZohoPurchaseReceiveId(body: unknown): string | null {
   if (body == null || typeof body !== "object") return null;
@@ -14,8 +14,23 @@ export function parseZohoPurchaseReceiveId(body: unknown): string | null {
   const data = o.data;
   if (data != null && typeof data === "object") {
     const d = data as Record<string, unknown>;
-    const fromData = d.purchase_receive_id ?? d.receive_id;
+    const fromData =
+      d.zoho_purchase_receive_id ?? d.purchase_receive_id ?? d.receive_id;
     if (typeof fromData === "string" && fromData.trim()) return fromData.trim();
   }
   return null;
+}
+
+export function parseZohoReceiveNumber(body: unknown): string | null {
+  if (body == null || typeof body !== "object") return null;
+  const root = body as Record<string, unknown>;
+  const data =
+    root.data != null && typeof root.data === "object"
+      ? (root.data as Record<string, unknown>)
+      : root;
+  const num =
+    data.receive_number ??
+    data.purchase_receive_number ??
+    data.zoho_receive_number;
+  return typeof num === "string" && num.trim() ? num.trim() : null;
 }

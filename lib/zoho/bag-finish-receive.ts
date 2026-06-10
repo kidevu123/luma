@@ -25,7 +25,14 @@ import {
   callBagFinishReceivePreview,
   type BagFinishReceiveRequest,
 } from "@/lib/zoho/bag-finish-receive-client";
-import { parseZohoPurchaseReceiveId } from "@/lib/zoho/zoho-purchase-receive-id";
+import {
+  bagFinishCommitBlockedReason,
+  shouldPersistBagFinishCommitFailure,
+} from "@/lib/zoho/bag-finish-receive-commit-state";
+import {
+  parseZohoPurchaseReceiveId,
+  parseZohoReceiveNumber,
+} from "@/lib/zoho/zoho-purchase-receive-id";
 import { buildBagFinishReceiveIdempotencyKey } from "@/lib/zoho/source-receipt-evidence";
 import type { AssemblyServiceCallResult } from "@/lib/zoho/assembly-service-client";
 
@@ -57,20 +64,6 @@ export function buildBagFinishReceivePayload(
     receive_date: input.receiveDate,
     idempotency_key: buildBagFinishReceiveIdempotencyKey(input.inventoryBagId),
   };
-}
-
-function parseZohoReceiveNumber(body: unknown): string | null {
-  if (body == null || typeof body !== "object") return null;
-  const root = body as Record<string, unknown>;
-  const data =
-    root.data != null && typeof root.data === "object"
-      ? (root.data as Record<string, unknown>)
-      : root;
-  const num =
-    data.receive_number ??
-    data.purchase_receive_number ??
-    data.zoho_receive_number;
-  return typeof num === "string" && num.trim() ? num.trim() : null;
 }
 
 async function loadAllocationSnapshot(inventoryBagId: string) {
@@ -369,8 +362,10 @@ export async function commitBagFinishReceive(
   const result = await callBagFinishReceiveCommit(payload);
 
   if (!result.ok) {
-    await persistPreviewResult(inventoryBagId, result);
-    return { ok: false, reason: result.message };
+    if (shouldPersistBagFinishCommitFailure(result)) {
+      await persistPreviewResult(inventoryBagId, result);
+    }
+    return { ok: false, reason: bagFinishCommitBlockedReason(result) };
   }
 
   const zohoPurchaseReceiveId = parseZohoPurchaseReceiveId(result.body);
