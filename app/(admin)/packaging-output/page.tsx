@@ -19,16 +19,16 @@ import {
   products,
   readBagState,
   readBagMetrics,
-  finishedLots,
   inventoryBags,
 } from "@/lib/db/schema";
-import { eq, and, isNull, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
+import { listProductionOutputBacklogWithEligibility } from "@/lib/db/queries/production-output-backlog";
 import { MetricCard } from "@/components/production/metric-card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { Package, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
-import { evaluateBacklogAutoIssueForWorkflowBag } from "@/lib/db/queries/finished-lots";
-import { AutoIssueAllButton, IssueLotButton } from "./auto-issue-controls";
+import { BacklogRowActions } from "./backlog-row-actions";
+import { BacklogStatusChip } from "./backlog-status-chip";
 import {
   derivePoOutputComparison,
   listPoSummaries,
@@ -44,12 +44,15 @@ const FALLBACK = {
   label: "No data",
 };
 
+const LEAD_ROLES = new Set(["OWNER", "ADMIN", "MANAGER", "LEAD"]);
+
 export default async function PackagingOutputPage({
   searchParams,
 }: {
   searchParams?: Promise<{ poId?: string }>;
 }) {
-  await requireSession();
+  const user = await requireSession();
+  const canMutate = LEAD_ROLES.has(user.role);
   const range = lastNDays(7);
 
   // P3-PO-VIEW — PO-centric comparison (ordered vs received vs
@@ -92,34 +95,7 @@ export default async function PackagingOutputPage({
       .groupBy(readBagMetrics.productId, products.name, products.sku)
       .orderBy(sql`SUM(${readBagMetrics.unitsYielded}) DESC`),
 
-    // Finalized bags without a finished lot.
-    db
-      .select({
-        id: workflowBags.id,
-        receiptNumber: sql<string | null>`COALESCE(${inventoryBags.internalReceiptNumber}, ${workflowBags.receiptNumber})`,
-        finalizedAt: workflowBags.finalizedAt,
-        productName: products.name,
-        productSku: products.sku,
-        masterCases: readBagMetrics.masterCases,
-        displaysMade: readBagMetrics.displaysMade,
-        looseCards: readBagMetrics.looseCards,
-        unitsYielded: readBagMetrics.unitsYielded,
-      })
-      .from(workflowBags)
-      .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
-      .leftJoin(products, eq(products.id, workflowBags.productId))
-      .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
-      .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
-      .leftJoin(finishedLots, eq(finishedLots.workflowBagId, workflowBags.id))
-      .where(
-        and(
-          sql`${workflowBags.finalizedAt} IS NOT NULL`,
-          isNull(finishedLots.id),
-          sql`COALESCE(${readBagState.excludedFromOutput}, false) = false`,
-        ),
-      )
-      .orderBy(desc(workflowBags.finalizedAt))
-      .limit(100),
+    listProductionOutputBacklogWithEligibility(20),
 
     // PACKAGED (not finalized) bags.
     db
@@ -209,23 +185,6 @@ export default async function PackagingOutputPage({
         : "Missing data";
 
   const hasQueue = awaitingLot.length > 0 || awaitingFinalize.length > 0;
-
-  // P0-LOT-BACKLOG — per-row auto-issue readiness with explicit
-  // blockers (missing receipt / product / BOM / shelf life / allocation
-  // session / counts). Drives the Ready chips, per-row Issue lot, and
-  // the bulk sweep button.
-  const autoIssueEvaluations = new Map(
-    (
-      await Promise.all(
-        awaitingLot.map((bag) =>
-          evaluateBacklogAutoIssueForWorkflowBag(bag.id),
-        ),
-      )
-    ).map((e) => [e.workflowBagId, e] as const),
-  );
-  const autoIssueReadyCount = [...autoIssueEvaluations.values()].filter(
-    (e) => e.ok,
-  ).length;
 
   type MaterialBurnRow = {
     packaging_material_id: string;
@@ -518,7 +477,9 @@ export default async function PackagingOutputPage({
               : "All clear"}
           </h2>
           <p className="text-[11px] text-text-muted mt-0.5">
-            Full-bag packaging normally creates and releases the finished lot automatically. Rows here need admin review because a prerequisite was missing or the bag predates automation. PACKAGED bags are still on the floor awaiting finalization.
+            Full-bag packaging normally creates and releases the finished lot automatically.
+            Each row shows the exact blocker and the next safe action. PACKAGED bags are still
+            on the floor awaiting finalization.
           </p>
         </div>
         <div className="px-4 py-4">
@@ -532,18 +493,10 @@ export default async function PackagingOutputPage({
             <div className="space-y-5">
               {/* Sub-section 1: Finalized bags awaiting lot */}
               <div>
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <div className="flex items-baseline gap-2">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
-                      Finalized — needs lot review
-                    </div>
-                    {awaitingLot.some((b) => !b.productName) && (
-                      <span className="text-[10px] text-text-subtle">· product blank = bag not yet mapped via PRODUCT_MAPPED event</span>
-                    )}
+                <div className="flex items-baseline gap-2 mb-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
+                    Finalized — awaiting lot
                   </div>
-                  {awaitingLot.length > 0 && (
-                    <AutoIssueAllButton readyCount={autoIssueReadyCount} />
-                  )}
                 </div>
                 {awaitingLot.length === 0 ? (
                   <p className="text-[12px] text-text-muted">None — all finalized bags have lots.</p>
@@ -560,14 +513,13 @@ export default async function PackagingOutputPage({
                           <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Sellable units</th>
                           <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Finalized at</th>
                           <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Auto-issue status</th>
+                          <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Next step</th>
                           <th className="text-left py-1.5 font-medium text-text-muted text-[11px] uppercase tracking-wide">Action</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {awaitingLot.map((bag) => {
-                          const evaluation = autoIssueEvaluations.get(bag.id);
-                          return (
-                          <tr key={bag.id} className="border-b border-border/30 last:border-0">
+                        {awaitingLot.map((bag) => (
+                          <tr key={bag.workflowBagId} className="border-b border-border/30 last:border-0">
                             <td className="py-2 pr-4 font-mono text-[11.5px] text-text-strong">
                               {bag.receiptNumber ?? <span className="text-text-subtle">—</span>}
                             </td>
@@ -583,45 +535,32 @@ export default async function PackagingOutputPage({
                             <td className="py-2 pr-4 text-right tabular-nums text-text-strong">{bag.unitsYielded ?? "—"}</td>
                             <td className="py-2 pr-4 text-[11.5px] text-text-muted tabular-nums whitespace-nowrap">
                               {bag.finalizedAt
-                                ? new Date(bag.finalizedAt).toLocaleString(undefined, {
-                                    month: "short",
-                                    day: "numeric",
-                                    hour: "numeric",
-                                    minute: "2-digit",
-                                  })
+                                ? formatDateTimeEst(bag.finalizedAt)
                                 : "—"}
                             </td>
                             <td className="py-2 pr-4">
-                              {evaluation?.ok ? (
-                                <span className="inline-flex rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-800">
-                                  Ready · lot {evaluation.finishedLotNumber}
-                                </span>
-                              ) : (
-                                <div className="max-w-[18rem]">
-                                  <span className="inline-flex rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900">
-                                    {evaluation?.reason?.replace(/_/g, " ").toLowerCase() ?? "unknown"}
-                                  </span>
-                                  <p className="mt-0.5 text-[10px] text-text-muted leading-snug">
-                                    {evaluation?.message}
-                                  </p>
+                              <BacklogStatusChip
+                                label={bag.evaluation.label}
+                                code={bag.evaluation.code}
+                              />
+                              {bag.evaluation.expectedConsumedQty != null ? (
+                                <div className="mt-1 text-[10px] text-text-subtle tabular-nums">
+                                  Est. {bag.evaluation.expectedConsumedQty.toLocaleString()} tablets
                                 </div>
-                              )}
+                              ) : null}
+                            </td>
+                            <td className="py-2 pr-4 text-[11.5px] text-text-muted">
+                              {bag.evaluation.nextStep}
                             </td>
                             <td className="py-2">
-                              {evaluation?.ok ? (
-                                <IssueLotButton workflowBagId={bag.id} />
-                              ) : (
-                                <Link
-                                  href={`/finished-lots/new?bagId=${encodeURIComponent(bag.id)}`}
-                                  className="inline-flex items-center gap-1 rounded-md border border-warn-500/40 bg-warn-50/60 px-2.5 py-1 text-[11.5px] font-medium text-warn-700 hover:bg-warn-50 transition-colors"
-                                >
-                                  Review / issue lot
-                                </Link>
-                              )}
+                              <BacklogRowActions
+                                workflowBagId={bag.workflowBagId}
+                                evaluation={bag.evaluation}
+                                canMutate={canMutate}
+                              />
                             </td>
                           </tr>
-                          );
-                        })}
+                        ))}
                       </tbody>
                     </table>
                   </div>

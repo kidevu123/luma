@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireLead, requireAdmin } from "@/lib/auth-guards";
 import {
   createFinishedLot,
+  repairAutoIssueFinishedLotForWorkflowBag,
   setFinishedLotStatus,
   type FinishedLotStatus,
 } from "@/lib/db/queries/finished-lots";
@@ -58,6 +59,9 @@ const coordinatedLotSchema = lotSchema.extend({
   workflowBagId: z.string().uuid(),
   consumedQty: z.coerce.number().int().positive(),
   endingBalanceQty: z.coerce.number().int().min(0),
+  repairMissingAllocation: z.boolean().optional(),
+  repairNotes: z.string().max(2000).optional().nullable(),
+  repairStartingBalanceQty: z.coerce.number().int().positive().optional().nullable(),
 });
 
 /** LEAD: create finished lot + close allocation in one transaction. */
@@ -82,6 +86,9 @@ export async function issueFinishedLotWithAllocationAndRedirect(payload: unknown
         notes: d.notes ?? null,
         consumedQty: d.consumedQty,
         endingBalanceQty: d.endingBalanceQty,
+        repairMissingAllocation: d.repairMissingAllocation ?? false,
+        repairNotes: d.repairNotes ?? null,
+        repairStartingBalanceQty: d.repairStartingBalanceQty ?? null,
       },
       actor,
     );
@@ -101,6 +108,23 @@ const statusSchema = z.object({
   status: z.enum(["PENDING_QC", "RELEASED", "ON_HOLD", "SHIPPED", "RECALLED"]),
   reason: z.string().max(500).optional(),
 });
+
+export async function repairAutoIssueFinishedLotAction(workflowBagId: string) {
+  const actor = await requireLead();
+  try {
+    const result = await repairAutoIssueFinishedLotForWorkflowBag(workflowBagId, actor);
+    if (!result.ok) return { error: result.message, reason: result.reason };
+    revalidatePath("/packaging-output");
+    revalidatePath("/finished-lots");
+    return {
+      ok: true as const,
+      finishedLotId: result.finishedLotId,
+      finishedLotNumber: result.finishedLotNumber,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Repair auto-issue failed." };
+  }
+}
 
 export async function setFinishedLotStatusAction(payload: unknown) {
   const actor = await requireAdmin();

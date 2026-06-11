@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, isNull, sql, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, isNull, isNotNull, sql, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   finishedLots,
@@ -14,11 +14,18 @@ import {
   readBagMetrics,
   readBagState,
   rawBagAllocationSessions,
+  zohoProductionOutputOps,
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
 import { projectEvent } from "@/lib/projector";
 import { projectFinishedLotPassportForLot } from "@/lib/projector/finished-lot-passport";
+import { closeAllocationForProductionOutputInTx } from "@/lib/production/raw-bag-allocation-lifecycle";
+import { computeExpectedTabletConsumptionFromProduct } from "@/lib/production/expected-tablet-consumption";
+import {
+  assertAutoLotRepairAllowed,
+  evaluateAutoLotBacklogRow,
+} from "@/lib/production/auto-lot-backlog-eligibility";
 import { runZohoAssemblyEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-after-lot-create";
 import { runProductionOutputEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-production-output-after-lot-create";
 import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
@@ -87,7 +94,18 @@ export type AutoFinishedLotReleaseResult =
         | "WORKFLOW_BAG_NOT_FOUND"
         | "LOT_NUMBER_CONFLICT"
         | "OPEN_ALLOCATION_SESSION"
-        | "MISSING_ALLOCATION_SESSION";
+        | "MISSING_ALLOCATION_SESSION"
+        | "MISSING_TABLETS_PER_UNIT"
+        | "MISSING_OUTPUT_QUANTITY"
+        | "MISSING_STARTING_BALANCE"
+        | "NEGATIVE_ENDING_BALANCE"
+        | "MISSING_INVENTORY_BAG"
+        | "ALLOCATION_CLOSE_FAILED"
+        | "MULTIPLE_SOURCE_BAGS_NEED_REVIEW"
+        | "OPEN_ALLOCATION_ON_OTHER_WORKFLOW"
+        | "FINISHED_LOT_EXISTS"
+        | "ZOHO_OUTPUT_COMMITTED"
+        | "MANUAL_REVIEW_REQUIRED";
       message: string;
     };
 
@@ -531,6 +549,7 @@ export async function autoCreateAndReleaseFinishedLotForWorkflowBag(
       productDefaultShelfLifeDays: products.defaultShelfLifeDays,
       unitsPerDisplay: products.unitsPerDisplay,
       displaysPerCase: products.displaysPerCase,
+      tabletsPerUnit: products.tabletsPerUnit,
     })
     .from(workflowBags)
     .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
@@ -543,39 +562,6 @@ export async function autoCreateAndReleaseFinishedLotForWorkflowBag(
       reason: "WORKFLOW_BAG_NOT_FOUND",
       message: "Packaging finalized, but the workflow bag could not be found.",
     };
-  }
-
-  if (bag.inventoryBagId) {
-    // P0-ALLOC — closeout is required before lot issuance: an OPEN
-    // session blocks (close it at the floor), and a bag with NO session
-    // at all blocks too (legacy run — a lead repairs the allocation from
-    // the station screen, or an admin resolves it on Partial bags).
-    const sessions = await tx
-      .select({
-        id: rawBagAllocationSessions.id,
-        allocationStatus: rawBagAllocationSessions.allocationStatus,
-      })
-      .from(rawBagAllocationSessions)
-      .where(
-        eq(rawBagAllocationSessions.inventoryBagId, bag.inventoryBagId),
-      );
-    if (sessions.some((s) => s.allocationStatus === "OPEN")) {
-      return {
-        ok: false,
-        reason: "OPEN_ALLOCATION_SESSION",
-        message:
-          "Packaging finalized, but the source raw bag still has an open allocation session.",
-      };
-    }
-    if (sessions.length === 0) {
-      return {
-        ok: false,
-        reason: "MISSING_ALLOCATION_SESSION",
-        message:
-          "The source raw bag has no allocation session, so consumed quantity is unknown. " +
-          "Repair the allocation from the station screen (lead) or resolve the bag on Partial bags, then issue the lot.",
-      };
-    }
   }
 
   const draft = buildAutoFinishedLotDraft({
@@ -595,6 +581,39 @@ export async function autoCreateAndReleaseFinishedLotForWorkflowBag(
       ok: false,
       reason: "MISSING_PRODUCT",
       message: "Packaging finalized, but no finished product is mapped to this bag.",
+    };
+  }
+
+  const consumption = computeExpectedTabletConsumptionFromProduct(
+    bag.tabletsPerUnit,
+    draft.unitsProduced,
+  );
+  if (!consumption.ok) {
+    return {
+      ok: false,
+      reason: consumption.blocker,
+      message: consumption.message,
+    };
+  }
+
+  if (!bag.inventoryBagId) {
+    return {
+      ok: false,
+      reason: "MISSING_INVENTORY_BAG",
+      message: "Packaging finalized, but no source inventory bag is linked.",
+    };
+  }
+
+  const [invBag] = await tx
+    .select({ batchId: inventoryBags.batchId })
+    .from(inventoryBags)
+    .where(eq(inventoryBags.id, bag.inventoryBagId))
+    .limit(1);
+  if (!invBag?.batchId) {
+    return {
+      ok: false,
+      reason: "MISSING_INVENTORY_BAG",
+      message: "Source inventory bag has no batch linkage.",
     };
   }
 
@@ -640,17 +659,48 @@ export async function autoCreateAndReleaseFinishedLotForWorkflowBag(
           displaysProduced: draft.displaysProduced,
           casesProduced: draft.casesProduced,
           notes: "Auto-created from packaging close-out.",
+          inputs: [
+            {
+              batchId: invBag.batchId,
+              qtyConsumed: consumption.expectedConsumed,
+            },
+          ],
         },
         args.actor,
         {
           traceCode: draft.finishedLotNumber,
           packedAt: args.packagedAt,
           expiresAt: draft.expiresAt,
+          skipOpenAllocationSessionCheck: true,
+          skipAllocationSessionLink: true,
         },
       )
     ).lot;
 
   if (!existingForBag) {
+    const allocationClose = await closeAllocationForProductionOutputInTx(tx, {
+      workflowBagId: args.workflowBagId,
+      productId: bag.productId,
+      unitsProduced: draft.unitsProduced,
+      finishedLotId: lot.id,
+      allowRepairOpen: true,
+      consumedQtySource: "OUTPUT_DERIVED",
+      endingBalanceSource: "OUTPUT_DERIVED",
+      notes: "Auto-closed after packaging close-out.",
+      actor: args.actor,
+    });
+    if (!allocationClose.ok) {
+      const blockedReason = allocationClose.code as Extract<
+        AutoFinishedLotReleaseResult,
+        { ok: false }
+      >["reason"];
+      return {
+        ok: false,
+        reason: blockedReason,
+        message: allocationClose.error,
+      };
+    }
+
     effects.push({
       kind: "created",
       finishedLotId: lot.id,
@@ -683,155 +733,220 @@ export async function autoCreateAndReleaseFinishedLotForWorkflowBag(
   };
 }
 
-// ---------------------------------------------------------------------------
-// P0-LOT-BACKLOG — "Needs lot review" backlog auto-issue
-// ---------------------------------------------------------------------------
-
-export type BacklogAutoIssueBlockerReason =
-  | Extract<AutoFinishedLotReleaseResult, { ok: false }>["reason"]
-  | "NOT_FINALIZED"
-  | "ALREADY_HAS_LOT"
-  | "EXCLUDED_FROM_OUTPUT"
-  | "MISSING_COUNTS";
-
-export type BacklogAutoIssueEvaluation =
-  | {
-      ok: true;
-      workflowBagId: string;
-      packagedAt: Date;
-      counts: PackagingFinishedLotCounts;
-      finishedLotNumber: string;
-      unitsProduced: number;
-    }
-  | {
-      ok: false;
-      workflowBagId: string;
-      reason: BacklogAutoIssueBlockerReason;
-      message: string;
-    };
-
-/**
- * Read-only readiness check for a finalized-without-lot bag. Mirrors
- * autoCreateAndReleaseFinishedLotForWorkflowBag's validation so the
- * Production Output backlog can show explicit per-row blockers instead
- * of forcing a manual "Review / issue lot" on every row.
- */
-export async function evaluateBacklogAutoIssueForWorkflowBag(
+/** Load eligibility inputs and evaluate repair/auto-issue safety (read-only). */
+export async function evaluateRepairAutoIssueEligibility(
   workflowBagId: string,
-): Promise<BacklogAutoIssueEvaluation> {
-  const blocked = (
-    reason: BacklogAutoIssueBlockerReason,
-    message: string,
-  ): BacklogAutoIssueEvaluation => ({ ok: false, workflowBagId, reason, message });
-
+) {
   const [bag] = await db
     .select({
-      id: workflowBags.id,
+      workflowBagId: workflowBags.id,
       productId: workflowBags.productId,
-      finalizedAt: workflowBags.finalizedAt,
-      workflowReceiptNumber: workflowBags.receiptNumber,
+      productName: products.name,
       inventoryBagId: workflowBags.inventoryBagId,
       inventoryReceiptNumber: inventoryBags.internalReceiptNumber,
-      productDefaultShelfLifeDays: products.defaultShelfLifeDays,
+      workflowReceiptNumber: workflowBags.receiptNumber,
+      inventoryPillCount: inventoryBags.pillCount,
+      tabletsPerUnit: products.tabletsPerUnit,
       unitsPerDisplay: products.unitsPerDisplay,
       displaysPerCase: products.displaysPerCase,
-      excludedFromOutput: readBagState.excludedFromOutput,
+      defaultShelfLifeDays: products.defaultShelfLifeDays,
       masterCases: readBagMetrics.masterCases,
       displaysMade: readBagMetrics.displaysMade,
       looseCards: readBagMetrics.looseCards,
-      existingLotId: finishedLots.id,
+      unitsYielded: readBagMetrics.unitsYielded,
+      finalizedAt: workflowBags.finalizedAt,
+      excludedFromOutput: readBagState.excludedFromOutput,
     })
     .from(workflowBags)
     .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
     .leftJoin(products, eq(products.id, workflowBags.productId))
-    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
     .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
-    .leftJoin(finishedLots, eq(finishedLots.workflowBagId, workflowBags.id))
-    .where(eq(workflowBags.id, workflowBagId));
+    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .where(eq(workflowBags.id, workflowBagId))
+    .limit(1);
 
-  if (!bag) {
-    return blocked("WORKFLOW_BAG_NOT_FOUND", "Workflow bag not found.");
-  }
-  if (bag.existingLotId) {
-    return blocked("ALREADY_HAS_LOT", "A finished lot already exists for this bag.");
-  }
-  if (!bag.finalizedAt) {
-    return blocked(
-      "NOT_FINALIZED",
-      "Bag is not finalized yet — finish the run on the floor first.",
-    );
-  }
-  if (bag.excludedFromOutput) {
-    return blocked(
-      "EXCLUDED_FROM_OUTPUT",
-      "Bag was recovered as wrong-route/voided — excluded from valid output.",
-    );
-  }
+  if (!bag) return null;
 
-  const counts: PackagingFinishedLotCounts = {
-    masterCases: bag.masterCases ?? 0,
-    displaysMade: bag.displaysMade ?? 0,
-    looseCards: bag.looseCards ?? 0,
-  };
-  if (counts.masterCases + counts.displaysMade + counts.looseCards === 0) {
-    return blocked(
-      "MISSING_COUNTS",
-      "No packaging counts were recorded for this bag — correct the packaging submission first.",
-    );
-  }
+  const [existingLot] = await db
+    .select({ id: finishedLots.id })
+    .from(finishedLots)
+    .where(eq(finishedLots.workflowBagId, workflowBagId))
+    .limit(1);
+
+  const [zohoCommitted] = await db
+    .select({ id: zohoProductionOutputOps.id })
+    .from(zohoProductionOutputOps)
+    .where(
+      and(
+        eq(zohoProductionOutputOps.workflowBagId, workflowBagId),
+        isNotNull(zohoProductionOutputOps.committedAt),
+      ),
+    )
+    .limit(1);
+
+  let openForWorkflow: {
+    id: string;
+    startingBalanceQty: number | null;
+  } | null = null;
+  let openOnOtherWorkflow = false;
+  let lastClosed: {
+    endingBalanceQty: number | null;
+    startingBalanceQty: number | null;
+    consumedQty: number | null;
+  } | null = null;
 
   if (bag.inventoryBagId) {
-    const sessions = await db
-      .select({ allocationStatus: rawBagAllocationSessions.allocationStatus })
+    const openSessions = await db
+      .select({
+        id: rawBagAllocationSessions.id,
+        workflowBagId: rawBagAllocationSessions.workflowBagId,
+        startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
+      })
       .from(rawBagAllocationSessions)
-      .where(eq(rawBagAllocationSessions.inventoryBagId, bag.inventoryBagId));
-    if (sessions.some((s) => s.allocationStatus === "OPEN")) {
-      return blocked(
-        "OPEN_ALLOCATION_SESSION",
-        "Source raw bag still has an open allocation session — close it out at the floor.",
+      .where(
+        and(
+          eq(rawBagAllocationSessions.inventoryBagId, bag.inventoryBagId),
+          eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+        ),
       );
-    }
-    if (sessions.length === 0) {
-      return blocked(
-        "MISSING_ALLOCATION_SESSION",
-        "Source raw bag has no allocation session — repair from the station screen (lead) or resolve on Partial bags.",
-      );
-    }
+    openForWorkflow =
+      openSessions.find((s) => s.workflowBagId === workflowBagId) ?? null;
+    openOnOtherWorkflow = openSessions.some(
+      (s) => s.workflowBagId != null && s.workflowBagId !== workflowBagId,
+    );
+
+    const [closed] = await db
+      .select({
+        endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+        startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
+        consumedQty: rawBagAllocationSessions.consumedQty,
+      })
+      .from(rawBagAllocationSessions)
+      .where(
+        and(
+          eq(rawBagAllocationSessions.inventoryBagId, bag.inventoryBagId),
+          inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+        ),
+      )
+      .orderBy(desc(rawBagAllocationSessions.closedAt))
+      .limit(1);
+    lastClosed = closed ?? null;
   }
 
-  const packagedAt = new Date(bag.finalizedAt as unknown as string);
-  const draft = buildAutoFinishedLotDraft({
-    productId: bag.productId,
-    unitsPerDisplay: bag.unitsPerDisplay,
-    displaysPerCase: bag.displaysPerCase,
-    defaultShelfLifeDays: bag.productDefaultShelfLifeDays,
-    inventoryReceiptNumber: bag.inventoryReceiptNumber,
-    workflowReceiptNumber: bag.workflowReceiptNumber,
-    packagedAt,
-    counts,
-  });
-  if (!draft.ok) return blocked(draft.reason, draft.message);
-
-  const [lotNumberConflict] = await db
-    .select({ id: finishedLots.id, workflowBagId: finishedLots.workflowBagId })
-    .from(finishedLots)
-    .where(eq(finishedLots.finishedLotNumber, draft.finishedLotNumber))
-    .limit(1);
-  if (lotNumberConflict && lotNumberConflict.workflowBagId !== workflowBagId) {
-    return blocked(
-      "LOT_NUMBER_CONFLICT",
-      `Finished lot ${draft.finishedLotNumber} already exists for another workflow bag.`,
+  let lotNumberConflict = false;
+  const receipt =
+    bag.inventoryReceiptNumber ?? bag.workflowReceiptNumber ?? null;
+  if (receipt) {
+    const [conflict] = await db
+      .select({ workflowBagId: finishedLots.workflowBagId })
+      .from(finishedLots)
+      .where(eq(finishedLots.finishedLotNumber, receipt))
+      .limit(1);
+    lotNumberConflict = Boolean(
+      conflict && conflict.workflowBagId !== workflowBagId,
     );
   }
 
-  return {
-    ok: true,
-    workflowBagId,
-    packagedAt,
-    counts,
-    finishedLotNumber: draft.finishedLotNumber,
-    unitsProduced: draft.unitsProduced,
-  };
+  const evaluation = evaluateAutoLotBacklogRow({
+    workflowBagId: bag.workflowBagId,
+    productId: bag.productId,
+    productName: bag.productName,
+    inventoryBagId: bag.inventoryBagId,
+    ambiguousSourceBagCount: bag.inventoryBagId ? 1 : 0,
+    inventoryPillCount: bag.inventoryPillCount,
+    lastClosedSessionEndingBalance: lastClosed?.endingBalanceQty ?? null,
+    lastClosedSessionStartingBalance: lastClosed?.startingBalanceQty ?? null,
+    lastClosedSessionConsumedQty: lastClosed?.consumedQty ?? null,
+    tabletsPerUnit: bag.tabletsPerUnit,
+    unitsPerDisplay: bag.unitsPerDisplay,
+    displaysPerCase: bag.displaysPerCase,
+    defaultShelfLifeDays: bag.defaultShelfLifeDays,
+    inventoryReceiptNumber: bag.inventoryReceiptNumber,
+    workflowReceiptNumber: bag.workflowReceiptNumber,
+    unitsYielded: bag.unitsYielded,
+    counts: {
+      masterCases: bag.masterCases ?? 0,
+      displaysMade: bag.displaysMade ?? 0,
+      looseCards: bag.looseCards ?? 0,
+    },
+    finalizedAt: bag.finalizedAt,
+    excludedFromOutput: bag.excludedFromOutput ?? false,
+    hasFinishedLot: Boolean(existingLot),
+    openAllocationSessionId: openForWorkflow?.id ?? null,
+    openAllocationStartingBalance: openForWorkflow?.startingBalanceQty ?? null,
+    openAllocationOnOtherWorkflow: openOnOtherWorkflow,
+    zohoOutputCommitted: Boolean(zohoCommitted),
+    lotNumberConflict,
+  });
+
+  return { bag, evaluation };
+}
+
+/** Backlog repair: auto-issue a finalized bag that missed packaging auto-lot. */
+export async function repairAutoIssueFinishedLotForWorkflowBag(
+  workflowBagId: string,
+  actor: FinishedLotAuditActor,
+): Promise<AutoFinishedLotReleaseResult> {
+  const eligibility = await evaluateRepairAutoIssueEligibility(workflowBagId);
+  if (!eligibility) {
+    return {
+      ok: false,
+      reason: "WORKFLOW_BAG_NOT_FOUND",
+      message: "Workflow bag not found.",
+    };
+  }
+
+  const allowed = assertAutoLotRepairAllowed(eligibility.evaluation);
+  if (!allowed.ok) {
+    return {
+      ok: false,
+      reason: allowed.code as Extract<
+        AutoFinishedLotReleaseResult,
+        { ok: false }
+      >["reason"],
+      message: allowed.message,
+    };
+  }
+
+  const result = await db.transaction(async (tx) => {
+    const { bag } = eligibility;
+    if (!bag.finalizedAt) {
+      return {
+        ok: false as const,
+        reason: "WORKFLOW_BAG_NOT_FOUND" as const,
+        message: "Bag is not finalized or could not be loaded.",
+      };
+    }
+
+    return autoCreateAndReleaseFinishedLotForWorkflowBag(tx, {
+      workflowBagId,
+      packagedAt: bag.finalizedAt,
+      counts: {
+        masterCases: bag.masterCases ?? 0,
+        displaysMade: bag.displaysMade ?? 0,
+        looseCards: bag.looseCards ?? 0,
+      },
+      actor,
+    });
+  });
+
+  if (result.ok) {
+    await runFinishedLotPostCommitEffects(result.effects);
+    await writeAudit({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action: "finished_lot.repair_auto_issue",
+      targetType: "WorkflowBag",
+      targetId: workflowBagId,
+      after: {
+        finishedLotId: result.finishedLotId,
+        finishedLotNumber: result.finishedLotNumber,
+        blockerCode: eligibility.evaluation.code,
+      },
+    });
+  }
+
+  return result;
 }
 
 export type FinishedLotStatus =

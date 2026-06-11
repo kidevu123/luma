@@ -1,16 +1,54 @@
 import { describe, expect, it } from "vitest";
+import { deriveIssueLotPrefill } from "@/lib/production/issue-lot-with-allocation-closeout";
 import {
-  computeExpectedTabletConsumption,
-} from "@/lib/zoho/v1206-choco-drift-pilot-contract";
+  computeExpectedTabletConsumptionFromProduct,
+} from "@/lib/production/expected-tablet-consumption";
 import { CHOCO_DRIFT_SKU } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
+import { computeExpectedTabletConsumption } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 
-describe("computeExpectedTabletConsumption", () => {
-  it("Choco Drift expects 4 tablets per finished unit", () => {
+describe("computeExpectedTabletConsumptionFromProduct", () => {
+  it("general product math replaces SKU-only pilot helper", () => {
+    expect(computeExpectedTabletConsumptionFromProduct(4, 100)).toEqual({
+      ok: true,
+      expectedConsumed: 400,
+      tabletsPerUnit: 4,
+      unitsProduced: 100,
+    });
     expect(computeExpectedTabletConsumption(CHOCO_DRIFT_SKU, 100)).toBe(400);
   });
+});
 
-  it("non-Choco SKU returns null", () => {
-    expect(computeExpectedTabletConsumption("OTHER-SKU", 100)).toBeNull();
+describe("deriveIssueLotPrefill", () => {
+  it("prefills consumed and ending from product structure", () => {
+    expect(
+      deriveIssueLotPrefill({
+        tabletsPerUnit: 1,
+        unitsProduced: 4002,
+        startingBalanceQty: 5000,
+      }),
+    ).toEqual({
+      expected: {
+        ok: true,
+        expectedConsumed: 4002,
+        tabletsPerUnit: 1,
+        unitsProduced: 4002,
+      },
+      consumedQty: 4002,
+      endingBalanceQty: 998,
+    });
+  });
+
+  it("does not fabricate consumed qty when product math is unavailable", () => {
+    expect(
+      deriveIssueLotPrefill({
+        tabletsPerUnit: null,
+        unitsProduced: 100,
+        startingBalanceQty: 5000,
+      }),
+    ).toMatchObject({
+      consumedQty: null,
+      endingBalanceQty: null,
+    });
   });
 });
 

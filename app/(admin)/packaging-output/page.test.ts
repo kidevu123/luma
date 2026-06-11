@@ -10,25 +10,26 @@ const pageSrc = readFileSync(
 );
 
 describe("packaging-output page receipt wiring", () => {
-  it("COALESCEs inventory internal receipt over legacy workflow denorm", () => {
-    expect(pageSrc).toMatch(
-      /COALESCE\(\$\{inventoryBags\.internalReceiptNumber\},\s*\$\{workflowBags\.receiptNumber\}\)/,
-    );
-    expect(pageSrc).toMatch(
-      /leftJoin\(inventoryBags,\s*eq\(inventoryBags\.id,\s*workflowBags\.inventoryBagId\)\)/,
-    );
+  it("loads backlog rows with eligibility evaluation", () => {
+    expect(pageSrc).toContain("listProductionOutputBacklogWithEligibility");
+    expect(pageSrc).toContain("BacklogStatusChip");
+    expect(pageSrc).toContain("BacklogRowActions");
   });
 
-  it("labels finalized bags without lots as admin review exceptions", () => {
-    expect(pageSrc).toContain(
-      "Full-bag packaging normally creates and releases the finished lot automatically.",
-    );
-    expect(pageSrc).toContain("Finalized — needs lot review");
-    expect(pageSrc).toContain("Review / issue lot");
+  it("shows auto-issue status and next step columns", () => {
+    expect(pageSrc).toContain("Auto-issue status");
+    expect(pageSrc).toContain("Next step");
+    expect(pageSrc).toContain("bag.evaluation.label");
+    expect(pageSrc).toContain("bag.evaluation.nextStep");
   });
-  it("links each review action to the selected workflow bag", () => {
-    expect(pageSrc).toContain(
-      'href={`/finished-lots/new?bagId=${encodeURIComponent(bag.id)}`}',
-    );
+
+  it("gates row mutations to lead roles", () => {
+    expect(pageSrc).toContain('LEAD_ROLES.has(user.role)');
+    expect(pageSrc).toContain("canMutate={canMutate}");
+  });
+
+  it("labels finalized bags without lots as actionable backlog", () => {
+    expect(pageSrc).toContain("Finalized — awaiting lot");
+    expect(pageSrc).toContain("exact blocker");
   });
 });

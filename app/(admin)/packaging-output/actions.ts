@@ -19,18 +19,17 @@ import {
 } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
 import {
-  autoCreateAndReleaseFinishedLotForWorkflowBag,
-  evaluateBacklogAutoIssueForWorkflowBag,
-  runFinishedLotPostCommitEffects,
-  type BacklogAutoIssueBlockerReason,
+  repairAutoIssueFinishedLotForWorkflowBag,
+  type AutoFinishedLotReleaseResult,
 } from "@/lib/db/queries/finished-lots";
+import type { CurrentUser } from "@/lib/auth";
 
 export type BacklogAutoIssueRowResult = {
   workflowBagId: string;
   receiptNumber: string | null;
   ok: boolean;
   finishedLotNumber?: string;
-  reason?: BacklogAutoIssueBlockerReason;
+  reason?: Extract<AutoFinishedLotReleaseResult, { ok: false }>["reason"];
   message?: string;
 };
 
@@ -40,13 +39,9 @@ export type BacklogAutoIssueSummary = {
   results: BacklogAutoIssueRowResult[];
 };
 
-type AutoIssueActor = Parameters<
-  typeof autoCreateAndReleaseFinishedLotForWorkflowBag
->[1]["actor"];
-
 async function issueOne(
   workflowBagId: string,
-  actor: AutoIssueActor,
+  actor: Pick<CurrentUser, "id" | "role">,
 ): Promise<BacklogAutoIssueRowResult> {
   const [receiptRow] = await db
     .select({
@@ -57,25 +52,7 @@ async function issueOne(
     .where(eq(workflowBags.id, workflowBagId));
   const receiptNumber = receiptRow?.receiptNumber ?? null;
 
-  const evaluation = await evaluateBacklogAutoIssueForWorkflowBag(workflowBagId);
-  if (!evaluation.ok) {
-    return {
-      workflowBagId,
-      receiptNumber,
-      ok: false,
-      reason: evaluation.reason,
-      message: evaluation.message,
-    };
-  }
-
-  const result = await db.transaction(async (tx) =>
-    autoCreateAndReleaseFinishedLotForWorkflowBag(tx, {
-      workflowBagId,
-      packagedAt: evaluation.packagedAt,
-      counts: evaluation.counts,
-      actor,
-    }),
-  );
+  const result = await repairAutoIssueFinishedLotForWorkflowBag(workflowBagId, actor);
   if (!result.ok) {
     return {
       workflowBagId,
@@ -85,7 +62,6 @@ async function issueOne(
       message: result.message,
     };
   }
-  await runFinishedLotPostCommitEffects(result.effects);
   return {
     workflowBagId,
     receiptNumber,

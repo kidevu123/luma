@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.109] — 2026-06-02
+
+### Added
+- **Production Output backlog:** Auto-issue blocker visibility and next-step actions on `/packaging-output` (`Auto-issue status`, `Next step`, repair/auto-issue row actions).
+- **Backlog repair:** Safe backlog repair and auto-issue actions for finalized bags missing lots, with estimated tablet consumption from product math.
+- **Issue Finished Lot repair:** Improved repair copy and prefill on `/finished-lots/new` so admins do not manually calculate normal tablet consumption.
+- **QA packet:** `docs/QA_AUTO_LOT_ALLOCATION_VERIFICATION.md` for allocation/auto-lot verification.
+
 ## [0.4.108] — 2026-06-05
 
 ### Added (ZOHO-PRODUCTION-OUTPUT-CONSOLIDATED-1)

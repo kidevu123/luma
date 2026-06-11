@@ -85,7 +85,7 @@ export default async function NewFinishedLotPage({
         </Link>
         <PageHeader
           title="Issue finished lot"
-          description="For workflow bags, issue the lot and close raw-bag allocation in one step. LEAD confirms actual tablet consumption."
+          description="For workflow bags, Luma calculates tablet consumption from finished units and product setup. Confirm only when physical use differed."
         />
       </div>
       <IssueLotForm

@@ -1,6 +1,6 @@
 // LEAD coordinated issue: finished lot + allocation closeout in one transaction.
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import type { CurrentUser } from "@/lib/auth";
 import {
@@ -20,10 +20,12 @@ import {
   openAllocationSessionInTx,
 } from "@/lib/production/raw-bag-allocation-lifecycle";
 import {
-  computeExpectedTabletConsumption,
-} from "@/lib/zoho/v1206-choco-drift-pilot-contract";
+  computeEndingBalanceFromConsumption,
+  computeExpectedTabletConsumptionFromProduct,
+} from "@/lib/production/expected-tablet-consumption";
 import { runProductionOutputEnqueueAfterLotCreate } from "@/lib/zoho/enqueue-production-output-after-lot-create";
 import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
+import { writeAudit } from "@/lib/db/audit";
 
 export type IssueLotWithAllocationInput = {
   productId: string;
@@ -37,8 +39,12 @@ export type IssueLotWithAllocationInput = {
   notes?: string | null;
   consumedQty: number;
   endingBalanceQty: number;
-  /** When true, consumed qty must match Choco Drift BOM (4 × units). */
-  requireExactChocoConsumption?: boolean;
+  /** Required when repairing a missing allocation session. */
+  repairNotes?: string | null;
+  /** When true, opens a missing allocation session before close. */
+  repairMissingAllocation?: boolean;
+  /** Manual starting balance when repairing a session with unknown starting qty. */
+  repairStartingBalanceQty?: number | null;
 };
 
 export type IssueLotWithAllocationResult =
@@ -49,6 +55,7 @@ export type IssueLotWithAllocationResult =
       expectedTabletConsumption: number | null;
       consumptionVariance: number | null;
       productionOutputOpId: string | null;
+      repairedAllocation: boolean;
     }
   | { ok: false; error: string; code?: string };
 
@@ -61,6 +68,7 @@ export async function issueFinishedLotWithAllocationCloseout(
       bag: workflowBags,
       productSku: products.sku,
       productName: products.name,
+      tabletsPerUnit: products.tabletsPerUnit,
       inventoryBagId: workflowBags.inventoryBagId,
       receiptNumber: sql<string | null>`COALESCE(${inventoryBags.internalReceiptNumber}, ${workflowBags.receiptNumber})`,
       unitsYielded: readBagMetrics.unitsYielded,
@@ -94,25 +102,32 @@ export async function issueFinishedLotWithAllocationCloseout(
     return { ok: false, error: "Product does not match the selected workflow bag." };
   }
 
-  const expected = computeExpectedTabletConsumption(
-    bagRow.productSku ?? "",
+  const expectedResult = computeExpectedTabletConsumptionFromProduct(
+    bagRow.tabletsPerUnit,
     input.unitsProduced,
   );
-  const variance =
-    expected != null ? input.consumedQty - expected : null;
-  if (
-    input.requireExactChocoConsumption !== false &&
-    expected != null &&
-    input.consumedQty !== expected
-  ) {
+  const expected = expectedResult.ok ? expectedResult.expectedConsumed : null;
+  const variance = expected != null ? input.consumedQty - expected : null;
+
+  if (expected != null && input.consumedQty <= 0) {
     return {
       ok: false,
-      error: `Consumed tablets (${input.consumedQty}) must equal expected ${expected} (4 × ${input.unitsProduced} units) for Choco Drift.`,
-      code: "CONSUMPTION_MISMATCH",
+      error: "Consumed tablets must be greater than zero for a production bag.",
+      code: "INVALID_CONSUMED_QTY",
     };
   }
 
-  let sessionId: string;
+  if (
+    input.repairMissingAllocation &&
+    (!input.repairNotes || input.repairNotes.trim().length < 8)
+  ) {
+    return {
+      ok: false,
+      error: "Repair notes are required when fixing a missing allocation session.",
+      code: "MISSING_REPAIR_NOTES",
+    };
+  }
+
   const [openSession] = await db
     .select({ id: rawBagAllocationSessions.id })
     .from(rawBagAllocationSessions)
@@ -124,6 +139,15 @@ export async function issueFinishedLotWithAllocationCloseout(
     )
     .limit(1);
 
+  if (!openSession && !input.repairMissingAllocation) {
+    return {
+      ok: false,
+      error:
+        "No open allocation session exists. Use repair allocation to open and close the source ledger.",
+      code: "MISSING_ALLOCATION_SESSION",
+    };
+  }
+
   const [invBag] = await db
     .select({ batchId: inventoryBags.batchId })
     .from(inventoryBags)
@@ -134,6 +158,14 @@ export async function issueFinishedLotWithAllocationCloseout(
       ok: false,
       error: "Source inventory bag has no batch linkage.",
       code: "MISSING_BATCH",
+    };
+  }
+
+  if (input.endingBalanceQty < 0) {
+    return {
+      ok: false,
+      error: "Ending balance cannot be negative.",
+      code: "NEGATIVE_ENDING_BALANCE",
     };
   }
 
@@ -151,6 +183,8 @@ export async function issueFinishedLotWithAllocationCloseout(
   };
 
   let finishedLotId = "";
+  let sessionId = "";
+  let repairedAllocation = false;
 
   try {
     await db.transaction(async (tx) => {
@@ -161,10 +195,34 @@ export async function issueFinishedLotWithAllocationCloseout(
           inventoryBagId: bagRow.inventoryBagId!,
           workflowBagId: input.workflowBagId,
           productId: input.productId,
+          ...(input.repairStartingBalanceQty != null
+            ? {
+                startingBalanceQty: input.repairStartingBalanceQty,
+                startingBalanceSource: "MANUAL_ENTRY",
+              }
+            : {}),
+          notes: input.repairNotes ?? input.notes ?? null,
           actor,
         });
         if (!opened.ok) throw new Error(opened.error);
         sessionId = opened.sessionId;
+        repairedAllocation = true;
+
+        await writeAudit(
+          {
+            actorId: actor.id,
+            actorRole: actor.role,
+            action: "raw_bag_allocation.repair_opened",
+            targetType: "RawBagAllocationSession",
+            targetId: sessionId,
+            after: {
+              workflowBagId: input.workflowBagId,
+              inventoryBagId: bagRow.inventoryBagId,
+              repairNotes: input.repairNotes ?? null,
+            },
+          },
+          tx,
+        );
       }
 
       const { lot } = await createFinishedLotInTx(tx, lotInput, actor, {
@@ -178,8 +236,10 @@ export async function issueFinishedLotWithAllocationCloseout(
         finishedLotId: lot.id,
         consumedQty: input.consumedQty,
         endingBalanceQty: input.endingBalanceQty,
-        consumedQtySource: "FINISHED_LOT_CLOSEOUT",
-        notes: input.notes ?? null,
+        consumedQtySource: repairedAllocation
+          ? "ALLOCATION_REPAIR_CLOSEOUT"
+          : "FINISHED_LOT_CLOSEOUT",
+        notes: [input.notes, input.repairNotes].filter(Boolean).join(" · ") || null,
         actor,
       });
       if (!closed.ok) throw new Error(closed.error);
@@ -207,6 +267,7 @@ export async function issueFinishedLotWithAllocationCloseout(
     expectedTabletConsumption: expected,
     consumptionVariance: variance,
     productionOutputOpId,
+    repairedAllocation,
   };
 }
 
@@ -218,6 +279,7 @@ export async function loadOpenAllocationForWorkflowBag(workflowBagId: string) {
       bagQrCode: inventoryBags.bagQrCode,
       pillCount: inventoryBags.pillCount,
       productSku: products.sku,
+      tabletsPerUnit: products.tabletsPerUnit,
     })
     .from(rawBagAllocationSessions)
     .innerJoin(
@@ -233,4 +295,25 @@ export async function loadOpenAllocationForWorkflowBag(workflowBagId: string) {
     )
     .limit(1);
   return row ?? null;
+}
+
+export function deriveIssueLotPrefill(args: {
+  tabletsPerUnit: number | null | undefined;
+  unitsProduced: number;
+  startingBalanceQty: number | null | undefined;
+}) {
+  const expected = computeExpectedTabletConsumptionFromProduct(
+    args.tabletsPerUnit,
+    args.unitsProduced,
+  );
+  if (!expected.ok) return { expected, consumedQty: null, endingBalanceQty: null };
+  const endingBalanceQty = computeEndingBalanceFromConsumption(
+    args.startingBalanceQty,
+    expected.expectedConsumed,
+  );
+  return {
+    expected,
+    consumedQty: expected.expectedConsumed,
+    endingBalanceQty,
+  };
 }

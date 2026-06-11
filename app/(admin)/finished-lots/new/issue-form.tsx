@@ -4,11 +4,15 @@ import { formatDateTimeEst, toDateInputValue } from "@/lib/ui/luma-display";
 
 import * as React from "react";
 import { Save, AlertCircle } from "lucide-react";
+import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { createFinishedLotAndRedirect, issueFinishedLotWithAllocationAndRedirect } from "../actions";
-import { isChocoDriftSku, computeExpectedTabletConsumption } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
+import {
+  computeEndingBalanceFromConsumption,
+  computeExpectedTabletConsumptionFromProduct,
+} from "@/lib/production/expected-tablet-consumption";
 
 type Product = {
   id: string;
@@ -29,11 +33,6 @@ type FinalizedBag = {
   looseCards: number | null;
   unitsYielded: number | null;
 };
-
-// Single-screen issue flow. Pick a bag (or skip), pick a product
-// (auto-suggested from the bag), enter the lot number + counts, save.
-// Expiry auto-derives from product.defaultShelfLifeDays + producedOn
-// the first time the operator picks a product, then becomes manual.
 
 type AllocationHint = {
   sessionId: string;
@@ -70,8 +69,12 @@ export function IssueLotForm({
   const [displays, setDisplays] = React.useState(initialBag?.displaysMade ?? 0);
   const [cases, setCases] = React.useState(initialBag?.masterCases ?? 0);
   const [notes, setNotes] = React.useState("");
-  const [consumedQty, setConsumedQty] = React.useState(0);
-  const [endingBalanceQty, setEndingBalanceQty] = React.useState(0);
+  const [consumedQty, setConsumedQty] = React.useState<number | null>(null);
+  const [endingBalanceQty, setEndingBalanceQty] = React.useState<number | null>(null);
+  const [repairNotes, setRepairNotes] = React.useState("");
+  const [repairStartingBalanceQty, setRepairStartingBalanceQty] = React.useState<
+    number | null
+  >(null);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [autoExpiryTouched, setAutoExpiryTouched] = React.useState(false);
@@ -81,31 +84,54 @@ export function IssueLotForm({
   const selectedBag = bagId ? finalizedBags.find((x) => x.id === bagId) : null;
   const allocationHint = bagId ? allocationHints[bagId] ?? null : null;
   const selectedProduct = products.find((x) => x.id === productId);
-  const expectedTablets =
-    selectedProduct?.sku != null
-      ? computeExpectedTabletConsumption(selectedProduct.sku, units)
-      : null;
+  const expectedResult = computeExpectedTabletConsumptionFromProduct(
+    selectedProduct?.tabletsPerUnit,
+    units,
+  );
+  const expectedTablets = expectedResult.ok ? expectedResult.expectedConsumed : null;
   const consumptionVariance =
-    expectedTablets != null ? consumedQty - expectedTablets : null;
+    expectedTablets != null && consumedQty != null
+      ? consumedQty - expectedTablets
+      : null;
+  const isRepairPath = Boolean(selectedBag && !allocationHint);
+  const needsRepairStartingBalance =
+    isRepairPath && allocationHint == null && repairStartingBalanceQty == null;
 
   React.useEffect(() => {
-    if (!selectedProduct?.sku || units <= 0) return;
-    const expected = computeExpectedTabletConsumption(selectedProduct.sku, units);
-    if (expected != null) {
-      setConsumedQty(expected);
-      const start = allocationHint?.startingBalanceQty;
-      if (start != null) setEndingBalanceQty(Math.max(0, start - expected));
+    if (!selectedProduct || units <= 0) {
+      setConsumedQty(null);
+      setEndingBalanceQty(null);
+      return;
     }
-  }, [units, selectedProduct?.sku, allocationHint?.startingBalanceQty]);
+    const expected = computeExpectedTabletConsumptionFromProduct(
+      selectedProduct.tabletsPerUnit,
+      units,
+    );
+    if (!expected.ok) {
+      setConsumedQty(null);
+      setEndingBalanceQty(null);
+      return;
+    }
+    setConsumedQty(expected.expectedConsumed);
+    const start = allocationHint?.startingBalanceQty ?? repairStartingBalanceQty;
+    const ending = computeEndingBalanceFromConsumption(
+      start,
+      expected.expectedConsumed,
+    );
+    setEndingBalanceQty(ending);
+  }, [
+    units,
+    selectedProduct,
+    allocationHint?.startingBalanceQty,
+    repairStartingBalanceQty,
+  ]);
 
   React.useEffect(() => {
-    const start = allocationHint?.startingBalanceQty;
-    if (start == null) return;
+    const start = allocationHint?.startingBalanceQty ?? repairStartingBalanceQty;
+    if (start == null || consumedQty == null) return;
     setEndingBalanceQty(Math.max(0, start - consumedQty));
-  }, [consumedQty, allocationHint?.startingBalanceQty]);
+  }, [consumedQty, allocationHint?.startingBalanceQty, repairStartingBalanceQty]);
 
-  // When the bag changes, snap the lot form to the row the admin clicked.
-  // The receipt number is the finished-lot number used by the automated path.
   React.useEffect(() => {
     if (!bagId) {
       lastAppliedBagLotRef.current = null;
@@ -127,11 +153,10 @@ export function IssueLotForm({
       lastAppliedBagLotRef.current = b.receiptNumber;
     }
     setAutoExpiryTouched(false);
+    setRepairNotes("");
+    setRepairStartingBalanceQty(null);
   }, [bagId, finalizedBags]);
 
-  // Auto-expiry: when product or producedOn changes, recompute expiry
-  // from defaultShelfLifeDays — but only if the operator hasn't typed
-  // a manual value (autoExpiryTouched flag).
   React.useEffect(() => {
     if (autoExpiryTouched) return;
     const p = products.find((x) => x.id === productId);
@@ -142,8 +167,6 @@ export function IssueLotForm({
     }
   }, [productId, producedOn, autoExpiryTouched, products]);
 
-  // Auto-suggest a lot number once a product is picked. Format
-  // matches Haute's existing convention: SKU-YYMMDD.
   React.useEffect(() => {
     if (lotNumber) return;
     const p = products.find((x) => x.id === productId);
@@ -152,6 +175,25 @@ export function IssueLotForm({
       setLotNumber(`${p.sku}-${yymmdd}`);
     }
   }, [productId, producedOn, lotNumber, products]);
+
+  const submitLabel = !bagId
+    ? "Issue lot"
+    : isRepairPath
+      ? "Repair allocation and issue lot"
+      : "Issue lot and close allocation";
+
+  const canSubmit =
+    !pending &&
+    Boolean(productId) &&
+    Boolean(lotNumber) &&
+    Boolean(expiryDate) &&
+    (!bagId ||
+      (consumedQty != null &&
+        consumedQty > 0 &&
+        endingBalanceQty != null &&
+        endingBalanceQty >= 0 &&
+        expectedResult.ok &&
+        (!isRepairPath || repairNotes.trim().length >= 8)));
 
   return (
     <div className="grid lg:grid-cols-[1fr_280px] gap-5">
@@ -175,7 +217,7 @@ export function IssueLotForm({
                 ))}
               </Select>
               <p className="text-[11px] text-text-subtle">
-                When set, input batches auto-derive from the bag's consumption events.
+                When set, tablet consumption is derived from output counts and product structure.
               </p>
             </div>
             {selectedBag && allocationHint ? (
@@ -190,17 +232,24 @@ export function IssueLotForm({
                 </div>
                 {expectedTablets != null ? (
                   <p className="text-brand-800/90">
-                    Expected consumption: {expectedTablets.toLocaleString()} tablets
-                    {isChocoDriftSku(selectedProduct?.sku ?? "")
-                      ? ` (4 × ${units} units)`
+                    Luma calculated expected tablet consumption from finished units and
+                    product setup: {expectedTablets.toLocaleString()} tablets
+                    {selectedProduct?.tabletsPerUnit
+                      ? ` (${selectedProduct.tabletsPerUnit} × ${units} units)`
                       : null}
+                    . Confirm only if this run used a different physical quantity.
                   </p>
                 ) : null}
               </div>
             ) : selectedBag ? (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                No open allocation session for this bag. Floor production start should
-                open one automatically; contact ops if this persists.
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-2">
+                <div className="font-semibold">Repair missing source allocation</div>
+                <p>
+                  Repair required because this run predates automatic allocation sessions.
+                  Confirm the source receipt, then close the ledger using Luma&apos;s calculated
+                  tablet consumption.
+                </p>
+                <p>Receipt: {selectedBag.receiptNumber ?? "—"}</p>
               </div>
             ) : initialBagId ? (
               <div className="rounded-lg border border-warn-300 bg-warn-50 px-3 py-2 text-xs text-warn-800">
@@ -223,6 +272,24 @@ export function IssueLotForm({
                   </option>
                 ))}
               </Select>
+              {!expectedResult.ok && selectedProduct && units > 0 ? (
+                <p className="text-xs text-amber-800">
+                  {expectedResult.blocker === "MISSING_TABLETS_PER_UNIT" ? (
+                    <>
+                      Product tablets-per-unit is missing.{" "}
+                      <Link
+                        href={`/products/${selectedProduct.id}`}
+                        className="underline font-medium"
+                      >
+                        Configure product structure
+                      </Link>{" "}
+                      before issuing this lot.
+                    </>
+                  ) : (
+                    expectedResult.message
+                  )}
+                </p>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -300,11 +367,47 @@ export function IssueLotForm({
                 />
               </div>
             </div>
-            {bagId ? (
+            {bagId && expectedResult.ok ? (
               <div className="rounded-lg border border-border/80 bg-surface-2/40 p-3 space-y-3">
                 <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-                  Close allocation (LEAD)
+                  {isRepairPath ? "Repair allocation closeout" : "Close allocation"}
                 </div>
+                {isRepairPath ? (
+                  <div className="space-y-3">
+                    {needsRepairStartingBalance ? (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="repairStartingBalanceQty">Starting balance (tablets)</Label>
+                        <Input
+                          id="repairStartingBalanceQty"
+                          type="number"
+                          min={1}
+                          value={repairStartingBalanceQty ?? ""}
+                          onChange={(e) =>
+                            setRepairStartingBalanceQty(
+                              e.target.value === "" ? null : Number(e.target.value) || null,
+                            )
+                          }
+                          required
+                        />
+                        <p className="text-[11px] text-text-subtle">
+                          Starting balance missing — enter the physical bag count so Luma can
+                          close the ledger.
+                        </p>
+                      </div>
+                    ) : null}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="repairNotes">Repair notes</Label>
+                      <Textarea
+                        id="repairNotes"
+                        rows={2}
+                        value={repairNotes}
+                        onChange={(e) => setRepairNotes(e.target.value)}
+                        placeholder="Why is allocation being repaired? Include receipt and any verified counts."
+                        required
+                      />
+                    </div>
+                  </div>
+                ) : null}
                 <div className="grid sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="consumedQty">Tablets consumed</Label>
@@ -312,10 +415,19 @@ export function IssueLotForm({
                       id="consumedQty"
                       type="number"
                       min={1}
-                      value={consumedQty}
-                      onChange={(e) => setConsumedQty(Number(e.target.value) || 0)}
+                      value={consumedQty ?? ""}
+                      onChange={(e) =>
+                        setConsumedQty(
+                          e.target.value === "" ? null : Number(e.target.value) || null,
+                        )
+                      }
                       required
                     />
+                    <p className="text-[11px] text-text-subtle">
+                      Calculated from {selectedProduct?.tabletsPerUnit ?? "—"} tabs/unit ×{" "}
+                      {units.toLocaleString()} units. Adjust only with a note if physical use
+                      differed.
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="endingBalanceQty">Ending balance</Label>
@@ -323,8 +435,12 @@ export function IssueLotForm({
                       id="endingBalanceQty"
                       type="number"
                       min={0}
-                      value={endingBalanceQty}
-                      onChange={(e) => setEndingBalanceQty(Number(e.target.value) || 0)}
+                      value={endingBalanceQty ?? ""}
+                      onChange={(e) =>
+                        setEndingBalanceQty(
+                          e.target.value === "" ? null : Number(e.target.value) || null,
+                        )
+                      }
                       required
                     />
                   </div>
@@ -332,7 +448,8 @@ export function IssueLotForm({
                 {consumptionVariance != null && consumptionVariance !== 0 ? (
                   <p className="text-xs text-amber-800">
                     Variance vs expected: {consumptionVariance > 0 ? "+" : ""}
-                    {consumptionVariance.toLocaleString()} tablets
+                    {consumptionVariance.toLocaleString()} tablets — add a note explaining
+                    the adjustment.
                   </p>
                 ) : null}
               </div>
@@ -344,7 +461,7 @@ export function IssueLotForm({
                 rows={2}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="QA observations, hold reasons, anything operations should remember."
+                placeholder="QA observations, hold reasons, variance explanations."
               />
             </div>
           </CardContent>
@@ -369,15 +486,22 @@ export function IssueLotForm({
                   : "manual"
               }
             />
-            {bagId ? (
+            {bagId && consumedQty != null ? (
               <>
                 <Row label="Consumed" value={consumedQty.toLocaleString()} />
-                <Row label="Ending bal." value={endingBalanceQty.toLocaleString()} />
+                <Row
+                  label="Ending bal."
+                  value={
+                    endingBalanceQty != null ? endingBalanceQty.toLocaleString() : "—"
+                  }
+                />
               </>
             ) : null}
             <p className="text-[11px] text-text-subtle pt-2 border-t border-border/60">
               {bagId
-                ? "Issues the lot and closes raw-bag allocation in one step."
+                ? isRepairPath
+                  ? "Repairs the missing allocation ledger, issues the lot, and closes allocation."
+                  : "Issues the lot and closes raw-bag allocation in one step."
                 : "Manual lot — no workflow bag linkage."}{" "}
               Status starts as <span className="font-mono">PENDING_QC</span>.
             </p>
@@ -393,13 +517,7 @@ export function IssueLotForm({
 
         <Button
           size="lg"
-          disabled={
-            pending ||
-            !productId ||
-            !lotNumber ||
-            !expiryDate ||
-            (bagId ? consumedQty <= 0 || endingBalanceQty < 0 : false)
-          }
+          disabled={!canSubmit}
           onClick={async () => {
             setPending(true);
             setError(null);
@@ -418,8 +536,13 @@ export function IssueLotForm({
               ? await issueFinishedLotWithAllocationAndRedirect({
                   ...payload,
                   workflowBagId: bagId,
-                  consumedQty,
-                  endingBalanceQty,
+                  consumedQty: consumedQty!,
+                  endingBalanceQty: endingBalanceQty!,
+                  repairMissingAllocation: isRepairPath,
+                  repairNotes: isRepairPath ? repairNotes : null,
+                  repairStartingBalanceQty: isRepairPath
+                    ? repairStartingBalanceQty
+                    : null,
                 })
               : await createFinishedLotAndRedirect(payload);
             setPending(false);
@@ -427,8 +550,7 @@ export function IssueLotForm({
           }}
           className="w-full"
         >
-          <Save className="h-4 w-4" />{" "}
-          {pending ? "Saving…" : bagId ? "Issue lot and close allocation" : "Issue lot"}
+          <Save className="h-4 w-4" /> {pending ? "Saving…" : submitLabel}
         </Button>
       </div>
     </div>

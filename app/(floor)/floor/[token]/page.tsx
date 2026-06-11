@@ -1009,6 +1009,8 @@ export default async function FloorStationPage({
                       ? allocationPanelData.sessionStatus
                       : null
                   }
+                  workflowBagId={currentAtStation.bag.id}
+                  missingReason={allocationPanelData.missingReason ?? null}
                 />
               ) : null}
               <p className="text-xs text-text-muted mt-2">

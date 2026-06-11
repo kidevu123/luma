@@ -8,14 +8,18 @@
 //   2. The live auto-issue path refuses lots without a closed
 //      allocation session (closeout precedes issuance) — generalized,
 //      not a one-off script.
-//   3. The Production Output page exposes per-row + bulk auto-issue
-//      and labels the units column "Sellable units".
+//   3. The Production Output page exposes per-row eligibility + next-step
+//      actions and labels the units column "Sellable units".
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 
 const finishedLotsSrc = readFileSync(join(__dirname, "finished-lots.ts"), "utf8");
+const eligibilitySrc = readFileSync(
+  join(__dirname, "../../production/auto-lot-backlog-eligibility.ts"),
+  "utf8",
+);
 const pageSrc = readFileSync(
   join(__dirname, "../../../app/(admin)/packaging-output/page.tsx"),
   "utf8",
@@ -34,41 +38,36 @@ describe("backlog evaluator blockers are explicit", () => {
       "MISSING_PACKAGING_STRUCTURE",
       "OPEN_ALLOCATION_SESSION",
       "MISSING_ALLOCATION_SESSION",
-      "MISSING_COUNTS",
-      "EXCLUDED_FROM_OUTPUT",
+      "MISSING_OUTPUT_QUANTITY",
       "LOT_NUMBER_CONFLICT",
     ]) {
-      expect(finishedLotsSrc).toContain(reason);
+      expect(finishedLotsSrc + eligibilitySrc).toContain(reason);
     }
   });
 
   it("wrong-route/voided bags are excluded from auto-issue", () => {
-    const idx = finishedLotsSrc.indexOf("evaluateBacklogAutoIssueForWorkflowBag");
-    const block = finishedLotsSrc.slice(idx, idx + 6000);
+    const idx = eligibilitySrc.indexOf("export function evaluateAutoLotBacklogRow");
+    const block = eligibilitySrc.slice(idx, idx + 8000);
     expect(block).toMatch(/excludedFromOutput/);
-    expect(block).toMatch(/EXCLUDED_FROM_OUTPUT/);
+    expect(block).toMatch(/MANUAL_REVIEW_REQUIRED/);
   });
 });
 
 describe("closeout precedes lot issuance (generalized)", () => {
-  it("auto-create blocks when the bag has no allocation session at all", () => {
-    const idx = finishedLotsSrc.indexOf(
-      "export async function autoCreateAndReleaseFinishedLotForWorkflowBag",
-    );
-    const block = finishedLotsSrc.slice(idx, idx + 4000);
-    expect(block).toMatch(/MISSING_ALLOCATION_SESSION/);
-    expect(block).toMatch(/sessions\.length === 0/);
-    expect(block).toMatch(/OPEN_ALLOCATION_SESSION/);
+  it("repair auto-issue uses eligibility guard before issuing", () => {
+    expect(finishedLotsSrc).toMatch(/repairAutoIssueFinishedLotForWorkflowBag/);
+    expect(finishedLotsSrc).toMatch(/assertAutoLotRepairAllowed/);
+    expect(finishedLotsSrc).toMatch(/closeAllocationForProductionOutputInTx/);
   });
 });
 
 describe("Production Output backlog tooling", () => {
-  it("page renders per-row readiness + bulk auto-issue", () => {
-    expect(pageSrc).toMatch(/evaluateBacklogAutoIssueForWorkflowBag/);
-    expect(pageSrc).toMatch(/AutoIssueAllButton/);
-    expect(pageSrc).toMatch(/IssueLotButton/);
-    // Blocked rows keep the manual review escape hatch.
-    expect(pageSrc).toMatch(/Review \/ issue lot/);
+  it("page renders per-row eligibility + next-step actions", () => {
+    expect(pageSrc).toMatch(/listProductionOutputBacklogWithEligibility/);
+    expect(pageSrc).toMatch(/BacklogStatusChip/);
+    expect(pageSrc).toMatch(/BacklogRowActions/);
+    expect(pageSrc).toMatch(/Next step/);
+    expect(pageSrc).toMatch(/Auto-issue status/);
   });
 
   it('ambiguous "Units" column renamed to "Sellable units"', () => {
@@ -80,5 +79,6 @@ describe("Production Output backlog tooling", () => {
     expect(actionsSrc).toMatch(/for \(const row of backlog\)/);
     expect(actionsSrc).toMatch(/blocked: results\.filter\(\(r\) => !r\.ok\)\.length/);
     expect(actionsSrc).toMatch(/requireAdmin/);
+    expect(actionsSrc).toMatch(/repairAutoIssueFinishedLotForWorkflowBag/);
   });
 });

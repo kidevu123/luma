@@ -66,5 +66,10 @@ export async function loadFloorAllocationPanelForWorkflowBag(
     consumedQtyEstimate: consumedEstimate,
     endingBalanceEstimate: session?.endingBalanceQty ?? null,
     sessionStatus: session?.allocationStatus ?? null,
+    missingReason: session
+      ? null
+      : sessions.length > 0
+        ? ("legacy_run" as const)
+        : ("start_path_gap" as const),
   };
 }

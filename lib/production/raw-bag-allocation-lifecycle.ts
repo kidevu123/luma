@@ -6,27 +6,38 @@ import { db } from "@/lib/db";
 import { writeAudit } from "@/lib/db/audit";
 import {
   inventoryBags,
+  products,
   qrCards,
   rawBagAllocationEvents,
   rawBagAllocationSessions,
+  readBagMetrics,
+  workflowBags,
 } from "@/lib/db/schema";
 import {
   checkOverAllocation,
   deriveBagStatusAfterClose,
   resolveReopenStartingBalance,
 } from "@/lib/production/bag-allocation";
+import {
+  computeEndingBalanceFromConsumption,
+  computeExpectedTabletConsumptionFromProduct,
+} from "@/lib/production/expected-tablet-consumption";
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+type AllocationActor =
+  | Pick<CurrentUser, "id" | "role">
+  | { id: string | null; role: CurrentUser["role"] | null };
 
 export type OpenAllocationSessionInput = {
   inventoryBagId: string;
   workflowBagId: string;
-  productId: string;
+  productId?: string | null;
   poId?: string | null;
   startingBalanceQty?: number | null;
   startingBalanceSource?: string | null;
   notes?: string | null;
-  actor?: Pick<CurrentUser, "id" | "role"> | null;
+  actor?: AllocationActor | null;
 };
 
 export async function openAllocationSessionInTx(
@@ -37,37 +48,6 @@ export async function openAllocationSessionInTx(
     return {
       ok: false,
       error: "inventory_bag_id and workflow_bag_id must be different.",
-    };
-  }
-
-  const [existingOpen] = await tx
-    .select({ id: rawBagAllocationSessions.id })
-    .from(rawBagAllocationSessions)
-    .where(
-      and(
-        eq(rawBagAllocationSessions.inventoryBagId, input.inventoryBagId),
-        eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
-      ),
-    )
-    .limit(1);
-
-  if (existingOpen) {
-    if (input.workflowBagId) {
-      const [match] = await tx
-        .select({ id: rawBagAllocationSessions.id })
-        .from(rawBagAllocationSessions)
-        .where(
-          and(
-            eq(rawBagAllocationSessions.id, existingOpen.id),
-            eq(rawBagAllocationSessions.workflowBagId, input.workflowBagId),
-          ),
-        )
-        .limit(1);
-      if (match) return { ok: true, sessionId: match.id };
-    }
-    return {
-      ok: false,
-      error: "Bag already has an open allocation session. Close it first.",
     };
   }
 
@@ -82,9 +62,30 @@ export async function openAllocationSessionInTx(
     )
     .limit(1);
   if (openForWorkflow) {
+    return { ok: true, sessionId: openForWorkflow.id };
+  }
+
+  const [existingOpen] = await tx
+    .select({
+      id: rawBagAllocationSessions.id,
+      workflowBagId: rawBagAllocationSessions.workflowBagId,
+    })
+    .from(rawBagAllocationSessions)
+    .where(
+      and(
+        eq(rawBagAllocationSessions.inventoryBagId, input.inventoryBagId),
+        eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+      ),
+    )
+    .limit(1);
+
+  if (existingOpen) {
     return {
       ok: false,
-      error: "This workflow bag already has an open allocation session.",
+      error:
+        existingOpen.workflowBagId && existingOpen.workflowBagId !== input.workflowBagId
+          ? "This source bag has an open allocation session on another production run. Close it before starting again."
+          : "Bag already has an open allocation session. Close it first.",
     };
   }
 
@@ -130,7 +131,7 @@ export async function openAllocationSessionInTx(
       inventoryBagId: input.inventoryBagId,
       ...(input.poId ? { poId: input.poId } : {}),
       workflowBagId: input.workflowBagId,
-      productId: input.productId,
+      ...(input.productId ? { productId: input.productId } : {}),
       allocationStatus: "OPEN",
       ...(startingBalance != null ? { startingBalanceQty: startingBalance } : {}),
       ...(startingSource ? { startingBalanceSource: startingSource } : {}),
@@ -146,7 +147,7 @@ export async function openAllocationSessionInTx(
     allocationSessionId: session.id,
     inventoryBagId: input.inventoryBagId,
     workflowBagId: input.workflowBagId,
-    productId: input.productId,
+    ...(input.productId ? { productId: input.productId } : {}),
     eventType: "RAW_BAG_OPENED",
     ...(startingBalance != null ? { quantity: String(startingBalance) } : {}),
     unitOfMeasure: "tablets",
@@ -179,19 +180,195 @@ export async function openAllocationSessionInTx(
 }
 
 /** Idempotent open when production starts (floor scan or admin start). */
-export async function ensureOpenAllocationForProductionStartInTx(
+export async function ensureOpenRawBagAllocationSessionForWorkflowBag(
   tx: DbTx,
   input: OpenAllocationSessionInput,
 ): Promise<
   | { ok: true; sessionId: string; opened: boolean }
   | { ok: false; error: string }
 > {
+  const [existingForWorkflow] = await tx
+    .select({ id: rawBagAllocationSessions.id })
+    .from(rawBagAllocationSessions)
+    .where(
+      and(
+        eq(rawBagAllocationSessions.workflowBagId, input.workflowBagId),
+        eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+      ),
+    )
+    .limit(1);
+  if (existingForWorkflow) {
+    return {
+      ok: true,
+      sessionId: existingForWorkflow.id,
+      opened: false,
+    };
+  }
+
   const opened = await openAllocationSessionInTx(tx, input);
   if (!opened.ok) return opened;
   return {
     ok: true,
     sessionId: opened.sessionId,
     opened: true,
+  };
+}
+
+/** @deprecated use ensureOpenRawBagAllocationSessionForWorkflowBag */
+export const ensureOpenAllocationForProductionStartInTx =
+  ensureOpenRawBagAllocationSessionForWorkflowBag;
+
+export type CloseAllocationForProductionOutputInput = {
+  workflowBagId: string;
+  productId: string;
+  unitsProduced: number;
+  finishedLotId: string;
+  consumedQtySource?: string | null;
+  endingBalanceSource?: string | null;
+  notes?: string | null;
+  /** When true, opens a missing session before close (legacy repair). */
+  allowRepairOpen?: boolean;
+  actor?: AllocationActor | null;
+};
+
+export type CloseAllocationForProductionOutputResult =
+  | {
+      ok: true;
+      sessionId: string;
+      consumedQty: number;
+      endingBalanceQty: number;
+      repairedSession: boolean;
+    }
+  | { ok: false; code: string; error: string };
+
+/** Locate (or repair-open) the workflow allocation session and close it from output math. */
+export async function closeAllocationForProductionOutputInTx(
+  tx: DbTx,
+  input: CloseAllocationForProductionOutputInput,
+): Promise<CloseAllocationForProductionOutputResult> {
+  const [bagRow] = await tx
+    .select({
+      inventoryBagId: workflowBags.inventoryBagId,
+      tabletsPerUnit: products.tabletsPerUnit,
+      unitsYielded: readBagMetrics.unitsYielded,
+    })
+    .from(workflowBags)
+    .leftJoin(products, eq(products.id, workflowBags.productId))
+    .leftJoin(readBagMetrics, eq(readBagMetrics.workflowBagId, workflowBags.id))
+    .where(eq(workflowBags.id, input.workflowBagId))
+    .limit(1);
+
+  if (!bagRow?.inventoryBagId) {
+    return {
+      ok: false,
+      code: "MISSING_INVENTORY_BAG",
+      error: "Workflow bag has no linked source inventory bag.",
+    };
+  }
+
+  const unitsProduced =
+    input.unitsProduced > 0 ? input.unitsProduced : (bagRow.unitsYielded ?? 0);
+  const consumption = computeExpectedTabletConsumptionFromProduct(
+    bagRow.tabletsPerUnit,
+    unitsProduced,
+  );
+  if (!consumption.ok) {
+    return {
+      ok: false,
+      code: consumption.blocker,
+      error: consumption.message,
+    };
+  }
+
+  let repairedSession = false;
+  let sessionId: string | null = null;
+
+  const [openSession] = await tx
+    .select({
+      id: rawBagAllocationSessions.id,
+      startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
+    })
+    .from(rawBagAllocationSessions)
+    .where(
+      and(
+        eq(rawBagAllocationSessions.workflowBagId, input.workflowBagId),
+        eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+      ),
+    )
+    .limit(1);
+
+  if (openSession) {
+    sessionId = openSession.id;
+  } else if (input.allowRepairOpen) {
+    const opened = await openAllocationSessionInTx(tx, {
+      inventoryBagId: bagRow.inventoryBagId,
+      workflowBagId: input.workflowBagId,
+      productId: input.productId,
+      notes: input.notes ?? "Repair-opened during lot issue.",
+      actor: input.actor ?? null,
+    });
+    if (!opened.ok) {
+      return { ok: false, code: "ALLOCATION_REPAIR_FAILED", error: opened.error };
+    }
+    sessionId = opened.sessionId;
+    repairedSession = true;
+  } else {
+    return {
+      ok: false,
+      code: "MISSING_ALLOCATION_SESSION",
+      error:
+        "No open raw-bag allocation session exists for this production run.",
+    };
+  }
+
+  const [sessionRow] = await tx
+    .select({ startingBalanceQty: rawBagAllocationSessions.startingBalanceQty })
+    .from(rawBagAllocationSessions)
+    .where(eq(rawBagAllocationSessions.id, sessionId))
+    .limit(1);
+
+  const startingBalance =
+    sessionRow?.startingBalanceQty ?? openSession?.startingBalanceQty ?? null;
+  const endingBalance = computeEndingBalanceFromConsumption(
+    startingBalance,
+    consumption.expectedConsumed,
+  );
+  if (endingBalance == null) {
+    return {
+      ok: false,
+      code: "MISSING_STARTING_BALANCE",
+      error:
+        "Starting tablet balance is unknown — confirm starting balance before auto-closing allocation.",
+    };
+  }
+  if (endingBalance < 0) {
+    return {
+      ok: false,
+      code: "NEGATIVE_ENDING_BALANCE",
+      error: `Computed ending balance (${endingBalance}) is negative. Review consumption or starting balance.`,
+    };
+  }
+
+  const closed = await closeAllocationSessionInTx(tx, {
+    sessionId,
+    finishedLotId: input.finishedLotId,
+    consumedQty: consumption.expectedConsumed,
+    endingBalanceQty: endingBalance,
+    consumedQtySource: input.consumedQtySource ?? "OUTPUT_DERIVED",
+    endingBalanceSource: input.endingBalanceSource ?? "OUTPUT_DERIVED",
+    notes: input.notes ?? null,
+    actor: input.actor ?? null,
+  });
+  if (!closed.ok) {
+    return { ok: false, code: "ALLOCATION_CLOSE_FAILED", error: closed.error };
+  }
+
+  return {
+    ok: true,
+    sessionId,
+    consumedQty: consumption.expectedConsumed,
+    endingBalanceQty: endingBalance,
+    repairedSession,
   };
 }
 
@@ -203,7 +380,7 @@ export type CloseAllocationSessionInput = {
   consumedQtySource?: string | null;
   endingBalanceSource?: string | null;
   notes?: string | null;
-  actor?: Pick<CurrentUser, "id" | "role"> | null;
+  actor?: AllocationActor | null;
 };
 
 export async function closeAllocationSessionInTx(

@@ -52,7 +52,7 @@ import {
   patchPackagingCompleteConsumptionSummary,
 } from "@/lib/production/packaging-consumption-summary";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
-import { ensureOpenAllocationForProductionStartInTx } from "@/lib/production/raw-bag-allocation-lifecycle";
+import { ensureOpenRawBagAllocationSessionForWorkflowBag } from "@/lib/production/raw-bag-allocation-lifecycle";
 import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
 import {
   computeSealedCountFromCounter,
@@ -466,11 +466,11 @@ export async function scanCardAction(
           },
           tx,
         );
-        if (productIdToSet) {
-          const alloc = await ensureOpenAllocationForProductionStartInTx(tx, {
+        {
+          const alloc = await ensureOpenRawBagAllocationSessionForWorkflowBag(tx, {
             inventoryBagId: inventoryLink.inventoryBagId,
             workflowBagId: bag.id,
-            productId: productIdToSet,
+            ...(productIdToSet ? { productId: productIdToSet } : {}),
           });
           if (!alloc.ok) throw new Error(alloc.error);
         }
@@ -631,11 +631,11 @@ export async function scanCardAction(
             },
             tx,
           );
-          if (productIdToSet) {
-            const alloc = await ensureOpenAllocationForProductionStartInTx(tx, {
+          {
+            const alloc = await ensureOpenRawBagAllocationSessionForWorkflowBag(tx, {
               inventoryBagId: inventoryLink.inventoryBagId,
               workflowBagId: restartBag.id,
-              productId: productIdToSet,
+              ...(productIdToSet ? { productId: productIdToSet } : {}),
             });
             if (!alloc.ok) throw new Error(alloc.error);
           }
@@ -802,6 +802,14 @@ export async function scanCardAction(
             },
             tx,
           );
+          {
+            const alloc = await ensureOpenRawBagAllocationSessionForWorkflowBag(tx, {
+              inventoryBagId: inventoryLink.inventoryBagId,
+              workflowBagId: resumeBag.id,
+              ...(productIdToSet ? { productId: productIdToSet } : {}),
+            });
+            if (!alloc.ok) throw new Error(alloc.error);
+          }
           return;
         }
         const resumeStages = STATION_STARTED_RESUME_FROM_STAGE[station.kind] ?? [];
@@ -1180,6 +1188,20 @@ export async function saveSealingProductAction(
         },
         tx,
       );
+
+      const [wfBagRow] = await tx
+        .select({ inventoryBagId: workflowBags.inventoryBagId })
+        .from(workflowBags)
+        .where(eq(workflowBags.id, parsed.data.workflowBagId))
+        .limit(1);
+      if (wfBagRow?.inventoryBagId) {
+        const alloc = await ensureOpenRawBagAllocationSessionForWorkflowBag(tx, {
+          inventoryBagId: wfBagRow.inventoryBagId,
+          workflowBagId: parsed.data.workflowBagId,
+          productId: sealingPick.productId,
+        });
+        if (!alloc.ok) throw new Error(alloc.error);
+      }
     });
   } catch (err) {
     return {

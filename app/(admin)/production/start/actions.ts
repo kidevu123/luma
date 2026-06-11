@@ -46,7 +46,7 @@ import {
   type PartialBagSession,
 } from "@/lib/production/partial-bag-restart";
 import { loadRawBagStartClassificationForScan } from "@/lib/production/floor-partial-bag-start-resolution";
-import { ensureOpenAllocationForProductionStartInTx } from "@/lib/production/raw-bag-allocation-lifecycle";
+import { ensureOpenRawBagAllocationSessionForWorkflowBag } from "@/lib/production/raw-bag-allocation-lifecycle";
 
 export type StartProductionResult =
   | {
@@ -336,7 +336,7 @@ export async function startProductionForRawBagAction(
       tx,
     );
 
-    const alloc = await ensureOpenAllocationForProductionStartInTx(tx, {
+    const alloc = await ensureOpenRawBagAllocationSessionForWorkflowBag(tx, {
       inventoryBagId: bag.id,
       workflowBagId: wfBag.id,
       productId: product.id,
