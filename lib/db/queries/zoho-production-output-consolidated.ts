@@ -19,6 +19,18 @@ import {
   isChocoDriftSku,
 } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 import {
+  fixRelaxSourceAllocationBuildOpts,
+  isFixRelaxSku,
+} from "@/lib/zoho/v1206-fix-relax-pilot-contract";
+
+function sourceAllocationBuildOptsForSku(sku: string) {
+  if (isChocoDriftSku(sku)) return chocoDriftSourceAllocationBuildOpts();
+  if (isFixRelaxSku(sku)) return fixRelaxSourceAllocationBuildOpts();
+  return {
+    resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true",
+  } as const;
+}
+import {
   buildProductionOutputPreviewIdempotencyKey,
   callProductionOutputPreview,
 } from "@/lib/zoho/production-output-preview";
@@ -241,9 +253,7 @@ export async function upsertConsolidatedProductionOutputOpForLot(
       outputPoLineItemId: null,
       unitsPerFinishedUnit: lotRow?.unitsProduced ?? 0,
     },
-    isChocoDriftSku(lotRow?.productSku ?? "")
-      ? chocoDriftSourceAllocationBuildOpts()
-      : { resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true" },
+    sourceAllocationBuildOptsForSku(lotRow?.productSku ?? ""),
   );
 
   const built = await loadAndBuildLumaProductionOutputPayload(finishedLotId, {
@@ -369,9 +379,7 @@ export async function upsertConsolidatedProductionOutputOpForLot(
         outputPoLineItemId: primaryPo,
         unitsPerFinishedUnit: built.payload.output.units_produced,
       },
-      isChocoDriftSku(lotRow?.productSku ?? "")
-        ? chocoDriftSourceAllocationBuildOpts()
-        : { resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true" },
+      sourceAllocationBuildOptsForSku(lotRow?.productSku ?? ""),
     );
 
     if (!sourceWithPo.ok) {
