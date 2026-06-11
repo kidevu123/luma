@@ -15,6 +15,9 @@ tsconfig.tsbuildinfo
 recon/
 scratch/
 .superpowers
+# Agent/knowledge-graph tooling output — never part of the deploy context.
+graphify-out/
+.agents/
 
 # Nested git worktree checkouts (sibling dirs accidentally linked inside repo)
 luma-*/

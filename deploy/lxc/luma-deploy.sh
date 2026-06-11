@@ -9,6 +9,17 @@ set -euo pipefail
 LUMA_DIR="${LUMA_DIR:-/opt/luma}"
 LUMA_BRANCH="${LUMA_BRANCH:-main}"
 APP_PORT="${APP_PORT:-3000}"
+LOCK_FILE="${LOCK_FILE:-/var/lock/luma-deploy.lock}"
+
+# P5-OPS — serialize deploys. The systemd timer fires every 60s while a
+# manual run may already be building; flock makes the overlap a no-op
+# instead of two concurrent `docker compose up --build` racing each
+# other (image tag clobbering, double migrations, mid-day disk spikes).
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "another luma-deploy is already running (lock: $LOCK_FILE) — skipping"
+  exit 0
+fi
 
 cd "$LUMA_DIR"
 
