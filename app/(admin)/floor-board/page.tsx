@@ -1,28 +1,33 @@
-// app/(admin)/floor-board/page.tsx
+// Floor board v2 — one opinionated view, rebuilt around four questions:
+//   What are they making right now, and for how long?   → Now Running
+//   How are the two lines flowing?                      → Card / Bottle lanes
+//   What needs me?                                      → Act Now rail
+//   Is the machine healthy this week, not just today?   → 7-day deck + pulse
+//
+// Data: getFloorManagerSnapshot (live) + _data.ts (trailing 7 days).
+// Live updates via SSE (LiveRefresh → router.refresh()).
+
 import { requireSession } from "@/lib/auth-guards";
-import {
-  buildShiftStatusData,
-  getAttentionItems,
-  getHourlyThroughput,
-  getKpiStripData,
-  getOperatorDailySummary,
-  getQueueHealthSummary,
-  getRecentEvents,
-  getShiftTargetStatus,
-  getStationsWithLiveState,
-} from "@/lib/production/floor-command";
-import { getFloorProductionIntelligence } from "@/lib/production/floor-production-intelligence";
-import { getFloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot";
 import { db } from "@/lib/db";
-import { companies, userDashboardConfig } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { companies } from "@/lib/db/schema";
+import { getFloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot";
+import { getAttentionItems } from "@/lib/production/floor-command";
+import { getFloorProductionIntelligence } from "@/lib/production/floor-production-intelligence";
 import { buildActNowPanel } from "@/lib/floor-command/act-now";
-import { parseFloorBoardMode } from "@/lib/floor-command/floor-board-mode";
-import { getPauseReasons7d } from "./_loaders";
-import { FloorCommandClient } from "./_components/floor-command-client";
-import type { WidgetLayout } from "@/lib/floor-command/types";
-import { DEFAULT_LAYOUT } from "@/lib/floor-command/types";
-import type { WidgetGridData } from "./_components/widget-grid";
+import {
+  BOTTLE_PRODUCTION_LINE,
+  CARD_PRODUCTION_LINE,
+} from "@/lib/floor-command/production-lines";
+import { computeShiftProgress } from "@/lib/production/shift-window";
+import { getDamage7d, getFlavorOutput7d, getSevenDayContext } from "./_data";
+import { ActNowRail } from "./_components/act-now-rail";
+import { BoardHeader } from "./_components/board-header";
+import { FlavorBoard } from "./_components/flavor-board";
+import { KpiDeck } from "./_components/kpi-deck";
+import { LineLane } from "./_components/line-lane";
+import { NowRunning } from "./_components/now-running";
+import { RecentCompletions } from "./_components/recent-completions";
+import { SevenDayPulse } from "./_components/seven-day-pulse";
 
 export const dynamic = "force-dynamic";
 
@@ -34,108 +39,75 @@ async function getCompanyTimezone(): Promise<string> {
   return rows[0]?.timezone ?? "America/Toronto";
 }
 
-async function safe<T>(name: string, fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (e) {
-    console.error(`[floor-board] ${name} FAILED:`, e);
-    throw e;
-  }
-}
-
-export default async function FloorBoardPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ mode?: string }>;
-}) {
-  const { mode: modeParam } = await searchParams;
-  const mode = parseFloorBoardMode(modeParam);
-
-  console.log("[floor-board] PAGE START mode=", mode);
-  const user = await requireSession();
+export default async function FloorBoardPage() {
+  await requireSession();
   const tz = await getCompanyTimezone();
-  console.log("[floor-board] tz:", tz);
 
-  const [
-    stations,
-    queues,
-    targetStatus,
-    attentionItems,
-    operators,
-    recentEvents,
-    kpiData,
-    hourlyThroughput,
-    productionIntelligence,
-    managerSnapshot,
-    savedLayoutRow,
-    pauseReasons7d,
-  ] = await Promise.all([
-    safe("getStationsWithLiveState", () => getStationsWithLiveState()),
-    safe("getQueueHealthSummary", () => getQueueHealthSummary()),
-    safe("getShiftTargetStatus", () => getShiftTargetStatus(tz)),
-    safe("getAttentionItems", () => getAttentionItems()),
-    safe("getOperatorDailySummary", () => getOperatorDailySummary(tz)),
-    safe("getRecentEvents", () => getRecentEvents(50)),
-    safe("getKpiStripData", () => getKpiStripData(tz)),
-    safe("getHourlyThroughput", () => getHourlyThroughput(tz)),
-    safe("getFloorProductionIntelligence", () => getFloorProductionIntelligence()),
-    safe("getFloorManagerSnapshot", () => getFloorManagerSnapshot(tz)),
-    safe("savedLayoutRow", () =>
-      db
-        .select({ layoutJson: userDashboardConfig.layoutJson })
-        .from(userDashboardConfig)
-        .where(
-          and(
-            eq(userDashboardConfig.userId, user.id),
-            eq(userDashboardConfig.boardKey, "floor-command"),
-          ),
-        )
-        .limit(1),
-    ),
-    safe("getPauseReasons7d", () => getPauseReasons7d()),
+  const [snapshot, attentionItems, productionIntelligence] = await Promise.all([
+    getFloorManagerSnapshot(tz),
+    getAttentionItems(),
+    getFloorProductionIntelligence(),
   ]);
 
-  console.log("[floor-board] all fetches OK");
-  console.log("[floor-board] station[0].lastEventAt:", stations[0]?.lastEventAt, typeof stations[0]?.lastEventAt);
-  console.log("[floor-board] recentEvents[0].occurredAt:", recentEvents[0]?.occurredAt, typeof recentEvents[0]?.occurredAt);
-
-  const yieldPct = kpiData.firstPassYieldPct;
-  const shiftStatus = buildShiftStatusData(targetStatus, queues, yieldPct, attentionItems);
-
-  const savedLayout =
-    (savedLayoutRow[0]?.layoutJson as WidgetLayout[] | undefined) ?? DEFAULT_LAYOUT;
-
-  const widgetData: WidgetGridData = {
-    stations,
-    queues,
-    operators,
-    recentEvents,
-    throughputPoints: hourlyThroughput,
-    targetBagsPerHour:
-      stations.find((s) => s.machineTargetBagsPerHour !== null)
-        ?.machineTargetBagsPerHour ?? null,
-    managerSnapshot,
-  };
+  const [sevenDay, flavor7d, damage] = await Promise.all([
+    getSevenDayContext(snapshot.shiftDayKey),
+    getFlavorOutput7d(),
+    getDamage7d(),
+  ]);
 
   const actNowItems = buildActNowPanel(
-    managerSnapshot,
+    snapshot,
     attentionItems,
     productionIntelligence,
   );
-
-  console.log("[floor-board] rendering FloorCommandClient");
+  const shift = computeShiftProgress(new Date(), tz);
 
   return (
-    <FloorCommandClient
-      mode={mode}
-      shiftStatus={shiftStatus}
-      kpiData={kpiData}
-      productionIntelligence={productionIntelligence}
-      managerSnapshot={managerSnapshot}
-      actNowItems={actNowItems}
-      savedLayout={savedLayout}
-      widgetData={widgetData}
-      pauseReasons={pauseReasons7d}
-    />
+    <div className="flex h-full flex-col overflow-hidden text-slate-200">
+      <BoardHeader
+        tz={tz}
+        shiftMinutesElapsed={shift.minutesElapsed}
+        shiftMinutesRemaining={shift.minutesRemaining}
+        dayKey={snapshot.shiftDayKey}
+      />
+
+      <div className="flex-1 overflow-y-auto px-4 pb-6 pt-3">
+        <div className="space-y-3.5">
+          <KpiDeck
+            snapshot={snapshot}
+            sevenDay={sevenDay}
+            damage={damage}
+            shiftMinutesElapsed={shift.minutesElapsed}
+          />
+
+          <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_320px] gap-3.5">
+            <div className="space-y-3.5 min-w-0">
+              <NowRunning snapshot={snapshot} />
+              <LineLane
+                line={CARD_PRODUCTION_LINE}
+                accent="card"
+                snapshot={snapshot}
+              />
+              <LineLane
+                line={BOTTLE_PRODUCTION_LINE}
+                accent="bottle"
+                snapshot={snapshot}
+                sharedStepKeys={["packaging"]}
+              />
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
+                <SevenDayPulse sevenDay={sevenDay} />
+                <FlavorBoard
+                  flavor7d={flavor7d}
+                  flavorToday={snapshot.flavorToday}
+                />
+                <RecentCompletions rows={snapshot.recentFinalized} />
+              </div>
+            </div>
+
+            <ActNowRail items={actNowItems} dataGaps={snapshot.dataGaps} />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

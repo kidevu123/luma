@@ -176,7 +176,7 @@ export function buildActNowPanel(
             : "info",
       title: `Bottleneck: ${bn}`,
       detail: [
-        typeof oldest === "number" ? `oldest ${oldest}m` : null,
+        typeof oldest === "number" ? `oldest ${formatWait(oldest)}` : null,
         typeof wip === "number" ? `${wip} WIP` : null,
         intelligence.bottleneck.reason.value != null
           ? String(intelligence.bottleneck.reason.value)

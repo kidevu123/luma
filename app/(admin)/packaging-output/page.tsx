@@ -66,9 +66,31 @@ export default async function PackagingOutputPage({
   const ROLL_KINDS_FOR_EXCLUSION = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"];
 
   // Run all queries in parallel — pack-out queue alongside existing metrics.
-  const [packaging, finished, awaitingLot, awaitingFinalize, materialBurnRaw] = await Promise.all([
+  const [packaging, finished, flavorRollup, awaitingLot, awaitingFinalize, materialBurnRaw] = await Promise.all([
     derivePackagingMetrics(range),
     deriveFinishedGoodsMetrics(range),
+
+    // Per-flavor running totals over the window — the vendor-reconciliation
+    // view: "this is what we produced of what you sent us", by flavor.
+    db
+      .select({
+        productId: readBagMetrics.productId,
+        productName: products.name,
+        productSku: products.sku,
+        bags: sql<number>`COUNT(*)::int`,
+        cases: sql<number>`COALESCE(SUM(${readBagMetrics.masterCases}), 0)::int`,
+        displays: sql<number>`COALESCE(SUM(${readBagMetrics.displaysMade}), 0)::int`,
+        loose: sql<number>`COALESCE(SUM(${readBagMetrics.looseCards}), 0)::int`,
+        units: sql<number>`COALESCE(SUM(${readBagMetrics.unitsYielded}), 0)::int`,
+        damaged: sql<number>`COALESCE(SUM(${readBagMetrics.damagedPackaging} + ${readBagMetrics.rippedCards}), 0)::int`,
+      })
+      .from(readBagMetrics)
+      .leftJoin(products, eq(products.id, readBagMetrics.productId))
+      .where(
+        sql`${readBagMetrics.finalizedAt} >= ${range.from.toISOString()}::timestamptz AND ${readBagMetrics.finalizedAt} <= ${range.to.toISOString()}::timestamptz`,
+      )
+      .groupBy(readBagMetrics.productId, products.name, products.sku)
+      .orderBy(sql`SUM(${readBagMetrics.unitsYielded}) DESC`),
 
     // Finalized bags without a finished lot.
     db
@@ -156,12 +178,28 @@ export default async function PackagingOutputPage({
   const releasedUnitsRaw = finished.releasedUnits?.value ?? null;
   const damageRateRaw = packaging.damageRatePct?.value ?? null;
   const onTimeRaw = finished.onTimeCompletionPct?.value ?? null;
+  const producedUnitsRaw = packaging.unitsYielded?.value ?? null;
+  const bagsFinalisedRaw = packaging.bagsFinalised?.value ?? null;
 
   // Coerce metric values to numbers for comparisons (metric values are string | number).
   const releasedLots = typeof releasedLotsRaw === "number" ? releasedLotsRaw : null;
   const releasedUnits = typeof releasedUnitsRaw === "number" ? releasedUnitsRaw : null;
   const damageRate = typeof damageRateRaw === "number" ? damageRateRaw : null;
   const onTime = typeof onTimeRaw === "number" ? onTimeRaw : null;
+  const producedUnits = typeof producedUnitsRaw === "number" ? producedUnitsRaw : null;
+  const bagsFinalised = typeof bagsFinalisedRaw === "number" ? bagsFinalisedRaw : null;
+
+  const flavorTotals = flavorRollup.reduce(
+    (acc, f) => ({
+      bags: acc.bags + f.bags,
+      cases: acc.cases + f.cases,
+      displays: acc.displays + f.displays,
+      loose: acc.loose + f.loose,
+      units: acc.units + f.units,
+      damaged: acc.damaged + f.damaged,
+    }),
+    { bags: 0, cases: 0, displays: 0, loose: 0, units: 0, damaged: 0 },
+  );
 
   const confidenceTone =
     finished.releasedLots?.confidence === "HIGH"
@@ -225,20 +263,24 @@ export default async function PackagingOutputPage({
       {/* Stats ribbon */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
-          <CheckCircle2 className="h-3.5 w-3.5 text-text-subtle mb-1" />
-          <p className="text-[10px] uppercase tracking-wider text-text-subtle font-medium">Released lots</p>
-          <p className={`text-2xl font-mono tabular-nums mt-1 ${releasedLots != null && releasedLots > 0 ? "text-green-700" : "text-text-strong"}`}>
-            {releasedLots != null ? releasedLots.toLocaleString() : "—"}
+          <Package className="h-3.5 w-3.5 text-text-subtle mb-1" />
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle font-medium">Units produced</p>
+          <p className={`text-2xl font-mono tabular-nums mt-1 ${producedUnits != null && producedUnits > 0 ? "text-green-700" : "text-text-strong"}`}>
+            {producedUnits != null ? producedUnits.toLocaleString() : "—"}
           </p>
-          <p className="text-[11px] text-text-muted mt-0.5">Lots with status RELEASED</p>
+          <p className="text-[11px] text-text-muted mt-0.5">
+            Sellable units from {bagsFinalised != null ? bagsFinalised.toLocaleString() : "—"} finalized bags
+          </p>
         </div>
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
-          <Package className="h-3.5 w-3.5 text-text-subtle mb-1" />
-          <p className="text-[10px] uppercase tracking-wider text-text-subtle font-medium">Released units</p>
+          <CheckCircle2 className="h-3.5 w-3.5 text-text-subtle mb-1" />
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle font-medium">Released</p>
           <p className={`text-2xl font-mono tabular-nums mt-1 ${releasedUnits != null && releasedUnits > 0 ? "text-green-700" : "text-text-strong"}`}>
             {releasedUnits != null ? releasedUnits.toLocaleString() : "—"}
           </p>
-          <p className="text-[11px] text-text-muted mt-0.5">Individual units released this week</p>
+          <p className="text-[11px] text-text-muted mt-0.5">
+            Units in {releasedLots != null ? releasedLots.toLocaleString() : "—"} RELEASED lots — rest awaits lot review below
+          </p>
         </div>
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
           <AlertTriangle className="h-3.5 w-3.5 text-text-subtle mb-1" />
@@ -254,7 +296,7 @@ export default async function PackagingOutputPage({
           }`}>
             {damageRate != null ? `${damageRate.toFixed(1)}%` : "—"}
           </p>
-          <p className="text-[11px] text-text-muted mt-0.5">(damaged + ripped) / (cases + displays + loose)</p>
+          <p className="text-[11px] text-text-muted mt-0.5">(damaged + ripped) / units produced</p>
         </div>
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
           <TrendingUp className="h-3.5 w-3.5 text-text-subtle mb-1" />
@@ -271,6 +313,91 @@ export default async function PackagingOutputPage({
             {onTime != null ? `${onTime.toFixed(0)}%` : "—"}
           </p>
           <p className="text-[11px] text-text-muted mt-0.5">Lots packed by due date</p>
+        </div>
+      </div>
+
+      {/* Per-flavor running totals — vendor reconciliation at a glance */}
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-border/60">
+          <p className="text-[10px] uppercase tracking-wider text-text-subtle">By flavor</p>
+          <h2 className="text-sm font-semibold text-text-strong">Running totals — last 7 days</h2>
+          <p className="text-[11px] text-text-muted mt-0.5">
+            Everything finalized in the window, grouped by flavor. Pair with the PO view below
+            to confirm against what the vendor sent.
+          </p>
+        </div>
+        <div className="px-4 py-4">
+          {flavorRollup.length === 0 ? (
+            <p className="text-[12px] text-text-muted">No bags finalized in the last 7 days.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="text-[12.5px] w-full">
+                <thead>
+                  <tr className="border-b border-border/60">
+                    <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Flavor</th>
+                    <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Bags</th>
+                    <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Cases</th>
+                    <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Displays</th>
+                    <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Loose</th>
+                    <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Sellable units</th>
+                    <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Damaged + ripped</th>
+                    <th className="text-left py-1.5 font-medium text-text-muted text-[11px] uppercase tracking-wide">Share of week</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flavorRollup.map((f) => {
+                    const sharePct =
+                      flavorTotals.units > 0
+                        ? Math.round((f.units / flavorTotals.units) * 100)
+                        : 0;
+                    return (
+                      <tr key={f.productId ?? "unmapped"} className="border-b border-border/30 last:border-0">
+                        <td className="py-2 pr-4">
+                          <div className="text-text-strong">
+                            {f.productName ?? <span className="text-text-subtle italic">Unmapped product</span>}
+                          </div>
+                          {f.productSku ? (
+                            <div className="font-mono text-[10.5px] text-text-muted">{f.productSku}</div>
+                          ) : null}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{f.bags.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{f.cases.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{f.displays.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{f.loose.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums font-medium text-text-strong">{f.units.toLocaleString()}</td>
+                        <td className={`py-2 pr-4 text-right tabular-nums ${f.damaged > 0 ? "text-amber-700" : "text-text-subtle"}`}>
+                          {f.damaged.toLocaleString()}
+                        </td>
+                        <td className="py-2 min-w-[8rem]">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 rounded-full bg-surface-2 overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-brand-600"
+                                style={{ width: `${sharePct}%` }}
+                              />
+                            </div>
+                            <span className="text-[10.5px] tabular-nums text-text-muted w-8 text-right">{sharePct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border/60">
+                    <td className="py-2 pr-4 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Total</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-medium text-text-strong">{flavorTotals.bags.toLocaleString()}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-medium text-text-strong">{flavorTotals.cases.toLocaleString()}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-medium text-text-strong">{flavorTotals.displays.toLocaleString()}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-medium text-text-strong">{flavorTotals.loose.toLocaleString()}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-semibold text-text-strong">{flavorTotals.units.toLocaleString()}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-medium text-amber-700">{flavorTotals.damaged.toLocaleString()}</td>
+                    <td className="py-2" />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
@@ -582,7 +709,7 @@ export default async function PackagingOutputPage({
             <MetricCard
               label="Damage rate"
               metric={packaging.damageRatePct ?? FALLBACK}
-              hint="(damaged + ripped) / (cases + displays + loose)"
+              hint="(damaged + ripped) / units produced"
               variant="light"
             />
           </div>

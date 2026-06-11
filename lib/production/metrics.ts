@@ -821,6 +821,7 @@ export async function derivePackagingMetrics(
       looseCards: sum(readBagMetrics.looseCards).mapWith(Number),
       damagedPackaging: sum(readBagMetrics.damagedPackaging).mapWith(Number),
       rippedCards: sum(readBagMetrics.rippedCards).mapWith(Number),
+      unitsYielded: sum(readBagMetrics.unitsYielded).mapWith(Number),
       bagsFinalised: count(),
     })
     .from(readBagMetrics)
@@ -830,19 +831,25 @@ export async function derivePackagingMetrics(
   const loose = Number(agg?.looseCards ?? 0);
   const damages = Number(agg?.damagedPackaging ?? 0);
   const ripped = Number(agg?.rippedCards ?? 0);
+  const units = Number(agg?.unitsYielded ?? 0);
   const bags = Number(agg?.bagsFinalised ?? 0);
+  // Damage rate is per UNIT: damaged/ripped counts are in cards/units,
+  // so the denominator must be units too. Dividing by container counts
+  // (cases + displays) inflated the rate ~100x.
+  const damageDenominator = units + damages + ripped;
   return {
     masterCases: ok(cases, "cases"),
     displaysMade: ok(displays, "displays"),
     looseCards: ok(loose, "cards"),
     damagedPackaging: ok(damages, "units"),
     rippedCards: ok(ripped, "cards"),
+    unitsYielded: ok(units, "units"),
     bagsFinalised: ok(bags, "bags"),
     damageRatePct:
-      cases + displays + loose === 0
+      damageDenominator === 0
         ? missing("%", ["output_units"], "No reject data")
         : ok(
-            +(((damages + ripped) / (cases + displays + loose)) * 100).toFixed(2),
+            +(((damages + ripped) / damageDenominator) * 100).toFixed(2),
             "%",
           ),
   };
