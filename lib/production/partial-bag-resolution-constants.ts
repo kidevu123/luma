@@ -37,6 +37,34 @@ export function confidenceForResolutionMethod(
   }
 }
 
+// ── Honest remaining-quantity display (client-safe) ─────────────────
+//
+// No fake precision: a supervisor estimate shows as "~1,220 (supervisor
+// estimate)", an unknown shows as "Unknown — closeout required". Only a
+// counted/weighed (HIGH) value renders as a plain number.
+
+export function formatRemainingEstimate(args: {
+  remainingEstimate: number | null;
+  confidence: string | null;
+  source: string | null;
+}): string {
+  const { remainingEstimate, confidence, source } = args;
+  if (remainingEstimate == null) return "Unknown — closeout required";
+  const n = remainingEstimate.toLocaleString();
+  if (confidence === "HIGH") return n;
+  const sourceLabel =
+    source === "SUPERVISOR_ESTIMATE"
+      ? "supervisor estimate"
+      : source === "WEIGH_BACK"
+        ? "weigh-back"
+        : source === "PHYSICAL_COUNT"
+          ? "counted"
+          : confidence === "MEDIUM"
+            ? "estimate"
+            : "low confidence";
+  return `~${n} (${sourceLabel})`;
+}
+
 /** Human label for endingBalanceSource on allocation sessions. */
 export function labelPartialBagEndingBalanceSource(
   source: string | null | undefined,

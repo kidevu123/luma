@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ScanLine, Camera, RotateCcw } from "lucide-react";
 import { scanCardAction, lookupCardByTokenAction } from "./actions";
 import { CameraScanner } from "./camera-scanner";
-import { formatRemainingEstimate } from "@/lib/production/partial-bag-lifecycle";
+import { formatRemainingEstimate } from "@/lib/production/partial-bag-resolution-constants";
 import type { PartialReuseContext } from "@/lib/production/partial-bags";
 
 export type EligibleCard = {

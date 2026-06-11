@@ -28,8 +28,12 @@ import {
   getTopFlavorsByFinalized,
   getActivityHeartbeat,
   getActiveQrCardCount,
+  getActionCenterCounts,
+  type ActionCenterCounts,
 } from "./loaders";
 import { buildWeeklyPredictionDetail } from "./prediction-copy";
+import { getFloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot";
+import { LUMA_TIMEZONE } from "@/lib/ui/luma-display";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +52,8 @@ export default async function DashboardPage() {
     topFlavors,
     eventsLast24h,
     activeCards,
+    actionCenter,
+    floorSnapshot,
   ] = await Promise.all([
     getFinalizedToday(),
     getCashOnFloor(),
@@ -57,6 +63,8 @@ export default async function DashboardPage() {
     getTopFlavorsByFinalized(),
     getActivityHeartbeat(),
     getActiveQrCardCount(),
+    getActionCenterCounts(),
+    getFloorManagerSnapshot(LUMA_TIMEZONE),
   ]);
 
   const prediction = pickPrediction({
@@ -183,6 +191,96 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* P4-DASHBOARD · Action Center — every queue that needs a human,
+          one glance, one click. Green tiles mean nothing is waiting. */}
+      <ActionCenter counts={actionCenter} />
+
+      {/* P4-DASHBOARD · Floor now — which bag is where, who's on it,
+          what's blocked, which rolls are mounted. */}
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-text-subtle">Floor now</p>
+            <p className="text-sm font-semibold text-text-strong mt-0.5">
+              Which bag is where
+            </p>
+          </div>
+          <Link
+            href="/floor-board"
+            className="text-[11px] font-medium text-text-muted hover:text-text underline-offset-2 hover:underline shrink-0"
+          >
+            Full command center →
+          </Link>
+        </div>
+        <div className="px-4 py-3">
+          {floorSnapshot.stationCommandRows.length === 0 ? (
+            <p className="text-sm text-text-muted py-2">No stations configured.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {floorSnapshot.stationCommandRows.map((s) => {
+                const blocked = s.isPaused || s.isOnHold;
+                const idle = s.workflowBagId == null;
+                return (
+                  <div
+                    key={s.stationId}
+                    className={`rounded-lg border px-3 py-2 text-xs ${
+                      blocked
+                        ? "border-amber-300 bg-amber-50/60"
+                        : idle
+                          ? "border-border bg-surface-2/40"
+                          : "border-emerald-200 bg-emerald-50/40"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-text-strong truncate">
+                        {s.stationLabel}
+                      </span>
+                      <span
+                        className={`inline-flex shrink-0 px-1.5 py-0.5 rounded border text-[10px] font-medium ${
+                          blocked
+                            ? "border-amber-400 bg-amber-100 text-amber-900"
+                            : idle
+                              ? "border-border bg-surface text-text-muted"
+                              : "border-emerald-300 bg-emerald-100 text-emerald-800"
+                        }`}
+                      >
+                        {s.isOnHold
+                          ? "On hold"
+                          : s.isPaused
+                            ? "Paused"
+                            : idle
+                              ? "Idle"
+                              : (s.stage ?? "Running")}
+                      </span>
+                    </div>
+                    {idle ? (
+                      <p className="text-text-muted mt-1">No bag at this station.</p>
+                    ) : (
+                      <>
+                        <p className="mt-1 truncate text-text-strong">
+                          {s.bagLabel ?? s.cardLabel ?? s.receiptNumber ?? "—"}
+                          {s.productName ? (
+                            <span className="text-text-muted"> · {s.productName}</span>
+                          ) : null}
+                        </p>
+                        <p className="text-[10.5px] text-text-muted mt-0.5 truncate">
+                          {s.activeOperatorName ?? s.operatorName ?? "no operator"}
+                          {s.activeRolls.length > 0
+                            ? ` · rolls: ${s.activeRolls
+                                .map((r) => r.rollNumber ?? r.materialRole ?? "?")
+                                .join(", ")}`
+                            : ""}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Prediction panel */}
       <div className={panelClass}>
         <PanelIcon className="h-4 w-4 shrink-0 mt-0.5" />
@@ -262,6 +360,122 @@ export default async function DashboardPage() {
 }
 
 // ── Components ────────────────────────────────────────────────────
+
+/** P4-DASHBOARD — every actionable queue as a tile: count, tone, and a
+ *  direct link. Anyone can answer "what needs a human?" at a glance. */
+function ActionCenter({ counts }: { counts: ActionCenterCounts }) {
+  const tiles: Array<{
+    label: string;
+    count: number;
+    href: string;
+    detail: string;
+    tone: "crit" | "warn" | "ok";
+  }> = [
+    {
+      label: "Needs lot review",
+      count: counts.needsLotReview,
+      href: "/packaging-output",
+      detail: "Finalized bags without a finished lot — auto-issue or review.",
+      tone: counts.needsLotReview > 0 ? "warn" : "ok",
+    },
+    {
+      label: "Runs missing allocation",
+      count: counts.runsMissingAllocation,
+      href: "/partial-bags",
+      detail: "In-flight runs with no source allocation — lead repair.",
+      tone: counts.runsMissingAllocation > 0 ? "crit" : "ok",
+    },
+    {
+      label: "Partials need closeout",
+      count: counts.partialsNeedCloseout,
+      href: "/partial-bags",
+      detail: "Partial bags with no trusted remaining count.",
+      tone: counts.partialsNeedCloseout > 0 ? "warn" : "ok",
+    },
+    {
+      label: "Partials ready to reuse",
+      count: counts.partialsReady,
+      href: "/partial-bags",
+      detail: "Trusted remaining quantity — can start a run.",
+      tone: "ok",
+    },
+    {
+      label: "Bags on hold",
+      count: counts.bagsOnHold,
+      href: "/partial-bags",
+      detail: "Quarantined raw bags awaiting QA review.",
+      tone: counts.bagsOnHold > 0 ? "warn" : "ok",
+    },
+    {
+      label: "Batches blocked",
+      count: counts.quarantinedBatches,
+      href: "/batches",
+      detail: "Input lots in quarantine — release or investigate.",
+      tone: counts.quarantinedBatches > 0 ? "warn" : "ok",
+    },
+    {
+      label: "Zoho failed",
+      count: counts.zohoFailed,
+      href: "/zoho-production-operations",
+      detail: "Production-output commits that errored — inspect, never blind-retry.",
+      tone: counts.zohoFailed > 0 ? "crit" : "ok",
+    },
+    {
+      label: "Zoho queued / unmapped",
+      count: counts.zohoQueued + counts.zohoNeedsMapping,
+      href: "/zoho-production-operations",
+      detail: `${counts.zohoQueued} queued · ${counts.zohoNeedsMapping} need mapping.`,
+      tone: counts.zohoNeedsMapping > 0 ? "warn" : "ok",
+    },
+  ];
+  const anyWork = tiles.some((t) => t.tone !== "ok" && t.count > 0);
+
+  return (
+    <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="px-4 py-3 border-b border-border">
+        <p className="text-[10px] uppercase tracking-wider text-text-subtle">Action center</p>
+        <p className="text-sm font-semibold text-text-strong mt-0.5">
+          {anyWork ? "What needs a human right now" : "All queues clear"}
+        </p>
+      </div>
+      <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {tiles.map((tile) => (
+          <Link
+            key={tile.label}
+            href={tile.href}
+            className={`rounded-lg border px-3 py-2.5 transition-colors hover:border-brand-300 ${
+              tile.count > 0 && tile.tone === "crit"
+                ? "border-red-300 bg-red-50/60"
+                : tile.count > 0 && tile.tone === "warn"
+                  ? "border-amber-300 bg-amber-50/60"
+                  : "border-border bg-surface-2/30"
+            }`}
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[11px] font-medium text-text-muted leading-tight">
+                {tile.label}
+              </span>
+              <span
+                className={`text-xl font-mono tabular-nums ${
+                  tile.count > 0 && tile.tone === "crit"
+                    ? "text-red-700"
+                    : tile.count > 0 && tile.tone === "warn"
+                      ? "text-amber-700"
+                      : "text-text-strong"
+                }`}
+              >
+                {tile.count.toLocaleString()}
+              </span>
+            </div>
+            <p className="text-[10px] text-text-subtle mt-1 leading-snug">
+              {tile.detail}
+            </p>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function QuickLink({
   href,

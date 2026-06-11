@@ -68,30 +68,7 @@ export function derivePartialBagLifecycleState(args: {
   return "partial_needs_closeout";
 }
 
-// ── Honest remaining-quantity display ────────────────────────────────
-//
-// No fake precision: a supervisor estimate shows as "~1,220 (supervisor
-// estimate)", an unknown shows as "Unknown — closeout required". Only a
-// counted/weighed (HIGH) value renders as a plain number.
-
-export function formatRemainingEstimate(args: {
-  remainingEstimate: number | null;
-  confidence: string | null;
-  source: string | null;
-}): string {
-  const { remainingEstimate, confidence, source } = args;
-  if (remainingEstimate == null) return "Unknown — closeout required";
-  const n = remainingEstimate.toLocaleString();
-  if (confidence === "HIGH") return n;
-  const sourceLabel =
-    source === "SUPERVISOR_ESTIMATE"
-      ? "supervisor estimate"
-      : source === "WEIGH_BACK"
-        ? "weigh-back"
-        : source === "PHYSICAL_COUNT"
-          ? "counted"
-          : confidence === "MEDIUM"
-            ? "estimate"
-            : "low confidence";
-  return `~${n} (${sourceLabel})`;
-}
+// Honest remaining-quantity display lives in the client-safe constants
+// module (this file pulls in the DB via partial-bags and must stay out
+// of client bundles). Re-exported here for server-side convenience.
+export { formatRemainingEstimate } from "@/lib/production/partial-bag-resolution-constants";
