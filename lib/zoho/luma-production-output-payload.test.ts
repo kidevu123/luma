@@ -6,6 +6,7 @@ import {
 import { evaluateConsolidatedProductionOutputProcessCommitEligibility } from "@/lib/zoho/production-output-consolidated-eligibility";
 import { callProductionOutputCommit } from "@/lib/zoho/production-output-service-client";
 import { isLegacyAssemblyEnqueueEnabled } from "@/lib/zoho/production-output-config";
+import { buildProductionOutputServicePayloadFromLuma } from "@/lib/zoho/production-output-service-payload";
 
 const baseProduct = {
   id: "prod-1",
@@ -156,6 +157,31 @@ describe("consolidated commit eligibility", () => {
   });
 });
 
+function servicePayloadForCommitTest(
+  built: ReturnType<typeof buildLumaProductionOutputPayloadFromContext> & { ok: true },
+) {
+  const bagId = built.payload.source_receipts[0]!.luma_inventory_bag_id;
+  return buildProductionOutputServicePayloadFromLuma({
+    ...built.payload,
+    source_receipt_evidence: [
+      {
+        source_bag_id: bagId,
+        internal_receipt_number: built.payload.source_receipts[0]!.internal_receipt_number,
+        zoho_purchase_receive_id: "5254962000000000001",
+        received_quantity: 1000,
+        purchaseorder_id: built.payload.source_receipts[0]!.zoho_purchaseorder_id,
+        purchaseorder_line_item_id:
+          built.payload.source_receipts[0]!.zoho_purchaseorder_line_item_id,
+        raw_item_id: built.payload.source_receipts[0]!.tablet_zoho_item_id,
+        api_receive_status: "received",
+        api_reconciliation_status: "received_by_luma",
+        received_at: "2026-06-04T00:00:00.000Z",
+        has_durable_row: true,
+      },
+    ],
+  });
+}
+
 describe("callProductionOutputCommit", () => {
   const env = {
     ZOHO_SERVICE_BASE_URL: "http://zoho-service.test",
@@ -186,7 +212,7 @@ describe("callProductionOutputCommit", () => {
     const built = buildLumaProductionOutputPayloadFromContext(buildInput());
     if (!built.ok) throw new Error("expected ok");
     const r = await callProductionOutputCommit({
-      payload: built.payload,
+      payload: servicePayloadForCommitTest(built),
       idempotencyKey: "luma-production-output:lot-1",
       env: {
         ...env,
@@ -202,7 +228,7 @@ describe("callProductionOutputCommit", () => {
     const built = buildLumaProductionOutputPayloadFromContext(buildInput());
     if (!built.ok) throw new Error("expected ok");
     const r = await callProductionOutputCommit({
-      payload: built.payload,
+      payload: servicePayloadForCommitTest(built),
       idempotencyKey: "luma-production-output:lot-1",
       env,
     });

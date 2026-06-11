@@ -7,6 +7,7 @@ import {
 } from "@/lib/zoho/production-output-config";
 import { callProductionOutputCommit } from "@/lib/zoho/production-output-service-client";
 import { buildLumaProductionOutputPayloadFromContext } from "@/lib/zoho/luma-production-output-payload";
+import { buildProductionOutputServicePayloadFromLuma } from "@/lib/zoho/production-output-service-payload";
 
 const baseEnv = {
   ZOHO_SERVICE_BASE_URL: "http://zoho.test",
@@ -152,8 +153,28 @@ describe("callProductionOutputCommit guard", () => {
       warehouseId: "wh-1",
     });
     if (!built.ok) throw new Error("payload build failed");
+    const bagId = built.payload.source_receipts[0]!.luma_inventory_bag_id;
+    const servicePayload = buildProductionOutputServicePayloadFromLuma({
+      ...built.payload,
+      source_receipt_evidence: [
+        {
+          source_bag_id: bagId,
+          internal_receipt_number: "352171",
+          zoho_purchase_receive_id: "5254962000000000001",
+          received_quantity: 1000,
+          purchaseorder_id: built.payload.source_receipts[0]!.zoho_purchaseorder_id,
+          purchaseorder_line_item_id:
+            built.payload.source_receipts[0]!.zoho_purchaseorder_line_item_id,
+          raw_item_id: built.payload.source_receipts[0]!.tablet_zoho_item_id,
+          api_receive_status: "received",
+          api_reconciliation_status: "received_by_luma",
+          received_at: "2026-06-04T00:00:00.000Z",
+          has_durable_row: true,
+        },
+      ],
+    });
     const r = await callProductionOutputCommit({
-      payload: built.payload,
+      payload: servicePayload,
       idempotencyKey: "luma-production-output:lot-1",
       env: payloadEnv,
       fetchImpl: fetchMock,

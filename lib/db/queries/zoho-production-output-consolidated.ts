@@ -70,6 +70,10 @@ import {
 import {
   callProductionOutputCommit,
 } from "@/lib/zoho/production-output-service-client";
+import {
+  buildProductionOutputServicePayloadFromLuma,
+  PRODUCTION_OUTPUT_SERVICE_PREVIEW_NOTES,
+} from "@/lib/zoho/production-output-service-payload";
 import { mapProductionOutputPreviewQuantities } from "@/lib/zoho/production-output-preview-quantities";
 import { buildOutboundSourceReceipts } from "@/lib/zoho/source-receipt-contract";
 import {
@@ -593,45 +597,12 @@ export async function upsertConsolidatedProductionOutputOpForLot(
       };
     }
 
-    const mappedQty = mapProductionOutputPreviewQuantities({
-      unitsProduced: built.payload.output.units_produced,
-      displaysProduced: built.payload.output.displays_produced,
-      casesProduced: built.payload.output.cases_produced,
-      looseCards: built.payload.output.loose_cards,
-    });
-
     const receiptBlockers = receiptGate.ok ? [] : receiptGate.blockers;
 
-    const previewPayload: Parameters<typeof callProductionOutputPreview>[0]["payload"] = {
-      purchaseorder_id: firstSourceReceiptPoId(built.payload) ?? "",
-      purchaseorder_line_item_id: primaryPo ?? "",
-      quantity_good: mappedQty.quantity_good,
-      receive_date: built.payload.production_dates.receive_date,
-      warehouse_id: built.payload.warehouse_id ?? "",
-      unit_composite_item_id: built.payload.product.unit_composite_item_id ?? "",
-      unit_assembly_quantity: mappedQty.unit_assembly_quantity,
-      luma_operation_id: buildLumaProductionOutputOperationId(finishedLotId),
-      quantity_damaged: built.payload.output.damaged_packaging ?? 0,
-      quantity_ripped: built.payload.output.ripped_cards ?? 0,
-      quantity_loose: mappedQty.quantity_loose,
-      display_assembly_quantity: mappedQty.display_assembly_quantity,
-      case_assembly_quantity: mappedQty.case_assembly_quantity,
-      notes: "Luma consolidated production-output preview",
-      component_batches: sourceWithPo.componentBatches,
-      luma_operation_snapshot: snapshotBuilt.snapshot,
-      verification: { mode: "snapshot" },
-      source_receipts: outboundSourceReceipts,
-      assembly_only: receiptGate.ok ? receiptGate.assemblyOnly : false,
-    };
-    if (built.payload.product.display_composite_item_id) {
-      previewPayload.display_composite_item_id = built.payload.product.display_composite_item_id;
-    }
-    if (built.payload.product.case_composite_item_id) {
-      previewPayload.case_composite_item_id = built.payload.product.case_composite_item_id;
-    }
-    if (built.payload.luma_workflow_bag_id) {
-      previewPayload.luma_bag_id = built.payload.luma_workflow_bag_id;
-    }
+    const previewPayload = buildProductionOutputServicePayloadFromLuma(
+      payloadWithSnapshot,
+      { notes: PRODUCTION_OUTPUT_SERVICE_PREVIEW_NOTES },
+    );
 
     const previewBlockers: Array<{ code: string; message: string }> = [
       ...receiptBlockers.map((b) => ({ code: b.code, message: b.message })),
@@ -929,9 +900,10 @@ export async function processConsolidatedProductionOutputCommit(
   const payload = claim.op.requestPayload as LumaProductionOutputPayload;
   const idempotencyKey =
     claim.op.commitIdempotencyKey ?? payload.idempotency_key;
+  const servicePayload = buildProductionOutputServicePayloadFromLuma(payload);
 
   const gateway = await callProductionOutputCommit({
-    payload,
+    payload: servicePayload,
     idempotencyKey,
   });
 

@@ -437,32 +437,98 @@ export async function persistSourceAllocationsForOp(
   );
 }
 
+function digObject(obj: unknown, ...keys: string[]): unknown {
+  let cur: unknown = obj;
+  for (const k of keys) {
+    if (cur == null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[k];
+  }
+  return cur;
+}
+
+function readStepEntityId(step: Record<string, unknown>): string | null {
+  const candidates = [step.zoho_entity_id, step.entity_id, step.zoho_entityId];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim().length > 0) return c.trim();
+  }
+  return null;
+}
+
+function readStepEntityType(step: Record<string, unknown>): string | null {
+  const candidates = [step.zoho_entity_type, step.entity_type];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim().length > 0) return c.trim().toLowerCase();
+  }
+  return null;
+}
+
+function parseCommitSteps(body: unknown): {
+  receiveId: string | null;
+  bundleIds: string[];
+} {
+  const steps = digObject(body, "steps");
+  if (!Array.isArray(steps)) {
+    return { receiveId: null, bundleIds: [] };
+  }
+
+  let receiveId: string | null = null;
+  const bundleIds: string[] = [];
+
+  for (const raw of steps) {
+    if (raw == null || typeof raw !== "object") continue;
+    const step = raw as Record<string, unknown>;
+    const stepName =
+      typeof step.step === "string" ? step.step.trim().toLowerCase() : "";
+    const entityType = readStepEntityType(step);
+    const entityId = readStepEntityId(step);
+    if (!entityId) continue;
+
+    if (
+      stepName === "receive" ||
+      entityType === "purchase_receive" ||
+      entityType === "purchase-receive"
+    ) {
+      receiveId = receiveId ?? entityId;
+      continue;
+    }
+
+    const isBundleStep =
+      entityType === "bundle" ||
+      stepName === "unit_assembly" ||
+      stepName === "display_assembly" ||
+      stepName === "case_assembly";
+
+    if (isBundleStep && step.status !== "failed") {
+      bundleIds.push(entityId);
+    }
+  }
+
+  return { receiveId, bundleIds };
+}
+
 export function parseZohoCommitResponseIds(body: unknown): {
   receiveId: string | null;
   bundleIds: string[];
   partialFailure: boolean;
   humanReviewRequired: boolean;
 } {
-  const dig = (obj: unknown, ...keys: string[]): unknown => {
-    let cur: unknown = obj;
-    for (const k of keys) {
-      if (cur == null || typeof cur !== "object") return undefined;
-      cur = (cur as Record<string, unknown>)[k];
-    }
-    return cur;
-  };
+  const fromSteps = parseCommitSteps(body);
 
   const receiveId =
-    dig(body, "receive_id") ??
-    dig(body, "results", "receive", "receive_id") ??
-    dig(body, "steps", "receive", "receive_id");
+    (typeof digObject(body, "receive_id") === "string"
+      ? (digObject(body, "receive_id") as string)
+      : null) ??
+    (typeof digObject(body, "results", "receive", "receive_id") === "string"
+      ? (digObject(body, "results", "receive", "receive_id") as string)
+      : null) ??
+    fromSteps.receiveId;
 
   const bundleRaw =
-    dig(body, "bundle_id") ??
-    dig(body, "bundle_ids") ??
-    dig(body, "results", "unit_assembly", "bundle_id");
+    digObject(body, "bundle_id") ??
+    digObject(body, "bundle_ids") ??
+    digObject(body, "results", "unit_assembly", "bundle_id");
 
-  const bundleIds: string[] = [];
+  const bundleIds: string[] = [...fromSteps.bundleIds];
   if (typeof bundleRaw === "string" && bundleRaw.trim()) {
     bundleIds.push(bundleRaw.trim());
   } else if (Array.isArray(bundleRaw)) {
@@ -472,15 +538,16 @@ export function parseZohoCommitResponseIds(body: unknown): {
   }
 
   const partialFailure = Boolean(
-    dig(body, "partial_failure") ?? dig(body, "partialFailure"),
+    digObject(body, "partial_failure") ?? digObject(body, "partialFailure"),
   );
   const humanReviewRequired = Boolean(
-    dig(body, "human_review_required") ?? dig(body, "humanReviewRequired"),
+    digObject(body, "human_review_required") ??
+      digObject(body, "humanReviewRequired"),
   );
 
   return {
-    receiveId: typeof receiveId === "string" ? receiveId : null,
-    bundleIds,
+    receiveId,
+    bundleIds: [...new Set(bundleIds)],
     partialFailure,
     humanReviewRequired,
   };

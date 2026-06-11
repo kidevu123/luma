@@ -1,10 +1,8 @@
 // ZOHO-PRODUCTION-OUTPUT-SERVICE-CLIENT — HTTP commit to shared Zoho service.
 // Luma never calls Zoho Books/Inventory directly.
 
-import {
-  PRODUCTION_OUTPUT_COMMIT_PATH,
-  type LumaProductionOutputPayload,
-} from "@/lib/zoho/luma-production-output-payload";
+import { PRODUCTION_OUTPUT_COMMIT_PATH } from "@/lib/zoho/luma-production-output-payload";
+import type { ProductionOutputPreviewPayload } from "@/lib/zoho/production-output-preview";
 import {
   isProductionOutputCommitEnabled,
   redactProductionOutputServiceHeaders,
@@ -80,7 +78,7 @@ export function buildProductionOutputCommitHeaders(opts: {
 }
 
 export async function callProductionOutputCommit(opts: {
-  payload: LumaProductionOutputPayload;
+  payload: ProductionOutputPreviewPayload;
   idempotencyKey: string;
   env?: Record<string, string | undefined>;
   fetchImpl?: FetchLike;

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.110] — 2026-06-02
+
+### Fixed
+- **Production-output commit payload:** Map internal LUMA consolidated ops to the Zoho Integration service body before commit; preview and commit now share `buildProductionOutputServicePayloadFromLuma` so the contract cannot drift.
+- **Commit response parsing:** Parse Zoho bundle IDs from `steps[]` (FIX Relax assembly path) so `zoho_bundle_ids` persist without manual reconciliation.
+
 ## [0.4.109] — 2026-06-02
 
 ### Added

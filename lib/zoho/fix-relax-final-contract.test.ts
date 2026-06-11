@@ -126,9 +126,11 @@ describe("FIX Relax consolidated preview wiring", () => {
     expect(consolidatedSrc).toMatch(/isChocoDriftSku/);
   });
 
-  it("assembly-only preview path does not call production-output commit client", () => {
+  it("preview and commit share buildProductionOutputServicePayloadFromLuma", () => {
+    expect(consolidatedSrc).toMatch(/buildProductionOutputServicePayloadFromLuma/);
+    expect(consolidatedSrc).toMatch(/PRODUCTION_OUTPUT_SERVICE_PREVIEW_NOTES/);
     expect(consolidatedSrc).toMatch(/callProductionOutputPreview/);
-    expect(consolidatedSrc).toMatch(/assembly_only/);
+    expect(consolidatedSrc).toMatch(/callProductionOutputCommit/);
   });
 });
 
