@@ -185,6 +185,12 @@ export function StageActionButtons({
   );
   const [pauseOpen, setPauseOpen] = React.useState(false);
   const [pauseCounterSnapshot, setPauseCounterSnapshot] = React.useState("");
+  // P3-FLOOR-UX — packaging stations prompt for in-progress counts at
+  // pause (optional but recommended; logged for metrics).
+  const isPackagingPauseCounts = stationKind === "PACKAGING";
+  const [pauseMasterCases, setPauseMasterCases] = React.useState("");
+  const [pauseDisplaysMade, setPauseDisplaysMade] = React.useState("");
+  const [pauseLooseCards, setPauseLooseCards] = React.useState("");
   const pauseRequiresCounterSnapshot = stationRequiresBlisterCounterSnapshot(
     stationKind,
     pauseReason,
@@ -400,10 +406,19 @@ export function StageActionButtons({
       if (counterSnapshot != null) {
         fd.set("counterSnapshotCount", String(counterSnapshot));
       }
+      // P3-FLOOR-UX — packaging in-progress counts logged with the pause.
+      if (isPackagingPauseCounts) {
+        if (pauseMasterCases) fd.set("pauseMasterCases", pauseMasterCases);
+        if (pauseDisplaysMade) fd.set("pauseDisplaysMade", pauseDisplaysMade);
+        if (pauseLooseCards) fd.set("pauseLooseCards", pauseLooseCards);
+      }
       const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
       if (badgeCode) fd.set("operatorCode", badgeCode);
       const r = await pauseBagAction(fd);
       setPauseOpen(false);
+      setPauseMasterCases("");
+      setPauseDisplaysMade("");
+      setPauseLooseCards("");
       if (r?.error) setError(r.error);
     } finally {
       setPending(null);
@@ -817,6 +832,38 @@ export function StageActionButtons({
               </span>
             </label>
           ) : null}
+          {/* P3-FLOOR-UX — packaging stations record their in-progress
+              counts at pause so metrics see where the run stood. */}
+          {isPackagingPauseCounts && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-amber-950">
+                Current counts so far{" "}
+                <span className="font-normal text-amber-900/70">
+                  (optional but recommended)
+                </span>
+              </p>
+              <div className="grid grid-cols-3 gap-1.5">
+                <NumField
+                  label="Master cases"
+                  value={pauseMasterCases}
+                  onChange={setPauseMasterCases}
+                  scrollSafe
+                />
+                <NumField
+                  label="Displays"
+                  value={pauseDisplaysMade}
+                  onChange={setPauseDisplaysMade}
+                  scrollSafe
+                />
+                <NumField
+                  label="Loose cards"
+                  value={pauseLooseCards}
+                  onChange={setPauseLooseCards}
+                  scrollSafe
+                />
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"

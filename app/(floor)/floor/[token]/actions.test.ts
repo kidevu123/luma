@@ -498,13 +498,17 @@ describe("HANDPACK-TABLET-CONTEXT-1 · floor actions", () => {
   });
 });
 
-describe("BLISTER-MACHINE-COUNTER-1 · pause schema accepts foil_swap", () => {
-  it("pauseSchema reason enum includes foil_swap", () => {
-    expect(actionsSrc).toMatch(/z\.enum\(\[.*"foil_swap".*\]\)/s);
+describe("P3-FLOOR-UX · pause schema rejects roll swap reasons", () => {
+  // Roll changes use the dedicated roll workflow; new pauses can no
+  // longer select pvc_swap/foil_swap. Historical events are preserved.
+  it("pauseSchema reason enum no longer includes foil_swap", () => {
+    const enumMatch = actionsSrc.match(/reason: z\.enum\(\[([^\]]+)\]\)/)?.[1] ?? "";
+    expect(enumMatch).not.toMatch(/foil_swap/);
   });
 
-  it("pauseSchema reason enum still includes pvc_swap", () => {
-    expect(actionsSrc).toMatch(/z\.enum\(\[.*"pvc_swap".*\]\)/s);
+  it("pauseSchema reason enum no longer includes pvc_swap", () => {
+    const enumMatch = actionsSrc.match(/reason: z\.enum\(\[([^\]]+)\]\)/)?.[1] ?? "";
+    expect(enumMatch).not.toMatch(/pvc_swap/);
   });
 
   it("pauseSchema reason enum still includes shift_end, shift_break, machine_jam, qa_check, other", () => {

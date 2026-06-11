@@ -1,8 +1,12 @@
 import type { StationKind } from "@/lib/floor-command/types";
 
+// P3-FLOOR-UX — "PVC roll swap" / "Foil roll swap" were REMOVED from
+// the selectable pause reasons: roll changes have a dedicated workflow
+// (StationRollPanel → Change PVC/Foil roll → changeRollAction), which
+// records the counter segment and the roll lifecycle correctly.
+// Historical BAG_PAUSED events with reason pvc_swap/foil_swap are
+// preserved as-is; display code keeps labels for them.
 export type PauseReasonValue =
-  | "pvc_swap"
-  | "foil_swap"
   | "shift_end"
   | "shift_break"
   | "machine_jam"
@@ -14,8 +18,6 @@ export type PauseReason = {
   label: string;
 };
 
-const PVC_SWAP: PauseReason = { value: "pvc_swap", label: "PVC roll swap" };
-const FOIL_SWAP: PauseReason = { value: "foil_swap", label: "Foil roll swap" };
 const SHIFT_END: PauseReason = { value: "shift_end", label: "Shift ending" };
 const SHIFT_BREAK: PauseReason = { value: "shift_break", label: "Shift break" };
 const MACHINE_JAM: PauseReason = {
@@ -25,12 +27,11 @@ const MACHINE_JAM: PauseReason = {
 const QA_CHECK: PauseReason = { value: "qa_check", label: "QA check" };
 const OTHER: PauseReason = { value: "other", label: "Other" };
 
-/** Blister press stations — roll swap pauses surface a roll-change card. */
+/** Blister press stations — roll swaps use the dedicated roll workflow,
+ *  not a pause reason. */
 const BLISTER_MACHINE_REASONS: readonly PauseReason[] = [
   SHIFT_END,
   SHIFT_BREAK,
-  PVC_SWAP,
-  FOIL_SWAP,
   MACHINE_JAM,
   QA_CHECK,
   OTHER,

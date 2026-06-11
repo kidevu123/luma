@@ -1580,9 +1580,9 @@ const pauseSchema = z.object({
   token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
+  // P3-FLOOR-UX — pvc_swap/foil_swap removed: roll changes use the
+  // dedicated roll workflow. Historical pause events keep old reasons.
   reason: z.enum([
-    "pvc_swap",
-    "foil_swap",
     "shift_end",
     "shift_break",
     "machine_jam",
@@ -1594,6 +1594,12 @@ const pauseSchema = z.object({
       if (value == null || value === "") return undefined;
       return parseNonnegativeIntegerInput(value);
     }, z.number().int().nonnegative().optional()),
+  // P3-FLOOR-UX — packaging pause counts. The packaging station prompts
+  // for the key in-progress counts at pause; logged on the BAG_PAUSED
+  // payload for metrics (optional — a break never blocks on them).
+  pauseMasterCases: z.coerce.number().int().min(0).max(100000).optional(),
+  pauseDisplaysMade: z.coerce.number().int().min(0).max(100000).optional(),
+  pauseLooseCards: z.coerce.number().int().min(0).max(100000).optional(),
   operatorCode: z.string().max(40).optional(),
   notes: z.string().max(400).optional(),
   clientEventId: clientEventIdField,
@@ -1608,6 +1614,9 @@ export async function pauseBagAction(
     stationId: formData.get("stationId"),
     reason: formData.get("reason") || "other",
     counterSnapshotCount: formData.get("counterSnapshotCount") || undefined,
+    pauseMasterCases: formData.get("pauseMasterCases") || undefined,
+    pauseDisplaysMade: formData.get("pauseDisplaysMade") || undefined,
+    pauseLooseCards: formData.get("pauseLooseCards") || undefined,
     operatorCode: formData.get("operatorCode") || undefined,
     notes: formData.get("notes") || undefined,
     clientEventId: pickClientEventId(formData),
@@ -1659,6 +1668,18 @@ export async function pauseBagAction(
                 counter_snapshot_reason: segmentReason,
                 counter_snapshot_unit: "good_blisters_since_last_reset",
                 counter_snapshot_source: "operator_entry",
+              }
+            : {}),
+          // P3-FLOOR-UX — packaging in-progress counts at pause time.
+          ...(parsed.data.pauseMasterCases != null ||
+          parsed.data.pauseDisplaysMade != null ||
+          parsed.data.pauseLooseCards != null
+            ? {
+                pause_counts: {
+                  master_cases: parsed.data.pauseMasterCases ?? null,
+                  displays_made: parsed.data.pauseDisplaysMade ?? null,
+                  loose_cards: parsed.data.pauseLooseCards ?? null,
+                },
               }
             : {}),
           ...(parsed.data.operatorCode
