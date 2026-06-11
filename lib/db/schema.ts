@@ -327,11 +327,17 @@ export const users = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     email: text("email").notNull(),
+    /** P3-USERS — real person name; primary display identity. */
+    name: text("name"),
     passwordHash: text("password_hash"), // null when authentik-managed
     role: userRoleEnum("role").notNull().default("STAFF"),
     employeeId: uuid("employee_id"), // FK applied below
     authentikSubject: text("authentik_subject"), // OIDC sub claim
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    /** P3-USERS — deletion marker. The row is anonymized in place
+     *  (name "Deleted user", tombstone email, credentials cleared) so
+     *  owned resources keep resolving under the canonical identity. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     mustChangePassword: boolean("must_change_password").notNull().default(false),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -1038,3 +1038,105 @@ export async function deriveSupplierSettlementReport(poId: string): Promise<PoSe
   const recon = await derivePoRawMaterialReconciliation(poId);
   return recon ? recon.settlement : null;
 }
+
+// ── P3-PO-VIEW · Production Output PO comparison ────────────────────
+//
+// Per tablet line on a PO: ordered vs received vs produced (finished
+// lots) vs remaining, for the Production Output page's PO-centric
+// view. Drill-down to lots/receipts/bags lives on /po-reconciliation.
+
+export type PoOutputComparisonLine = {
+  poLineId: string;
+  tabletTypeId: string;
+  tabletName: string;
+  qtyOrdered: number;
+  qtyReceived: number;
+  rawConsumed: number;
+  finishedUnits: number;
+  remainingToReceive: number;
+  unproducedOnHand: number;
+  state: "matched" | "short" | "over" | "in_progress";
+};
+
+export async function derivePoOutputComparison(
+  poId: string,
+): Promise<PoOutputComparisonLine[]> {
+  type Row = {
+    po_line_id: string;
+    tablet_type_id: string;
+    tablet_name: string;
+    qty_ordered: number;
+    qty_received: number;
+    raw_consumed: number;
+    finished_units: number;
+  };
+  const rows = (await db.execute<Row>(sql`
+    WITH bag_set AS (
+      SELECT ib.id, ib.tablet_type_id,
+             COALESCE(ib.declared_pill_count, ib.pill_count, 0)::int AS received_count
+      FROM inventory_bags ib
+      JOIN small_boxes sb ON sb.id = ib.small_box_id
+      JOIN receives r     ON r.id = sb.receive_id
+      WHERE r.po_id = ${poId}
+    ),
+    received AS (
+      SELECT tablet_type_id, SUM(received_count)::int AS qty_received
+      FROM bag_set GROUP BY tablet_type_id
+    ),
+    consumed AS (
+      SELECT bs.tablet_type_id, SUM(COALESCE(s.consumed_qty, 0))::int AS raw_consumed
+      FROM raw_bag_allocation_sessions s
+      JOIN bag_set bs ON bs.id = s.inventory_bag_id
+      WHERE s.allocation_status IN ('CLOSED','DEPLETED','RETURNED_TO_STOCK')
+      GROUP BY bs.tablet_type_id
+    ),
+    produced AS (
+      SELECT bs.tablet_type_id, SUM(COALESCE(fl.units_produced, 0))::int AS finished_units
+      FROM finished_lots fl
+      JOIN workflow_bags wb ON wb.id = fl.workflow_bag_id
+      JOIN bag_set bs ON bs.id = wb.inventory_bag_id
+      WHERE fl.status NOT IN ('RECALLED')
+      GROUP BY bs.tablet_type_id
+    )
+    SELECT
+      pl.id::text              AS po_line_id,
+      pl.tablet_type_id::text  AS tablet_type_id,
+      tt.name                  AS tablet_name,
+      pl.qty_ordered           AS qty_ordered,
+      COALESCE(rcv.qty_received, 0)  AS qty_received,
+      COALESCE(c.raw_consumed, 0)    AS raw_consumed,
+      COALESCE(p.finished_units, 0)  AS finished_units
+    FROM po_lines pl
+    JOIN tablet_types tt ON tt.id = pl.tablet_type_id
+    LEFT JOIN received rcv ON rcv.tablet_type_id = pl.tablet_type_id
+    LEFT JOIN consumed c   ON c.tablet_type_id = pl.tablet_type_id
+    LEFT JOIN produced p   ON p.tablet_type_id = pl.tablet_type_id
+    WHERE pl.po_id = ${poId} AND pl.tablet_type_id IS NOT NULL
+    ORDER BY tt.name
+  `)) as unknown as Row[];
+
+  return rows.map((r) => {
+    const remainingToReceive = Math.max(0, r.qty_ordered - r.qty_received);
+    const unproducedOnHand = Math.max(0, r.qty_received - r.raw_consumed);
+    // Discrepancy classification on the receive side (the commercial
+    // promise): short = under-received, over = over-received, matched
+    // when received covers ordered and consumption caught up.
+    let state: PoOutputComparisonLine["state"];
+    if (r.qty_received > r.qty_ordered) state = "over";
+    else if (remainingToReceive > 0) state = "short";
+    else if (unproducedOnHand > 0) state = "in_progress";
+    else state = "matched";
+    return {
+      poLineId: r.po_line_id,
+      tabletTypeId: r.tablet_type_id,
+      tabletName: r.tablet_name,
+      qtyOrdered: r.qty_ordered,
+      qtyReceived: r.qty_received,
+      rawConsumed: r.raw_consumed,
+      finishedUnits: r.finished_units,
+      remainingToReceive,
+      unproducedOnHand,
+      state,
+    };
+  });
+}

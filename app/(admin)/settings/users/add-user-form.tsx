@@ -29,7 +29,17 @@ export function AddUserForm() {
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="add-name">Name</Label>
+          <Input
+            id="add-name"
+            name="name"
+            type="text"
+            placeholder="Real person name"
+            autoComplete="off"
+          />
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="add-email">Email</Label>
           <Input

@@ -3,7 +3,14 @@
 import { useTransition, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
-import { updateRoleAction, disableUserAction, enableUserAction, resetPasswordAction } from "./actions";
+import {
+  updateRoleAction,
+  disableUserAction,
+  enableUserAction,
+  resetPasswordAction,
+  updateUserProfileAction,
+  deleteUserAction,
+} from "./actions";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
 type Role = "OWNER" | "ADMIN" | "MANAGER" | "LEAD" | "STAFF";
@@ -11,6 +18,7 @@ type Role = "OWNER" | "ADMIN" | "MANAGER" | "LEAD" | "STAFF";
 type UserRow = {
   id: string;
   email: string;
+  name: string | null;
   role: Role;
   disabled: boolean;
 };
@@ -34,6 +42,15 @@ export function UserRowActions({
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetSuccess, setResetSuccess] = useState(false);
   const [showResetForm, setShowResetForm] = useState(false);
+  // P3-USERS — edit (name/email) + delete flows.
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editName, setEditName] = useState(user.name ?? "");
+  const [editEmail, setEditEmail] = useState(user.email);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editPending, startEditTransition] = useTransition();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletePending, startDeleteTransition] = useTransition();
 
   const isSelf = user.id === currentUserId;
   const isOwner = user.role === "OWNER";
@@ -116,9 +133,20 @@ export function UserRowActions({
 
       {roleError && <p className="text-[11px] text-red-600 text-right">{roleError}</p>}
 
-      {/* Disable / enable + reset password */}
+      {/* Disable / enable + edit + reset password + delete */}
       {canModify && (
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setShowEditForm((v) => !v);
+              setEditError(null);
+            }}
+            className="h-7 text-[12px] text-text-subtle"
+          >
+            Edit
+          </Button>
           <Button
             size="sm"
             variant={user.disabled ? "secondary" : "ghost"}
@@ -137,6 +165,105 @@ export function UserRowActions({
             Reset password
             {showResetForm ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setShowDeleteConfirm((v) => !v);
+              setDeleteError(null);
+            }}
+            className="h-7 text-[12px] text-red-600 hover:bg-red-50"
+          >
+            Delete
+          </Button>
+        </div>
+      )}
+
+      {/* P3-USERS — edit name/email */}
+      {showEditForm && canModify && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setEditError(null);
+            const fd = new FormData();
+            fd.set("userId", user.id);
+            fd.set("name", editName);
+            fd.set("email", editEmail);
+            startEditTransition(async () => {
+              const result = await updateUserProfileAction(fd);
+              if ("error" in result) setEditError(result.error);
+              else setShowEditForm(false);
+            });
+          }}
+          className="flex items-center gap-1.5 flex-wrap justify-end"
+        >
+          <Input
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="Name"
+            className="h-7 w-36 text-[12px]"
+          />
+          <Input
+            value={editEmail}
+            onChange={(e) => setEditEmail(e.target.value)}
+            placeholder="Email"
+            type="email"
+            required
+            className="h-7 w-48 text-[12px]"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            variant="secondary"
+            disabled={editPending}
+            className="h-7 text-[12px]"
+          >
+            {editPending ? "…" : "Save"}
+          </Button>
+        </form>
+      )}
+      {editError && <p className="text-[11px] text-red-600 text-right">{editError}</p>}
+
+      {/* P3-USERS — delete confirmation explaining resource handling */}
+      {showDeleteConfirm && canModify && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 max-w-[320px] text-left space-y-1.5">
+          <p className="text-[11.5px] text-red-800 leading-snug">
+            Delete <span className="font-semibold">{user.name?.trim() || user.email}</span>?
+            Their workflows, logs, and history are kept and will show as
+            owned by <span className="font-semibold">Deleted user</span>.
+            This cannot be undone.
+          </p>
+          <div className="flex gap-1.5 justify-end">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowDeleteConfirm(false)}
+              className="h-7 text-[12px]"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={deletePending}
+              onClick={() => {
+                setDeleteError(null);
+                const fd = new FormData();
+                fd.set("userId", user.id);
+                startDeleteTransition(async () => {
+                  const result = await deleteUserAction(fd);
+                  if ("error" in result) setDeleteError(result.error);
+                  else setShowDeleteConfirm(false);
+                });
+              }}
+              className="h-7 text-[12px] text-red-700"
+            >
+              {deletePending ? "Deleting…" : "Confirm delete"}
+            </Button>
+          </div>
+          {deleteError && (
+            <p className="text-[11px] text-red-700 text-right">{deleteError}</p>
+          )}
         </div>
       )}
 

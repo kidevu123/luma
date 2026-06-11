@@ -43,8 +43,10 @@ export default async function UsersPage() {
     .select({
       id: users.id,
       email: users.email,
+      name: users.name,
       role: users.role,
       disabledAt: users.disabledAt,
+      deletedAt: users.deletedAt,
       mustChangePassword: users.mustChangePassword,
       lastLoginAt: users.lastLoginAt,
       createdAt: users.createdAt,
@@ -81,7 +83,7 @@ export default async function UsersPage() {
       <DataTable>
         <THead>
           <TR>
-            <TH>Email</TH>
+            <TH>Name</TH>
             <TH>Role</TH>
             <TH>Last login</TH>
             <TH>Status</TH>
@@ -96,7 +98,19 @@ export default async function UsersPage() {
               <TR key={u.id}>
                 <TD>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-[12px] text-text">{u.email}</span>
+                    <div>
+                      {/* P3-USERS — name primary, email secondary. */}
+                      <span className="text-[13px] font-medium text-text-strong">
+                        {u.deletedAt
+                          ? "Deleted user"
+                          : (u.name?.trim() || u.email)}
+                      </span>
+                      {!u.deletedAt && u.name?.trim() ? (
+                        <span className="block font-mono text-[11px] text-text-muted">
+                          {u.email}
+                        </span>
+                      ) : null}
+                    </div>
                     {u.id === me.id && (
                       <span className="text-[10px] text-text-subtle px-1 py-0.5 rounded border border-border bg-surface-2">you</span>
                     )}
@@ -116,7 +130,11 @@ export default async function UsersPage() {
                   <span className="text-[12px] text-text-muted">{formatDate(u.lastLoginAt)}</span>
                 </TD>
                 <TD>
-                  {u.disabledAt ? (
+                  {u.deletedAt ? (
+                    <span className="inline-flex items-center h-5 px-2 rounded-md border border-border bg-surface-2 text-text-muted text-[11px] font-medium">
+                      Deleted
+                    </span>
+                  ) : u.disabledAt ? (
                     <span className="inline-flex items-center h-5 px-2 rounded-md border border-red-200 bg-red-50 text-red-700 text-[11px] font-medium">
                       Disabled
                     </span>
@@ -127,11 +145,21 @@ export default async function UsersPage() {
                   )}
                 </TD>
                 <TD className="text-right">
-                  <UserRowActions
-                    user={{ id: u.id, email: u.email, role: u.role, disabled: u.disabledAt !== null }}
-                    currentUserId={me.id}
-                    currentUserRole={me.role}
-                  />
+                  {u.deletedAt ? (
+                    <span className="text-[11px] text-text-subtle">—</span>
+                  ) : (
+                    <UserRowActions
+                      user={{
+                        id: u.id,
+                        email: u.email,
+                        name: u.name,
+                        role: u.role,
+                        disabled: u.disabledAt !== null,
+                      }}
+                      currentUserId={me.id}
+                      currentUserRole={me.role}
+                    />
+                  )}
                 </TD>
               </TR>
             ))

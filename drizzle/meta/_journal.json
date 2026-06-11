@@ -388,6 +388,13 @@
       "breakpoints": true
     },
     {
+      "idx": 55,
+      "version": "7",
+      "when": 1783500000000,
+      "tag": "0056_batch_default_released",
+      "breakpoints": true
+    },
+    {
       "idx": 56,
       "version": "7",
       "when": 1783600000000,
@@ -413,6 +420,13 @@
       "version": "7",
       "when": 1783900000000,
       "tag": "0060_zoho_raw_bag_receive_reconciliation_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1784000000000,
+      "tag": "0061_user_name_and_delete",
       "breakpoints": true
     }
   ]

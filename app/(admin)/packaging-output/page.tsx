@@ -29,6 +29,10 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Package, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
 import { evaluateBacklogAutoIssueForWorkflowBag } from "@/lib/db/queries/finished-lots";
 import { AutoIssueAllButton, IssueLotButton } from "./auto-issue-controls";
+import {
+  derivePoOutputComparison,
+  listPoSummaries,
+} from "@/lib/production/po-reconciliation";
 
 export const dynamic = "force-dynamic";
 
@@ -40,9 +44,24 @@ const FALLBACK = {
   label: "No data",
 };
 
-export default async function PackagingOutputPage() {
+export default async function PackagingOutputPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ poId?: string }>;
+}) {
   await requireSession();
   const range = lastNDays(7);
+
+  // P3-PO-VIEW — PO-centric comparison (ordered vs received vs
+  // produced vs remaining) driven by the ?poId= selector below.
+  const selectedPoId = (await searchParams)?.poId ?? null;
+  const [poSummaries, poComparison] = await Promise.all([
+    listPoSummaries(),
+    selectedPoId ? derivePoOutputComparison(selectedPoId) : Promise.resolve(null),
+  ]);
+  const selectedPo = selectedPoId
+    ? (poSummaries.find((p) => p.po_id === selectedPoId) ?? null)
+    : null;
 
   const ROLL_KINDS_FOR_EXCLUSION = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"];
 
@@ -253,6 +272,113 @@ export default async function PackagingOutputPage() {
           </p>
           <p className="text-[11px] text-text-muted mt-0.5">Lots packed by due date</p>
         </div>
+      </div>
+
+      {/* P3-PO-VIEW — PO-centric comparison */}
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-border/60 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-text-subtle">PO view</p>
+            <h2 className="text-sm font-semibold text-text-strong">
+              {selectedPo
+                ? `${selectedPo.po_number} · ${selectedPo.vendor_name ?? "unknown vendor"}`
+                : "Select a purchase order"}
+            </h2>
+            <p className="text-[11px] text-text-muted mt-0.5">
+              Ordered vs received vs produced per tablet line. Full receipts,
+              bags, and lots drill-down on PO reconciliation.
+            </p>
+          </div>
+          <form action="/packaging-output" className="flex items-center gap-2">
+            <select
+              name="poId"
+              defaultValue={selectedPoId ?? ""}
+              className="h-9 px-2 rounded-lg bg-surface border border-border text-sm min-w-[14rem]"
+            >
+              <option value="">— Select PO —</option>
+              {poSummaries.map((p) => (
+                <option key={p.po_id} value={p.po_id}>
+                  {p.po_number} · {p.vendor_name ?? "unknown"} ({p.bag_count} bags)
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="h-9 px-3 rounded-lg bg-brand-700 text-white text-sm font-medium"
+            >
+              View
+            </button>
+          </form>
+        </div>
+        {poComparison && (
+          <div className="px-4 py-4">
+            {poComparison.length === 0 ? (
+              <p className="text-sm text-text-muted">No tablet lines on this PO.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="text-[12.5px] w-full">
+                  <thead>
+                    <tr className="border-b border-border/60">
+                      <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Tablet line</th>
+                      <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Ordered</th>
+                      <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Received</th>
+                      <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Consumed</th>
+                      <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Sellable units produced</th>
+                      <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Remaining to receive</th>
+                      <th className="text-right py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Unproduced on hand</th>
+                      <th className="text-left py-1.5 pr-4 font-medium text-text-muted text-[11px] uppercase tracking-wide">Status</th>
+                      <th className="text-left py-1.5 font-medium text-text-muted text-[11px] uppercase tracking-wide">Drill-down</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {poComparison.map((line) => (
+                      <tr key={line.poLineId} className="border-b border-border/30 last:border-0">
+                        <td className="py-2 pr-4 text-text-strong">{line.tabletName}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{line.qtyOrdered.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{line.qtyReceived.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{line.rawConsumed.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums text-text-strong">{line.finishedUnits.toLocaleString()}</td>
+                        <td className={`py-2 pr-4 text-right tabular-nums ${line.remainingToReceive > 0 ? "text-amber-700 font-medium" : ""}`}>
+                          {line.remainingToReceive.toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-4 text-right tabular-nums">{line.unproducedOnHand.toLocaleString()}</td>
+                        <td className="py-2 pr-4">
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                              line.state === "matched"
+                                ? "border-green-300 bg-green-50 text-green-800"
+                                : line.state === "short"
+                                  ? "border-amber-300 bg-amber-50 text-amber-900"
+                                  : line.state === "over"
+                                    ? "border-red-300 bg-red-50 text-red-800"
+                                    : "border-sky-300 bg-sky-50 text-sky-800"
+                            }`}
+                          >
+                            {line.state === "matched"
+                              ? "Matched"
+                              : line.state === "short"
+                                ? "Short — under-received"
+                                : line.state === "over"
+                                  ? "Over-received"
+                                  : "In progress"}
+                          </span>
+                        </td>
+                        <td className="py-2">
+                          <Link
+                            href={`/po-reconciliation/${selectedPoId}`}
+                            className="text-[11.5px] underline underline-offset-2 text-brand-700 hover:text-brand-800"
+                          >
+                            Lots · receipts · bags
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Pack-out queue — actionable section */}
