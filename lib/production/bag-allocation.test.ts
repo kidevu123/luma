@@ -815,11 +815,12 @@ describe("isPartialBagResume", () => {
     })).toBe(true);
   });
 
-  it("returns true when CLOSED with endingBalanceQty null (conservative)", () => {
+  // P1-PARTIAL: unknown remaining is never silently reusable.
+  it("returns false when CLOSED with endingBalanceQty null (needs closeout)", () => {
     expect(isPartialBagResume({
       allocationStatus: "CLOSED",
       endingBalanceQty: null,
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it("returns false when CLOSED with endingBalanceQty = 0 (empty confirmed)", () => {
@@ -855,10 +856,10 @@ describe("isPartialBagResume", () => {
     ).toBe(false);
   });
 
-  it("RETURNED_TO_STOCK with null endingBalanceQty is treated as partial resume (conservative)", () => {
+  it("RETURNED_TO_STOCK with null endingBalanceQty needs closeout (not resumable)", () => {
     expect(
       isPartialBagResume({ allocationStatus: "RETURNED_TO_STOCK", endingBalanceQty: null }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("DEPLETED is not a partial resume", () => {

@@ -892,5 +892,7 @@ export function isPartialBagResume(
   ) {
     return false;
   }
-  return session.endingBalanceQty == null || session.endingBalanceQty > 0;
+  // P1-PARTIAL: an unknown ending balance is "partial - needs closeout",
+  // never silently reusable. Admin must record the remaining count first.
+  return session.endingBalanceQty != null && session.endingBalanceQty > 0;
 }
