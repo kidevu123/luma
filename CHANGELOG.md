@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.112] — 2026-06-12
+
+### Fixed
+- **Missed bag backfill deploy:** Split client-safe contract types from the server backfill module so `next build` no longer bundles `lib/db` into the settings form.
+
 ## [0.4.111] — 2026-06-12
 
 ### Added

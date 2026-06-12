@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   MISSED_BLISTER_BAG_CONFIRM_STRING,
   type MissedBlisterBagProposal,
-} from "@/lib/ops/missed-blister-bag-backfill";
+} from "@/lib/ops/missed-blister-bag-backfill-contract";
 import {
   applyMissedBagBackfillAction,
   previewMissedBagBackfillAction,
