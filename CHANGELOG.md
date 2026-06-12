@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.111] — 2026-06-12
+
+### Added
+- **Missed blister bag backfill:** Admin settings tool at `/settings/missed-bag-backfill` to append historical card assignment, PVC roll change, and blister complete events when a bag was run on the floor but never scanned. Dry-run preview, typed confirmation, audit log, roll read-model rebuild, and live board snapshot restore. CLI: `scripts/apply-missed-blister-bag-backfill.ts`.
+
 ## [0.4.110] — 2026-06-02
 
 ### Fixed

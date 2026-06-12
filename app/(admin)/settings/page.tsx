@@ -18,6 +18,7 @@ import {
   Receipt,
   Scale,
   ClipboardCheck,
+  Wrench,
 } from "lucide-react";
 import {
   products as productsTable,
@@ -148,6 +149,12 @@ export default async function SettingsPage() {
           icon={ClipboardCheck}
           label="Shift review"
           hint="read-only post-shift blister counter review — flags only, no repair"
+        />
+        <ConfigLink
+          href="/settings/missed-bag-backfill"
+          icon={Wrench}
+          label="Missed bag backfill"
+          hint="admin — record a blister bag that was run but never scanned on the floor"
         />
         <ConfigLink
           href="/qr-cards"
