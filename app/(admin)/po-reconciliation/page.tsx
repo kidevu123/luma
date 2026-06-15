@@ -9,7 +9,6 @@ import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
-import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 import { listPoSummaries } from "@/lib/production/po-reconciliation";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +35,6 @@ export default async function PoReconciliationListPage({
 
   return (
     <div className="space-y-5">
-      <ReceivingTabs />
       <PageHeader
         title="PO reconciliation"
         description="Reconcile vendor declared counts vs. our internal estimate, finished output, known loss, and remaining inventory per purchase order."

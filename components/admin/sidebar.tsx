@@ -1,8 +1,21 @@
 "use client";
 
-// NAV-REDESIGN-1 — consolidated nav.
-// 3 sections (Operations, Inventory, Reports) + pinned Dashboard/Live
-// floor at top + Settings link at bottom. No collapsed Advanced group.
+// NAV-PHASED-1 — process-phased sidebar.
+//
+// Four sections that mirror the real Luma flow: Intake & materials →
+// Run production → Reconciliation & output → Traceability & reporting.
+// Pinned Dashboard/Live floor stay at top; Settings at bottom.
+//
+// Section membership rules:
+//   - Receiving / Materials / Input lots belong with INTAKE — they
+//     describe what enters the floor.
+//   - Workflows / Partial bags / QC / Shift review belong with RUN
+//     PRODUCTION — they describe what's happening on the floor right
+//     now.
+//   - Production output, PO reconciliation, Finished lots, Zoho
+//     output belong together — every step that closes out a run.
+//   - Traceability lookup, Metrics, Productivity, Audit log are the
+//     after-the-fact reporting surfaces.
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -39,33 +52,38 @@ const PINNED_TOP: NavItem[] = [
 
 const SECTIONS: Section[] = [
   {
-    heading: "Operations",
+    heading: "Intake & materials",
     items: [
-      { href: "/partial-bags",       label: "Partial Bag Workbench", icon: Archive },
-      { href: "/inbound",            label: "Receiving",             icon: Inbox },
-      { href: "/packaging-output",   label: "Production output",     icon: Package },
-      { href: "/po-reconciliation",  label: "PO reconciliation",     icon: GitCompare },
-      { href: "/qc-review",          label: "QC review",             icon: ShieldAlert },
-      { href: "/shift-review",       label: "Shift review",          icon: ClipboardCheck },
+      { href: "/inbound",             label: "Receiving",   icon: Inbox },
+      { href: "/packaging-inventory", label: "Materials",   icon: Boxes },
+      { href: "/batches",             label: "Input lots",  icon: ShieldCheck },
     ],
   },
   {
-    heading: "Inventory",
+    heading: "Run production",
     items: [
-      { href: "/packaging-inventory", label: "Materials",     icon: Boxes },
-      { href: "/finished-lots",       label: "Finished lots", icon: PackageCheck },
-      { href: "/zoho-production-operations", label: "Zoho output", icon: CloudUpload },
-      { href: "/batches",             label: "Input lots",    icon: ShieldCheck },
-      { href: "/workflow-submissions", label: "Workflows",    icon: ClipboardList },
-      { href: "/recall",              label: "Traceability lookup", icon: Search },
+      { href: "/workflow-submissions", label: "Workflows",             icon: ClipboardList },
+      { href: "/partial-bags",         label: "Partial Bag Workbench", icon: Archive },
+      { href: "/qc-review",            label: "QC review",             icon: ShieldAlert },
+      { href: "/shift-review",         label: "Shift review",          icon: ClipboardCheck },
     ],
   },
   {
-    heading: "Reports",
+    heading: "Reconciliation & output",
     items: [
-      { href: "/metrics",                label: "Metrics",      icon: BarChart3 },
-      { href: "/operator-productivity",  label: "Productivity", icon: Users },
-      { href: "/reports/audit-log",      label: "Audit log",    icon: ScrollText },
+      { href: "/packaging-output",            label: "Production output", icon: Package },
+      { href: "/po-reconciliation",           label: "PO reconciliation", icon: GitCompare },
+      { href: "/finished-lots",               label: "Finished lots",     icon: PackageCheck },
+      { href: "/zoho-production-operations",  label: "Zoho output",       icon: CloudUpload },
+    ],
+  },
+  {
+    heading: "Traceability & reporting",
+    items: [
+      { href: "/recall",                label: "Traceability lookup", icon: Search },
+      { href: "/metrics",               label: "Metrics",             icon: BarChart3 },
+      { href: "/operator-productivity", label: "Productivity",        icon: Users },
+      { href: "/reports/audit-log",     label: "Audit log",           icon: ScrollText },
     ],
   },
 ];

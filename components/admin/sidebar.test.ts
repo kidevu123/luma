@@ -1,7 +1,14 @@
-// NAV-REDESIGN-1 — sidebar invariants for the consolidated nav.
+// NAV-PHASED-1 — sidebar invariants for the process-phased nav.
 //
 // Parses sidebar.tsx as source text and asserts the structural
-// contract: 3 sections, pinned top items, nothing buried in Advanced.
+// contract: four phased sections in business-flow order, pinned
+// Dashboard + Live floor, and no leftover Operations/Inventory/
+// Reports labels from the prior structure.
+//
+// The four phases (Intake & materials → Run production →
+// Reconciliation & output → Traceability & reporting) mirror how a
+// production day actually plays out, so the tests verify both
+// membership and ordering.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -11,32 +18,62 @@ import { dirname, resolve } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(resolve(here, "sidebar.tsx"), "utf8");
 
+const SECTION_HEADINGS = [
+  "Intake & materials",
+  "Run production",
+  "Reconciliation & output",
+  "Traceability & reporting",
+] as const;
+
+function sectionRange(heading: string): { start: number; end: number } {
+  const start = src.indexOf(`heading: "${heading}"`);
+  expect(start, `section ${heading} should exist`).toBeGreaterThan(-1);
+  const idx = SECTION_HEADINGS.indexOf(heading as (typeof SECTION_HEADINGS)[number]);
+  const nextHeading = SECTION_HEADINGS[idx + 1];
+  const end = nextHeading
+    ? src.indexOf(`heading: "${nextHeading}"`)
+    : src.length;
+  return { start, end };
+}
+
+function inSection(section: string, needle: string): boolean {
+  const { start, end } = sectionRange(section);
+  const at = src.indexOf(needle);
+  return at > start && at < end;
+}
+
 // ─── Section headings ────────────────────────────────────────────────────
 
-describe("NAV-REDESIGN-1 · section headings", () => {
-  it("has an Operations section", () => {
-    expect(src).toMatch(/heading:\s*"Operations"/);
+describe("NAV-PHASED-1 · section headings", () => {
+  for (const heading of SECTION_HEADINGS) {
+    it(`has section: ${heading}`, () => {
+      expect(src).toMatch(new RegExp(`heading:\\s*"${heading.replace(/&/g, "\\&")}"`));
+    });
+  }
+
+  it("sections appear in the documented business-flow order", () => {
+    const positions = SECTION_HEADINGS.map((h) => src.indexOf(`heading: "${h}"`));
+    for (let i = 1; i < positions.length; i += 1) {
+      expect(positions[i]).toBeGreaterThan(positions[i - 1]!);
+    }
   });
-  it("has an Inventory section", () => {
-    expect(src).toMatch(/heading:\s*"Inventory"/);
-  });
-  it("has a Reports section", () => {
-    expect(src).toMatch(/heading:\s*"Reports"/);
-  });
-  it("does NOT have an Advanced collapsed section", () => {
-    expect(src).not.toMatch(/collapsedByDefault:\s*true/);
-  });
-  it("does NOT have an Oversight section", () => {
+
+  it("legacy section labels are gone", () => {
+    expect(src).not.toMatch(/heading:\s*"Operations"/);
+    expect(src).not.toMatch(/heading:\s*"Inventory"/);
+    expect(src).not.toMatch(/heading:\s*"Reports"/);
     expect(src).not.toMatch(/heading:\s*"Oversight"/);
-  });
-  it("does NOT have a Configure section", () => {
     expect(src).not.toMatch(/heading:\s*"Configure"/);
+  });
+
+  it("no collapsed-by-default groups (everything is reachable from the top of the sidebar)", () => {
+    expect(src).not.toMatch(/collapsedByDefault:\s*true/);
   });
 });
 
 // ─── Pinned top items ────────────────────────────────────────────────────
 
-describe("NAV-REDESIGN-1 · pinned top items", () => {
+describe("NAV-PHASED-1 · pinned top items", () => {
   it("Dashboard is in PINNED_TOP", () => {
     const pinnedAt = src.indexOf("PINNED_TOP");
     const sectionsAt = src.indexOf("SECTIONS");
@@ -55,101 +92,106 @@ describe("NAV-REDESIGN-1 · pinned top items", () => {
   });
 });
 
-// ─── Operations entries ──────────────────────────────────────────────────
+// ─── Intake & materials ─────────────────────────────────────────────────
 
-describe("NAV-REDESIGN-1 · Operations entries", () => {
-  function inOps(s: string): boolean {
-    const start = src.indexOf('heading: "Operations"');
-    const end = src.indexOf('heading: "Inventory"');
-    const at = src.indexOf(s);
-    return start > -1 && at > start && at < end;
-  }
+describe("NAV-PHASED-1 · Intake & materials entries", () => {
+  it("Receiving (/inbound) is in Intake & materials", () => {
+    expect(inSection("Intake & materials", '"/inbound"')).toBe(true);
+  });
+  it("Materials (/packaging-inventory) is in Intake & materials", () => {
+    expect(inSection("Intake & materials", '"/packaging-inventory"')).toBe(true);
+  });
+  it("Input lots (/batches) is in Intake & materials", () => {
+    expect(inSection("Intake & materials", '"/batches"')).toBe(true);
+    expect(inSection("Intake & materials", '"Input lots"')).toBe(true);
+  });
+});
 
-  it("Start production is not in Operations", () => {
-    expect(inOps('"/production/start"')).toBe(false);
+// ─── Run production ─────────────────────────────────────────────────────
+
+describe("NAV-PHASED-1 · Run production entries", () => {
+  it("Workflows (/workflow-submissions) is in Run production", () => {
+    expect(inSection("Run production", '"/workflow-submissions"')).toBe(true);
   });
-  it("Receiving is in Operations", () => {
-    expect(inOps('"/inbound"')).toBe(true);
+  it("Partial Bag Workbench is in Run production", () => {
+    expect(inSection("Run production", '"/partial-bags"')).toBe(true);
   });
-  it("Production output is in Operations", () => {
-    expect(inOps('"Production output"')).toBe(true);
+  it("QC review is in Run production", () => {
+    expect(inSection("Run production", '"/qc-review"')).toBe(true);
   });
-  it("PO reconciliation is in Operations", () => {
-    expect(inOps('"/po-reconciliation"')).toBe(true);
+  it("Shift review is in Run production", () => {
+    expect(inSection("Run production", '"/shift-review"')).toBe(true);
+  });
+});
+
+// ─── Reconciliation & output ────────────────────────────────────────────
+
+describe("NAV-PHASED-1 · Reconciliation & output entries", () => {
+  it("Production output is in Reconciliation & output", () => {
+    expect(inSection("Reconciliation & output", '"/packaging-output"')).toBe(true);
+  });
+  it("PO reconciliation is in Reconciliation & output", () => {
+    expect(inSection("Reconciliation & output", '"/po-reconciliation"')).toBe(true);
   });
   it("PO reconciliation appears directly after Production output", () => {
     const prodOut = src.indexOf('"/packaging-output"');
     const poRecon = src.indexOf('"/po-reconciliation"');
-    const qc = src.indexOf('"/qc-review"');
+    const finished = src.indexOf('"/finished-lots"');
     expect(prodOut).toBeGreaterThan(-1);
     expect(poRecon).toBeGreaterThan(prodOut);
-    expect(poRecon).toBeLessThan(qc);
+    expect(poRecon).toBeLessThan(finished);
   });
-  it("QC review is in Operations", () => {
-    expect(inOps('"QC review"')).toBe(true);
+  it("Finished lots is in Reconciliation & output", () => {
+    expect(inSection("Reconciliation & output", '"/finished-lots"')).toBe(true);
   });
-  it("Available Partial Bags is in Operations", () => {
-    expect(inOps('"/partial-bags"')).toBe(true);
+  it("Zoho output is in Reconciliation & output", () => {
+    expect(
+      inSection("Reconciliation & output", '"/zoho-production-operations"'),
+    ).toBe(true);
   });
 });
 
-// ─── Inventory entries ───────────────────────────────────────────────────
+// ─── Traceability & reporting ───────────────────────────────────────────
 
-describe("NAV-REDESIGN-1 · Inventory entries", () => {
-  function inInventory(s: string): boolean {
-    const start = src.indexOf('heading: "Inventory"');
-    const end = src.indexOf('heading: "Reports"');
-    const at = src.indexOf(s);
-    return start > -1 && at > start && at < end;
-  }
-
-  it("Materials (packaging-inventory) is in Inventory", () => {
-    expect(inInventory('"/packaging-inventory"')).toBe(true);
+describe("NAV-PHASED-1 · Traceability & reporting entries", () => {
+  it("Traceability lookup (/recall) is in Traceability & reporting", () => {
+    expect(inSection("Traceability & reporting", '"/recall"')).toBe(true);
   });
-  it("Roll management is reachable via Materials tabs, not as a standalone sidebar item", () => {
-    // Roll management was deduplicated — the only entry point is now the
-    // Materials → Roll management tab in MaterialsTabs.
+  it("Metrics is in Traceability & reporting", () => {
+    expect(inSection("Traceability & reporting", '"/metrics"')).toBe(true);
+  });
+  it("Productivity is in Traceability & reporting", () => {
+    expect(inSection("Traceability & reporting", '"/operator-productivity"')).toBe(
+      true,
+    );
+  });
+  it("Audit log is in Traceability & reporting", () => {
+    expect(inSection("Traceability & reporting", '"/reports/audit-log"')).toBe(true);
+  });
+});
+
+// ─── Cross-section invariants ───────────────────────────────────────────
+
+describe("NAV-PHASED-1 · cross-section invariants", () => {
+  it("Workflows is NOT under Intake & materials (it's a Run production concern)", () => {
+    expect(inSection("Intake & materials", '"/workflow-submissions"')).toBe(false);
+  });
+  it("Zoho output is NOT under Intake & materials (it's a close-out step)", () => {
+    expect(
+      inSection("Intake & materials", '"/zoho-production-operations"'),
+    ).toBe(false);
+  });
+  it("Roll management is reachable via Materials tabs, never as a standalone sidebar item", () => {
     expect(src).not.toMatch(/href:\s*"\/roll-management"/);
-  });
-  it("Finished lots is in Inventory", () => {
-    expect(inInventory('"/finished-lots"')).toBe(true);
-  });
-  it("Input lots is in Inventory", () => {
-    expect(inInventory('"/batches"')).toBe(true);
-    expect(inInventory('"Input lots"')).toBe(true);
   });
   it("Batches label was renamed to Input lots", () => {
     expect(src).not.toMatch(/label:\s*"Batches"/);
-  });
-  it("Workflows is in Inventory", () => {
-    expect(inInventory('"/workflow-submissions"')).toBe(true);
-  });
-  it("Find lot is in Inventory", () => {
-    expect(inInventory('"/recall"')).toBe(true);
-  });
-});
-
-// ─── Reports entries ─────────────────────────────────────────────────────
-
-describe("NAV-REDESIGN-1 · Reports entries", () => {
-  function inReports(s: string): boolean {
-    const start = src.indexOf('heading: "Reports"');
-    const end = src.length; // Reports is last section
-    const at = src.indexOf(s);
-    return start > -1 && at > start && at < end;
-  }
-
-  it("Metrics is in Reports", () => {
-    expect(inReports('"/metrics"')).toBe(true);
-  });
-  it("Productivity is in Reports", () => {
-    expect(inReports('"/operator-productivity"')).toBe(true);
   });
 });
 
 // ─── Settings link present ───────────────────────────────────────────────
 
-describe("NAV-REDESIGN-1 · Settings", () => {
+describe("NAV-PHASED-1 · Settings", () => {
   it("Settings link exists", () => {
     expect(src).toMatch(/href.*"\/settings"/);
   });
@@ -157,22 +199,25 @@ describe("NAV-REDESIGN-1 · Settings", () => {
 
 // ─── Sidebar routes — all linked hrefs ───────────────────────────────────
 
-describe("NAV-REDESIGN-1 · sidebar routes", () => {
+describe("NAV-PHASED-1 · sidebar routes", () => {
   const routes = [
     "/dashboard",
     "/floor-board",
-    "/partial-bags",
     "/inbound",
-    "/packaging-output",
-    "/po-reconciliation",
-    "/qc-review",
     "/packaging-inventory",
-    "/finished-lots",
     "/batches",
     "/workflow-submissions",
+    "/partial-bags",
+    "/qc-review",
+    "/shift-review",
+    "/packaging-output",
+    "/po-reconciliation",
+    "/finished-lots",
+    "/zoho-production-operations",
     "/recall",
     "/metrics",
     "/operator-productivity",
+    "/reports/audit-log",
     "/settings",
   ];
   for (const route of routes) {
@@ -190,11 +235,11 @@ describe("STATION-NAV-CLEANUP-1 · removed sidebar routes", () => {
   });
 });
 
-describe("NAV-REDESIGN-1 · removed sidebar routes", () => {
-  // /po-reconciliation was promoted into Operations (right under
-  // Production output) — see the Operations-entries block above. The
-  // rest stay off the sidebar; they're reachable via in-page tab rows
-  // (Receives, Materials, Metrics) or deep links.
+describe("NAV-PHASED-1 · removed sidebar routes", () => {
+  // These are reachable via in-page tab rows (Receives, Materials,
+  // Metrics) or via the parent routes they sit under, but they aren't
+  // sidebar destinations on their own. /po-reconciliation IS in the
+  // sidebar — it's intentionally absent from this list.
   const removed = [
     "/genealogy",
     "/packaging-receipts",
@@ -212,8 +257,6 @@ describe("NAV-REDESIGN-1 · removed sidebar routes", () => {
   ];
   for (const route of removed) {
     it(`${route} is NOT a sidebar href`, () => {
-      // The route may appear in comments or isActive logic — check it's
-      // not an href value.
       expect(src).not.toMatch(
         new RegExp(`href:\\s*"${route.replace(/\//g, "\\/")}"`),
       );
@@ -223,7 +266,7 @@ describe("NAV-REDESIGN-1 · removed sidebar routes", () => {
 
 // ─── Data-honesty banned phrases ─────────────────────────────────────────
 
-describe("NAV-REDESIGN-1 · banned phrases", () => {
+describe("NAV-PHASED-1 · banned phrases", () => {
   it("does not introduce banned QC phrases", () => {
     expect(src).not.toMatch(/production loss/i);
     expect(src).not.toMatch(/supplier shortage/i);

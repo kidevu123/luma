@@ -2,15 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Truck, Inbox, Boxes, ClipboardList, GitCompare } from "lucide-react";
+import { Truck, Inbox, Boxes, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// NAV-PHASED-1 — Receives is intake-only now. PO reconciliation
+// stopped being a tab here; it has its own sidebar entry under
+// "Reconciliation & output" because it's a close-out step, not an
+// intake step. Receives sub-routes drill into what came in the door;
+// PO reconciliation answers "does what came in match what we owe."
 const TABS = [
   { href: "/inbound",                     label: "Receives",           icon: Truck },
   { href: "/receiving/raw-bags",          label: "Receive pills",      icon: Inbox },
   { href: "/inbound/packaging-materials", label: "Receive packaging",  icon: Boxes },
   { href: "/packaging-receipts",          label: "Packaging receipts", icon: ClipboardList },
-  { href: "/po-reconciliation",           label: "PO reconciliation",  icon: GitCompare },
 ] as const;
 
 function isTabActive(pathname: string, href: string): boolean {

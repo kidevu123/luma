@@ -29,13 +29,17 @@ function rendersTab(src: string, componentName: string): boolean {
 
 // ── Receives ────────────────────────────────────────────────────────
 
-describe("persistent Receives header on every subroute", () => {
+describe("persistent Receives header on every intake subroute", () => {
+  // NAV-PHASED-1 — PO reconciliation is intentionally NOT in this
+  // list. It's a close-out / reconciliation page, not an intake page;
+  // it lives under "Reconciliation & output" in the sidebar and
+  // renders WITHOUT the Receives tab row so the two surfaces stay
+  // distinct.
   const subroutes: Array<[string, string]> = [
     ["/inbound", "inbound/page.tsx"],
     ["/receiving/raw-bags", "receiving/raw-bags/page.tsx"],
     ["/inbound/packaging-materials", "inbound/packaging-materials/page.tsx"],
     ["/packaging-receipts", "packaging-receipts/page.tsx"],
-    ["/po-reconciliation", "po-reconciliation/page.tsx"],
   ];
   for (const [route, file] of subroutes) {
     it(`${route} renders <ReceivingTabs />`, () => {
@@ -43,6 +47,18 @@ describe("persistent Receives header on every subroute", () => {
       expect(rendersTab(src, "ReceivingTabs")).toBe(true);
     });
   }
+});
+
+describe("PO reconciliation is NOT inside the Receives tab row", () => {
+  it("the standalone /po-reconciliation page does not import ReceivingTabs", () => {
+    const src = readSrc("po-reconciliation/page.tsx");
+    expect(src).not.toMatch(/ReceivingTabs/);
+  });
+  it("ReceivingTabs definition does not link to /po-reconciliation", () => {
+    const componentsDir = resolve(here, "../../components/ui");
+    const src = readFileSync(resolve(componentsDir, "receiving-tabs.tsx"), "utf8");
+    expect(src).not.toMatch(/href:\s*"\/po-reconciliation"/);
+  });
 });
 
 // ── Materials ───────────────────────────────────────────────────────
@@ -91,14 +107,13 @@ describe("tab definitions match the subroute list", () => {
     return readFileSync(resolve(componentsDir, name), "utf8");
   }
 
-  it("ReceivingTabs links to every Receives subroute", () => {
+  it("ReceivingTabs links to every Receives intake subroute (no PO recon)", () => {
     const src = readComponent("receiving-tabs.tsx");
     for (const href of [
       "/inbound",
       "/receiving/raw-bags",
       "/inbound/packaging-materials",
       "/packaging-receipts",
-      "/po-reconciliation",
     ]) {
       expect(src).toMatch(new RegExp(`href:\\s*"${href.replace(/\//g, "\\/")}"`));
     }
