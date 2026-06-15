@@ -24,13 +24,18 @@ function StatusChip({ status, uiStatus }: { status: string; uiStatus: string }) 
   const tone =
     uiStatus === "committed"
       ? "bg-green-50 text-green-800 border-green-200"
-      : uiStatus === "blocked" || uiStatus === "preview failed" || uiStatus === "partial failure"
+      : uiStatus.includes("ambiguous") || uiStatus.includes("needs Luma reconcile")
+        ? "bg-orange-50 text-orange-900 border-orange-200"
+      : uiStatus === "blocked" || uiStatus === "preview failed" || uiStatus === "partial failure" || uiStatus === "commit failed"
         ? "bg-red-50 text-red-800 border-red-200"
         : uiStatus === "human review required"
           ? "bg-orange-50 text-orange-900 border-orange-200"
-          : uiStatus === "commit pending" || status === "QUEUED" || status === "COMMITTING"
+          : uiStatus === "commit pending" ||
+              uiStatus === "commit in progress" ||
+              status === "QUEUED" ||
+              status === "COMMITTING"
             ? "bg-amber-50 text-amber-900 border-amber-200"
-            : uiStatus === "ready"
+            : uiStatus === "ready" || uiStatus === "ready to commit"
               ? "bg-blue-50 text-blue-900 border-blue-200"
               : "bg-surface-2 text-text-muted border-border";
   return (
@@ -130,6 +135,10 @@ export default async function ZohoProductionOperationsPage() {
                   const uiStatus = deriveUiOperationStatus({
                     status: op.status as "READY",
                     previewStatus: op.previewStatus,
+                    commitStatus: op.commitStatus,
+                    commitError: op.commitError,
+                    commitResponse: op.commitResponse,
+                    zohoBundleIds: op.zohoBundleIds,
                     humanReviewRequired: op.humanReviewRequired,
                     partialFailure: op.partialFailure,
                     voidedAt: op.voidedAt,

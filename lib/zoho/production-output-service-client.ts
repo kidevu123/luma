@@ -52,9 +52,13 @@ function parseIdempotencyReplay(
   headers: Headers,
   body: unknown,
 ): boolean | null {
-  const header = headers.get("x-idempotency-replay");
-  if (header === "true") return true;
-  if (header === "false") return false;
+  const header =
+    headers.get("x-idempotency-replay") ??
+    headers.get("Idempotency-Replayed") ??
+    headers.get("X-Idempotency-Replayed") ??
+    headers.get("Idempotency-Replay");
+  if (header === "true" || header === "1") return true;
+  if (header === "false" || header === "0") return false;
   if (body != null && typeof body === "object") {
     const replay = (body as { idempotency_replay?: unknown }).idempotency_replay;
     if (typeof replay === "boolean") return replay;

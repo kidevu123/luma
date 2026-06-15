@@ -20,6 +20,10 @@ import {
   skuRequiresComponentBatchesUntilBomConfirmed,
 } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 import { evaluateSourceReceiptEvidenceForProductionOutput } from "@/lib/zoho/source-receipt-evidence";
+import {
+  deriveProductionOutputUiCommitState,
+  productionOutputUiCommitStateLabel,
+} from "@/lib/zoho/production-output-ui-state";
 
 export type V1206ReadinessBlocker = {
   code: string;
@@ -249,18 +253,42 @@ export function derivePreviewStatus(input: {
 export function deriveUiOperationStatus(input: {
   status: ZohoProductionOutputOpStatus | null;
   previewStatus: string | null;
+  commitStatus?: string | null;
+  commitError?: string | null;
+  commitResponse?: unknown;
+  zohoBundleIds?: string[] | null;
   humanReviewRequired: boolean;
   partialFailure: boolean;
   voidedAt: Date | null;
 }): string {
-  if (input.voidedAt != null || input.status === "VOIDED") return "cancelled/invalid test";
-  if (input.partialFailure) return "partial failure";
-  if (input.humanReviewRequired) return "human review required";
-  if (input.status === "COMMITTED") return "committed";
-  if (input.status === "COMMITTING" || input.status === "QUEUED") {
-    return "commit pending";
+  if (input.voidedAt != null || input.status === "VOIDED") {
+    return "cancelled/invalid test";
   }
-  if (input.status === "FAILED") return "preview failed";
+  if (input.partialFailure) return "partial failure";
+
+  const commitUi = deriveProductionOutputUiCommitState({
+    status: input.status,
+    previewStatus: input.previewStatus,
+    commitStatus: input.commitStatus ?? null,
+    commitError: input.commitError ?? null,
+    commitResponse: input.commitResponse ?? null,
+    zohoBundleIds: input.zohoBundleIds ?? null,
+    humanReviewRequired: input.humanReviewRequired,
+    partialFailure: input.partialFailure,
+    voidedAt: input.voidedAt,
+  });
+
+  if (
+    commitUi === "COMMITTED" ||
+    commitUi === "COMMIT_IN_PROGRESS" ||
+    commitUi === "COMMIT_AMBIGUOUS_NEEDS_REVIEW" ||
+    commitUi === "COMMIT_FAILED_SAFE" ||
+    commitUi === "COMMITTED_IN_ZOHO_NEEDS_LUMA_RECONCILE" ||
+    commitUi === "READY_TO_COMMIT"
+  ) {
+    return productionOutputUiCommitStateLabel(commitUi);
+  }
+
   if (input.previewStatus === "blocked" || input.status === "NEEDS_MAPPING") {
     return "blocked";
   }

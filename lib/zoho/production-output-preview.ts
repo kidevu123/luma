@@ -242,7 +242,7 @@ export function buildProductionOutputPreviewIdempotencyKey(
   payload: ProductionOutputPreviewPayload,
 ): string {
   const hash = buildProductionOutputPreviewRequestHash(payload).slice(0, 16);
-  return `luma-production-output-preview-${finishedLotId}-${hash}`;
+  return `luma-production-output-preview:${finishedLotId}:${hash}`;
 }
 
 export function classifyProductionOutputMetricsState(input: {

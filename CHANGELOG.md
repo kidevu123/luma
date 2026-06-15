@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1] — 2026-06-02
+
+### Fixed
+- **Production-output commit hardening:** Reconcile Luma to COMMITTED from Zoho idempotency replay after network errors, 409 conflicts, or ambiguous gateway responses; never leave successful Zoho proof in FAILED/READY.
+- **Preview vs commit idempotency:** Distinct key namespaces (`luma-production-output-preview:` vs `luma-production-output:`) with assertion at commit time.
+- **Operator UI states:** Explicit commit lifecycle labels (READY_TO_COMMIT, COMMIT_IN_PROGRESS, COMMIT_AMBIGUOUS_NEEDS_REVIEW, COMMITTED_IN_ZOHO_NEEDS_LUMA_RECONCILE, etc.).
+- **Pilot commit scripts:** `withPilotProductionOutputCommitWindow` closes Luma gates in `finally`; documented Zoho shell trap checklist.
+
 ## [0.4.115] — 2026-06-02
 
 ### Added

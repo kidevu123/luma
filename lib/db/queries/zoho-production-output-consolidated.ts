@@ -86,9 +86,15 @@ import {
   loadSourceReceiptEvidenceForBags,
 } from "@/lib/zoho/source-receipt-evidence";
 import {
-  completeZohoProductionOutputCommitFailure,
   completeZohoProductionOutputCommitSuccess,
 } from "@/lib/db/queries/zoho-production-output";
+import {
+  reconcileProductionOutputCommitAfterGatewayFailure,
+} from "@/lib/zoho/production-output-commit-reconcile";
+import {
+  assertPreviewCommitIdempotencyKeysDistinct,
+  hashProductionOutputServicePayload,
+} from "@/lib/zoho/production-output-idempotency";
 
 type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 
@@ -609,15 +615,18 @@ export async function upsertConsolidatedProductionOutputOpForLot(
       { notes: PRODUCTION_OUTPUT_SERVICE_PREVIEW_NOTES },
     );
 
+    const previewIdempotencyKey = opts?.previewRetry
+      ? `${buildProductionOutputPreviewIdempotencyKey(finishedLotId, previewPayload)}:retry:${now.getTime()}`
+      : buildProductionOutputPreviewIdempotencyKey(finishedLotId, previewPayload);
+    assertPreviewCommitIdempotencyKeysDistinct(finishedLotId, previewIdempotencyKey);
+
     const previewBlockers: Array<{ code: string; message: string }> = [
       ...receiptBlockers.map((b) => ({ code: b.code, message: b.message })),
     ];
 
     const preview = await callProductionOutputPreview({
       payload: previewPayload,
-      idempotencyKey: opts?.previewRetry
-        ? `${buildProductionOutputPreviewIdempotencyKey(finishedLotId, previewPayload)}-retry-${now.getTime()}`
-        : buildProductionOutputPreviewIdempotencyKey(finishedLotId, previewPayload),
+      idempotencyKey: previewIdempotencyKey,
     });
     if (!preview.ok) {
       previewBlockers.push({
@@ -670,6 +679,7 @@ export async function upsertConsolidatedProductionOutputOpForLot(
       .set({
         ...finalValues,
         requestPayload: payloadWithSnapshot,
+        previewIdempotencyKey,
       })
       .where(eq(zohoProductionOutputOps.id, opId));
 
@@ -906,6 +916,7 @@ export async function processConsolidatedProductionOutputCommit(
   const idempotencyKey =
     claim.op.commitIdempotencyKey ?? payload.idempotency_key;
   const servicePayload = buildProductionOutputServicePayloadFromLuma(payload);
+  const servicePayloadHash = hashProductionOutputServicePayload(servicePayload);
 
   const gateway = await callProductionOutputCommit({
     payload: servicePayload,
@@ -928,15 +939,31 @@ export async function processConsolidatedProductionOutputCommit(
     return { ok: true, op: done.op };
   }
 
-  const failed = await completeZohoProductionOutputCommitFailure(opId, actor, {
-    commitError: gateway.message,
-    commitResponse: gateway.body,
+  const reconcile = await reconcileProductionOutputCommitAfterGatewayFailure({
+    opId,
+    actor,
+    idempotencyKey,
+    servicePayload,
+    servicePayloadHash,
+    initial: gateway,
   });
-  if (!failed.ok) {
-    return { ok: false, error: failed.error, phase: "complete" };
+
+  if (reconcile.kind === "success") {
+    return { ok: true, op: reconcile.op };
+  }
+  if (reconcile.kind === "ambiguous") {
+    return {
+      ok: false,
+      error: reconcile.error,
+      phase: "gateway",
+    };
   }
 
-  return { ok: false, error: gateway.message, phase: "gateway" };
+  return {
+    ok: false,
+    error: reconcile.error ?? gateway.message,
+    phase: "gateway",
+  };
 }
 
 export async function queueConsolidatedProductionOutputOp(

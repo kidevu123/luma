@@ -625,6 +625,63 @@ export async function completeZohoProductionOutputCommitSuccess(
   return { ok: true, op: updated };
 }
 
+export async function completeZohoProductionOutputCommitAmbiguous(
+  opId: string,
+  actor: CurrentUser,
+  input: {
+    commitError: string;
+    commitResponse?: unknown;
+    code: string;
+  },
+): Promise<
+  | { ok: true; op: ZohoProductionOutputOpRow }
+  | { ok: false; error: string }
+> {
+  const now = new Date();
+  const [updated] = await db
+    .update(zohoProductionOutputOps)
+    .set({
+      status: "FAILED",
+      commitFinishedAt: now,
+      commitError: input.commitError,
+      commitResponse: input.commitResponse ?? null,
+      commitStatus: "ambiguous_needs_review",
+      humanReviewRequired: true,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(zohoProductionOutputOps.id, opId),
+        eq(zohoProductionOutputOps.status, "COMMITTING"),
+        isNull(zohoProductionOutputOps.voidedAt),
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    return {
+      ok: false,
+      error: "Only COMMITTING operations can be marked ambiguous.",
+    };
+  }
+
+  await writeAudit({
+    actorId: actor.id,
+    actorRole: actor.role,
+    action: "zoho_production_output_op.commit_ambiguous",
+    targetType: "ZohoProductionOutputOp",
+    targetId: opId,
+    before: { status: "COMMITTING" },
+    after: {
+      status: "FAILED",
+      commitStatus: "ambiguous_needs_review",
+      code: input.code,
+    },
+  });
+
+  return { ok: true, op: updated };
+}
+
 export async function completeZohoProductionOutputCommitFailure(
   opId: string,
   actor: CurrentUser,
@@ -644,6 +701,8 @@ export async function completeZohoProductionOutputCommitFailure(
       commitFinishedAt: now,
       commitError: input.commitError,
       commitResponse: input.commitResponse ?? null,
+      commitStatus: "failed",
+      humanReviewRequired: false,
       updatedAt: now,
     })
     .where(
