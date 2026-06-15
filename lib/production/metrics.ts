@@ -16,6 +16,7 @@
 //      event counts are never reported as production output.
 //   6. Genealogy reads straight off workflow_events — no derivation.
 
+import { loadBlisterBagCounterSegments } from "./blister-bag-counter-segments";
 import {
   and,
   asc,
@@ -240,6 +241,7 @@ export async function deriveBagGenealogy(
     return {
       bagId: "",
       events: [],
+      blisterCounterSegments: [],
       summary: emptyGenealogySummary(),
       confidence: "MISSING",
       missingInputs: ["bagId"],
@@ -267,10 +269,13 @@ export async function deriveBagGenealogy(
     .where(eq(workflowEvents.workflowBagId, bagId))
     .orderBy(asc(workflowEvents.occurredAt), asc(workflowEvents.id));
 
+  const blisterCounterSegments = await loadBlisterBagCounterSegments(bagId);
+
   if (rows.length === 0) {
     return {
       bagId,
       events: [],
+      blisterCounterSegments,
       summary: emptyGenealogySummary("no events for this bag"),
       confidence: "MISSING",
       missingInputs: ["events"],
@@ -313,6 +318,7 @@ export async function deriveBagGenealogy(
   return {
     bagId,
     events,
+    blisterCounterSegments,
     summary: {
       eventCount: ok(events.length, "events"),
       firstEventAt: ok(first.toISOString(), "iso"),

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.113] — 2026-06-12
+
+### Fixed
+- **Workflow submissions blister totals:** Show PVC counter segments (roll change + bag complete) and blister bag total in the expanded bag view. Submission `count_total` alone only reflects the last machine-counter segment after a roll change.
+
 ## [0.4.112] — 2026-06-12
 
 ### Fixed

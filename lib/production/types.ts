@@ -12,6 +12,8 @@
 //   • Aggregations (Dashboard, Genealogy, etc.) return a Bundle —
 //     a record of MetricResults — not a single MetricResult.
 
+import type { BlisterBagCounterSegment } from "./blister-bag-counter-segments";
+
 /** Confidence ladder from highest to lowest. MISSING means we
  *  refused to compute because of an empty/unconfigured input. */
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "MISSING";
@@ -98,6 +100,9 @@ export interface GenealogyEvent {
 export interface BagGenealogyResult {
   bagId: string;
   events: GenealogyEvent[];
+  /** PVC machine-counter segments (roll change, bag complete, etc.).
+   *  FOIL is omitted — it mirrors PVC and would double-count. */
+  blisterCounterSegments: BlisterBagCounterSegment[];
   /** Quick summary numbers the UI can show next to the timeline. */
   summary: {
     eventCount: MetricResult;

@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { loadBagEventsAction } from "./load-events-action";
 import { adminBackfillMissingBlisterCloseoutAction } from "./actions";
 import type { BagGenealogyResult } from "@/lib/production/types";
+import { sumBlisterBagCounterSegments } from "@/lib/production/blister-bag-counter-segments";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
@@ -222,6 +223,12 @@ function ExpandedContent({
     if (typeof ct === "number") totalCountSum += ct;
   }
 
+  const blisterCounterSegments = genealogy.blisterCounterSegments;
+  const blisterBagTotal = sumBlisterBagCounterSegments(blisterCounterSegments);
+  const hasBlisterSegmentTotal = blisterBagTotal > 0;
+  const submissionTotalDiffersFromSegments =
+    hasBlisterSegmentTotal && blisterBagTotal !== totalCountSum;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 bg-surface-2/40 border-t border-border/60">
       {bag.excludedFromOutput || bag.recoveryStatus ? (
@@ -373,6 +380,47 @@ function ExpandedContent({
               );
             })}
 
+            {blisterCounterSegments.length > 0 ? (
+              <div className="rounded border border-border bg-surface px-3 py-2">
+                <div className="text-[9.5px] uppercase tracking-[0.10em] text-text-subtle mb-1.5">
+                  Blister counter segments ({blisterCounterSegments.length})
+                </div>
+                <p className="text-[10px] text-text-muted mb-2">
+                  Machine counter segments for this bag. The counter resets at roll change, so
+                  submission count_total is only the last segment unless you sum these.
+                </p>
+                <div className="space-y-1.5">
+                  {blisterCounterSegments.map((segment, index) => (
+                    <div
+                      key={`${segment.segmentReason}-${index}`}
+                      className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-[11px]"
+                    >
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <span className="font-medium text-text-strong">{segment.segmentLabel}</span>
+                        {segment.rollNumber ? (
+                          <span className="font-mono text-[10px] text-text-muted">
+                            {segment.rollNumber}
+                          </span>
+                        ) : null}
+                        <span className="font-mono text-[10px] text-text-subtle">
+                          {formatWorkflowTimestamp(segment.occurredAt)}
+                        </span>
+                      </div>
+                      <span className="font-mono tabular-nums text-text-strong">
+                        {segment.segmentCount.toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-baseline justify-between gap-1 border-t border-border/60 pt-2 text-[11px]">
+                  <span className="font-medium text-text-muted">Blister bag total</span>
+                  <span className="font-mono tabular-nums font-medium text-text-strong">
+                    {blisterBagTotal.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
             {/* Batch totals */}
             <div className="rounded border border-border bg-surface-2/60 px-3 py-2 mt-1">
               <div className="text-[9.5px] uppercase tracking-[0.10em] text-text-subtle mb-1.5">
@@ -380,13 +428,22 @@ function ExpandedContent({
               </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px]">
                 {[
-                  ["Sum count_total", totalCountSum > 0 ? totalCountSum : null],
+                  submissionTotalDiffersFromSegments
+                    ? ["Sum count_total (submissions)", totalCountSum > 0 ? totalCountSum : null]
+                    : ["Sum count_total", hasBlisterSegmentTotal ? blisterBagTotal : totalCountSum > 0 ? totalCountSum : null],
+                  hasBlisterSegmentTotal && !submissionTotalDiffersFromSegments
+                    ? null
+                    : hasBlisterSegmentTotal
+                      ? ["Blister bag total (segments)", blisterBagTotal]
+                      : null,
                   ["Units yielded", bag.unitsYielded],
                   ["Cases", bag.masterCases],
                   ["Displays", bag.displaysMade],
                   ["Loose", bag.looseCards],
                   ["Damaged", bag.damagedPackaging],
-                ].map(([label, value]) => (
+                ]
+                  .filter((row): row is [string, number | null] => row !== null)
+                  .map(([label, value]) => (
                   <div key={String(label)} className="flex items-baseline justify-between gap-1">
                     <span className="text-text-muted">{label}:</span>
                     <span className="font-mono tabular-nums text-text-strong">
