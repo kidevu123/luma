@@ -11,6 +11,8 @@ import {
 import { deriveUiOperationStatus } from "@/lib/zoho/production-output-v1206-readiness";
 import { parsePreviewWritesAllowed } from "@/lib/zoho/luma-operation-snapshot";
 import { isChocoDriftSku } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
+import { PushToZohoGoLiveBanner } from "@/components/admin/push-to-zoho-go-live-banner";
+import { approvedSkuLabelForProductId } from "@/lib/zoho/push-to-zoho-go-live-allowlist";
 import {
   processNextQueuedProductionOutputAction,
   processProductionOutputOpAction,
@@ -86,6 +88,8 @@ export default async function ZohoProductionOperationsPage() {
         }
       />
 
+      <PushToZohoGoLiveBanner context="production_output" />
+
       <div className="rounded-xl border border-border bg-surface px-4 py-3 space-y-2">
         <div className="flex flex-wrap gap-2">
           <GateChip label="Persist" on={persistOn} />
@@ -158,6 +162,16 @@ export default async function ZohoProductionOperationsPage() {
                         <span className="font-mono text-[10px] text-text-muted block">
                           {op.finishedSku ?? "—"}
                         </span>
+                        {op.productId && approvedSkuLabelForProductId(op.productId) ? (
+                          <span className="text-[10px] text-emerald-800 block">
+                            PM-approved for live commit:{" "}
+                            {approvedSkuLabelForProductId(op.productId)}
+                          </span>
+                        ) : op.finishedSku && !choco ? (
+                          <span className="text-[10px] text-amber-800 block">
+                            Preview-only until PM adds SKU to allowlist
+                          </span>
+                        ) : null}
                         {op.workflowBagId ? (
                           <span className="text-[10px] text-text-subtle block">
                             bag {op.workflowBagId.slice(0, 8)}

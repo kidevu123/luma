@@ -159,6 +159,12 @@ export function RawBagZohoReceivePanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
+        <p className="text-[11px] text-sky-900 rounded-md border border-sky-200 bg-sky-50/60 px-2 py-1.5">
+          Live commit requires PM checklist sign-off and an open commit window. Day-1
+          approved SKUs: FIX Relax 1ct, Hyroxi MIT B - Sweet Trip only. Physical bag
+          quantity ({panel.declaredQuantity.toLocaleString()} declared) is what Zoho
+          receive will post — not floor consumed qty.
+        </p>
         {!panel.bagFinishEligible && panel.bagFinishIneligibleReason ? (
           <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-amber-900 text-xs">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />

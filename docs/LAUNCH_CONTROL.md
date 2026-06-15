@@ -2,15 +2,36 @@
 
 **Purpose:** Single source of truth for what is live on staging/production, what is intentionally not shipped, and what blocks blister-room launch. Updated by PM/QA passes — not by feature work.
 
-**Last verified:** 2026-06-02 (BUG-UI-BACKLOG-RESET-1)
-
 ---
 
-## Current live snapshot
+## Zoho Push to Zoho — go-live posture (active)
 
 | Field | Value |
 |-------|-------|
-| **Version** | `0.4.79` (verify `package.json` on shift day) |
+| **Luma version** | `1.0.1` |
+| **Luma SHA** | `ca2b9a2` (verify `/api/health`) |
+| **Zoho Integration** | `1.21.3` |
+| **Workflow** | Preview-first, PM-gated live commit |
+| **Day-1 live-commit SKUs** | FIX Relax 1ct, Hyroxi MIT B - Sweet Trip only |
+| **Default gates** | All commit gates **closed**; preview capabilities **allowed** |
+
+**Canonical doc index:** [ZOHO_PUSH_GO_LIVE_INDEX.md](./ZOHO_PUSH_GO_LIVE_INDEX.md)
+
+**Supersedes:** The v0.4.x snapshot below for Zoho push launch truth. Floor/blister slices in the historical section remain accurate unless contradicted above.
+
+**Last verified:** 2026-06-02 (Zoho Push go-live activation)
+
+---
+
+## Historical snapshot (pre–Zoho push go-live)
+
+**Last verified:** 2026-06-02 (BUG-UI-BACKLOG-RESET-1)
+
+### Current live snapshot (legacy reference)
+
+| Field | Value |
+|-------|-------|
+| **Version** | `0.4.79` (superseded by v1.0.1 for Zoho push) |
 | **Git SHA** | verify `/api/health` — expect `41864de…` after 0.4.79 deploy |
 | **Staging health** | `ok` (app + db) |
 | **Deploy verify** | `npm run verify:deploy` → exit 0, SHA match |

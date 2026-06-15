@@ -25,6 +25,7 @@ import { RawBagIntakeForm } from "./raw-bag-intake-form";
 import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import { SyncPoButton } from "./sync-po-button";
+import { PushToZohoGoLiveBanner } from "@/components/admin/push-to-zoho-go-live-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,8 @@ export default async function ReceiveRawBagsPage() {
         title="Receive pills"
         description="Single-screen receiving for raw-pill bags. Pick the PO, capture supplier lot + bag count + receipt range. One save creates every inventory_bag in a single transaction."
       />
+
+      <PushToZohoGoLiveBanner context="bag_receive" />
 
       <p className="text-sm text-text-muted rounded-lg border border-border/60 bg-surface-2/40 px-4 py-3">
         Each bag row shows a <span className="font-medium">Ready for floor</span>{" "}
