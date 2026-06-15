@@ -12,7 +12,7 @@
 //   • Aggregations (Dashboard, Genealogy, etc.) return a Bundle —
 //     a record of MetricResults — not a single MetricResult.
 
-import type { BlisterBagCounterSegment } from "./blister-bag-counter-segments";
+import type { BlisterBagCounterSegment } from "./blister-bag-counter-segments-contract";
 
 /** Confidence ladder from highest to lowest. MISSING means we
  *  refused to compute because of an empty/unconfigured input. */

@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { loadBagEventsAction } from "./load-events-action";
 import { adminBackfillMissingBlisterCloseoutAction } from "./actions";
 import type { BagGenealogyResult } from "@/lib/production/types";
-import { sumBlisterBagCounterSegments } from "@/lib/production/blister-bag-counter-segments";
+import { sumBlisterBagCounterSegments } from "@/lib/production/blister-bag-counter-segments-contract";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {

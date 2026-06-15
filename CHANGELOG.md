@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.114] — 2026-06-15
+
+### Fixed
+- **Workflow submissions deploy:** Split blister counter segment client helpers from the DB loader so `next build` does not bundle `lib/db` into the workflow table.
+
 ## [0.4.113] — 2026-06-12
 
 ### Fixed

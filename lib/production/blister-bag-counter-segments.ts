@@ -1,37 +1,14 @@
-// PVC counter segments for a workflow bag — one row per machine-counter
-// segment (roll change, bag complete, pause snapshot, etc.). FOIL is
-// omitted because it mirrors PVC counts and would double the display.
+// Server loader for PVC counter segments on a workflow bag.
 
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { materialInventoryEvents, packagingLots } from "@/lib/db/schema";
+import {
+  labelBlisterCounterSegmentReason,
+  type BlisterBagCounterSegment,
+} from "./blister-bag-counter-segments-contract";
 
-export type BlisterBagCounterSegment = {
-  occurredAt: Date;
-  segmentCount: number;
-  segmentReason: string;
-  segmentLabel: string;
-  rollNumber: string | null;
-  bagSegmentSequence: number | null;
-};
-
-const SEGMENT_REASON_LABELS: Record<string, string> = {
-  ROLL_CHANGE: "Roll change",
-  BAG_COMPLETE: "Bag complete",
-  PAUSE_SNAPSHOT: "Pause snapshot",
-  SHIFT_END_SNAPSHOT: "Shift end snapshot",
-  RECOVERY_ROLL_CHANGE: "Recovery roll change",
-};
-
-export function labelBlisterCounterSegmentReason(reason: string): string {
-  return SEGMENT_REASON_LABELS[reason] ?? reason.replaceAll("_", " ").toLowerCase();
-}
-
-export function sumBlisterBagCounterSegments(
-  segments: readonly BlisterBagCounterSegment[],
-): number {
-  return segments.reduce((sum, s) => sum + s.segmentCount, 0);
-}
+export type { BlisterBagCounterSegment } from "./blister-bag-counter-segments-contract";
 
 export async function loadBlisterBagCounterSegments(
   workflowBagId: string,

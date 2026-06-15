@@ -3,7 +3,7 @@ import {
   labelBlisterCounterSegmentReason,
   sumBlisterBagCounterSegments,
   type BlisterBagCounterSegment,
-} from "./blister-bag-counter-segments";
+} from "./blister-bag-counter-segments-contract";
 
 describe("blister bag counter segments helpers", () => {
   it("labels known segment reasons for operators", () => {
