@@ -22,10 +22,15 @@ import {
   fixRelaxSourceAllocationBuildOpts,
   isFixRelaxSku,
 } from "@/lib/zoho/v1206-fix-relax-pilot-contract";
+import {
+  isSweetTripSku,
+  sweetTripSourceAllocationBuildOpts,
+} from "@/lib/zoho/v1206-sweet-trip-pilot-contract";
 
 function sourceAllocationBuildOptsForSku(sku: string) {
   if (isChocoDriftSku(sku)) return chocoDriftSourceAllocationBuildOpts();
   if (isFixRelaxSku(sku)) return fixRelaxSourceAllocationBuildOpts();
+  if (isSweetTripSku(sku)) return sweetTripSourceAllocationBuildOpts();
   return {
     resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true",
   } as const;

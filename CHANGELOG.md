@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.115] — 2026-06-02
+
+### Added
+- **Pilot #2 Sweet Trip:** `v1206-sweet-trip-pilot-contract.ts` with confirmed 4:1 raw + 1:1 blister BOM, wired through `sourceAllocationBuildOptsForSku()`, tests, and scoped prep/walkthrough scripts.
+
 ## [0.4.114] — 2026-06-15
 
 ### Fixed
