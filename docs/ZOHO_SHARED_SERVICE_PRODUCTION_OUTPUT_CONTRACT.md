@@ -7,6 +7,8 @@ assemblies/manufactures, brand routing, retries, and Zoho-side idempotency.
 Luma sends **one consolidated production-output request** per finished lot.
 Luma does **not** call Zoho Books/Inventory directly for this flow.
 
+**Operations:** [LUMA_ZOHO_BAG_RECEIVE_AND_PRODUCTION_OUTPUT_RUNBOOK.md](./LUMA_ZOHO_BAG_RECEIVE_AND_PRODUCTION_OUTPUT_RUNBOOK.md) · [ZOHO_SKU_ROLLOUT_READINESS_CHECKLIST.md](./ZOHO_SKU_ROLLOUT_READINESS_CHECKLIST.md) · [FIX_RELAX_PILOT_CLOSEOUT.md](./FIX_RELAX_PILOT_CLOSEOUT.md)
+
 ## Endpoint
 
 ```
@@ -42,6 +44,16 @@ safe replays and return the prior success response when applicable
 (`X-Idempotency-Replay: true` optional).
 
 ## Request body (Luma → shared service)
+
+**Preview and commit** both POST the Zoho Integration service contract shape
+(`purchaseorder_id`, `unit_composite_item_id`, `source_receipts` with
+`source_bag_id`, `assembly_only`, etc.). Luma builds it via
+`buildProductionOutputServicePayloadFromLuma()` in
+`lib/zoho/production-output-service-payload.ts`.
+
+The internal `source: "LUMA"` structure below is what Luma **persists** in
+`zoho_production_output_ops.request_payload` — it must **not** be sent directly
+to `/zoho/luma/production-output/commit` (HTTP 422).
 
 ```json
 {
