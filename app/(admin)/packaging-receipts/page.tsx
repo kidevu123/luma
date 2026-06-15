@@ -14,6 +14,7 @@ import { db } from "@/lib/db";
 import { sql, type SQL } from "drizzle-orm";
 import { requireAdmin } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
+import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import Link from "next/link";
 
@@ -112,6 +113,7 @@ export default async function PackagingReceiptsPage({
 
   return (
     <div className="space-y-5">
+      <ReceivingTabs />
       <PageHeader
         title="Packaging receipts"
         description="Every packaging_lots row including manual Luma + PackTrack-origin receipts. Receipt variance is shown as a separate bucket — never as production loss."

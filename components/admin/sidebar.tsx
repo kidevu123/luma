@@ -23,8 +23,8 @@ import {
   ClipboardCheck,
   Archive,
   ScrollText,
-  Wrench,
   CloudUpload,
+  GitCompare,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -44,6 +44,7 @@ const SECTIONS: Section[] = [
       { href: "/partial-bags",       label: "Partial Bag Workbench", icon: Archive },
       { href: "/inbound",            label: "Receiving",             icon: Inbox },
       { href: "/packaging-output",   label: "Production output",     icon: Package },
+      { href: "/po-reconciliation",  label: "PO reconciliation",     icon: GitCompare },
       { href: "/qc-review",          label: "QC review",             icon: ShieldAlert },
       { href: "/shift-review",       label: "Shift review",          icon: ClipboardCheck },
     ],
@@ -52,7 +53,6 @@ const SECTIONS: Section[] = [
     heading: "Inventory",
     items: [
       { href: "/packaging-inventory", label: "Materials",     icon: Boxes },
-      { href: "/roll-management",    label: "Roll management", icon: Wrench },
       { href: "/finished-lots",       label: "Finished lots", icon: PackageCheck },
       { href: "/zoho-production-operations", label: "Zoho output", icon: CloudUpload },
       { href: "/batches",             label: "Input lots",    icon: ShieldCheck },

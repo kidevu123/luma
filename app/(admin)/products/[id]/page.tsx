@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
 import { getProductWithBom } from "@/lib/db/queries/products";
 import { listTabletTypes } from "@/lib/db/queries/tablet-types";
@@ -9,6 +9,7 @@ import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { BomEditor } from "./bom-editor";
 import { ZohoMappingForm } from "./zoho-mapping-form";
+import { SpecForm } from "./spec-form";
 import { db } from "@/lib/db";
 import { productPackagingSpecs } from "@/lib/db/schema";
 import { floorReadinessLevel, floorReadinessLabel } from "@/lib/production/product-floor-readiness";
@@ -17,16 +18,21 @@ import {
   zohoReadinessShortLabel,
   zohoReadinessReasonLabel,
 } from "@/lib/zoho/product-zoho-readiness";
+import { evaluateProductSetupReadiness } from "@/lib/production/product-setup-readiness";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductBomPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ from?: string }>;
 }) {
   await requireAdmin();
   const { id } = await params;
+  const from = (await searchParams)?.from ?? null;
+  const cameFromOutputQueue = from === "output-queue";
   const [product, tablets, materials, assignedRows] = await Promise.all([
     getProductWithBom(id),
     listTabletTypes(),
@@ -38,15 +44,35 @@ export default async function ProductBomPage({
   // Material IDs assigned to ANY product — used by BomEditor to hide
   // already-claimed PACKAGING items from the picker dropdown globally.
   const globallyAssignedIds = assignedRows.map((r) => r.id);
+  const setupReadiness = evaluateProductSetupReadiness({
+    productId: product.id,
+    tabletsPerUnit: product.tabletsPerUnit,
+    unitsPerDisplay: product.unitsPerDisplay,
+    displaysPerCase: product.displaysPerCase,
+    defaultShelfLifeDays: product.defaultShelfLifeDays,
+    zohoItemIdUnit: product.zohoItemIdUnit ?? null,
+    zohoItemIdDisplay: product.zohoItemIdDisplay ?? null,
+    zohoItemIdCase: product.zohoItemIdCase ?? null,
+  });
   return (
     <div className="space-y-5">
       <div>
-        <Link
-          href="/products"
-          className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text mb-2"
-        >
-          <ArrowLeft className="h-3 w-3" /> All products
-        </Link>
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <Link
+            href="/products"
+            className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text"
+          >
+            <ArrowLeft className="h-3 w-3" /> All products
+          </Link>
+          {cameFromOutputQueue ? (
+            <Link
+              href="/packaging-output#output-queue"
+              className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:text-brand-800 underline-offset-2 hover:underline"
+            >
+              Back to Production output queue <ArrowRight className="h-3 w-3" />
+            </Link>
+          ) : null}
+        </div>
         <PageHeader
           title={product.name}
           description={`SKU ${product.sku} · ${product.kind}`}
@@ -58,20 +84,29 @@ export default async function ProductBomPage({
         />
       </div>
 
+      {cameFromOutputQueue ? (
+        <SetupReadinessBanner readiness={setupReadiness} />
+      ) : null}
+
       <div className="grid lg:grid-cols-2 gap-5">
         <Card>
           <CardHeader>
             <CardTitle>Spec</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <SpecRow label="Tablets per unit" value={product.tabletsPerUnit ?? "—"} />
-            <SpecRow label="Units per display" value={product.unitsPerDisplay ?? "—"} />
-            <SpecRow label="Displays per case" value={product.displaysPerCase ?? "—"} />
-            <SpecRow
-              label="Default shelf life"
-              value={product.defaultShelfLifeDays ? `${product.defaultShelfLifeDays} days` : "—"}
+          <CardContent>
+            <SpecForm
+              productId={product.id}
+              tabletsPerUnit={product.tabletsPerUnit ?? null}
+              unitsPerDisplay={product.unitsPerDisplay ?? null}
+              displaysPerCase={product.displaysPerCase ?? null}
+              defaultShelfLifeDays={product.defaultShelfLifeDays ?? null}
             />
-            <SpecRow label="Zoho item id" value={product.zohoItemId ?? "—"} mono />
+            <div className="mt-3 pt-3 border-t border-border/60 text-[11px] text-text-muted">
+              Legacy Zoho item id (single column):{" "}
+              <span className="font-mono">{product.zohoItemId ?? "—"}</span>{" "}
+              · use the Zoho assembly mapping card below to manage the
+              per-level IDs.
+            </div>
           </CardContent>
         </Card>
 
@@ -133,27 +168,69 @@ export default async function ProductBomPage({
           />
         </CardContent>
       </Card>
+
+      {cameFromOutputQueue ? (
+        <div className="flex justify-end">
+          <Link
+            href="/packaging-output#output-queue"
+            className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-700 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-brand-800 transition-colors"
+          >
+            Back to Production output queue <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function SpecRow({
-  label,
-  value,
-  mono,
+// Banner shown only when arrived from the Production Output queue —
+// gives the operator a one-glance picture of what's still missing for
+// THIS specific product so they don't keep bouncing back and forth.
+function SetupReadinessBanner({
+  readiness,
 }: {
-  label: string;
-  value: string | number;
-  mono?: boolean;
+  readiness: ReturnType<typeof evaluateProductSetupReadiness>;
 }) {
+  if (readiness.unknown) return null;
+  if (readiness.missingFields.length === 0) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 flex items-start gap-2.5">
+        <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-emerald-900">
+            Product setup complete — auto-issue ready and Zoho push ready.
+          </p>
+          <p className="text-xs text-emerald-800/80 mt-0.5">
+            Returning to the Production output queue will show any bags
+            for this product as ready to auto-issue.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  const autoIssueGaps = readiness.autoIssueBlockers.map((b) => b.label);
+  const zohoGap = !readiness.zohoReady;
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-text-muted text-xs uppercase tracking-wider">{label}</span>
-      <span
-        className={`font-semibold tabular-nums${mono ? " font-mono text-xs" : ""}`}
-      >
-        {value}
-      </span>
+    <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 flex items-start gap-2.5">
+      <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-amber-900">
+          Fix the fields below to clear the Production Output queue.
+        </p>
+        {autoIssueGaps.length > 0 ? (
+          <p className="text-xs text-amber-800/85">
+            <span className="font-semibold">Blocks auto-issue:</span>{" "}
+            {autoIssueGaps.join(" · ")}
+          </p>
+        ) : null}
+        {zohoGap ? (
+          <p className="text-xs text-amber-800/85">
+            <span className="font-semibold">Blocks Zoho push:</span>{" "}
+            Missing Zoho item IDs (single unit, display, or master case).
+            Finished lot can still be created — the Zoho push will skip.
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

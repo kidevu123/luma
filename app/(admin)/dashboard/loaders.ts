@@ -17,6 +17,7 @@ import {
   products,
   tabletTypes,
 } from "@/lib/db/schema";
+import { countProductionOutputBacklog } from "@/lib/db/queries/production-output-backlog";
 
 /** Company display timezone — matches company.timezone default. */
 export const DASHBOARD_TZ = "America/New_York";
@@ -266,7 +267,6 @@ export type ActionCenterCounts = {
 
 export async function getActionCenterCounts(): Promise<ActionCenterCounts> {
   type Row = {
-    needs_lot_review: number;
     runs_missing_allocation: number;
     partials_ready: number;
     partials_need_closeout: number;
@@ -276,7 +276,13 @@ export async function getActionCenterCounts(): Promise<ActionCenterCounts> {
     zoho_failed: number;
     zoho_needs_mapping: number;
   };
-  const rows = (await db.execute<Row>(sql`
+
+  // needsLotReview shares its predicate with the packaging-output
+  // queue — both call countProductionOutputBacklog so the Action
+  // Center tile and the on-page list can never drift.
+  const [needsLotReview, rows] = await Promise.all([
+    countProductionOutputBacklog(),
+    db.execute<Row>(sql`
     WITH latest_closed AS (
       SELECT DISTINCT ON (s.inventory_bag_id)
         s.inventory_bag_id, s.ending_balance_qty
@@ -303,14 +309,6 @@ export async function getActionCenterCounts(): Promise<ActionCenterCounts> {
     SELECT
       (SELECT COUNT(*)
          FROM workflow_bags wb
-         LEFT JOIN finished_lots fl ON fl.workflow_bag_id = wb.id
-         LEFT JOIN read_bag_state rbs ON rbs.workflow_bag_id = wb.id
-        WHERE wb.finalized_at IS NOT NULL
-          AND fl.id IS NULL
-          AND COALESCE(rbs.excluded_from_output, false) = false
-      )::int AS needs_lot_review,
-      (SELECT COUNT(*)
-         FROM workflow_bags wb
          JOIN read_bag_state rbs
            ON rbs.workflow_bag_id = wb.id AND rbs.is_finalized = false
         WHERE wb.inventory_bag_id IS NOT NULL
@@ -329,11 +327,12 @@ export async function getActionCenterCounts(): Promise<ActionCenterCounts> {
         WHERE status = 'FAILED' AND voided_at IS NULL)::int AS zoho_failed,
       (SELECT COUNT(*) FROM zoho_production_output_ops
         WHERE status = 'NEEDS_MAPPING' AND voided_at IS NULL)::int AS zoho_needs_mapping
-  `)) as unknown as Row[];
+  `),
+  ]);
 
-  const r = rows[0];
+  const r = (rows as unknown as Row[])[0];
   return {
-    needsLotReview: Number(r?.needs_lot_review ?? 0),
+    needsLotReview,
     runsMissingAllocation: Number(r?.runs_missing_allocation ?? 0),
     partialsReady: Number(r?.partials_ready ?? 0),
     partialsNeedCloseout: Number(r?.partials_need_closeout ?? 0),

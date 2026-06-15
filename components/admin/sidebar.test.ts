@@ -74,6 +74,17 @@ describe("NAV-REDESIGN-1 · Operations entries", () => {
   it("Production output is in Operations", () => {
     expect(inOps('"Production output"')).toBe(true);
   });
+  it("PO reconciliation is in Operations", () => {
+    expect(inOps('"/po-reconciliation"')).toBe(true);
+  });
+  it("PO reconciliation appears directly after Production output", () => {
+    const prodOut = src.indexOf('"/packaging-output"');
+    const poRecon = src.indexOf('"/po-reconciliation"');
+    const qc = src.indexOf('"/qc-review"');
+    expect(prodOut).toBeGreaterThan(-1);
+    expect(poRecon).toBeGreaterThan(prodOut);
+    expect(poRecon).toBeLessThan(qc);
+  });
   it("QC review is in Operations", () => {
     expect(inOps('"QC review"')).toBe(true);
   });
@@ -95,8 +106,10 @@ describe("NAV-REDESIGN-1 · Inventory entries", () => {
   it("Materials (packaging-inventory) is in Inventory", () => {
     expect(inInventory('"/packaging-inventory"')).toBe(true);
   });
-  it("Roll management is in Inventory", () => {
-    expect(inInventory('"/roll-management"')).toBe(true);
+  it("Roll management is reachable via Materials tabs, not as a standalone sidebar item", () => {
+    // Roll management was deduplicated — the only entry point is now the
+    // Materials → Roll management tab in MaterialsTabs.
+    expect(src).not.toMatch(/href:\s*"\/roll-management"/);
   });
   it("Finished lots is in Inventory", () => {
     expect(inInventory('"/finished-lots"')).toBe(true);
@@ -151,9 +164,9 @@ describe("NAV-REDESIGN-1 · sidebar routes", () => {
     "/partial-bags",
     "/inbound",
     "/packaging-output",
+    "/po-reconciliation",
     "/qc-review",
     "/packaging-inventory",
-    "/roll-management",
     "/finished-lots",
     "/batches",
     "/workflow-submissions",
@@ -178,9 +191,12 @@ describe("STATION-NAV-CLEANUP-1 · removed sidebar routes", () => {
 });
 
 describe("NAV-REDESIGN-1 · removed sidebar routes", () => {
+  // /po-reconciliation was promoted into Operations (right under
+  // Production output) — see the Operations-entries block above. The
+  // rest stay off the sidebar; they're reachable via in-page tab rows
+  // (Receives, Materials, Metrics) or deep links.
   const removed = [
     "/genealogy",
-    "/po-reconciliation",
     "/packaging-receipts",
     "/active-rolls",
     "/material-alerts",
@@ -192,6 +208,7 @@ describe("NAV-REDESIGN-1 · removed sidebar routes", () => {
     "/product-packaging-requirements",
     "/zoho-operations",
     "/products",
+    "/roll-management",
   ];
   for (const route of removed) {
     it(`${route} is NOT a sidebar href`, () => {

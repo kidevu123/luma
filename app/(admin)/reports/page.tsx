@@ -20,6 +20,7 @@ import {
   packagingMaterials,
 } from "@/lib/db/schema";
 import { PageHeader, EmptyState } from "@/components/ui/page-header";
+import { MetricsTabs } from "@/components/ui/metrics-tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { BarChart3 } from "lucide-react";
@@ -124,6 +125,7 @@ export default async function ReportsPage() {
 
   return (
     <div className="space-y-5">
+      <MetricsTabs />
       <PageHeader
         title="Reports"
         description="Throughput backed by read_daily_throughput — the projector writes here on every stage event, so numbers refresh in real time."

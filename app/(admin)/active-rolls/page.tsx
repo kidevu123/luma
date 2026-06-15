@@ -5,6 +5,7 @@ import { loadActiveRollPanel, type ActiveRollRow } from "@/lib/production/materi
 import { getRollYieldReconciliation } from "@/lib/production/roll-yield-reconciliation";
 import { RollYieldReconciliationPanel } from "@/app/(admin)/settings/blister-standards/_components/roll-yield-reconciliation-panel";
 import { PageHeader } from "@/components/ui/page-header";
+import { MaterialsTabs } from "@/components/ui/materials-tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { formatDateTimeEst, formatWeightKg } from "@/lib/ui/luma-display";
@@ -24,6 +25,7 @@ export default async function ActiveRollsPage() {
 
   return (
     <div className="space-y-5">
+      <MaterialsTabs />
       <PageHeader
         title="Active rolls"
         description="PVC and foil rolls currently mounted on roll-capable machines. Missing rows mean no roll is mounted, never an inferred roll."

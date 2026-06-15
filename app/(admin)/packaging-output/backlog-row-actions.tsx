@@ -65,9 +65,12 @@ export function BacklogRowActions({
   }
 
   if (evaluation.action === "FIX_PRODUCT_SETUP" && evaluation.productId) {
+    // ?from=output-queue lets the product detail page render a
+    // "Back to Production output queue" button after the operator saves
+    // the spec — closes the loop instead of dumping them on /products.
     return (
       <Link
-        href={`/products/${evaluation.productId}`}
+        href={`/products/${evaluation.productId}?from=output-queue`}
         className="inline-flex items-center rounded-md border border-sky-500/40 bg-sky-50 px-2.5 py-1 text-[11.5px] font-medium text-sky-900 hover:bg-sky-100 transition-colors"
       >
         Fix product setup

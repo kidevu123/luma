@@ -14,6 +14,37 @@ import {
   evaluateAutoLotBacklogRow,
   type AutoLotBacklogEvaluation,
 } from "@/lib/production/auto-lot-backlog-eligibility";
+import {
+  evaluateProductSetupReadiness,
+  type ProductSetupReadiness,
+} from "@/lib/production/product-setup-readiness";
+
+// Single source of truth for the "needs lot review" filter. Used by
+// both the dashboard Action Center tile and the packaging-output queue
+// so the count and the list never drift.
+//
+//   finalized_at IS NOT NULL
+//   AND finished_lots.id IS NULL
+//   AND COALESCE(read_bag_state.excluded_from_output, false) = false
+//
+// If you change this filter, also update
+// app/(admin)/dashboard/loaders.ts which references the same predicate
+// inside its single CTE query.
+export async function countProductionOutputBacklog(): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`COUNT(*)::int` })
+    .from(workflowBags)
+    .leftJoin(finishedLots, eq(finishedLots.workflowBagId, workflowBags.id))
+    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .where(
+      and(
+        isNotNull(workflowBags.finalizedAt),
+        isNull(finishedLots.id),
+        sql`COALESCE(${readBagState.excludedFromOutput}, false) = false`,
+      ),
+    );
+  return Number(row?.n ?? 0);
+}
 
 export type ProductionOutputBacklogRow = {
   workflowBagId: string;
@@ -27,6 +58,7 @@ export type ProductionOutputBacklogRow = {
   looseCards: number | null;
   unitsYielded: number | null;
   evaluation: AutoLotBacklogEvaluation;
+  setupReadiness: ProductSetupReadiness;
 };
 
 export async function listProductionOutputBacklogWithEligibility(
@@ -48,6 +80,9 @@ export async function listProductionOutputBacklogWithEligibility(
       unitsPerDisplay: products.unitsPerDisplay,
       displaysPerCase: products.displaysPerCase,
       defaultShelfLifeDays: products.defaultShelfLifeDays,
+      zohoItemIdUnit: products.zohoItemIdUnit,
+      zohoItemIdDisplay: products.zohoItemIdDisplay,
+      zohoItemIdCase: products.zohoItemIdCase,
       masterCases: readBagMetrics.masterCases,
       displaysMade: readBagMetrics.displaysMade,
       looseCards: readBagMetrics.looseCards,
@@ -211,6 +246,17 @@ export async function listProductionOutputBacklogWithEligibility(
         bag.receiptNumber != null && lotConflictNumbers.has(bag.receiptNumber),
     });
 
+    const setupReadiness = evaluateProductSetupReadiness({
+      productId: bag.productId,
+      tabletsPerUnit: bag.tabletsPerUnit,
+      unitsPerDisplay: bag.unitsPerDisplay,
+      displaysPerCase: bag.displaysPerCase,
+      defaultShelfLifeDays: bag.defaultShelfLifeDays,
+      zohoItemIdUnit: bag.zohoItemIdUnit,
+      zohoItemIdDisplay: bag.zohoItemIdDisplay,
+      zohoItemIdCase: bag.zohoItemIdCase,
+    });
+
     return {
       workflowBagId: bag.workflowBagId,
       receiptNumber: bag.receiptNumber,
@@ -223,6 +269,7 @@ export async function listProductionOutputBacklogWithEligibility(
       looseCards: bag.looseCards,
       unitsYielded: bag.unitsYielded,
       evaluation,
+      setupReadiness,
     };
   });
 }

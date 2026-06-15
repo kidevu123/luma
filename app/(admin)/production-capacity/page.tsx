@@ -15,6 +15,7 @@ import {
   packagingLots,
 } from "@/lib/db/schema";
 import { PageHeader } from "@/components/ui/page-header";
+import { MetricsTabs } from "@/components/ui/metrics-tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { sortCapacityRows } from "@/lib/production/capacity";
 
@@ -282,6 +283,7 @@ export default async function ProductionCapacityPage() {
 
   return (
     <div className="space-y-5">
+      <MetricsTabs />
       <PageHeader
         title="Production capacity"
         description="Given current pill stock and packaging on hand, how many complete units, displays, and cases can we build right now."

@@ -11,6 +11,7 @@ import { loadMaterialRecommendations } from "@/lib/db/queries/material-recommend
 import { validatePackTrackRecommendationConfig } from "@/lib/integrations/packtrack/recommendations";
 import { ShortageRecommendationsPanel } from "./_recommendations-panel";
 import { PageHeader } from "@/components/ui/page-header";
+import { MaterialsTabs } from "@/components/ui/materials-tabs";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -45,6 +46,7 @@ export default async function MaterialAlertsPage() {
 
   return (
     <div className="space-y-5">
+      <MaterialsTabs />
       <PageHeader
         title="Material alerts"
         description="Read-only. Alerts point to missing data or variance buckets — not automatic actions. Each row cites the source table so the underlying issue can be resolved directly."

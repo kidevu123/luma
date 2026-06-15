@@ -22,13 +22,16 @@ import {
   inventoryBags,
 } from "@/lib/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { listProductionOutputBacklogWithEligibility } from "@/lib/db/queries/production-output-backlog";
+import {
+  countProductionOutputBacklog,
+  listProductionOutputBacklogWithEligibility,
+} from "@/lib/db/queries/production-output-backlog";
 import { MetricCard } from "@/components/production/metric-card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { Package, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
 import { BacklogRowActions } from "./backlog-row-actions";
-import { BacklogStatusChip } from "./backlog-status-chip";
+import { BacklogStatusChip, ZohoReadyChip } from "./backlog-status-chip";
 import {
   derivePoOutputComparison,
   listPoSummaries,
@@ -69,7 +72,7 @@ export default async function PackagingOutputPage({
   const ROLL_KINDS_FOR_EXCLUSION = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"];
 
   // Run all queries in parallel — pack-out queue alongside existing metrics.
-  const [packaging, finished, flavorRollup, awaitingLot, awaitingFinalize, materialBurnRaw] = await Promise.all([
+  const [packaging, finished, flavorRollup, awaitingLot, awaitingLotTotal, awaitingFinalize, materialBurnRaw] = await Promise.all([
     derivePackagingMetrics(range),
     deriveFinishedGoodsMetrics(range),
 
@@ -96,6 +99,7 @@ export default async function PackagingOutputPage({
       .orderBy(sql`SUM(${readBagMetrics.unitsYielded}) DESC`),
 
     listProductionOutputBacklogWithEligibility(20),
+    countProductionOutputBacklog(),
 
     // PACKAGED (not finalized) bags.
     db
@@ -184,7 +188,7 @@ export default async function PackagingOutputPage({
         ? "Estimated"
         : "Missing data";
 
-  const hasQueue = awaitingLot.length > 0 || awaitingFinalize.length > 0;
+  const hasQueue = awaitingLotTotal > 0 || awaitingFinalize.length > 0;
 
   type MaterialBurnRow = {
     packaging_material_id: string;
@@ -467,16 +471,24 @@ export default async function PackagingOutputPage({
         )}
       </div>
 
-      {/* Pack-out queue — actionable section */}
-      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+      {/* Pack-out queue — actionable section. The id="output-queue"
+          anchor is the deep-link target from the Action Center tile on
+          /dashboard, so the user lands on the visible list, not the top
+          of the page. */}
+      <div id="output-queue" className="rounded-xl border border-border bg-surface overflow-hidden scroll-mt-4">
         <div className="px-4 py-3 border-b border-border/60">
           <p className="text-[10px] uppercase tracking-wider text-text-subtle">Output queue</p>
           <h2 className="text-sm font-semibold text-text-strong">
             {hasQueue
-              ? `${awaitingLot.length > 0 ? `${awaitingLot.length} bag${awaitingLot.length === 1 ? "" : "s"} awaiting lot` : ""}${awaitingLot.length > 0 && awaitingFinalize.length > 0 ? " · " : ""}${awaitingFinalize.length > 0 ? `${awaitingFinalize.length} bag${awaitingFinalize.length === 1 ? "" : "s"} on floor` : ""}`
+              ? `${awaitingLotTotal > 0 ? `${awaitingLotTotal} bag${awaitingLotTotal === 1 ? "" : "s"} awaiting lot` : ""}${awaitingLotTotal > 0 && awaitingFinalize.length > 0 ? " · " : ""}${awaitingFinalize.length > 0 ? `${awaitingFinalize.length} bag${awaitingFinalize.length === 1 ? "" : "s"} on floor` : ""}`
               : "All clear"}
           </h2>
           <p className="text-[11px] text-text-muted mt-0.5">
+            {awaitingLotTotal > awaitingLot.length
+              ? `Showing ${awaitingLot.length} of ${awaitingLotTotal} bags needing lot review — most recently finalized first. `
+              : awaitingLotTotal > 0
+                ? `Showing all ${awaitingLotTotal} bag${awaitingLotTotal === 1 ? "" : "s"} needing lot review. `
+                : ""}
             Full-bag packaging normally creates and releases the finished lot automatically.
             Each row shows the exact blocker and the next safe action. PACKAGED bags are still
             on the floor awaiting finalization.
@@ -539,10 +551,16 @@ export default async function PackagingOutputPage({
                                 : "—"}
                             </td>
                             <td className="py-2 pr-4">
-                              <BacklogStatusChip
-                                label={bag.evaluation.label}
-                                code={bag.evaluation.code}
-                              />
+                              <div className="flex flex-wrap items-center gap-1">
+                                <BacklogStatusChip
+                                  label={bag.evaluation.label}
+                                  code={bag.evaluation.code}
+                                  setupReadiness={bag.setupReadiness}
+                                />
+                                {bag.productId && !bag.setupReadiness.unknown ? (
+                                  <ZohoReadyChip ready={bag.setupReadiness.zohoReady} />
+                                ) : null}
+                              </div>
                               {bag.evaluation.expectedConsumedQty != null ? (
                                 <div className="mt-1 text-[10px] text-text-subtle tabular-nums">
                                   Est. {bag.evaluation.expectedConsumedQty.toLocaleString()} tablets

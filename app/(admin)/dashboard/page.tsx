@@ -374,7 +374,10 @@ function ActionCenter({ counts }: { counts: ActionCenterCounts }) {
     {
       label: "Needs lot review",
       count: counts.needsLotReview,
-      href: "/packaging-output",
+      // Deep link straight to the queue section so the user lands on
+      // the actual list, not the top of the long page. The
+      // #output-queue anchor lives on /packaging-output.
+      href: "/packaging-output#output-queue",
       detail: "Finalized bags without a finished lot — auto-issue or review.",
       tone: counts.needsLotReview > 0 ? "warn" : "ok",
     },

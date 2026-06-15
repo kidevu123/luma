@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth-guards";
 import { loadRollVariancePanel } from "@/lib/production/material-panels";
 import { VARIANCE_LABELS } from "@/lib/production/reconciliation-v2-loader";
 import { PageHeader } from "@/components/ui/page-header";
+import { MetricsTabs } from "@/components/ui/metrics-tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { formatWeightKg } from "@/lib/ui/luma-display";
@@ -17,6 +18,7 @@ export default async function RollVariancePage() {
 
   return (
     <div className="space-y-5">
+      <MetricsTabs />
       <PageHeader
         title="Roll variance"
         description="Expected usage comes from roll standards. Actual usage appears only when a weigh-back or depletion signal exists."
