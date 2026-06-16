@@ -19,6 +19,10 @@ type Props = {
   zohoItemIdUnit:    string | null;
   zohoItemIdDisplay: string | null;
   zohoItemIdCase:    string | null;
+  /** WAREHOUSE-RESOLUTION-v1.3.0 — per-product override; null = fall
+   *  through to app-level default on /settings/zoho. */
+  zohoDefaultWarehouseId: string | null;
+  appSettingsWarehouseId: string | null;
 };
 
 export function ZohoMappingForm({
@@ -30,6 +34,8 @@ export function ZohoMappingForm({
   zohoItemIdUnit,
   zohoItemIdDisplay,
   zohoItemIdCase,
+  zohoDefaultWarehouseId,
+  appSettingsWarehouseId,
 }: Props) {
   const [pending, setPending] = React.useState(false);
   const [error,   setError]   = React.useState<string | null>(null);
@@ -136,6 +142,30 @@ export function ZohoMappingForm({
           />
         </div>
       )}
+
+      <div className="space-y-1.5 border-t border-border/60 pt-4">
+        <Label htmlFor="zohoDefaultWarehouseId">
+          Zoho warehouse ID — per-product override (optional)
+        </Label>
+        <Input
+          id="zohoDefaultWarehouseId"
+          name="zohoDefaultWarehouseId"
+          defaultValue={zohoDefaultWarehouseId ?? ""}
+          placeholder={
+            appSettingsWarehouseId
+              ? `Leave blank to use app default (${appSettingsWarehouseId})`
+              : "Leave blank to use app default from Zoho settings"
+          }
+          className="font-mono text-sm"
+        />
+        <p className="text-[11px] text-text-subtle">
+          Used as the production-output warehouse_id for this product
+          unless the operator picks a different one on the preview
+          form. Leave blank to fall through to the app-level default
+          set on{" "}
+          <span className="font-mono">/settings/zoho</span>.
+        </p>
+      </div>
 
       {error && (
         <p className="text-xs text-crit-700 bg-crit-50 border border-crit-500/30 rounded-md px-3 py-2">

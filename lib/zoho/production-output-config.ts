@@ -34,6 +34,13 @@ export type ProductionOutputServiceConfig =
       gates: ProductionOutputGateConfig;
       autoQueueEnabled: boolean;
       legacyAssemblyEnqueueEnabled: boolean;
+      /**
+       * WAREHOUSE-RESOLUTION-v1.3.0 — Env-level fallback warehouse_id
+       * only. The production-output preview resolves warehouse_id
+       * via lib/zoho/warehouse-resolution.ts: operator pick > product
+       * default > app settings > THIS env fallback > BLOCK. Treat
+       * this field as the last source in that chain, NOT the primary.
+       */
       defaultWarehouseId: string | null;
     }
   | { ok: false; reason: string };

@@ -431,6 +431,11 @@ export const products = pgTable(
      *  also pass. Default false so existing products do not silently
      *  promote when this column lands on a populated DB. */
     zohoLiveCommitEnabled: boolean("zoho_live_commit_enabled").notNull().default(false),
+    /** WAREHOUSE-RESOLUTION-v1.3.0 — optional per-product Zoho
+     *  warehouse override. NULL means "fall through to app-level
+     *  default (zoho_credentials.warehouseId) then env". Operator
+     *  pick on the preview form still overrides this. */
+    zohoDefaultWarehouseId: text("zoho_default_warehouse_id"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     dailyUnitGoal: integer("daily_unit_goal"),

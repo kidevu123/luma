@@ -11,7 +11,7 @@ import { BomEditor } from "./bom-editor";
 import { ZohoMappingForm } from "./zoho-mapping-form";
 import { SpecForm } from "./spec-form";
 import { db } from "@/lib/db";
-import { productPackagingSpecs } from "@/lib/db/schema";
+import { productPackagingSpecs, zohoCredentials } from "@/lib/db/schema";
 import { floorReadinessLevel, floorReadinessLabel } from "@/lib/production/product-floor-readiness";
 import {
   classifyProductZohoReadiness,
@@ -33,14 +33,23 @@ export default async function ProductBomPage({
   const { id } = await params;
   const from = (await searchParams)?.from ?? null;
   const cameFromOutputQueue = from === "output-queue";
-  const [product, tablets, materials, assignedRows] = await Promise.all([
-    getProductWithBom(id),
-    listTabletTypes(),
-    listPackagingMaterials(),
-    db.selectDistinct({ id: productPackagingSpecs.packagingMaterialId })
-      .from(productPackagingSpecs),
-  ]);
+  const [product, tablets, materials, assignedRows, appSettings] =
+    await Promise.all([
+      getProductWithBom(id),
+      listTabletTypes(),
+      listPackagingMaterials(),
+      db
+        .selectDistinct({ id: productPackagingSpecs.packagingMaterialId })
+        .from(productPackagingSpecs),
+      // WAREHOUSE-RESOLUTION-v1.3.0 — show the app-level default
+      // inline on the per-product override input as helper copy.
+      db
+        .select({ warehouseId: zohoCredentials.warehouseId })
+        .from(zohoCredentials)
+        .limit(1),
+    ]);
   if (!product) notFound();
+  const appSettingsWarehouseId = appSettings[0]?.warehouseId ?? null;
   // Material IDs assigned to ANY product — used by BomEditor to hide
   // already-claimed PACKAGING items from the picker dropdown globally.
   const globallyAssignedIds = assignedRows.map((r) => r.id);
@@ -165,6 +174,8 @@ export default async function ProductBomPage({
             zohoItemIdUnit={product.zohoItemIdUnit ?? null}
             zohoItemIdDisplay={product.zohoItemIdDisplay ?? null}
             zohoItemIdCase={product.zohoItemIdCase ?? null}
+            zohoDefaultWarehouseId={product.zohoDefaultWarehouseId ?? null}
+            appSettingsWarehouseId={appSettingsWarehouseId}
           />
         </CardContent>
       </Card>

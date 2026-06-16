@@ -54,6 +54,8 @@ type LotRow = {
     zohoItemIdUnit: string | null;
     zohoItemIdDisplay: string | null;
     zohoItemIdCase: string | null;
+    // WAREHOUSE-RESOLUTION-v1.3.0 — per-product override.
+    zohoDefaultWarehouseId: string | null;
   };
   metrics: {
     damagedPackaging: number | null;
@@ -75,6 +77,7 @@ const LOT_ROW: LotRow = {
     zohoItemIdUnit: "unit-composite-1",
     zohoItemIdDisplay: null,
     zohoItemIdCase: null,
+    zohoDefaultWarehouseId: null,
   },
   metrics: {
     damagedPackaging: 0,
@@ -85,7 +88,10 @@ const LOT_ROW: LotRow = {
 
 function mockLotQuery(
   row: LotRow | null,
-  rawBagLinks = [{ confidence: "HIGH" }],
+  rawBagLinks: Array<{ confidence: string }> = [{ confidence: "HIGH" }],
+  /** WAREHOUSE-RESOLUTION-v1.3.0 — preview-actions also reads
+   *  zoho_credentials.warehouseId via loadAppSettingsWarehouseId(). */
+  appSettingsWarehouseId: string | null = null,
 ) {
   const limit = vi.fn().mockResolvedValue(row ? [row] : []);
   const where = vi.fn(() => ({ limit }));
@@ -94,9 +100,14 @@ function mockLotQuery(
   const from = vi.fn(() => ({ innerJoin }));
   const rawWhere = vi.fn().mockResolvedValue(rawBagLinks);
   const rawFrom = vi.fn(() => ({ where: rawWhere }));
+  const settingsLimit = vi
+    .fn()
+    .mockResolvedValue([{ warehouseId: appSettingsWarehouseId }]);
+  const settingsFrom = vi.fn(() => ({ limit: settingsLimit }));
   vi.mocked(db.select)
     .mockReturnValueOnce({ from } as never)
-    .mockReturnValueOnce({ from: rawFrom } as never);
+    .mockReturnValueOnce({ from: rawFrom } as never)
+    .mockReturnValueOnce({ from: settingsFrom } as never);
 }
 
 beforeEach(() => {
@@ -142,8 +153,12 @@ afterEach(() => {
 });
 
 describe("previewZohoProductionOutputAction", () => {
-  it("returns a clear warehouse error before HTTP when env and form value are blank", async () => {
-    mockLotQuery(LOT_ROW);
+  it("returns a clear warehouse error before HTTP when ALL four resolution sources are empty", async () => {
+    // WAREHOUSE-RESOLUTION-v1.3.0 — the v1.2 error string was
+    // env-centric. The v1.3 resolver returns a single
+    // operator-actionable message that names both safe fix
+    // surfaces.
+    mockLotQuery(LOT_ROW, undefined, null);
 
     const result = await previewZohoProductionOutputAction({
       finishedLotId: LOT_ID,
@@ -159,9 +174,92 @@ describe("previewZohoProductionOutputAction", () => {
     expect(result.blockers).toContainEqual({
       field: "warehouse_id",
       message:
-        "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
+        "No warehouse configured. Set one in Zoho settings or choose a warehouse on the preview form.",
     });
     expect(callProductionOutputPreview).not.toHaveBeenCalled();
+  });
+
+  it("uses app-settings warehouse when env is empty and operator did not pick one", async () => {
+    // WAREHOUSE-RESOLUTION-v1.3.0 — the #36 unblocker. With env
+    // empty (production posture today) and no operator pick, the
+    // resolver should fall through to zoho_credentials.warehouseId.
+    mockLotQuery(LOT_ROW, undefined, "appsettings-wh-123");
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.warehouse_id).toBe("appsettings-wh-123");
+  });
+
+  it("product-level warehouse override beats app-settings default", async () => {
+    const productLot: LotRow = {
+      ...LOT_ROW,
+      product: {
+        ...LOT_ROW.product,
+        zohoDefaultWarehouseId: "product-wh-999",
+      },
+    };
+    mockLotQuery(productLot, undefined, "appsettings-wh-123");
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.warehouse_id).toBe("product-wh-999");
+  });
+
+  it("operator form value beats both product override and app-settings default", async () => {
+    const productLot: LotRow = {
+      ...LOT_ROW,
+      product: {
+        ...LOT_ROW.product,
+        zohoDefaultWarehouseId: "product-wh-999",
+      },
+    };
+    mockLotQuery(productLot, undefined, "appsettings-wh-123");
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "operator-typed-wh-7",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.warehouse_id).toBe("operator-typed-wh-7");
   });
 
   it("persists a PREVIEWED operation row after a successful preview", async () => {

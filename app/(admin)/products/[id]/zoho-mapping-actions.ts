@@ -14,6 +14,11 @@ const schema = z.object({
   zohoItemIdUnit:    z.string().max(100).optional().nullable(),
   zohoItemIdDisplay: z.string().max(100).optional().nullable(),
   zohoItemIdCase:    z.string().max(100).optional().nullable(),
+  // WAREHOUSE-RESOLUTION-v1.3.0 — optional per-product warehouse
+  // override. Trimmed; empty becomes null so falling-through to the
+  // app-level default is the easy default for products that don't
+  // want their own routing.
+  zohoDefaultWarehouseId: z.string().max(80).optional().nullable(),
 });
 
 export async function updateProductZohoAssemblyMappingAction(
@@ -25,6 +30,8 @@ export async function updateProductZohoAssemblyMappingAction(
     zohoItemIdUnit:    formData.get("zohoItemIdUnit")    || null,
     zohoItemIdDisplay: formData.get("zohoItemIdDisplay") || null,
     zohoItemIdCase:    formData.get("zohoItemIdCase")    || null,
+    zohoDefaultWarehouseId:
+      (formData.get("zohoDefaultWarehouseId") as string | null)?.trim() || null,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };

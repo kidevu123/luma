@@ -109,13 +109,21 @@ export function ZohoCredentialForm({ initial }: { initial: Initial | null }) {
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="warehouseId">Warehouse ID (optional)</Label>
+        <Label htmlFor="warehouseId">Warehouse ID (app-level default)</Label>
         <Input
           id="warehouseId"
           name="warehouseId"
           defaultValue={initial?.warehouseId ?? ""}
-          placeholder="Default warehouse for receives"
+          placeholder="e.g. 460000000012345"
         />
+        <p className="text-[11px] text-text-muted">
+          Used as the default warehouse for production-output previews
+          when no per-product override is set and the operator does not
+          pick one on the preview form. Warehouse ID must match a Zoho{" "}
+          <span className="font-mono">warehouse_id</span>. Cached
+          warehouse dropdown will replace this once gateway v1.23.0 is
+          available.
+        </p>
       </div>
 
       <label className="flex items-center gap-2 text-sm">

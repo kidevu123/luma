@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0] — 2026-06-16
+
+### Added
+- **Production-output warehouse resolution:** Operator pick > per-product override > app-settings default > env > BLOCK. `lib/zoho/warehouse-resolution.ts` is the canonical pure helper. Migration 0066 adds `products.zoho_default_warehouse_id`. `/settings/zoho` warehouse input is now the primary app-wide default (env becomes fallback only). Product admin page gains a per-product override input. Unblocks the production-output preview test (#36) without a `ZOHO_WAREHOUSE_ID` env edit on the LXC.
+
+### Notes
+- No env changes. Live-write gates remain OFF (observation mode).
+- No Zoho v1.23.0 cached-endpoint integration yet (`/zoho/cached/*` paths are still unused). Cached warehouse dropdown will replace the free-text input once the gateway ships v1.23.0.
+
 ## [1.0.2] — 2026-06-02
 
 ### Added

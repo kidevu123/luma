@@ -9,6 +9,7 @@ import {
   finishedLots,
   products,
   readBagMetrics,
+  zohoCredentials,
 } from "@/lib/db/schema";
 import {
   getActiveZohoProductionOutputOpForLot,
@@ -28,6 +29,7 @@ import {
   type ProductionOutputPreviewPayload,
 } from "@/lib/zoho/production-output-preview";
 import { buildProductionOutputNotes } from "@/lib/zoho/zoho-commit-notes";
+import { resolveProductionOutputWarehouseId } from "@/lib/zoho/warehouse-resolution";
 
 const previewInputSchema = z.object({
   finishedLotId: z.string().uuid(),
@@ -122,8 +124,30 @@ export async function previewZohoProductionOutputAction(
     };
   }
 
-  const warehouseId =
-    parsed.data.warehouseId || config.defaultWarehouseId || "";
+  // WAREHOUSE-RESOLUTION-v1.3.0 — operator pick > product default
+  // > app-settings default > env > BLOCK. Replaces the prior
+  // operator-or-env-only fallback.
+  const appSettingsWarehouseId = await loadAppSettingsWarehouseId();
+  const warehouseResolution = resolveProductionOutputWarehouseId({
+    operatorOverride: parsed.data.warehouseId,
+    productWarehouseId: lot.product.zohoDefaultWarehouseId,
+    appSettingsWarehouseId,
+    envWarehouseId: config.defaultWarehouseId,
+  });
+  if (!warehouseResolution.ok) {
+    return {
+      ok: false,
+      kind: "PAYLOAD_BLOCKED",
+      message: warehouseResolution.reason,
+      blockers: [
+        {
+          field: "warehouse_id",
+          message: warehouseResolution.reason,
+        },
+      ],
+    };
+  }
+  const warehouseId = warehouseResolution.warehouseId;
 
   // ZOHO-STAGING-BUFFER-v1.1.0 — build accounting notes from the
   // canonical helper and prepend them to any operator-supplied notes.
@@ -275,6 +299,7 @@ async function loadProductionOutputPreviewLot(finishedLotId: string) {
         zohoItemIdUnit: products.zohoItemIdUnit,
         zohoItemIdDisplay: products.zohoItemIdDisplay,
         zohoItemIdCase: products.zohoItemIdCase,
+        zohoDefaultWarehouseId: products.zohoDefaultWarehouseId,
       },
       metrics: {
         damagedPackaging: readBagMetrics.damagedPackaging,
@@ -305,4 +330,17 @@ async function loadProductionOutputPreviewLot(finishedLotId: string) {
       (link) => link.confidence === "HIGH",
     ).length,
   };
+}
+
+/**
+ * WAREHOUSE-RESOLUTION-v1.3.0 — Read the app-wide default warehouse
+ * from zoho_credentials. Returns null when the row doesn't exist or
+ * the column is empty. Pure read; no writes.
+ */
+async function loadAppSettingsWarehouseId(): Promise<string | null> {
+  const [row] = await db
+    .select({ warehouseId: zohoCredentials.warehouseId })
+    .from(zohoCredentials)
+    .limit(1);
+  return row?.warehouseId ?? null;
 }

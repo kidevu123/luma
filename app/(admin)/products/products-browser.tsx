@@ -22,6 +22,7 @@ export type ProductRow = {
   zohoItemIdUnit: string | null;
   zohoItemIdDisplay: string | null;
   zohoItemIdCase: string | null;
+  zohoDefaultWarehouseId: string | null;
   zohoLiveCommitEnabled: boolean;
   dailyUnitGoal: number | null;
   isActive: boolean;

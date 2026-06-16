@@ -72,6 +72,9 @@ export type ProductInput = {
   zohoItemIdUnit?: string | null | undefined;
   zohoItemIdDisplay?: string | null | undefined;
   zohoItemIdCase?: string | null | undefined;
+  /** WAREHOUSE-RESOLUTION-v1.3.0 — optional per-product warehouse
+   *  override. NULL/empty falls through to the app-level default. */
+  zohoDefaultWarehouseId?: string | null | undefined;
   isActive?: boolean | undefined;
 };
 
