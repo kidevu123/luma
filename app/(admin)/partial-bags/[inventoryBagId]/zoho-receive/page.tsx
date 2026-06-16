@@ -40,6 +40,11 @@ export default async function BagFinishZohoReceivePage({
       voidedAt: zohoRawBagReceives.voidedAt,
       autoCommitEligibleAt: zohoRawBagReceives.autoCommitEligibleAt,
       mappingBlockers: zohoRawBagReceives.mappingBlockers,
+      // OVERS-RESOLUTION-v1.2.0 — fields the resolution panel needs.
+      receivedQuantity: zohoRawBagReceives.zohoReceivedQuantity,
+      adjustedReceivedQuantity: zohoRawBagReceives.adjustedReceivedQuantity,
+      oversDecision: zohoRawBagReceives.oversDecision,
+      oversDecisionNote: zohoRawBagReceives.oversDecisionNote,
     })
     .from(zohoRawBagReceives)
     .where(eq(zohoRawBagReceives.inventoryBagId, inventoryBagId))
@@ -60,6 +65,10 @@ export default async function BagFinishZohoReceivePage({
             voidedAt: stagedOp.voidedAt,
             autoCommitEligibleAt: stagedOp.autoCommitEligibleAt,
             mappingBlockers: stagedOp.mappingBlockers ?? null,
+            receivedQuantity: stagedOp.receivedQuantity ?? 0,
+            adjustedReceivedQuantity: stagedOp.adjustedReceivedQuantity,
+            oversDecision: stagedOp.oversDecision,
+            oversDecisionNote: stagedOp.oversDecisionNote,
           }}
         />
       ) : null}

@@ -191,6 +191,23 @@ async function freezeRawBagReceivePayloadInternal(
       // the payload. The new payload deserves a fresh shot.
       mappingBlockers: null,
       commitError: null,
+      // OVERS-RESOLUTION-v1.2.0 — a payload regeneration clears any
+      // prior overs-decision tag too. The operator's earlier decision
+      // is preserved in the audit log; we just stop the tag from
+      // leaking into a freshly-edited payload.
+      //
+      // EXCEPT — adjust_down deliberately calls this fn after stamping
+      // its own decision. We detect that by the caller's prior write
+      // to overs_decision = 'adjust_down' happening immediately before
+      // this update; the order matters. To keep the freeze fn pure
+      // (no caller-awareness), the resolveOversBlockerAction's
+      // adjust_down branch re-stamps the decision AFTER calling
+      // regenerateFrozenRawBagReceivePayload. See
+      // app/(admin)/partial-bags/[inventoryBagId]/zoho-receive/staging-actions.ts.
+      oversDecision: null,
+      oversDecisionAt: null,
+      oversDecisionByUserId: null,
+      oversDecisionNote: null,
       updatedAt: options.now,
     })
     .where(eq(zohoRawBagReceives.id, opId));

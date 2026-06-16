@@ -19,6 +19,8 @@ import {
   unholdRawBagReceiveOp,
   voidRawBagReceiveOp,
 } from "./staging-actions";
+import { OversResolutionPanel } from "./overs-resolution-panel";
+import { OVER_RECEIVE_BLOCKER_CODE } from "@/lib/zoho/overs-resolution";
 
 export type RawBagStagingRow = {
   /** zoho_raw_bag_receives.id — the staged op. */
@@ -27,7 +29,17 @@ export type RawBagStagingRow = {
   heldAt: Date | null;
   voidedAt: Date | null;
   autoCommitEligibleAt: Date | null;
-  mappingBlockers: Array<{ code: string; message: string }> | null;
+  mappingBlockers: Array<{
+    code: string;
+    message: string;
+    remainingQuantity?: number | null;
+  }> | null;
+  // OVERS-RESOLUTION-v1.2.0 — current state of the operator's overs
+  // decision (if any) + the quantities used by the resolution panel.
+  receivedQuantity: number;
+  adjustedReceivedQuantity: number | null;
+  oversDecision: string | null;
+  oversDecisionNote: string | null;
 };
 
 const COMMITTABLE_STATUSES = new Set([
@@ -82,28 +94,42 @@ export function RawBagStagingButtons({ row }: { row: RawBagStagingRow }) {
       </p>
 
       {row.status === "NEEDS_REVIEW" ? (
-        <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-          <p className="font-semibold">Business decision required.</p>
-          {row.mappingBlockers?.some(
-            (b) => b.code === "OVER_RECEIVE_EXCEEDS_PO_REMAINING",
-          ) ? (
-            <p className="mt-0.5">
-              This receive exceeds the remaining Zoho PO line quantity.
-              Decide whether to adjust this receive down, hold until the
-              original PO is updated, void it, or create an overs PO
-              later.
-            </p>
-          ) : (
-            <p className="mt-0.5">Resolve before commit.</p>
-          )}
-          {row.mappingBlockers && row.mappingBlockers.length > 0 ? (
-            <ul className="mt-1 list-disc pl-4 text-[11.5px]">
-              {row.mappingBlockers.map((b) => (
-                <li key={b.code}>{b.message}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        (() => {
+          const overReceive = row.mappingBlockers?.find(
+            (b) => b.code === OVER_RECEIVE_BLOCKER_CODE,
+          );
+          // Over-receive blocker → render the v1.2.0 resolution panel.
+          // Other NEEDS_REVIEW codes (future) get a simple notice.
+          if (overReceive) {
+            return (
+              <OversResolutionPanel
+                row={{
+                  opId: row.opId,
+                  status: row.status,
+                  receivedQuantity: row.receivedQuantity,
+                  adjustedReceivedQuantity: row.adjustedReceivedQuantity,
+                  oversDecision: row.oversDecision,
+                  oversDecisionNote: row.oversDecisionNote,
+                  prefillRemainingQuantity: overReceive.remainingQuantity ?? null,
+                  blockerMessage: overReceive.message,
+                }}
+              />
+            );
+          }
+          return (
+            <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+              <p className="font-semibold">Business decision required.</p>
+              <p className="mt-0.5">Resolve before commit.</p>
+              {row.mappingBlockers && row.mappingBlockers.length > 0 ? (
+                <ul className="mt-1 list-disc pl-4 text-[11.5px]">
+                  {row.mappingBlockers.map((b) => (
+                    <li key={b.code}>{b.message}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          );
+        })()
       ) : null}
 
       {row.status === "NEEDS_MAPPING" ? (

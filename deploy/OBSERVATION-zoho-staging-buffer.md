@@ -1,5 +1,12 @@
 # v1.1.0 staging-buffer — observation runbook
 
+## Status as of 2026-06-16
+
+| | |
+|---|---|
+| Raw-bag controlled freeze test on op `f71e8b48-…` | ✅ green — payload + notes + audit verified, no live writes |
+| Production-output preview test on lot `6337-15` (BlueRaz, recommended candidate) | **⏸ HOLD** — blocked on missing authoritative `ZOHO_WAREHOUSE_ID`. See `MANUAL-CUTOVER-zoho-staging-buffer.md` for the warehouse-ID prereq. Lot remains the cleanest known candidate; resume the test once a warehouse ID is supplied. |
+
 Use this to monitor real staging events while live writes stay OFF.
 Run the queries periodically (or after each operator action) until
 all 7 checks are GREEN at least once on freshly-seeded data.

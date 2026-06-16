@@ -1354,8 +1354,25 @@ export const zohoRawBagReceives = pgTable(
     commitResponsePayload: jsonb("commit_response_payload").$type<unknown>(),
     commitError: text("commit_error"),
     mappingBlockers: jsonb("mapping_blockers").$type<
-      Array<{ code: string; message: string }>
+      Array<{ code: string; message: string; remainingQuantity?: number | null }>
     >(),
+    // OVERS-RESOLUTION-v1.2.0 — operator decisions on over-receive
+    // rows. See docs/OVERS_EXTRAS_RESOLUTION_DESIGN.md.
+    // overs_decision ∈ {'adjust_down','hold_for_po_update','needs_overs_po','reconciled_manually'}.
+    oversDecision: text("overs_decision"),
+    oversDecisionAt: timestamp("overs_decision_at", { withTimezone: true }),
+    oversDecisionByUserId: uuid("overs_decision_by_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    oversDecisionNote: text("overs_decision_note"),
+    // adjusted_received_quantity is populated ONLY when overs_decision
+    // = 'adjust_down'. inventory_bags.declared_pill_count is never
+    // mutated by the resolution actions.
+    adjustedReceivedQuantity: integer("adjusted_received_quantity"),
+    // Forward-stub for the v1.3.0+ split workflow. NULL on every row
+    // today. Self-FK to zoho_raw_bag_receives.id.
+    parentOpId: uuid("parent_op_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1377,6 +1394,9 @@ export const zohoRawBagReceives = pgTable(
     index("zoho_raw_bag_receives_auto_commit_idx")
       .on(t.autoCommitEligibleAt)
       .where(sql`${t.autoCommitEligibleAt} is not null`),
+    index("zoho_raw_bag_receives_overs_decision_idx")
+      .on(t.oversDecision)
+      .where(sql`${t.oversDecision} is not null`),
   ],
 );
 

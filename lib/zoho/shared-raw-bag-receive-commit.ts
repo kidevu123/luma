@@ -80,7 +80,17 @@ import { resolveAutoCommitWriteGates } from "@/lib/zoho/auto-commit-write-gates"
 
 export type CommitSource = "manual" | "auto";
 
-export type CommitMappingBlocker = { code: string; message: string };
+export type CommitMappingBlocker = {
+  code: string;
+  message: string;
+  /** OVERS-RESOLUTION-v1.2.0 — optional structured remaining-qty hint
+   *  from the gateway. When the over-receive blocker carries a real
+   *  number here, the operator UI prefills the adjust-down input with
+   *  it. When absent (legacy + most gateway versions today), the
+   *  input is left blank and the operator types the value. We never
+   *  guess. */
+  remainingQuantity?: number | null;
+};
 
 /** Blocker codes that mean "business decision required" (NEEDS_REVIEW),
  *  NOT "product setup gap" (NEEDS_MAPPING). The set is closed here so
@@ -210,7 +220,16 @@ export function extractMappingBlockers(body: unknown): CommitMappingBlocker[] {
     const o = item as Record<string, unknown>;
     const code = typeof o["code"] === "string" ? o["code"] : null;
     const message = typeof o["message"] === "string" ? o["message"] : null;
-    if (code && message) out.push({ code, message });
+    if (!code || !message) continue;
+    const blocker: CommitMappingBlocker = { code, message };
+    // Pick up the optional remaining-quantity hint when the gateway
+    // includes it. Accept either snake_case or camelCase; ignore any
+    // non-positive-integer value.
+    const remainingRaw = o["remaining_quantity"] ?? o["remainingQuantity"];
+    if (typeof remainingRaw === "number" && Number.isFinite(remainingRaw) && remainingRaw >= 0) {
+      blocker.remainingQuantity = Math.floor(remainingRaw);
+    }
+    out.push(blocker);
   }
   return out;
 }

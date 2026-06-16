@@ -25,6 +25,35 @@ min for one safe row.
       (`http://192.168.1.205:8000` or whatever the gateway exposes for
       operators) so we can see the commit land in real time.
 - [ ] Rollback commands (below) are pasted into a terminal and ready.
+- [ ] **`ZOHO_WAREHOUSE_ID` is set in `/etc/luma/.env`** with an
+      authoritative Zoho warehouse ID.
+
+  This was an unmet blocker on the 2026-06-16 controlled-observation
+  attempt: every historical row in `zoho_production_output_ops` has
+  `zoho_warehouse_id = NULL` (the 2 committed ops used the
+  consolidated/auto-finalize path which does not include a
+  `warehouse_id` field in its payload). The operator-preview path
+  (`buildProductionOutputPreviewPayload`) requires `warehouse_id` and
+  short-circuits with `PAYLOAD_BLOCKED { field: "warehouse_id" }`
+  when both the env default and the form value are empty.
+
+  **Preferred source for the value:**
+   1. Once the Zoho gateway exposes `/zoho/cached/warehouses/list`
+      (planned for gateway v1.23.0), query that and let the operator
+      pick from the response. Cached = no live Zoho call cost per
+      preview.
+   2. Until then, query the live `/zoho/warehouses/list` endpoint on
+      the gateway IF the gateway exposes it AND the call is safe (no
+      side effects). Cache the response in a small Luma-side table
+      so we're not hitting Zoho on every preview.
+   3. As a manual fallback, the operator/admin opens Zoho Inventory
+      → Settings → Warehouses, copies the canonical warehouse ID,
+      and sets `ZOHO_WAREHOUSE_ID=<id>` in `/etc/luma/.env`.
+
+  Do NOT guess. An invalid warehouse ID will produce
+  `NEEDS_MAPPING` rather than a useful test result, and a wrong-org
+  warehouse ID could land the staged op against the wrong Zoho
+  tenant if writes are ever enabled.
 
 ---
 

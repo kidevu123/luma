@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.2] — 2026-06-02
+
+### Added
+- **Push to Zoho go-live:** PM-approved SKU allowlist module, operator banners on raw-bag receive and production-output ops, doc index (`ZOHO_PUSH_GO_LIVE_INDEX.md`), updated `LAUNCH_CONTROL.md` for ca2b9a2/v1.0.1+ posture.
+
 ## [1.0.1] — 2026-06-02
 
 ### Fixed

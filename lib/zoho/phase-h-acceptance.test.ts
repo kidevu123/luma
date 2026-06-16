@@ -308,9 +308,17 @@ describe("overs / extras — cumulative no-retry, no-commit contract", () => {
   });
 
   it("UI shows the overs decision copy for NEEDS_REVIEW + OVER_RECEIVE_EXCEEDS_PO_REMAINING", () => {
-    expect(buttons).toMatch(/OVER_RECEIVE_EXCEEDS_PO_REMAINING/);
-    expect(buttons).toMatch(/exceeds the remaining Zoho PO line quantity/);
-    expect(buttons).toMatch(/create an overs PO\s+later/);
+    // v1.2.0 — the decision copy moved into the OversResolutionPanel.
+    // staging-buttons.tsx now ROUTES to the panel via
+    // OVER_RECEIVE_BLOCKER_CODE; the panel itself owns the operator
+    // copy. Both must be present.
+    expect(buttons).toMatch(/OVER_RECEIVE_BLOCKER_CODE/);
+    expect(buttons).toMatch(/OversResolutionPanel/);
+    const panel = read(
+      "app/(admin)/partial-bags/[inventoryBagId]/zoho-receive/overs-resolution-panel.tsx",
+    );
+    expect(panel).toMatch(/exceeds the remaining Zoho PO line quantity/);
+    expect(panel).toMatch(/Create or update an overs PO later/);
   });
 
   it("Commit-now button is hidden when status=NEEDS_REVIEW (no opt-out path through the operator UI)", () => {

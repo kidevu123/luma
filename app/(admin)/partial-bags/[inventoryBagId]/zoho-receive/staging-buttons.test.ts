@@ -25,12 +25,18 @@ describe("RawBagStagingButtons — visibility matrix", () => {
     );
   });
 
-  it("NEEDS_REVIEW includes the OVER_RECEIVE_EXCEEDS_PO_REMAINING decision copy", () => {
-    expect(src).toMatch(/OVER_RECEIVE_EXCEEDS_PO_REMAINING/);
-    expect(src).toMatch(
-      /This receive exceeds the remaining Zoho PO line quantity/,
-    );
-    expect(src).toMatch(/create an overs PO\s+later/);
+  it("NEEDS_REVIEW + over-receive routes to the OversResolutionPanel (decision copy lives in the panel)", () => {
+    // v1.2.0 moved the static "exceeds the remaining PO line quantity"
+    // copy out of staging-buttons.tsx and into the OversResolutionPanel
+    // component, which renders only for NEEDS_REVIEW + over-receive.
+    // staging-buttons must still IMPORT the panel and route to it via
+    // OVER_RECEIVE_BLOCKER_CODE; the actual copy is asserted by the
+    // overs-resolution-contract test file.
+    expect(src).toMatch(/OVER_RECEIVE_BLOCKER_CODE/);
+    expect(src).toMatch(/OversResolutionPanel/);
+    // Sanity: the non-over-receive NEEDS_REVIEW branch is the plain
+    // notice (still rendered by staging-buttons itself).
+    expect(src).toMatch(/Business decision required/);
   });
 
   it("NEEDS_MAPPING renders a mapping-fix message distinct from NEEDS_REVIEW", () => {
