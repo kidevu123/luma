@@ -59,6 +59,15 @@ services:
       ZOHO_PRODUCTION_OUTPUT_AUTO_QUEUE: ${ZOHO_PRODUCTION_OUTPUT_AUTO_QUEUE:-false}
       ZOHO_ALLOW_SCRIPT_COMMIT_BYPASS: ${ZOHO_ALLOW_SCRIPT_COMMIT_BYPASS:-false}
       ZOHO_BAG_FINISH_RECEIVE_COMMIT_ENABLED: ${ZOHO_BAG_FINISH_RECEIVE_COMMIT_ENABLED:-false}
+      # ZOHO-STAGING-BUFFER-v1.1.0 — staging buffer + auto-commit cron.
+      # LUMA_CRON_SECRET: bearer token the systemd timer sends to the
+      #   POST /api/cron/zoho-auto-commit route. Empty = 503.
+      # ZOHO_AUTO_COMMIT_ENABLED: master switch for the cron sweep.
+      # ZOHO_AUTO_COMMIT_BUFFER_HOURS: review window before auto-commit
+      #   eligibility fires; 0 for immediate (dev/staging tests only).
+      LUMA_CRON_SECRET: ${LUMA_CRON_SECRET:-}
+      ZOHO_AUTO_COMMIT_ENABLED: ${ZOHO_AUTO_COMMIT_ENABLED:-false}
+      ZOHO_AUTO_COMMIT_BUFFER_HOURS: ${ZOHO_AUTO_COMMIT_BUFFER_HOURS:-24}
       AUTHENTIK_ISSUER: ${AUTHENTIK_ISSUER:-}
       AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
