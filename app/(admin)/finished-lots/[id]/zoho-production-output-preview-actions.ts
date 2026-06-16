@@ -27,6 +27,7 @@ import {
   type ProductionOutputPreviewBlocker,
   type ProductionOutputPreviewPayload,
 } from "@/lib/zoho/production-output-preview";
+import { buildProductionOutputNotes } from "@/lib/zoho/zoho-commit-notes";
 
 const previewInputSchema = z.object({
   finishedLotId: z.string().uuid(),
@@ -123,6 +124,35 @@ export async function previewZohoProductionOutputAction(
 
   const warehouseId =
     parsed.data.warehouseId || config.defaultWarehouseId || "";
+
+  // ZOHO-STAGING-BUFFER-v1.1.0 — build accounting notes from the
+  // canonical helper and prepend them to any operator-supplied notes.
+  // These are FROZEN into the payload so the same string arrives at
+  // commit time whether the buffer expires or an operator pushes by
+  // hand. Source = "auto" because the staging buffer's default
+  // disposition is auto-commit; the Luma audit log captures the
+  // actual trigger separately for the rare manual-override case.
+  const accountingNotes = buildProductionOutputNotes(
+    {
+      lumaOperationId: lot.finishedLot.id,
+      finishedLotId: lot.finishedLot.id,
+      unitsProduced: lot.finishedLot.unitsProduced,
+      productionDate: lot.finishedLot.producedOn,
+      casesProduced: lot.finishedLot.casesProduced,
+      looseDisplaysProduced: lot.finishedLot.displaysProduced,
+      looseSinglesProduced: lot.metrics?.looseCards ?? null,
+      source: "auto",
+    },
+    // production-output gateway notes column caps at 1000 per the
+    // existing preview validator. The shared helper truncates safely
+    // around priority-1 fields.
+    { maxLength: 1000 },
+  );
+  const operatorNotes = (parsed.data.notes ?? "").trim();
+  const combinedNotes = operatorNotes
+    ? `${accountingNotes}\n\nOperator notes: ${operatorNotes}`
+    : accountingNotes;
+
   const buildResult = buildProductionOutputPreviewPayload({
     finishedLotId: lot.finishedLot.id,
     workflowBagId: lot.finishedLot.workflowBagId,
@@ -136,7 +166,7 @@ export async function previewZohoProductionOutputAction(
       purchaseorderId: parsed.data.purchaseorderId,
       purchaseorderLineItemId: parsed.data.purchaseorderLineItemId,
       warehouseId,
-      notes: parsed.data.notes ?? null,
+      notes: combinedNotes,
     },
   });
 

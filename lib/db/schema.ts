@@ -424,6 +424,13 @@ export const products = pgTable(
     zohoItemIdCase:    text("zoho_item_id_case"),
     /** ZOHO-PRODUCTION-OUTPUT-V1206 — stable family for PO/output validation. */
     productFamily: text("product_family"),
+    /** ZOHO-STAGING-BUFFER-v1.1.0 — operator-toggleable live-commit gate.
+     *  AND'd with readiness facets (Zoho IDs present, structure valid,
+     *  no mapping blockers) to decide live-commit eligibility. Flipping
+     *  this on by itself does NOT enable live commits — readiness must
+     *  also pass. Default false so existing products do not silently
+     *  promote when this column lands on a populated DB. */
+    zohoLiveCommitEnabled: boolean("zoho_live_commit_enabled").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     dailyUnitGoal: integer("daily_unit_goal"),
@@ -1272,11 +1279,29 @@ export const zohoCredentials = pgTable(
 );
 
 // ZOHO-RAW-BAG-RECEIVE-1 — Path B intake owns Zoho purchase receiving per bag.
+// ZOHO-STAGING-BUFFER-v1.1.0 — HELD/NEEDS_MAPPING/COMMITTING/VOIDED added.
+// NEEDS_REVIEW added (0064) for human-decision blockers like over-receive
+// — distinct from NEEDS_MAPPING (SKU/Zoho ID gaps the operator can fix
+// on the product page).
+//
+// HELD          — operator paused; resumes on unhold.
+// NEEDS_MAPPING — gateway returned product-side mapping gaps; resolve on
+//                 the product page.
+// NEEDS_REVIEW  — receiving exception (e.g. over-receive); requires a
+//                 business decision (adjust qty, hold for PO update,
+//                 create overs PO, split, void, reconcile-with-note).
+// COMMITTING    — in flight at the gateway; recovers to PENDING/FAILED.
+// VOIDED        — operator cancelled; terminal.
 export const zohoRawBagReceiveStatusEnum = pgEnum("zoho_raw_bag_receive_status", [
   "PENDING",
   "PREVIEWED",
   "COMMITTED",
   "FAILED",
+  "HELD",
+  "NEEDS_MAPPING",
+  "NEEDS_REVIEW",
+  "COMMITTING",
+  "VOIDED",
 ]);
 
 export const zohoRawBagReconciliationStatusEnum = pgEnum(
@@ -1315,6 +1340,22 @@ export const zohoRawBagReceives = pgTable(
     reconciledBy: uuid("reconciled_by"),
     reconciliationNote: text("reconciliation_note"),
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    // ZOHO-STAGING-BUFFER-v1.1.0 — review/buffer/auto-commit columns.
+    autoCommitEligibleAt: timestamp("auto_commit_eligible_at", { withTimezone: true }),
+    heldAt: timestamp("held_at", { withTimezone: true }),
+    heldReason: text("held_reason"),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    commitIdempotencyKey: text("commit_idempotency_key"),
+    commitAttemptCount: integer("commit_attempt_count").notNull().default(0),
+    commitStartedAt: timestamp("commit_started_at", { withTimezone: true }),
+    committedAt: timestamp("committed_at", { withTimezone: true }),
+    commitRequestPayload: jsonb("commit_request_payload").$type<unknown>(),
+    commitResponsePayload: jsonb("commit_response_payload").$type<unknown>(),
+    commitError: text("commit_error"),
+    mappingBlockers: jsonb("mapping_blockers").$type<
+      Array<{ code: string; message: string }>
+    >(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1324,10 +1365,18 @@ export const zohoRawBagReceives = pgTable(
     uniqueIndex("zoho_raw_bag_receives_zoho_pr_unique")
       .on(t.zohoPurchaseReceiveId)
       .where(sql`${t.zohoPurchaseReceiveId} is not null`),
+    // Commit-side idempotency key is independent of the preview key so a
+    // re-preview doesn't collide with an in-flight commit replay.
+    uniqueIndex("zoho_raw_bag_receives_commit_idem_unique")
+      .on(t.commitIdempotencyKey)
+      .where(sql`${t.commitIdempotencyKey} is not null`),
     index("zoho_raw_bag_receives_receive_idx").on(t.receiveId),
     index("zoho_raw_bag_receives_status_idx").on(t.zohoReceiveStatus),
     index("zoho_raw_bag_receives_reconciliation_idx").on(t.reconciliationStatus),
     index("zoho_raw_bag_receives_zoho_pr_idx").on(t.zohoPurchaseReceiveId),
+    index("zoho_raw_bag_receives_auto_commit_idx")
+      .on(t.autoCommitEligibleAt)
+      .where(sql`${t.autoCommitEligibleAt} is not null`),
   ],
 );
 
@@ -1519,6 +1568,11 @@ export const zohoProductionOutputOps = pgTable(
     partialFailure: boolean("partial_failure").notNull().default(false),
     previewStatus: text("preview_status"),
     commitStatus: text("commit_status"),
+    // ZOHO-STAGING-BUFFER-v1.1.0 — buffer + operator-hold columns. status
+    // on this table is free-text, so HELD does not need an enum extension.
+    autoCommitEligibleAt: timestamp("auto_commit_eligible_at", { withTimezone: true }),
+    heldAt: timestamp("held_at", { withTimezone: true }),
+    heldReason: text("held_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1536,6 +1590,9 @@ export const zohoProductionOutputOps = pgTable(
     uniqueIndex("zoho_prod_output_ops_committed_lot_unique")
       .on(t.finishedLotId)
       .where(sql`status = 'COMMITTED'`),
+    index("zoho_production_output_ops_auto_commit_idx")
+      .on(t.autoCommitEligibleAt)
+      .where(sql`auto_commit_eligible_at is not null`),
   ],
 );
 

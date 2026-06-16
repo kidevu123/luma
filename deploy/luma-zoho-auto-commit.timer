@@ -1,0 +1,21 @@
+[Unit]
+Description=Luma Zoho auto-commit cron timer
+Documentation=docs/ZOHO_STAGING_BUFFER_v1_1_0.md
+# Don't start until the network's up so the curl can reach the app.
+After=network-online.target
+
+[Timer]
+# Wait 2 minutes after boot before the first run — gives the
+# luma-app container time to come up.
+OnBootSec=2min
+# Every 5 minutes afterwards. The 24h buffer means the cron has
+# plenty of slack; tightening this to 1min would just hammer the DB
+# without committing rows any sooner.
+OnUnitActiveSec=5min
+# If the system was down when a scheduled run would have happened,
+# fire the run immediately after startup (don't accumulate misses).
+Persistent=true
+Unit=luma-zoho-auto-commit.service
+
+[Install]
+WantedBy=timers.target

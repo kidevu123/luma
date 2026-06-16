@@ -110,6 +110,12 @@ beforeEach(() => {
   vi.stubEnv("ZOHO_SERVICE_BEARER_SECRET", "secret-prefix-rest");
   vi.stubEnv("ZOHO_BRAND", "haute_brands");
   vi.stubEnv("ZOHO_WAREHOUSE_ID", "");
+  // The preview action gates on persist+preview being enabled together
+  // (lib/zoho/production-output-config.ts). Without these the action
+  // short-circuits with LOCAL_ERROR before reaching any of the
+  // assertions in these tests, so we enable both for the suite.
+  vi.stubEnv("ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED", "true");
+  vi.stubEnv("ZOHO_PRODUCTION_OUTPUT_PREVIEW_ENABLED", "true");
   vi.mocked(getActiveZohoProductionOutputOpForLot).mockResolvedValue(null);
   vi.mocked(upsertZohoProductionOutputPreviewOp).mockResolvedValue({
     id: "op-1",

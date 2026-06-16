@@ -228,13 +228,26 @@ export type PendingRawBagReceiveSeed = {
   zohoLineItemId: string | null;
 };
 
-/** Persist PENDING rows for new Path B bags — never called for legacy backfill. */
+/** Persist PENDING rows for new Path B bags — never called for legacy backfill.
+ *
+ * ZOHO-STAGING-BUFFER-v1.1.0: after inserting the row, we freeze the
+ * gateway payload (with accounting notes) into commit_request_payload
+ * and stamp auto_commit_eligible_at if auto-commit is enabled. From
+ * that moment the row is fully buffered — manual and auto commit will
+ * both replay the frozen payload verbatim. */
 export async function seedPendingRawBagReceiveRows(
   seeds: readonly PendingRawBagReceiveSeed[],
   actor: Pick<CurrentUser, "id" | "role"> | null,
+  options?: { now?: Date; env?: Record<string, string | undefined> },
 ): Promise<void> {
   if (seeds.length === 0) return;
-  const now = new Date();
+  const now = options?.now ?? new Date();
+
+  // Import lazily to avoid a circular-import path through the schema
+  // when this module is required at boot.
+  const { freezeRawBagReceivePayloadAtSeed } = await import(
+    "@/lib/zoho/freeze-raw-bag-receive-payload"
+  );
 
   for (const seed of seeds) {
     const idempotencyKey = buildRawBagReceiveIdempotencyKey(seed.inventoryBagId);
@@ -272,6 +285,14 @@ export async function seedPendingRawBagReceiveRows(
         inventoryBagId: seed.inventoryBagId,
         quantity: seed.declaredPillCount,
       },
+    });
+
+    // Freeze the gateway payload (with accounting notes) and stamp
+    // auto_commit_eligible_at right after insert. The freeze writes
+    // its own audit row so the timeline shows the two steps in order.
+    await freezeRawBagReceivePayloadAtSeed(inserted!.id, actor, {
+      now,
+      ...(options?.env ? { env: options.env } : {}),
     });
   }
 }

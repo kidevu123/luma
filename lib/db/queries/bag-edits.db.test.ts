@@ -287,7 +287,13 @@ describe("editInventoryBag — receipt# uniqueness pre-check", () => {
 
 describe("editInventoryBag — old QR released only when intake-reserved", () => {
   it("releases old QR when it is intake-reserved (ASSIGNED + null workflowBagId)", async () => {
-    setupGetBagForEdit(bagRow({ bagQrCode: "old-token" }));
+    // bag.status must be non-AVAILABLE for the release branch to fire —
+    // shouldReleaseQrAtBagEdit guards against releasing the QR for bags
+    // that are still AVAILABLE for floor-start (intake-reserved bags
+    // about to be picked up). The release path is only taken once the
+    // bag has been moved out of AVAILABLE (e.g. an admin correcting a
+    // bag that's already in IN_USE).
+    setupGetBagForEdit(bagRow({ bagQrCode: "old-token", status: "IN_USE" }));
     // slot 2 → old card: ASSIGNED, no workflowBagId → shouldRelease = true
     selectResults.push([
       {

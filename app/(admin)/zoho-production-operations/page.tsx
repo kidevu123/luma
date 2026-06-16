@@ -11,14 +11,20 @@ import {
 import { deriveUiOperationStatus } from "@/lib/zoho/production-output-v1206-readiness";
 import { parsePreviewWritesAllowed } from "@/lib/zoho/luma-operation-snapshot";
 import { isChocoDriftSku } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
-import { PushToZohoGoLiveBanner } from "@/components/admin/push-to-zoho-go-live-banner";
-import { approvedSkuLabelForProductId } from "@/lib/zoho/push-to-zoho-go-live-allowlist";
-import {
-  processNextQueuedProductionOutputAction,
-  processProductionOutputOpAction,
-  queueProductionOutputOpAction,
-  retryPreviewProductionOutputOpAction,
-} from "./actions";
+// PushToZohoGoLiveBanner + approvedSkuLabelForProductId removed in
+// v1.1.0 — the 2-SKU live-commit allowlist is gone. Live-commit
+// eligibility is now data-driven via products.zoho_live_commit_enabled
+// AND product-readiness facets (see lib/zoho/zoho-live-commit-eligibility.ts).
+// Operators toggle the flag on the product page; this queue page no
+// longer needs a hard-coded SKU badge.
+import { retryPreviewProductionOutputOpAction } from "./actions";
+import { ProductionOutputStagingButtons } from "./staging-buttons";
+// ZOHO-STAGING-BUFFER-v1.1.0 — processNextQueuedProductionOutputAction
+// is intentionally NOT imported here. The single operator/cron entry
+// path for production-output commit is sharedCommitProductionOutputOp,
+// called by approveAndCommitProductionOutputNow (manual UI) and the
+// cron sweep. The legacy "Process next queued" header button bypassed
+// the shared wrapper and was removed in v1.1.0.
 
 export const dynamic = "force-dynamic";
 
@@ -73,22 +79,8 @@ export default async function ZohoProductionOperationsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Zoho production output"
-        description="Consolidated production-output ops. Persist and preview are independent of live commit."
-        actions={
-          commitOn ? (
-            <form action={processNextQueuedProductionOutputAction}>
-              <button
-                type="submit"
-                className="rounded-md border border-border bg-surface px-3 py-1.5 text-[12px] font-medium hover:bg-surface-2"
-              >
-                Process next queued
-              </button>
-            </form>
-          ) : null
-        }
+        description="Consolidated production-output ops. Persist and preview are independent of live commit. Commit is operator-driven only — Approve for auto-commit (cron) or Approve & commit now (immediate), both via the same shared idempotent path."
       />
-
-      <PushToZohoGoLiveBanner context="production_output" />
 
       <div className="rounded-xl border border-border bg-surface px-4 py-3 space-y-2">
         <div className="flex flex-wrap gap-2">
@@ -162,15 +154,13 @@ export default async function ZohoProductionOperationsPage() {
                         <span className="font-mono text-[10px] text-text-muted block">
                           {op.finishedSku ?? "—"}
                         </span>
-                        {op.productId && approvedSkuLabelForProductId(op.productId) ? (
-                          <span className="text-[10px] text-emerald-800 block">
-                            PM-approved for live commit:{" "}
-                            {approvedSkuLabelForProductId(op.productId)}
-                          </span>
-                        ) : op.finishedSku && !choco ? (
-                          <span className="text-[10px] text-amber-800 block">
-                            Preview-only until PM adds SKU to allowlist
-                          </span>
+                        {op.productId ? (
+                          <Link
+                            href={`/products/${op.productId}`}
+                            className="text-[10px] text-text-muted hover:text-brand-700 hover:underline block"
+                          >
+                            Check live-commit settings →
+                          </Link>
                         ) : null}
                         {op.workflowBagId ? (
                           <span className="text-[10px] text-text-subtle block">
@@ -210,42 +200,34 @@ export default async function ZohoProductionOperationsPage() {
                             : "—")}
                       </td>
                       <td className="px-4 py-2">
-                        <div className="flex flex-wrap gap-2">
-                          {previewOn &&
-                          persistOn &&
-                          op.status !== "COMMITTED" &&
-                          op.status !== "COMMITTING" &&
-                          op.status !== "QUEUED" &&
-                          !op.voidedAt ? (
-                            <form action={retryPreviewProductionOutputOpAction}>
-                              <input type="hidden" name="opId" value={op.id} />
-                              <button type="submit" className="text-[11px] underline">
-                                Retry preview
-                              </button>
-                            </form>
-                          ) : null}
-                          {commitOn &&
-                          op.status === "READY" &&
-                          uiStatus === "ready" ? (
-                            <form action={queueProductionOutputOpAction}>
-                              <input type="hidden" name="opId" value={op.id} />
-                              <button type="submit" className="text-[11px] underline">
-                                Queue
-                              </button>
-                            </form>
-                          ) : null}
-                          {commitOn &&
-                          (op.status === "QUEUED" || op.status === "FAILED") &&
-                          !op.humanReviewRequired &&
-                          !op.partialFailure ? (
-                            <form action={processProductionOutputOpAction}>
-                              <input type="hidden" name="opId" value={op.id} />
-                              <button type="submit" className="text-[11px] underline">
-                                {op.status === "FAILED" ? "Retry commit" : "Commit now"}
-                              </button>
-                            </form>
-                          ) : null}
-                        </div>
+                        {/* ZOHO-STAGING-BUFFER-v1.1.0 — two-button approve
+                            model + Hold/Unhold/Void. The legacy explicit
+                            "Queue" and "Commit now (by id)" buttons are
+                            gone; the state machine still goes
+                            Approve → Queue → Commit internally. */}
+                        <ProductionOutputStagingButtons
+                          row={{
+                            id: op.id,
+                            status: op.status,
+                            heldAt: op.heldAt ?? null,
+                            voidedAt: op.voidedAt ?? null,
+                            autoCommitEligibleAt: op.autoCommitEligibleAt ?? null,
+                            mappingBlockers: op.mappingBlockers ?? null,
+                          }}
+                        />
+                        {previewOn &&
+                        persistOn &&
+                        op.status !== "COMMITTED" &&
+                        op.status !== "COMMITTING" &&
+                        op.status !== "QUEUED" &&
+                        !op.voidedAt ? (
+                          <form action={retryPreviewProductionOutputOpAction} className="mt-1">
+                            <input type="hidden" name="opId" value={op.id} />
+                            <button type="submit" className="text-[10.5px] text-text-muted underline">
+                              Retry preview
+                            </button>
+                          </form>
+                        ) : null}
                       </td>
                     </tr>
                   );

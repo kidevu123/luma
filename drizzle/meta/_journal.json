@@ -428,6 +428,27 @@
       "when": 1784000000000,
       "tag": "0061_user_name_and_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1784100000000,
+      "tag": "0062_zoho_staging_buffer_enums",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1784200000000,
+      "tag": "0063_zoho_staging_buffer_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1784300000000,
+      "tag": "0064_zoho_raw_bag_needs_review",
+      "breakpoints": true
     }
   ]
 }

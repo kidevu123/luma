@@ -27,6 +27,12 @@ export type BagFinishReceiveRequest = {
   received_quantity: number;
   receive_date: string;
   idempotency_key: string;
+  /** ZOHO-STAGING-BUFFER-v1.1.0 — accounting/reconciliation notes
+   *  frozen at preview/seed time, with the commit-trigger suffix
+   *  appended just before the gateway call. Optional because the
+   *  legacy commit flow doesn't populate it; the new shared flow
+   *  always does. */
+  notes?: string;
 };
 
 export type BagFinishReceiveClientPath =

@@ -1,0 +1,32 @@
+[Unit]
+Description=Luma Zoho auto-commit cron sweep
+Documentation=docs/ZOHO_STAGING_BUFFER_v1_1_0.md
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Bearer secret lives in /etc/luma/zoho-cron.env, mode 0600, owned by
+# root. The file contains a single line:
+#   LUMA_CRON_SECRET=<the-shared-secret>
+# Same secret is set in the luma-app container's env so the route
+# can verify the bearer.
+EnvironmentFile=/etc/luma/zoho-cron.env
+
+# Curl the route through the local loopback. -f makes curl exit
+# non-zero on 4xx/5xx so systemd records the failure. --max-time
+# bounds the request so a hung Zoho gateway doesn't keep the sweep
+# alive forever. 90s headroom over the route's typical sweep time.
+ExecStart=/usr/bin/curl -fsS --max-time 90 \
+  -X POST \
+  -H "Authorization: Bearer ${LUMA_CRON_SECRET}" \
+  -H "Content-Type: application/json" \
+  http://localhost:3000/api/cron/zoho-auto-commit
+
+# Logs the response body to the journal — `journalctl -u
+# luma-zoho-auto-commit.service` shows the summary for every run.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
