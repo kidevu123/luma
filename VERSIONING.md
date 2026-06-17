@@ -2,7 +2,9 @@
 
 Luma uses [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.PATCH`.
 
-Luma is **post-launch**. The current line is `1.x.y`. There will never be another `0.x.y` release; the launch milestone is recorded as `1.0.0`.
+Luma is **post-launch**. The current line is `1.x.y`. There will never be another `0.x.y` release; the launch milestone is recorded as `1.0.0`. The 0.x.y series is **closed forever**.
+
+> **Enforced by `lib/version.contract.test.ts`.** The guard test refuses any `package.json` `version` whose MAJOR is `0`, refuses a missing CHANGELOG entry for the running version, and refuses any disagreement between the admin footer, floor footer, settings "Release" row, and `/api/health`. If the suite is green, the operator-facing version is on the `1.x.y` line and every surface agrees. If you see a footer drop to `v0.x.y` in production, the test would have caught it — investigate why the test was bypassed (rebase that dropped the guard, `--no-verify` push, build that skipped vitest, etc.) before anything else.
 
 ## When to bump
 
@@ -51,8 +53,20 @@ If you're unsure whether a change is breaking: ask "could this break a bookmark,
 ## How to bump
 
 1. Edit `package.json` `version` to the next number per the rules above.
-2. Reference the new version in the commit subject: `feat(admin): … (v1.1.0)` or `fix(admin): … (v1.0.4)`.
-3. Push to `main`. The LXC deploy reads `package.json` for the running version label; no other file needs touching.
+2. Add a matching `## [X.Y.Z] — YYYY-MM-DD` entry to `CHANGELOG.md`. The guard test refuses a mismatch.
+3. Reference the new version in the commit subject: `feat(admin): … (v1.1.0)` or `fix(admin): … (v1.0.4)`.
+4. Push to `main`. The LXC deploy reads `package.json` for the running version label; no other file needs touching.
+
+## Where the canonical version lives
+
+| Surface | Source |
+|---|---|
+| Admin footer badge (`components/admin/footer.tsx`) | `getPackageVersion()` from `lib/build-metadata.ts` |
+| Floor footer badge (`components/ui/luma-build-footer.tsx`) | `getBuildFooterParts().version` from the same module |
+| Settings → Release row (`app/(admin)/settings/page.tsx`) | Same module |
+| `/api/health` response `version` field | Same module |
+
+`getPackageVersion()` is the single source of truth — it reads `package.json` at runtime via `readFileSync`. Never hard-code a version string anywhere; the guard test will reject it.
 
 ## What doesn't get a bump
 

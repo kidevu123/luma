@@ -99,7 +99,11 @@ describe("Preview action wires the resolver into the preview flow", () => {
     const src = read(PREVIEW_ACTIONS_PATH);
     expect(src).toMatch(/kind:\s*"PAYLOAD_BLOCKED"/);
     expect(src).toMatch(/field:\s*"warehouse_id"/);
-    expect(src).toMatch(/warehouseResolution\.reason/);
+    // WAREHOUSE-CAPABILITY-v1.4.0 — v1.3's `warehouseResolution.reason`
+    // is now wrapped by the decision combinator. The block reason
+    // still carries the v1.3 message verbatim for the REQUIRED case;
+    // pin the new variable name here.
+    expect(src).toMatch(/message:\s*decision\.reason/);
   });
 
   it("loads the app-settings warehouse from zoho_credentials (not env)", () => {

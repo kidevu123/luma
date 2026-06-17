@@ -134,6 +134,33 @@ export function ZohoProductionOutputPreviewCard({
           exist.
         </div>
 
+        {/* WAREHOUSE-CAPABILITY-v1.4.0 — banner reflects the
+            capability resolved during the most recent preview
+            attempt. Pre-preview, no banner is shown; the persisted
+            metadata block carries the historical capability state
+            for any existing PREVIEWED/DRAFT row. */}
+        {persistedPreview?.warehouseOmitted && (
+          <div
+            className="rounded-md border border-info-300/60 bg-info-50 px-3 py-2 text-xs text-info-800"
+            data-testid="warehouse-omitted-banner"
+          >
+            This Zoho org does not use warehouses; warehouse will be omitted.
+          </div>
+        )}
+        {persistedPreview &&
+          persistedPreview.warehouseRequired === false &&
+          !persistedPreview.warehouseOmitted &&
+          persistedPreview.zohoWarehouseId && (
+            <div
+              className="rounded-md border border-info-300/60 bg-info-50 px-3 py-2 text-xs text-info-800"
+              data-testid="warehouse-optional-resolved-banner"
+            >
+              This Zoho org does not require a warehouse, but a default is
+              set ({persistedPreview.zohoWarehouseId}). Clear the warehouse
+              field on the form to omit.
+            </div>
+          )}
+
         {isApproved && (
           <div className="rounded-md border border-good-300/60 bg-good-50 px-3 py-2 text-xs text-good-800">
             <p className="font-semibold">Approved for future Zoho commit</p>
@@ -478,8 +505,35 @@ function PersistedPreviewMetadata({
           label="PO line"
           value={metadata.zohoPurchaseorderLineItemId}
         />
-        <SummaryRow label="warehouse" value={metadata.zohoWarehouseId} />
+        <SummaryRow
+          label="warehouse"
+          value={
+            metadata.warehouseOmitted
+              ? "(omitted — org has no warehouses)"
+              : metadata.zohoWarehouseId
+          }
+        />
         <SummaryRow label="unit item" value={metadata.zohoCompositeItemId} />
+        <SummaryRow
+          label="warehouse_required"
+          value={
+            metadata.warehouseRequired == null
+              ? null
+              : metadata.warehouseRequired
+                ? "true"
+                : "false"
+          }
+        />
+        <SummaryRow
+          label="capability source"
+          value={metadata.capabilitySource}
+        />
+        {metadata.capabilityGatewayRequestId && (
+          <SummaryRow
+            label="capability request"
+            value={metadata.capabilityGatewayRequestId}
+          />
+        )}
         {metadata.approvedAt && (
           <SummaryRow
             label="approved at"

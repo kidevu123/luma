@@ -33,10 +33,25 @@ vi.mock("@/lib/db/queries/zoho-production-output", async (importOriginal) => {
   };
 });
 
+// WAREHOUSE-CAPABILITY-v1.4.0 — mock the gateway capability call so
+// tests can drive REQUIRED / OPTIONAL / UNKNOWN deterministically
+// without hitting the gateway.
+vi.mock("@/lib/zoho/brand-capabilities-client", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/lib/zoho/brand-capabilities-client")
+    >();
+  return {
+    ...actual,
+    fetchWarehouseCapability: vi.fn(),
+  };
+});
+
 import { requireAdmin } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { upsertZohoProductionOutputPreviewOp, getActiveZohoProductionOutputOpForLot } from "@/lib/db/queries/zoho-production-output";
 import { callProductionOutputPreview } from "@/lib/zoho/production-output-preview";
+import { fetchWarehouseCapability } from "@/lib/zoho/brand-capabilities-client";
 import { previewZohoProductionOutputAction } from "./zoho-production-output-preview-actions";
 
 const LOT_ID = "11111111-1111-4111-8111-111111111111";
@@ -111,7 +126,12 @@ function mockLotQuery(
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // WAREHOUSE-CAPABILITY-v1.4.0 — use resetAllMocks (not clearAll)
+  // so per-test mock implementations and queued mockResolvedValueOnce
+  // values don't leak between tests. clearAllMocks only resets call
+  // history; implementations from the previous test would carry over
+  // and made v1.4 tests see stale capability states.
+  vi.resetAllMocks();
   vi.mocked(requireAdmin).mockResolvedValue({
     id: "admin-user",
     role: "ADMIN",
@@ -145,6 +165,16 @@ beforeEach(() => {
     zohoPurchaseorderLineItemId: "line-1",
     zohoWarehouseId: "warehouse-1",
     zohoCompositeItemId: "unit-composite-1",
+    warehouseRequired: true,
+    warehouseOmitted: false,
+    capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+    capabilityGatewayRequestId: "test-request-id",
+  });
+  // Default capability for legacy tests: REQUIRED (matches v1.3
+  // behavior where a warehouse must resolve or the action blocks).
+  vi.mocked(fetchWarehouseCapability).mockResolvedValue({
+    state: "REQUIRED",
+    gatewayRequestId: "test-request-id",
   });
 });
 
@@ -315,6 +345,10 @@ describe("previewZohoProductionOutputAction", () => {
       zohoPurchaseorderLineItemId: "line-1",
       zohoWarehouseId: "warehouse-1",
       zohoCompositeItemId: "unit-composite-1",
+      warehouseRequired: true,
+      warehouseOmitted: false,
+      capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+      capabilityGatewayRequestId: "test-request-id",
     });
     vi.mocked(callProductionOutputPreview).mockResolvedValue({
       ok: false,
@@ -397,6 +431,10 @@ describe("previewZohoProductionOutputAction", () => {
       zohoPurchaseorderLineItemId: "line-1",
       zohoWarehouseId: "warehouse-1",
       zohoCompositeItemId: "unit-composite-1",
+      warehouseRequired: true,
+      warehouseOmitted: false,
+      capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+      capabilityGatewayRequestId: "test-request-id",
     });
     mockLotQuery(LOT_ROW);
 
@@ -412,5 +450,196 @@ describe("previewZohoProductionOutputAction", () => {
     if (result.ok) return;
     expect(result.message).toContain("Void it");
     expect(callProductionOutputPreview).not.toHaveBeenCalled();
+  });
+
+  // WAREHOUSE-CAPABILITY-v1.4.0 — decision matrix tests.
+
+  it("OPTIONAL + missing -> omits warehouse_id and proceeds", async () => {
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-1",
+    });
+    mockLotQuery(LOT_ROW, undefined, null);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The whole point: payload omits the warehouse_id KEY entirely.
+    // Not present, not empty string, not null.
+    expect(Object.hasOwn(result.payload, "warehouse_id")).toBe(false);
+    expect((result.payload as Record<string, unknown>).warehouse_id).toBe(
+      undefined,
+    );
+    expect(callProductionOutputPreview).toHaveBeenCalled();
+  });
+
+  it("OPTIONAL + resolved -> uses the resolved warehouseId", async () => {
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-2",
+    });
+    mockLotQuery(LOT_ROW, undefined, "appsettings-wh-9");
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.warehouse_id).toBe("appsettings-wh-9");
+  });
+
+  it("UNKNOWN + missing -> blocks with the canonical UNKNOWN message", async () => {
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "UNKNOWN",
+      reason: "gateway returned HTTP 500",
+    });
+    mockLotQuery(LOT_ROW, undefined, null);
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("PAYLOAD_BLOCKED");
+    expect(result.message).toBe(
+      "Cannot confirm whether this Zoho org uses warehouses. Resolve gateway warehouse capability before previewing.",
+    );
+    expect(callProductionOutputPreview).not.toHaveBeenCalled();
+  });
+
+  it("UNKNOWN + supplied warehouse -> STILL blocks with the UNKNOWN message", async () => {
+    // Critical pin: UNKNOWN dominates even when an operator has
+    // typed a warehouse on the form. Fail closed.
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "UNKNOWN",
+      reason: "gateway unreachable",
+    });
+    mockLotQuery(LOT_ROW, undefined, "appsettings-wh-9");
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "operator-typed-wh-1",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("PAYLOAD_BLOCKED");
+    expect(result.message).toContain("Cannot confirm");
+    expect(callProductionOutputPreview).not.toHaveBeenCalled();
+  });
+
+  it("REQUIRED + missing -> blocks with the v1.3 canonical message (unchanged)", async () => {
+    // Default REQUIRED capability is set in beforeEach; this is the
+    // legacy v1.3 path that still must hold under v1.4.
+    mockLotQuery(LOT_ROW, undefined, null);
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("PAYLOAD_BLOCKED");
+    expect(result.message).toBe(
+      "No warehouse configured. Set one in Zoho settings or choose a warehouse on the preview form.",
+    );
+  });
+
+  it("OPTIONAL + missing -> persists audit row with warehouseOmitted=true and gateway request id", async () => {
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-AUDIT",
+    });
+    mockLotQuery(LOT_ROW, undefined, null);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(upsertZohoProductionOutputPreviewOp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        warehouseAudit: {
+          warehouseRequired: false,
+          warehouseOmitted: true,
+          capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+          capabilityGatewayRequestId: "wh-cap-AUDIT",
+        },
+      }),
+    );
+  });
+
+  it("REQUIRED + resolved -> audit row has warehouseRequired=true, warehouseOmitted=false", async () => {
+    mockLotQuery(LOT_ROW, undefined, null);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "operator-typed-wh-1",
+      notes: "",
+    });
+
+    expect(upsertZohoProductionOutputPreviewOp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        warehouseAudit: expect.objectContaining({
+          warehouseRequired: true,
+          warehouseOmitted: false,
+          capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+          capabilityGatewayRequestId: "test-request-id",
+        }),
+      }),
+    );
   });
 });

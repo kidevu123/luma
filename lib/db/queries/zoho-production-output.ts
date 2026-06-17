@@ -63,6 +63,16 @@ export type ZohoProductionOutputPreviewMetadata = {
   zohoPurchaseorderLineItemId: string | null;
   zohoWarehouseId: string | null;
   zohoCompositeItemId: string | null;
+  // WAREHOUSE-CAPABILITY-v1.4.0 — capability audit fields. Persisted
+  // inside quantity_basis (jsonb) to avoid a migration; surfaced as
+  // top-level metadata for reads and audits. capabilitySource always
+  // starts with "gateway:" today (read-through); when DB caching
+  // lands later, "cache:..." values will appear. capabilityGatewayRequestId
+  // is non-null iff capabilitySource starts with "gateway:".
+  warehouseRequired: boolean | null;
+  warehouseOmitted: boolean;
+  capabilitySource: string | null;
+  capabilityGatewayRequestId: string | null;
 };
 
 export type UpsertZohoProductionOutputPreviewOpInput = {
@@ -78,6 +88,17 @@ export type UpsertZohoProductionOutputPreviewOpInput = {
   metricsState: ProductionOutputDataQualityState;
   genealogyState: ProductionOutputDataQualityState;
   userId: string | null;
+  // WAREHOUSE-CAPABILITY-v1.4.0 — capability audit context for the
+  // preview row. All four fields are required at the type level so
+  // callers can't forget to record them; legacy paths supply null/
+  // false defaults when capability wasn't consulted (e.g. error
+  // paths that never called the gateway).
+  warehouseAudit: {
+    warehouseRequired: boolean | null;
+    warehouseOmitted: boolean;
+    capabilitySource: string | null;
+    capabilityGatewayRequestId: string | null;
+  };
 };
 
 type ZohoProductionOutputPreviewOpValues =
@@ -97,7 +118,10 @@ export function buildZohoProductionOutputPreviewOpValues(
     status: input.status,
     zohoPurchaseorderId: input.payload.purchaseorder_id,
     zohoPurchaseorderLineItemId: input.payload.purchaseorder_line_item_id,
-    zohoWarehouseId: input.payload.warehouse_id,
+    // WAREHOUSE-CAPABILITY-v1.4.0 — warehouse_id key is absent from
+    // the payload when capability OPTIONAL + no resolution. Persist
+    // null to the dedicated column in that case.
+    zohoWarehouseId: input.payload.warehouse_id ?? null,
     zohoCompositeItemId: input.payload.unit_composite_item_id,
     zohoDisplayCompositeItemId: input.payload.display_composite_item_id ?? null,
     zohoCaseCompositeItemId: input.payload.case_composite_item_id ?? null,
@@ -114,6 +138,14 @@ export function buildZohoProductionOutputPreviewOpValues(
       display_assembly_quantity: input.payload.display_assembly_quantity,
       case_assembly_quantity: input.payload.case_assembly_quantity,
       receive_date: input.payload.receive_date,
+      // WAREHOUSE-CAPABILITY-v1.4.0 — capability audit dump for
+      // post-hoc forensics. Surfaced on the metadata type via
+      // toPreviewMetadata.
+      warehouse_required: input.warehouseAudit.warehouseRequired,
+      warehouse_omitted: input.warehouseAudit.warehouseOmitted,
+      capability_source: input.warehouseAudit.capabilitySource,
+      capability_gateway_request_id:
+        input.warehouseAudit.capabilityGatewayRequestId,
     },
     metricsState: input.metricsState,
     genealogyState: input.genealogyState,
@@ -837,6 +869,25 @@ function toPreviewMetadata(
     approvedRequestHash: row.approvedRequestHash,
   });
 
+  // WAREHOUSE-CAPABILITY-v1.4.0 — pull capability audit fields out
+  // of the jsonb quantityBasis sink. Older rows without these keys
+  // surface as the documented "legacy" defaults (null/false).
+  const basis = (row.quantityBasis ?? {}) as Record<string, unknown>;
+  const warehouseRequiredRaw = basis.warehouse_required;
+  const warehouseRequired =
+    typeof warehouseRequiredRaw === "boolean" ? warehouseRequiredRaw : null;
+  const warehouseOmittedRaw = basis.warehouse_omitted;
+  const warehouseOmitted =
+    typeof warehouseOmittedRaw === "boolean" ? warehouseOmittedRaw : false;
+  const capabilitySourceRaw = basis.capability_source;
+  const capabilitySource =
+    typeof capabilitySourceRaw === "string" ? capabilitySourceRaw : null;
+  const capabilityGatewayRequestIdRaw = basis.capability_gateway_request_id;
+  const capabilityGatewayRequestId =
+    typeof capabilityGatewayRequestIdRaw === "string"
+      ? capabilityGatewayRequestIdRaw
+      : null;
+
   return {
     id: row.id,
     status,
@@ -854,6 +905,10 @@ function toPreviewMetadata(
     zohoPurchaseorderLineItemId: row.zohoPurchaseorderLineItemId,
     zohoWarehouseId: row.zohoWarehouseId,
     zohoCompositeItemId: row.zohoCompositeItemId,
+    warehouseRequired,
+    warehouseOmitted,
+    capabilitySource,
+    capabilityGatewayRequestId,
   };
 }
 

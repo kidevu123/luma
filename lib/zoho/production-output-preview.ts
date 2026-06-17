@@ -10,7 +10,12 @@ export type ProductionOutputPreviewPayload = {
   purchaseorder_line_item_id: string;
   quantity_good: number;
   receive_date: string;
-  warehouse_id: string;
+  /** WAREHOUSE-CAPABILITY-v1.4.0 — present with non-empty string when
+   *  the gateway capability is REQUIRED or when an operator/product/
+   *  app/env source supplied one under OPTIONAL. Absent (key not in
+   *  JSON, NOT empty string, NOT null) when capability is OPTIONAL
+   *  and no source resolved. */
+  warehouse_id?: string;
   unit_composite_item_id: string;
   unit_assembly_quantity: number;
   luma_operation_id: string;
@@ -87,9 +92,18 @@ export type ProductionOutputPreviewBuildInput = {
   mapping: {
     purchaseorderId: string;
     purchaseorderLineItemId: string;
+    /** WAREHOUSE-CAPABILITY-v1.4.0 — empty/whitespace is treated as
+     *  "omit" when `allowWarehouseOmission` is true; otherwise a
+     *  missing-warehouse blocker is emitted (v1.3.0 behavior). */
     warehouseId: string;
     notes?: string | null;
   };
+  /** WAREHOUSE-CAPABILITY-v1.4.0 — gate set by the preview action
+   *  after it resolves the capability + resolution combinator. When
+   *  true AND mapping.warehouseId is empty, the payload omits the
+   *  warehouse_id key entirely. Default false preserves v1.3.0
+   *  behavior for any caller that hasn't migrated. */
+  allowWarehouseOmission?: boolean;
 };
 
 export type ProductionOutputPreviewBlocker = {
@@ -142,7 +156,7 @@ export function buildProductionOutputPreviewPayload(
       message: "Enter the Zoho PO line item ID for the finished output.",
     });
   }
-  if (!warehouseId) {
+  if (!warehouseId && !input.allowWarehouseOmission) {
     blockers.push({
       field: "warehouse_id",
       message:
@@ -183,12 +197,17 @@ export function buildProductionOutputPreviewPayload(
     looseCards: input.metrics?.looseCards ?? null,
   });
 
+  // WAREHOUSE-CAPABILITY-v1.4.0 — payload.warehouse_id is OMITTED
+  // (key absent from JSON) when warehouseId is empty AND the caller
+  // opted in via allowWarehouseOmission. Otherwise it's present as a
+  // non-empty string (REQUIRED + resolved, OR legacy callers that
+  // never set the omit flag). NEVER sent as "" or null.
   const payload: ProductionOutputPreviewPayload = {
     purchaseorder_id: purchaseorderId as string,
     purchaseorder_line_item_id: purchaseorderLineItemId as string,
     quantity_good: mappedQty.quantity_good,
     receive_date: input.producedOn,
-    warehouse_id: warehouseId as string,
+    ...(warehouseId ? { warehouse_id: warehouseId } : {}),
     unit_composite_item_id: unitCompositeItemId as string,
     unit_assembly_quantity: mappedQty.unit_assembly_quantity,
     luma_operation_id: buildProductionOutputOperationId(input.finishedLotId),

@@ -134,6 +134,12 @@ describe("buildZohoProductionOutputPreviewOpValues", () => {
       metricsState: "MISSING",
       genealogyState: "LOW",
       userId: "33333333-3333-4333-8333-333333333333",
+      warehouseAudit: {
+        warehouseRequired: true,
+        warehouseOmitted: false,
+        capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+        capabilityGatewayRequestId: "test-request-id",
+      },
     });
 
     expect(values.metricsState).toBe("MISSING");
@@ -167,6 +173,12 @@ describe("buildZohoProductionOutputPreviewOpValues", () => {
       metricsState: "HIGH",
       genealogyState: "HIGH",
       userId: "33333333-3333-4333-8333-333333333333",
+      warehouseAudit: {
+        warehouseRequired: true,
+        warehouseOmitted: false,
+        capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+        capabilityGatewayRequestId: "test-request-id",
+      },
     });
 
     expect(values.quantityDamaged).toBe(2);

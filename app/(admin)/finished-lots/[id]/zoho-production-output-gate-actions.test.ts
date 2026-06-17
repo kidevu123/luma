@@ -60,6 +60,10 @@ describe("approveZohoProductionOutputAction", () => {
         zohoPurchaseorderLineItemId: "line-1",
         zohoWarehouseId: "wh-1",
         zohoCompositeItemId: "item-1",
+        warehouseRequired: true,
+        warehouseOmitted: false,
+        capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+        capabilityGatewayRequestId: "test-request-id",
       },
     });
 
@@ -116,6 +120,10 @@ describe("queueZohoProductionOutputAction", () => {
         zohoPurchaseorderLineItemId: "line-1",
         zohoWarehouseId: "wh-1",
         zohoCompositeItemId: "item-1",
+        warehouseRequired: true,
+        warehouseOmitted: false,
+        capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+        capabilityGatewayRequestId: "test-request-id",
       },
       queueEligibility: {
         eligible: true,

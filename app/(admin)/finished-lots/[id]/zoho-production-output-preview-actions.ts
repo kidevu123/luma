@@ -30,6 +30,11 @@ import {
 } from "@/lib/zoho/production-output-preview";
 import { buildProductionOutputNotes } from "@/lib/zoho/zoho-commit-notes";
 import { resolveProductionOutputWarehouseId } from "@/lib/zoho/warehouse-resolution";
+import { fetchWarehouseCapability } from "@/lib/zoho/brand-capabilities-client";
+import {
+  capabilitySourceLabel,
+  decideWarehouseInclusion,
+} from "@/lib/zoho/warehouse-decision";
 
 const previewInputSchema = z.object({
   finishedLotId: z.string().uuid(),
@@ -134,20 +139,43 @@ export async function previewZohoProductionOutputAction(
     appSettingsWarehouseId,
     envWarehouseId: config.defaultWarehouseId,
   });
-  if (!warehouseResolution.ok) {
+
+  // WAREHOUSE-CAPABILITY-v1.4.0 — read-through capability call on
+  // every preview attempt. The combinator decides use/omit/block.
+  // UNKNOWN always blocks regardless of resolution.
+  const capability = await fetchWarehouseCapability();
+  const decision = decideWarehouseInclusion(capability, warehouseResolution);
+  const warehouseAudit = {
+    warehouseRequired:
+      capability.state === "REQUIRED"
+        ? true
+        : capability.state === "OPTIONAL"
+          ? false
+          : null,
+    warehouseOmitted: decision.kind === "omit",
+    capabilitySource: capabilitySourceLabel(capability),
+    capabilityGatewayRequestId:
+      capability.state === "UNKNOWN" ? null : capability.gatewayRequestId,
+  };
+
+  if (decision.kind === "block") {
     return {
       ok: false,
       kind: "PAYLOAD_BLOCKED",
-      message: warehouseResolution.reason,
+      message: decision.reason,
       blockers: [
         {
           field: "warehouse_id",
-          message: warehouseResolution.reason,
+          message: decision.reason,
         },
       ],
     };
   }
-  const warehouseId = warehouseResolution.warehouseId;
+
+  // `use` -> populate; `omit` -> empty string + allowWarehouseOmission
+  // flag so the payload builder drops the key entirely.
+  const warehouseId = decision.kind === "use" ? decision.warehouseId : "";
+  const allowWarehouseOmission = decision.kind === "omit";
 
   // ZOHO-STAGING-BUFFER-v1.1.0 — build accounting notes from the
   // canonical helper and prepend them to any operator-supplied notes.
@@ -192,6 +220,7 @@ export async function previewZohoProductionOutputAction(
       warehouseId,
       notes: combinedNotes,
     },
+    allowWarehouseOmission,
   });
 
   if (!buildResult.ok) {
@@ -238,6 +267,7 @@ export async function previewZohoProductionOutputAction(
       metricsState,
       genealogyState,
       userId: actor.id,
+      warehouseAudit,
     });
     return {
       ok: true,
@@ -266,6 +296,7 @@ export async function previewZohoProductionOutputAction(
           metricsState,
           genealogyState,
           userId: actor.id,
+          warehouseAudit,
         });
 
   return {

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.0] — 2026-06-17
+
+### Added
+- **Zoho warehouse capability.** Production-output preview now consumes the Zoho gateway's `GET /zoho/brand-capabilities/warehouse` (gateway v1.23.1) on every preview attempt — read-through, no DB cache yet. New pure helpers `lib/zoho/brand-capabilities-client.ts` (total mapping over the gateway response: REQUIRED / OPTIONAL / UNKNOWN; transport / parse / non-2xx all collapse to UNKNOWN) and `lib/zoho/warehouse-decision.ts` (pure combiner that takes capability + v1.3 warehouse-resolution outcome and returns use / omit / block). When capability is OPTIONAL and no warehouse resolves, the preview payload's `warehouse_id` key is **absent** (not empty string, not null) so Zoho's warehouse-not-used path is exercised correctly for `haute_brands`. UNKNOWN always blocks regardless of resolution — operator-typed values cannot override an unknown capability. Adds four audit fields (`warehouseRequired`, `warehouseOmitted`, `capabilitySource`, `capabilityGatewayRequestId`) persisted on every preview op row via the existing `quantity_basis` jsonb sink (no migration). Preview card surfaces the "This Zoho org does not use warehouses; warehouse will be omitted." banner and renders capability source + gateway request id rows on the persisted snapshot.
+- **`/api/health` exposes the operator-facing version** (`version` field next to the existing `sha`). Single source of truth for the running version — matches `package.json` and the admin/floor footer badges.
+
+### Fixed
+- **Version-label regression repaired.** The previous release was tagged `0.4.110` in `package.json`, which propagated through `getPackageVersion()` to the admin footer, floor footer, and settings page. Per `VERSIONING.md` the project is post-launch on the `1.x.y` line and the `0.x.y` series is closed forever. This release returns the operator-facing version to the `1.x.y` line (`1.4.0`). Pinned by new guard tests in `lib/version.contract.test.ts` (refuses any `0.x.y` in `package.json`, refuses `/api/health` disagreement, refuses a missing CHANGELOG entry for the current version).
+
+### Notes
+- No migration. No env changes. Live-write gates remain OFF (observation mode).
+- No `/zoho/cached/*` cutover (still deferred until cached-endpoints phase).
+- No fake warehouse IDs, no env-level capability hatch, no UNKNOWN → OPTIONAL fallback anywhere.
+- No app-level or product-level warehouse override is set; resolver still routes to OPTIONAL → omit for the haute_brands org.
+
 ## [0.4.110] — 2026-06-17
 
 ### Added
