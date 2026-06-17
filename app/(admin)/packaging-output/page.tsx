@@ -36,6 +36,12 @@ import {
   derivePoOutputComparison,
   listPoSummaries,
 } from "@/lib/production/po-reconciliation";
+// PRODUCTION-OUTPUT-WORKBENCH-v1.5.0 — filter bar + results table
+// for search/history mode. Default behavior preserved unchanged.
+import { parseProductionOutputFilters } from "@/lib/production/production-output-filters";
+import { listProductionOutputRowsWithFilters } from "@/lib/db/queries/production-output-rows";
+import { ProductionOutputFilterBar } from "./filter-bar";
+import { ProductionOutputResultsTable } from "./results-table";
 
 export const dynamic = "force-dynamic";
 
@@ -52,15 +58,22 @@ const LEAD_ROLES = new Set(["OWNER", "ADMIN", "MANAGER", "LEAD"]);
 export default async function PackagingOutputPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ poId?: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireSession();
   const canMutate = LEAD_ROLES.has(user.role);
   const range = lastNDays(7);
 
+  // PRODUCTION-OUTPUT-WORKBENCH-v1.5.0 — parse the workbench filters
+  // out of searchParams. When `hasUserFilter` is true, the page
+  // switches into "results" mode (search/history). Otherwise the
+  // historical dashboard + 20-row backlog queue render unchanged.
+  const rawParams = (await searchParams) ?? {};
+  const filters = parseProductionOutputFilters(rawParams);
+
   // P3-PO-VIEW — PO-centric comparison (ordered vs received vs
   // produced vs remaining) driven by the ?poId= selector below.
-  const selectedPoId = (await searchParams)?.poId ?? null;
+  const selectedPoId = typeof rawParams.poId === "string" ? rawParams.poId : null;
   const [poSummaries, poComparison] = await Promise.all([
     listPoSummaries(),
     selectedPoId ? derivePoOutputComparison(selectedPoId) : Promise.resolve(null),
@@ -71,8 +84,16 @@ export default async function PackagingOutputPage({
 
   const ROLL_KINDS_FOR_EXCLUSION = ["PVC_ROLL", "FOIL_ROLL", "BLISTER_FOIL"];
 
+  // PRODUCTION-OUTPUT-WORKBENCH-v1.5.0 — workbench results query
+  // runs only when filters are active. Keep the rest of the page's
+  // existing parallel-query block intact so default-mode behavior
+  // (7-day rollups + 20-row queue) is byte-identical to before.
+  const workbenchResultsPromise = filters.hasUserFilter
+    ? listProductionOutputRowsWithFilters(filters)
+    : Promise.resolve(null);
+
   // Run all queries in parallel — pack-out queue alongside existing metrics.
-  const [packaging, finished, flavorRollup, awaitingLot, awaitingLotTotal, awaitingFinalize, materialBurnRaw] = await Promise.all([
+  const [packaging, finished, flavorRollup, awaitingLot, awaitingLotTotal, awaitingFinalize, materialBurnRaw, workbenchResults] = await Promise.all([
     derivePackagingMetrics(range),
     deriveFinishedGoodsMetrics(range),
 
@@ -152,6 +173,8 @@ export default async function PackagingOutputPage({
       GROUP BY mie.packaging_material_id, pm.name, pm.kind
       ORDER BY MAX(mie.occurred_at) DESC
     `),
+
+    workbenchResultsPromise,
   ]);
 
   const releasedLotsRaw = finished.releasedLots?.value ?? null;
@@ -200,6 +223,15 @@ export default async function PackagingOutputPage({
   };
   const materialBurn = materialBurnRaw as unknown as MaterialBurnRow[];
 
+  // Status filter dropdown initial value — "all" when no status set.
+  const initialStatus = filters.status ?? "all";
+  const initialFromIso = filters.from
+    ? filters.from.toISOString().slice(0, 10)
+    : "";
+  const initialToIso = filters.to
+    ? filters.to.toISOString().slice(0, 10)
+    : "";
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -222,6 +254,29 @@ export default async function PackagingOutputPage({
           </div>
         }
       />
+
+      {/* PRODUCTION-OUTPUT-WORKBENCH-v1.5.0 — filter bar */}
+      <ProductionOutputFilterBar
+        initialQ={filters.q ?? ""}
+        initialFrom={initialFromIso}
+        initialTo={initialToIso}
+        initialStatus={initialStatus}
+        initialLimit={filters.limit}
+      />
+
+      {/* PRODUCTION-OUTPUT-WORKBENCH-v1.5.0 — search/history results
+          table. Rendered only when the operator has applied a filter
+          beyond limit. Otherwise we keep the historical 7-day
+          dashboard + 20-row queue rendering below unchanged. */}
+      {workbenchResults && (
+        <ProductionOutputResultsTable
+          rows={workbenchResults.rows}
+          totalCount={workbenchResults.totalCount}
+          hasMore={workbenchResults.hasMore}
+          filters={filters}
+          canMutate={canMutate}
+        />
+      )}
 
       {/* Stats ribbon */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

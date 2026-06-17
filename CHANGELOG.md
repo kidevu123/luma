@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.110] — 2026-06-17
+
+### Added
+- **Production Output search/history workbench.** Adds receipt / product / workflow / date / status / PO / limit / page filters to `/packaging-output` so operators can find older issued lots and older awaiting-lot rows outside the 7-day dashboard window. Status badges and drilldowns (workflow, finished lot, Zoho op, PO reconciliation) on every row. New "Push to Zoho" readiness CTA navigates to the finished-lot detail preview without executing any live Zoho action from the workbench. Default `/packaging-output` dashboard behavior (7-day metrics, 20-row backlog queue, `#output-queue` anchor) is preserved unchanged.
+
 ## [1.3.0] — 2026-06-16
 
 ### Added
