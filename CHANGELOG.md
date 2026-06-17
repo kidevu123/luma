@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.1] — 2026-06-17
+
+### Fixed
+- **Receive pills — supplier lot setup:** Removed the unused "Receipt prefix (optional)" field. Operators enter the full receipt start (e.g. `1001` or `QA-R1001`) in one field; prefix override was redundant with embedded-prefix receipt numbers.
+- **Receive pills — "Receive another batch":** After a successful save, the button now reloads `/receiving/raw-bags?poId=…` with the PO from the receive just saved. Operators can still change PO or line; the dropdown is simply pre-filled for back-to-back receives on the same PO.
+
 ## [1.4.0] — 2026-06-17
 
 ### Added

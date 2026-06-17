@@ -68,6 +68,7 @@ export function RawBagIntakeForm({
   availableQrCards,
   lineReceiveTotals = [],
   viewerRole,
+  initialPoId = null,
 }: {
   purchaseOrders: PO[];
   poLines: PoLine[];
@@ -75,11 +76,19 @@ export function RawBagIntakeForm({
   availableQrCards: { scanToken: string }[];
   lineReceiveTotals?: PoLineReceiveTotal[];
   viewerRole: ViewerRole;
+  /** When set (e.g. from ?poId= after "Receive another batch"), pre-selects that PO. */
+  initialPoId?: string | null;
 }) {
+  const resolvedInitialPoId =
+    initialPoId && purchaseOrders.some((p) => p.id === initialPoId) ? initialPoId : "";
   const [poMode, setPoMode] = React.useState<PoMode>(
-    purchaseOrders.length > 0 ? "LOCAL_PO" : "MANUAL_REFERENCE",
+    resolvedInitialPoId.length > 0
+      ? "LOCAL_PO"
+      : purchaseOrders.length > 0
+        ? "LOCAL_PO"
+        : "MANUAL_REFERENCE",
   );
-  const [poId, setPoId] = React.useState<string>("");
+  const [poId, setPoId] = React.useState<string>(resolvedInitialPoId);
   const [poLineId, setPoLineId] = React.useState<string>("");
   const [poNumberManual, setPoNumberManual] = React.useState("");
   const [vendorNameManual, setVendorNameManual] = React.useState("");
@@ -92,7 +101,6 @@ export function RawBagIntakeForm({
   const [numberOfBags, setNumberOfBags] = React.useState<string>("10");
   const [declaredTotal, setDeclaredTotal] = React.useState<string>("");
   const [receiptStart, setReceiptStart] = React.useState<string>("");
-  const [receiptPrefix, setReceiptPrefix] = React.useState<string>("");
 
   const [rows, setRows] = React.useState<RawBagRowSeed[]>([]);
   const [pending, setPending] = React.useState(false);
@@ -148,7 +156,6 @@ export function RawBagIntakeForm({
     const seed = generateBagRowSeed({
       count: safeCount,
       receiptStart: receiptStart.trim(),
-      receiptPrefix: receiptPrefix.trim() || null,
       declaredTotal: declared,
       supplierLotNumber: supplierLot.trim(),
       // no weightGrams — operator enters per-row in kg
@@ -215,11 +222,6 @@ export function RawBagIntakeForm({
     }
   }
 
-  function handleAnother() {
-    // Full page load guarantees a clean form and refreshed QR pool.
-    window.location.href = "/receiving/raw-bags";
-  }
-
   const receivedTotal = computeReceivedTotal(rows);
 
   const poolSet = React.useMemo(
@@ -248,11 +250,7 @@ export function RawBagIntakeForm({
 
   if (result?.ok) {
     return (
-      <SaveResultPanel
-        result={result}
-        onAnother={handleAnother}
-        viewerRole={viewerRole}
-      />
+      <SaveResultPanel result={result} viewerRole={viewerRole} />
     );
   }
 
@@ -385,15 +383,6 @@ export function RawBagIntakeForm({
               onChange={(e) => setDeclaredTotal(e.target.value)}
               onWheel={(e) => (e.target as HTMLInputElement).blur()}
               placeholder="e.g. 200000 (distributed evenly)"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="receiptPrefix">Receipt prefix (optional)</Label>
-            <Input
-              id="receiptPrefix"
-              value={receiptPrefix}
-              onChange={(e) => setReceiptPrefix(e.target.value)}
-              placeholder="e.g. QA-R"
             />
           </div>
           <div className="space-y-1">
@@ -881,13 +870,18 @@ function LookupCard({ viewerRole }: { viewerRole: ViewerRole }) {
   );
 }
 
+function receiveAnotherBatchHref(poId: string | null): string {
+  if (poId && poId.trim().length > 0) {
+    return `/receiving/raw-bags?poId=${encodeURIComponent(poId)}`;
+  }
+  return "/receiving/raw-bags";
+}
+
 function SaveResultPanel({
   result,
-  onAnother,
   viewerRole,
 }: {
   result: Extract<Awaited<ReturnType<typeof createRawBagIntakeAction>>, { ok: true }>;
-  onAnother: () => void;
   viewerRole: ViewerRole;
 }) {
   const [readinessRows, setReadinessRows] = React.useState<
@@ -1026,8 +1020,10 @@ function SaveResultPanel({
             <ArrowRight className="h-3.5 w-3.5" /> Live floor
           </Link>
         </Button>
-        <Button size="sm" onClick={onAnother}>
-          <Inbox className="h-3.5 w-3.5" /> Receive another batch
+        <Button asChild size="sm">
+          <a href={receiveAnotherBatchHref(result.poId)}>
+            <Inbox className="h-3.5 w-3.5" /> Receive another batch
+          </a>
         </Button>
       </div>
     </ProductionSection>

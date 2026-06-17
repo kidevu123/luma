@@ -6,6 +6,7 @@ const formSrc = readFileSync(
   join(__dirname, "raw-bag-intake-form.tsx"),
   "utf8",
 );
+const pageSrc = readFileSync(join(__dirname, "page.tsx"), "utf8");
 const panelSrc = readFileSync(
   join(__dirname, "../../../../components/admin/raw-bag-zoho-receive-panel.tsx"),
   "utf8",
@@ -39,6 +40,18 @@ describe("RAW-BAGS-READINESS-BADGES-1 · intake form wiring", () => {
     expect(formSrc).not.toMatch(/saveSealingProductAction/);
     expect(actionsSrc).not.toMatch(/scanCardAction/);
     expect(actionsSrc).not.toMatch(/fireStageEventAction/);
+  });
+
+  it("does not expose a separate receipt-prefix field in supplier lot setup", () => {
+    expect(formSrc).not.toMatch(/receiptPrefix/);
+    expect(formSrc).not.toMatch(/Receipt prefix/);
+  });
+
+  it("Receive another batch preserves the saved PO via ?poId=", () => {
+    expect(formSrc).toMatch(/receiveAnotherBatchHref/);
+    expect(formSrc).toMatch(/result\.poId/);
+    expect(pageSrc).toMatch(/searchParams/);
+    expect(pageSrc).toMatch(/initialPoId/);
   });
 
   it("wires Zoho pending banner on save and lookup (bag-finish receive)", () => {
