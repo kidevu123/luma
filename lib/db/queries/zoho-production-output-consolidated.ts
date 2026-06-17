@@ -411,6 +411,17 @@ export async function upsertConsolidatedProductionOutputOpForLot(
         finalizedAt: lotRow?.workflowFinalizedAt ?? null,
         zohoPurchaseorderId: firstSourceReceiptPoId(built.payload),
         zohoPurchaseorderLineItemId: primaryPo,
+        // CASE-ITEM-CHECK-v1.4.1 — the table's check constraints
+        // (`zoho_prod_output_ops_case_item_check` and the matching
+        // display + unit checks) require the composite-item IDs to
+        // be set when their assembly quantity is > 0. Pull them
+        // through from the already-built payload (the source-of-truth
+        // for what we'd send to Zoho if the allocation issue
+        // resolved). Without these the partial NEEDS_MAPPING insert
+        // is rejected by the DB, which is the bug v1.4.1 patches.
+        zohoCompositeItemId: built.payload.product.unit_composite_item_id,
+        zohoDisplayCompositeItemId: built.payload.product.display_composite_item_id,
+        zohoCaseCompositeItemId: built.payload.product.case_composite_item_id,
         quantityGood: built.payload.output.units_produced,
         unitAssemblyQuantity: built.payload.output.units_produced,
         displayAssemblyQuantity: built.payload.output.displays_produced ?? 0,

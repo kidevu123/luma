@@ -99,6 +99,19 @@ export type UpsertZohoProductionOutputPreviewOpInput = {
     capabilitySource: string | null;
     capabilityGatewayRequestId: string | null;
   };
+  // SNAPSHOT-ATTACH-v1.4.1 — fields the gateway needs to verify the
+  // attached luma_operation_snapshot matches a persisted Luma op.
+  // Without these the snapshot builder cannot reconstruct the same
+  // shape on read-back and the gateway rejects the preview as a
+  // one-shot. When the caller has nothing to attach (legacy path),
+  // pass nulls; the op row remains snapshot-incomplete and the
+  // gateway will keep emitting LUMA_OPERATION_NOT_PERSISTED.
+  snapshotSource?: {
+    finalizedAt: Date | null;
+    productId: string | null;
+    productFamily: string | null;
+    finishedSku: string | null;
+  };
 };
 
 type ZohoProductionOutputPreviewOpValues =
@@ -132,6 +145,15 @@ export function buildZohoProductionOutputPreviewOpValues(
     quantityDamaged: metricsAreKnown ? input.payload.quantity_damaged : null,
     quantityRipped: metricsAreKnown ? input.payload.quantity_ripped : null,
     quantityLoose: metricsAreKnown ? input.payload.quantity_loose : null,
+    // SNAPSHOT-ATTACH-v1.4.1 — persist the snapshot-source fields so
+    // buildLumaOperationSnapshotFromPersistedOp(opId) on a subsequent
+    // read produces the same shape as the attached snapshot. The
+    // gateway uses these to verify the incoming snapshot matches
+    // Luma's persisted operation.
+    finalizedAt: input.snapshotSource?.finalizedAt ?? null,
+    productId: input.snapshotSource?.productId ?? null,
+    productFamily: input.snapshotSource?.productFamily ?? null,
+    finishedSku: input.snapshotSource?.finishedSku ?? null,
     quantityBasis: {
       quantity_good: input.payload.quantity_good,
       unit_assembly_quantity: input.payload.unit_assembly_quantity,

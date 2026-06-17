@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.4.2] — 2026-06-17
+
+### Fixed
+- **Admin Zoho preview attaches the persisted operation snapshot.** `previewZohoProductionOutputAction` now calls `buildSourceAllocationsForFinishedLot` and `buildLumaOperationSnapshotFromOpRow`, then `attachSnapshotToPayload` + `verification: { mode: "snapshot" }` before the gateway call. The upsert persists the four snapshot-source fields (`finalized_at`, `product_id`, `product_family`, `finished_sku`) and the source allocation rows so the gateway's snapshot verification matches the persisted Luma op. Previously the admin preview produced `LUMA_OPERATION_NOT_PERSISTED` and `ONE_SHOT_SCRIPT_BLOCKED` blockers because the snapshot was never attached.
+- **Consolidated path no longer rejects NEEDS_MAPPING inserts on lots with cases produced.** The partial NEEDS_MAPPING insert in `upsertConsolidatedProductionOutputOpForLot` (`!sourceWithPo.ok` branch) now pulls `unit_composite_item_id`, `display_composite_item_id`, and `case_composite_item_id` through from the already-built payload, satisfying the table check constraints `zoho_prod_output_ops_case_item_check` / `_display_item_check`. The constraints are not bypassed or relaxed; the inserts simply carry the data the constraint requires. Fix verified against BlueRaz #36.
+
+### Notes
+- v1.4.0 warehouse-capability behavior preserved: capability call first, OPTIONAL+missing → omit, `warehouse_id` absent from payload, audit fields persisted unchanged.
+- No migration. No env changes. Live-write gates remain OFF.
+
 ## [1.4.1] — 2026-06-17
 
 ### Fixed

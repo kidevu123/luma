@@ -47,11 +47,29 @@ vi.mock("@/lib/zoho/brand-capabilities-client", async (importOriginal) => {
   };
 });
 
+// SNAPSHOT-ATTACH-v1.4.2 — mock the source-allocations builder and
+// persistor so tests don't need a real allocation ledger.
+vi.mock("@/lib/zoho/production-output-source-allocations", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/lib/zoho/production-output-source-allocations")
+    >();
+  return {
+    ...actual,
+    buildSourceAllocationsForFinishedLot: vi.fn(),
+    persistSourceAllocationsForOp: vi.fn(),
+  };
+});
+
 import { requireAdmin } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { upsertZohoProductionOutputPreviewOp, getActiveZohoProductionOutputOpForLot } from "@/lib/db/queries/zoho-production-output";
 import { callProductionOutputPreview } from "@/lib/zoho/production-output-preview";
 import { fetchWarehouseCapability } from "@/lib/zoho/brand-capabilities-client";
+import {
+  buildSourceAllocationsForFinishedLot,
+  persistSourceAllocationsForOp,
+} from "@/lib/zoho/production-output-source-allocations";
 import { previewZohoProductionOutputAction } from "./zoho-production-output-preview-actions";
 
 const LOT_ID = "11111111-1111-4111-8111-111111111111";
@@ -66,6 +84,12 @@ type LotRow = {
     casesProduced: number;
   };
   product: {
+    // SNAPSHOT-ATTACH-v1.4.2 — id/productSku/productName/productFamily
+    // needed for the snapshot builder.
+    id: string;
+    productSku: string;
+    productName: string;
+    productFamily: string | null;
     zohoItemIdUnit: string | null;
     zohoItemIdDisplay: string | null;
     zohoItemIdCase: string | null;
@@ -77,6 +101,8 @@ type LotRow = {
     rippedCards: number | null;
     looseCards: number | null;
   } | null;
+  // SNAPSHOT-ATTACH-v1.4.2 — workflow-bag finalized_at for snapshot.
+  workflowFinalizedAt: Date | null;
 };
 
 const LOT_ROW: LotRow = {
@@ -89,6 +115,10 @@ const LOT_ROW: LotRow = {
     casesProduced: 0,
   },
   product: {
+    id: "33333333-3333-4333-8333-333333333333",
+    productSku: "tt-product-1",
+    productName: "Test Product",
+    productFamily: "HYROXI_MIT_A",
     zohoItemIdUnit: "unit-composite-1",
     zohoItemIdDisplay: null,
     zohoItemIdCase: null,
@@ -99,6 +129,43 @@ const LOT_ROW: LotRow = {
     rippedCards: 0,
     looseCards: 0,
   },
+  workflowFinalizedAt: new Date("2026-05-28T12:00:00Z"),
+};
+
+// SNAPSHOT-ATTACH-v1.4.2 — BlueRaz #36 fixture. Matches the real
+// finished lot d353853e-3313-42e2-a0a1-c06b9e3dada4 shape:
+// unit + display + case quantities all > 0 with all three composite
+// item IDs populated. This is the shape that triggered the
+// zoho_prod_output_ops_case_item_check failure in the consolidated
+// path before the v1.4.2 fix. Used by BlueRaz-shaped tests below to
+// pin that the v1.4.2 admin preview-action attaches a snapshot, omits
+// warehouse_id under OPTIONAL capability, and persists snapshotSource
+// + source allocations without tripping the check constraint.
+const BLUERAZ_LOT_ROW: LotRow = {
+  finishedLot: {
+    id: LOT_ID,
+    workflowBagId: "8f876446-7bd1-4aa8-af24-97df1bc2f424",
+    producedOn: "2026-06-15",
+    unitsProduced: 4021,
+    displaysProduced: 21,
+    casesProduced: 9,
+  },
+  product: {
+    id: "44444444-4444-4444-8444-444444444444",
+    productSku: "tt-product-30",
+    productName: "Hyroxi Mit A - BlueRaz",
+    productFamily: "HYROXI_MIT_A",
+    zohoItemIdUnit: "5254962000002477016",
+    zohoItemIdDisplay: "5254962000002477047",
+    zohoItemIdCase: "5254962000002477064",
+    zohoDefaultWarehouseId: null,
+  },
+  metrics: {
+    damagedPackaging: 3,
+    rippedCards: 5,
+    looseCards: 1,
+  },
+  workflowFinalizedAt: new Date("2026-06-15T18:00:00Z"),
 };
 
 function mockLotQuery(
@@ -110,7 +177,10 @@ function mockLotQuery(
 ) {
   const limit = vi.fn().mockResolvedValue(row ? [row] : []);
   const where = vi.fn(() => ({ limit }));
-  const leftJoin = vi.fn(() => ({ where }));
+  // SNAPSHOT-ATTACH-v1.4.2 — chain now has TWO leftJoins (readBagMetrics,
+  // then workflowBags) before .where().limit().
+  const leftJoinWorkflow = vi.fn(() => ({ where }));
+  const leftJoin = vi.fn(() => ({ leftJoin: leftJoinWorkflow }));
   const innerJoin = vi.fn(() => ({ leftJoin }));
   const from = vi.fn(() => ({ innerJoin }));
   const rawWhere = vi.fn().mockResolvedValue(rawBagLinks);
@@ -176,6 +246,33 @@ beforeEach(() => {
     state: "REQUIRED",
     gatewayRequestId: "test-request-id",
   });
+  // SNAPSHOT-ATTACH-v1.4.2 — default source-allocation mock returns a
+  // single valid row so the snapshot builder succeeds. Individual
+  // tests can override.
+  vi.mocked(buildSourceAllocationsForFinishedLot).mockResolvedValue({
+    ok: true,
+    rows: [
+      {
+        zohoComponentItemId: "tablet-component-1",
+        lumaInventoryBagId: "44444444-4444-4444-8444-444444444444",
+        humanLotNumber: "LOT-A",
+        componentRole: null,
+        quantityAllocated: 100,
+        allocationSessionId: null,
+        workflowBagId: null,
+        varietyRunId: null,
+        parentScanToken: null,
+        manufactureDate: null,
+        expiryDate: null,
+        zohoBatchId: null,
+        batchResolutionStatus: "NOT_BATCH_TRACKED",
+        outQuantity: null,
+      },
+    ],
+    componentBatches: [],
+    productFamily: "HYROXI_MIT_A",
+  });
+  vi.mocked(persistSourceAllocationsForOp).mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -379,13 +476,12 @@ describe("previewZohoProductionOutputAction", () => {
   });
 
   it("persists missing metrics and missing genealogy honestly", async () => {
+    // SNAPSHOT-ATTACH-v1.4.2 — snapshot builder requires a non-null
+    // workflowBagId. Keep the original v1.4.0 test but with a valid
+    // workflowBagId so we still exercise the missing-metrics path.
     mockLotQuery(
       {
         ...LOT_ROW,
-        finishedLot: {
-          ...LOT_ROW.finishedLot,
-          workflowBagId: null,
-        },
         metrics: null,
       },
       [],
@@ -408,9 +504,332 @@ describe("previewZohoProductionOutputAction", () => {
     expect(upsertZohoProductionOutputPreviewOp).toHaveBeenCalledWith(
       expect.objectContaining({
         metricsState: "MISSING",
-        genealogyState: "MISSING",
+        // SNAPSHOT-ATTACH-v1.4.2 — workflowBagId stays valid (snapshot
+        // requires it) so genealogy is LOW (no high-conf links) rather
+        // than the v1.4.0 case's "MISSING" (no workflowBagId).
+        genealogyState: "LOW",
       }),
     );
+  });
+
+  // SNAPSHOT-ATTACH-v1.4.2 — new tests for the v1.4.2 contract.
+
+  it("attaches luma_operation_snapshot + verification.mode=snapshot to the payload (so gateway does not emit script-only blockers)", async () => {
+    mockLotQuery(LOT_ROW);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Snapshot is attached with the documented shape.
+    const payloadAny = result.payload as Record<string, unknown>;
+    expect(Object.hasOwn(payloadAny, "luma_operation_snapshot")).toBe(true);
+    expect(Object.hasOwn(payloadAny, "verification")).toBe(true);
+    expect(payloadAny.verification).toEqual({ mode: "snapshot" });
+    const snapshot = payloadAny.luma_operation_snapshot as Record<string, unknown>;
+    expect(snapshot.status).toBe("finalized");
+    expect(snapshot.finished_lot_id).toBe(LOT_ID);
+    expect(snapshot.workflow_bag_id).toBe(LOT_ROW.finishedLot.workflowBagId);
+    expect(Array.isArray(snapshot.source_allocations)).toBe(true);
+    expect((snapshot.source_allocations as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("persists source allocations via persistSourceAllocationsForOp after the upsert", async () => {
+    mockLotQuery(LOT_ROW);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(persistSourceAllocationsForOp).toHaveBeenCalledWith(
+      "op-1",
+      expect.arrayContaining([
+        expect.objectContaining({ lumaInventoryBagId: expect.any(String) }),
+      ]),
+    );
+  });
+
+  it("upsert receives snapshotSource (finalizedAt + productId + productFamily + finishedSku)", async () => {
+    mockLotQuery(LOT_ROW);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(upsertZohoProductionOutputPreviewOp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotSource: expect.objectContaining({
+          productId: LOT_ROW.product.id,
+          productFamily: expect.any(String),
+          finishedSku: LOT_ROW.product.productSku,
+          finalizedAt: expect.any(Date),
+        }),
+      }),
+    );
+  });
+
+  it("returns PAYLOAD_BLOCKED when source allocations cannot be built (no allocation ledger)", async () => {
+    mockLotQuery(LOT_ROW);
+    vi.mocked(buildSourceAllocationsForFinishedLot).mockResolvedValueOnce({
+      ok: false,
+      blockers: [
+        {
+          code: "MISSING_ALLOCATION_LEDGER",
+          message: "No closed allocation sessions exist for this finished lot.",
+        },
+      ],
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("PAYLOAD_BLOCKED");
+    expect(result.blockers).toContainEqual(
+      expect.objectContaining({ field: "MISSING_ALLOCATION_LEDGER" }),
+    );
+    expect(callProductionOutputPreview).not.toHaveBeenCalled();
+  });
+
+  it("v1.4.0 warehouse omission preserved: OPTIONAL + missing -> payload still omits warehouse_id + snapshot still attached", async () => {
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-omit-1",
+    });
+    mockLotQuery(LOT_ROW, undefined, null);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const payloadAny = result.payload as Record<string, unknown>;
+    // v1.4.0 contract intact:
+    expect(Object.hasOwn(payloadAny, "warehouse_id")).toBe(false);
+    // v1.4.2 contract present:
+    expect(Object.hasOwn(payloadAny, "luma_operation_snapshot")).toBe(true);
+    expect(payloadAny.verification).toEqual({ mode: "snapshot" });
+  });
+
+  // SNAPSHOT-ATTACH-v1.4.2 — BlueRaz #36 unit + display + case path.
+  // The shape that triggered zoho_prod_output_ops_case_item_check
+  // before this patch. Must build cleanly and persist without
+  // tripping the check constraint.
+
+  it("BlueRaz #36 shape (unit + display + case) builds payload with all three composite IDs, attaches snapshot, omits warehouse_id under OPTIONAL capability", async () => {
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-blueraz-1",
+    });
+    mockLotQuery(BLUERAZ_LOT_ROW, undefined, null);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "5254962000004878112",
+      purchaseorderLineItemId: "5254962000004878118",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const payload = result.payload as Record<string, unknown>;
+
+    // All three assembly quantities > 0.
+    expect(payload.unit_assembly_quantity).toBe(4021);
+    expect(payload.display_assembly_quantity).toBe(21);
+    expect(payload.case_assembly_quantity).toBe(9);
+
+    // All three composite item IDs present in the payload.
+    expect(payload.unit_composite_item_id).toBe("5254962000002477016");
+    expect(payload.display_composite_item_id).toBe("5254962000002477047");
+    expect(payload.case_composite_item_id).toBe("5254962000002477064");
+
+    // Warehouse capability OPTIONAL + no resolution → warehouse_id key
+    // absent from JSON entirely (not empty string, not null).
+    expect(Object.hasOwn(payload, "warehouse_id")).toBe(false);
+    expect(JSON.stringify(payload)).not.toMatch(/"warehouse_id"/);
+
+    // Snapshot + verification mode attached.
+    expect(Object.hasOwn(payload, "luma_operation_snapshot")).toBe(true);
+    expect(payload.verification).toEqual({ mode: "snapshot" });
+
+    // Snapshot carries the BlueRaz identity (lot, workflow bag, SKU).
+    const snapshot = payload.luma_operation_snapshot as Record<string, unknown>;
+    expect(snapshot.status).toBe("finalized");
+    expect(snapshot.finished_lot_id).toBe(LOT_ID);
+    expect(snapshot.workflow_bag_id).toBe(BLUERAZ_LOT_ROW.finishedLot.workflowBagId);
+    expect(snapshot.finished_sku).toBe(BLUERAZ_LOT_ROW.product.productSku);
+    expect(snapshot.unit_composite_item_id).toBe("5254962000002477016");
+    expect(Array.isArray(snapshot.source_allocations)).toBe(true);
+    expect((snapshot.source_allocations as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("BlueRaz #36 shape: upsert receives all four v1.4.0 capability audit fields + v1.4.2 snapshotSource", async () => {
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-blueraz-2",
+    });
+    mockLotQuery(BLUERAZ_LOT_ROW, undefined, null);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "5254962000004878112",
+      purchaseorderLineItemId: "5254962000004878118",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(upsertZohoProductionOutputPreviewOp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // The persisted PREVIEWED payload still carries all three
+        // composite item IDs. The upsert reads them off the payload
+        // (input.payload.unit_composite_item_id etc.) which is what
+        // populates the zoho_*_composite_item_id columns and lets the
+        // table's three check constraints all pass.
+        payload: expect.objectContaining({
+          unit_composite_item_id: "5254962000002477016",
+          display_composite_item_id: "5254962000002477047",
+          case_composite_item_id: "5254962000002477064",
+          unit_assembly_quantity: 4021,
+          display_assembly_quantity: 21,
+          case_assembly_quantity: 9,
+        }),
+        // v1.4.0 capability audit fields.
+        warehouseAudit: expect.objectContaining({
+          warehouseRequired: false,
+          warehouseOmitted: true,
+          capabilitySource: "gateway:/zoho/brand-capabilities/warehouse",
+          capabilityGatewayRequestId: "wh-cap-blueraz-2",
+        }),
+        // v1.4.2 snapshotSource columns persisted on the op row so
+        // the gateway snapshot-verification callback can reconstruct
+        // the snapshot on subsequent reads.
+        snapshotSource: expect.objectContaining({
+          productId: BLUERAZ_LOT_ROW.product.id,
+          productFamily: expect.any(String),
+          finishedSku: BLUERAZ_LOT_ROW.product.productSku,
+          finalizedAt: expect.any(Date),
+        }),
+      }),
+    );
+    // Source allocations persisted after the upsert so the commit
+    // path can reload + verify the snapshot.
+    expect(persistSourceAllocationsForOp).toHaveBeenCalled();
+  });
+
+  it("BlueRaz #36 shape: case_assembly_quantity > 0 AND case_composite_item_id present together (no zoho_prod_output_ops_case_item_check failure path)", async () => {
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-blueraz-3",
+    });
+    mockLotQuery(BLUERAZ_LOT_ROW, undefined, null);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "5254962000004878112",
+      purchaseorderLineItemId: "5254962000004878118",
+      warehouseId: "",
+      notes: "",
+    });
+
+    // The check constraint is:
+    //   case_assembly_quantity = 0 OR zoho_case_composite_item_id IS NOT NULL
+    // The upsert reads case_composite_item_id off the payload (see
+    // buildZohoProductionOutputPreviewOpValues:140). So if the payload
+    // carries case_assembly_quantity > 0, it MUST also carry a
+    // non-empty case_composite_item_id. Assert exactly that on every
+    // upsert call.
+    const calls = vi.mocked(upsertZohoProductionOutputPreviewOp).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [arg] of calls) {
+      const p = arg.payload as Record<string, unknown>;
+      const caseQty = Number(p.case_assembly_quantity ?? 0);
+      const caseComposite = p.case_composite_item_id;
+      const displayQty = Number(p.display_assembly_quantity ?? 0);
+      const displayComposite = p.display_composite_item_id;
+      const unitQty = Number(p.unit_assembly_quantity ?? 0);
+      const unitComposite = p.unit_composite_item_id;
+      if (caseQty > 0) {
+        expect(typeof caseComposite).toBe("string");
+        expect((caseComposite as string).length).toBeGreaterThan(0);
+      }
+      if (displayQty > 0) {
+        expect(typeof displayComposite).toBe("string");
+        expect((displayComposite as string).length).toBeGreaterThan(0);
+      }
+      if (unitQty > 0) {
+        expect(typeof unitComposite).toBe("string");
+        expect((unitComposite as string).length).toBeGreaterThan(0);
+      }
+    }
   });
 
   it("blocks preview when an approved op is still active", async () => {

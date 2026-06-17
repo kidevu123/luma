@@ -35,6 +35,30 @@ import {
   capabilitySourceLabel,
   decideWarehouseInclusion,
 } from "@/lib/zoho/warehouse-decision";
+// SNAPSHOT-ATTACH-v1.4.1 — preview must attach a luma_operation_snapshot
+// so the gateway can verify the operation is persisted in Luma. Same
+// canonical helpers the consolidated commit path uses.
+import {
+  buildLumaOperationSnapshotFromOpRow,
+  attachSnapshotToPayload,
+} from "@/lib/zoho/luma-operation-snapshot";
+import {
+  buildSourceAllocationsForFinishedLot,
+  persistSourceAllocationsForOp,
+} from "@/lib/zoho/production-output-source-allocations";
+import { resolveProductFamily } from "@/lib/zoho/product-family";
+import { buildLumaProductionOutputOperationId } from "@/lib/zoho/luma-production-output-payload";
+import { workflowBags } from "@/lib/db/schema";
+
+// SNAPSHOT-ATTACH-v1.4.1 — match the consolidated path's allocation
+// build options so the preview's snapshot lines up with what a later
+// consolidated commit would produce. Mirrors the local helper in
+// lib/db/queries/zoho-production-output-consolidated.ts.
+function previewSourceAllocationBuildOpts(_sku: string) {
+  return {
+    resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true",
+  } as const;
+}
 
 const previewInputSchema = z.object({
   finishedLotId: z.string().uuid(),
@@ -232,13 +256,80 @@ export async function previewZohoProductionOutputAction(
     };
   }
 
+  // SNAPSHOT-ATTACH-v1.4.1 — build source allocations + snapshot and
+  // attach to payload. Without this the gateway emits
+  // LUMA_OPERATION_NOT_PERSISTED + ONE_SHOT_SCRIPT_BLOCKED.
+  const outputFamily = resolveProductFamily({
+    persistedFamily: lot.product.productFamily,
+    name: lot.product.productName ?? "",
+  });
+  const sourceBuilt = await buildSourceAllocationsForFinishedLot(
+    {
+      finishedLotId: lot.finishedLot.id,
+      workflowBagId: lot.finishedLot.workflowBagId,
+      outputProductFamily: outputFamily,
+      outputPoLineItemId: parsed.data.purchaseorderLineItemId,
+      unitsPerFinishedUnit: lot.finishedLot.unitsProduced,
+    },
+    previewSourceAllocationBuildOpts(lot.product.productSku ?? ""),
+  );
+  if (!sourceBuilt.ok) {
+    return {
+      ok: false,
+      kind: "PAYLOAD_BLOCKED",
+      message: "Cannot build production-output source allocations for this lot.",
+      blockers: sourceBuilt.blockers.map((b) => ({
+        field: b.code,
+        message: b.message,
+      })),
+    };
+  }
+  const snapshotBuilt = buildLumaOperationSnapshotFromOpRow(
+    {
+      lumaOperationId: buildLumaProductionOutputOperationId(lot.finishedLot.id),
+      finalizedAt: lot.workflowFinalizedAt,
+      productId: lot.product.id,
+      productFamily: outputFamily,
+      finishedSku: lot.product.productSku,
+      unitCompositeItemId: lot.product.zohoItemIdUnit,
+      workflowBagId: lot.finishedLot.workflowBagId,
+      finishedLotId: lot.finishedLot.id,
+    },
+    sourceBuilt.rows.map((row) => ({
+      lumaInventoryBagId: row.lumaInventoryBagId,
+      zohoComponentItemId: row.zohoComponentItemId,
+      humanLotNumber: row.humanLotNumber,
+      quantityAllocated: row.quantityAllocated,
+    })),
+  );
+  if (!snapshotBuilt.ok) {
+    return {
+      ok: false,
+      kind: "PAYLOAD_BLOCKED",
+      message:
+        "Cannot build the persisted Luma operation snapshot. Resolve the listed blockers before previewing.",
+      blockers: snapshotBuilt.blockers.map((b) => ({
+        field: b.code,
+        message: b.message,
+      })),
+    };
+  }
+  const payloadWithSnapshot = attachSnapshotToPayload(
+    buildResult.payload,
+    snapshotBuilt.snapshot,
+  );
+  // The gateway uses verification.mode = "snapshot" to enforce the
+  // snapshot match; without it the gateway falls back to one-shot
+  // semantics and emits the script-only blockers we are fixing.
+  payloadWithSnapshot.verification = { mode: "snapshot" };
+  const finalPayload =
+    payloadWithSnapshot as typeof buildResult.payload;
+
   const idempotencyKey = buildProductionOutputPreviewIdempotencyKey(
     lot.finishedLot.id,
-    buildResult.payload,
+    finalPayload,
   );
-  const requestHash = buildProductionOutputPreviewRequestHash(
-    buildResult.payload,
-  );
+  const requestHash = buildProductionOutputPreviewRequestHash(finalPayload);
   const metricsState = classifyProductionOutputMetricsState({
     workflowBagId: lot.finishedLot.workflowBagId,
     metrics: lot.metrics,
@@ -249,17 +340,24 @@ export async function previewZohoProductionOutputAction(
     highConfidenceRawBagLinkCount: lot.highConfidenceRawBagLinkCount,
   });
   const response = await callProductionOutputPreview({
-    payload: buildResult.payload,
+    payload: finalPayload,
     idempotencyKey,
   });
+
+  const snapshotSource = {
+    finalizedAt: lot.workflowFinalizedAt,
+    productId: lot.product.id,
+    productFamily: outputFamily,
+    finishedSku: lot.product.productSku,
+  };
 
   if (response.ok) {
     const persistedPreview = await upsertZohoProductionOutputPreviewOp({
       finishedLotId: lot.finishedLot.id,
       workflowBagId: lot.finishedLot.workflowBagId,
-      lumaOperationId: buildResult.payload.luma_operation_id,
+      lumaOperationId: finalPayload.luma_operation_id,
       status: "PREVIEWED",
-      payload: buildResult.payload,
+      payload: finalPayload,
       requestHash,
       previewIdempotencyKey: idempotencyKey,
       previewHttpStatus: response.httpStatus,
@@ -268,12 +366,17 @@ export async function previewZohoProductionOutputAction(
       genealogyState,
       userId: actor.id,
       warehouseAudit,
+      snapshotSource,
     });
+    // SNAPSHOT-ATTACH-v1.4.1 — persist the source allocations so the
+    // gateway's snapshot verification on subsequent preview retries
+    // and the commit path can both reconstruct the same shape.
+    await persistSourceAllocationsForOp(persistedPreview.id, sourceBuilt.rows);
     return {
       ok: true,
       httpStatus: response.httpStatus,
       body: response.body,
-      payload: buildResult.payload,
+      payload: finalPayload,
       idempotencyKey,
       idempotencyReplay: response.idempotencyReplay,
       persistedPreview,
@@ -286,9 +389,9 @@ export async function previewZohoProductionOutputAction(
       : await upsertZohoProductionOutputPreviewOp({
           finishedLotId: lot.finishedLot.id,
           workflowBagId: lot.finishedLot.workflowBagId,
-          lumaOperationId: buildResult.payload.luma_operation_id,
+          lumaOperationId: finalPayload.luma_operation_id,
           status: "DRAFT",
-          payload: buildResult.payload,
+          payload: finalPayload,
           requestHash,
           previewIdempotencyKey: idempotencyKey,
           previewHttpStatus: response.httpStatus,
@@ -297,7 +400,11 @@ export async function previewZohoProductionOutputAction(
           genealogyState,
           userId: actor.id,
           warehouseAudit,
+          snapshotSource,
         });
+  if (persistedPreview) {
+    await persistSourceAllocationsForOp(persistedPreview.id, sourceBuilt.rows);
+  }
 
   return {
     ok: false,
@@ -327,6 +434,12 @@ async function loadProductionOutputPreviewLot(finishedLotId: string) {
         casesProduced: finishedLots.casesProduced,
       },
       product: {
+        // SNAPSHOT-ATTACH-v1.4.1 — id / productSku / productFamily /
+        // productName needed for snapshot + source allocation build.
+        id: products.id,
+        productSku: products.sku,
+        productName: products.name,
+        productFamily: products.productFamily,
         zohoItemIdUnit: products.zohoItemIdUnit,
         zohoItemIdDisplay: products.zohoItemIdDisplay,
         zohoItemIdCase: products.zohoItemIdCase,
@@ -337,12 +450,19 @@ async function loadProductionOutputPreviewLot(finishedLotId: string) {
         rippedCards: readBagMetrics.rippedCards,
         looseCards: readBagMetrics.looseCards,
       },
+      // SNAPSHOT-ATTACH-v1.4.1 — finalized_at lives on workflow_bags
+      // and the gateway snapshot requires it to be a valid ISO timestamp.
+      workflowFinalizedAt: workflowBags.finalizedAt,
     })
     .from(finishedLots)
     .innerJoin(products, eq(products.id, finishedLots.productId))
     .leftJoin(
       readBagMetrics,
       eq(readBagMetrics.workflowBagId, finishedLots.workflowBagId),
+    )
+    .leftJoin(
+      workflowBags,
+      eq(workflowBags.id, finishedLots.workflowBagId),
     )
     .where(eq(finishedLots.id, finishedLotId))
     .limit(1);
