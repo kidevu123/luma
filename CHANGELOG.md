@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.14] — 2026-06-18
+
+### Fixed
+- **Raw bag allocation sessions allow negative ending balance.** Migration `0068_rba_sessions_allow_negative_ending_balance` relaxes `rba_sessions_qty_signs` so `ending_balance_qty` can be negative when packaging consumption exceeds the vendor label count. Coordinated lot issue + repair closeout no longer fails at the database layer.
+
 ## [1.4.13] — 2026-06-18
 
 ### Fixed

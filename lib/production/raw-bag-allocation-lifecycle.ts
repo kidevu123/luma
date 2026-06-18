@@ -458,7 +458,7 @@ export async function closeAllocationSessionInTx(
   });
 
   const allocationStatus =
-    input.endingBalanceQty === 0 ? ("DEPLETED" as const) : ("CLOSED" as const);
+    input.endingBalanceQty <= 0 ? ("DEPLETED" as const) : ("CLOSED" as const);
 
   await tx
     .update(rawBagAllocationSessions)
