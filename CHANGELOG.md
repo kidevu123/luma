@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.9] — 2026-06-18
+
+### Fixed
+- **Settings hub respects role access.** Configuration links on `/settings` are filtered by the signed-in user's role (`SESSION`, `LEAD`, `ADMIN`, `OWNER`), matching each destination page's auth guard. Managers and staff no longer see admin-only setup links they cannot open. Owner-only areas (legacy import, danger zone) are hidden from admins.
+
 ## [1.4.8] — 2026-06-18
 
 ### Fixed

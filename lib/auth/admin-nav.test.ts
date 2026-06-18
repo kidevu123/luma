@@ -24,6 +24,11 @@ describe("roleMeetsNavMin", () => {
     expect(roleMeetsNavMin("ADMIN", "ADMIN")).toBe(true);
     expect(roleMeetsNavMin("OWNER", "ADMIN")).toBe(true);
   });
+
+  it("OWNER min excludes everyone except OWNER", () => {
+    expect(roleMeetsNavMin("ADMIN", "OWNER")).toBe(false);
+    expect(roleMeetsNavMin("OWNER", "OWNER")).toBe(true);
+  });
 });
 
 describe("filterAdminNavForRole", () => {
@@ -44,6 +49,10 @@ describe("filterAdminNavForRole", () => {
     expect(hrefs).toContain("/reports/audit-log");
     expect(hrefs).not.toContain("/packaging-inventory");
     expect(hrefs).not.toContain("/partial-bags");
+  });
+
+  it("MANAGER matches LEAD for sidebar visibility", () => {
+    expect(visibleAdminNavHrefs("MANAGER")).toEqual(visibleAdminNavHrefs("LEAD"));
   });
 
   it("ADMIN sees admin-gated sidebar entries", () => {

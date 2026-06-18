@@ -10,7 +10,7 @@ import type { CurrentUser } from "@/lib/auth";
 export type UserRole = CurrentUser["role"];
 
 /** Minimum role required to see a nav link (and access the page). */
-export type NavMinRole = "SESSION" | "LEAD" | "ADMIN";
+export type NavMinRole = "SESSION" | "LEAD" | "ADMIN" | "OWNER";
 
 export type AdminNavItemDef = {
   href: string;
@@ -35,6 +35,7 @@ const MIN_ROLE_RANK: Record<NavMinRole, number> = {
   SESSION: ROLE_RANK.STAFF,
   LEAD: ROLE_RANK.LEAD,
   ADMIN: ROLE_RANK.ADMIN,
+  OWNER: ROLE_RANK.OWNER,
 };
 
 export function roleMeetsNavMin(role: UserRole, minRole: NavMinRole): boolean {
