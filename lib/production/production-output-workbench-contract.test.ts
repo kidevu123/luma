@@ -128,6 +128,14 @@ describe("Workbench query does not clamp to 7 days or to finalized-only", () => 
     expect(src).toMatch(/fl\.finished_lot_number ILIKE/);
     expect(src).toMatch(/rbs\.current_operator_code ILIKE/);
   });
+
+  it("resolves PO through small_boxes → receives, not inventory_bags.po_line_id", () => {
+    const src = read(QUERY_LIB_PATH);
+    expect(src).not.toMatch(/ib\.po_line_id/);
+    expect(src).toMatch(/LEFT JOIN small_boxes sb\s+ON sb\.id = ib\.small_box_id/);
+    expect(src).toMatch(/LEFT JOIN receives rcv\s+ON rcv\.id = sb\.receive_id/);
+    expect(src).toMatch(/LEFT JOIN purchase_orders po\s+ON po\.id = rcv\.po_id/);
+  });
 });
 
 describe("No Zoho commits initiated from workbench surfaces", () => {

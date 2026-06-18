@@ -228,8 +228,9 @@ export async function listProductionOutputRowsWithFilters(
     LEFT JOIN read_bag_state rbs ON rbs.workflow_bag_id = wb.id
     LEFT JOIN read_bag_metrics rbm ON rbm.workflow_bag_id = wb.id
     LEFT JOIN finished_lots fl   ON fl.workflow_bag_id = wb.id
-    LEFT JOIN po_lines pol       ON pol.id = ib.po_line_id
-    LEFT JOIN purchase_orders po ON po.id = pol.po_id
+    LEFT JOIN small_boxes sb     ON sb.id = ib.small_box_id
+    LEFT JOIN receives rcv       ON rcv.id = sb.receive_id
+    LEFT JOIN purchase_orders po ON po.id = rcv.po_id
     LEFT JOIN LATERAL (
       SELECT id, status, committed_at
       FROM zoho_production_output_ops
@@ -250,8 +251,9 @@ export async function listProductionOutputRowsWithFilters(
     LEFT JOIN products p         ON p.id = wb.product_id
     LEFT JOIN read_bag_state rbs ON rbs.workflow_bag_id = wb.id
     LEFT JOIN finished_lots fl   ON fl.workflow_bag_id = wb.id
-    LEFT JOIN po_lines pol       ON pol.id = ib.po_line_id
-    LEFT JOIN purchase_orders po ON po.id = pol.po_id
+    LEFT JOIN small_boxes sb     ON sb.id = ib.small_box_id
+    LEFT JOIN receives rcv       ON rcv.id = sb.receive_id
+    LEFT JOIN purchase_orders po ON po.id = rcv.po_id
     ${whereClause}
   `;
 

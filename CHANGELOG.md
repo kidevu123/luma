@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.3] — 2026-06-17
+
+### Fixed
+- **Production output search:** Receipt / product search on `/packaging-output` no longer crashes with "Page failed to render". The workbench query was joining PO data through a non-existent `inventory_bags.po_line_id` column; it now follows the real genealogy path (`inventory_bags` → `small_boxes` → `receives` → `purchase_orders`).
+
 ## [1.4.2] — 2026-06-17
 
 ### Fixed
