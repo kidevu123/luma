@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.4] — 2026-06-18
+
+### Fixed
+- **Production-output preview / commit now derives `normalizedBomQuantities` from Luma product setup data instead of per-SKU hard-coded pilot contracts.** New helper `lib/zoho/derive-normalized-bom-quantities.ts` reads `products.tablets_per_unit` + `product_allowed_tablets` + `tablet_types.zoho_item_id` and builds the map automatically. Both dispatchers — the admin preview action and the consolidated cron path — try the Luma-data derivation first and only fall back to the existing Choco Drift / Sweet Trip / FIX Relax pilot contracts as a transition mode. Existing pilots are flagged `@deprecated` and the dispatcher is no longer extensible by SKU. Unblocks BlueRaz #36 (the previous generic `BOM_QUANTITY_PENDING` gateway-level blocker is replaced with specific Luma-side blockers: `MISSING_TABLETS_PER_UNIT`, `MISSING_ALLOWED_TABLETS`, `MISSING_TABLET_ZOHO_ITEM_ID`).
+
+### Notes
+- No migration. No env changes. Live-write gates remain OFF.
+- No new per-SKU hard-coded contract added (no BlueRaz pilot).
+- No `Hyroxi Mit A - BlueRaz` / `tt-product-30` / raw item ID hard-coded anywhere except in test fixtures.
+- BlueRaz packaging spec (`product_packaging_specs`) is still empty — non-blocking for production-output preview / commit because Zoho composite-item BOMs carry packaging; flagged as an operator follow-up if Luma packaging inventory bookkeeping needs it.
+- Existing Choco Drift / Sweet Trip / FIX Relax flows unchanged by transitive fallback.
+
 ## [1.4.3] — 2026-06-17
 
 ### Fixed

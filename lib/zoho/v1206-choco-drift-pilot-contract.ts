@@ -164,6 +164,17 @@ export function buildChocoDriftOperationSnapshot(input: {
   };
 }
 
+/**
+ * @deprecated DYNAMIC-BOM-DERIVATION-v1.4.4 — pilot contracts are a
+ *   transition-only fallback for products whose tablet BOM is still
+ *   hard-coded here instead of in Luma product setup. New products
+ *   MUST configure tablets_per_unit + product_allowed_tablets +
+ *   tablet_types.zoho_item_id; the dispatcher will derive
+ *   normalizedBomQuantities from that data automatically. Do not
+ *   extend this file with new SKU constants. Eventually the existing
+ *   Choco Drift / FIX Relax / Sweet Trip data should be migrated to
+ *   real product rows and these helpers deleted.
+ */
 export function chocoDriftSourceAllocationBuildOpts(): {
   resolveBatches: false;
   batchTrackedItemIds: Set<string>;

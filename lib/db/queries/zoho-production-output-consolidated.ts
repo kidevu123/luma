@@ -26,14 +26,62 @@ import {
   isSweetTripSku,
   sweetTripSourceAllocationBuildOpts,
 } from "@/lib/zoho/v1206-sweet-trip-pilot-contract";
+import { deriveNormalizedBomQuantitiesForProduct } from "@/lib/zoho/derive-normalized-bom-quantities";
 
-function sourceAllocationBuildOptsForSku(sku: string) {
-  if (isChocoDriftSku(sku)) return chocoDriftSourceAllocationBuildOpts();
-  if (isFixRelaxSku(sku)) return fixRelaxSourceAllocationBuildOpts();
-  if (isSweetTripSku(sku)) return sweetTripSourceAllocationBuildOpts();
+/**
+ * DYNAMIC-BOM-DERIVATION-v1.4.4
+ *
+ * Build source-allocation opts for a finished lot. Tries to derive
+ * normalizedBomQuantities from Luma product data first
+ * (products.tablets_per_unit + product_allowed_tablets +
+ * tablet_types.zoho_item_id) and falls back to the per-SKU pilot
+ * contracts ONLY when the product data is incomplete AND a pilot
+ * predicate still matches the SKU (transition mode).
+ *
+ * Returns the same shape used by the v1.20.6 pilot contracts so the
+ * downstream allocation builder behaves identically. The pilot
+ * fallback path is deprecated; do not add new pilots — configure new
+ * products via product setup data instead.
+ *
+ * Returns null when neither path produced opts (caller must convert
+ * the missing-setup blockers into NEEDS_MAPPING blockers — same shape
+ * as the existing missing-PO-line / family-mismatch paths).
+ */
+async function sourceAllocationBuildOptsForProduct(
+  productId: string | null,
+  sku: string,
+): Promise<
+  | { ok: true; opts: { resolveBatches: boolean; normalizedBomQuantities?: Record<string, number>; batchTrackedItemIds?: Set<string> } }
+  | { ok: false; blockers: Array<{ code: string; field: string; message: string }> }
+> {
+  if (productId) {
+    const derived = await deriveNormalizedBomQuantitiesForProduct(productId);
+    if (derived.ok) {
+      return {
+        ok: true,
+        opts: {
+          resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true",
+          normalizedBomQuantities: derived.normalizedBomQuantities,
+          batchTrackedItemIds: derived.batchTrackedItemIds,
+        },
+      };
+    }
+    // Fall through to pilot fallback below — derivation blockers are
+    // returned only if no pilot matches either.
+    if (!isChocoDriftSku(sku) && !isFixRelaxSku(sku) && !isSweetTripSku(sku)) {
+      return { ok: false, blockers: derived.blockers };
+    }
+  }
+  // Transition fallback — existing pilot contracts only. NOT extended.
+  if (isChocoDriftSku(sku)) return { ok: true, opts: chocoDriftSourceAllocationBuildOpts() };
+  if (isFixRelaxSku(sku))   return { ok: true, opts: fixRelaxSourceAllocationBuildOpts() };
+  if (isSweetTripSku(sku))  return { ok: true, opts: sweetTripSourceAllocationBuildOpts() };
   return {
-    resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true",
-  } as const;
+    ok: true,
+    opts: {
+      resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true",
+    },
+  };
 }
 import {
   buildProductionOutputPreviewIdempotencyKey,
@@ -260,16 +308,33 @@ export async function upsertConsolidatedProductionOutputOpForLot(
     name: lotRow?.productName ?? "",
   });
 
-  const sourceBuilt = await buildSourceAllocationsForFinishedLot(
-    {
-      finishedLotId,
-      workflowBagId: lotRow?.workflowBagId ?? null,
-      outputProductFamily: outputFamily,
-      outputPoLineItemId: null,
-      unitsPerFinishedUnit: lotRow?.unitsProduced ?? 0,
-    },
-    sourceAllocationBuildOptsForSku(lotRow?.productSku ?? ""),
+  // DYNAMIC-BOM-DERIVATION-v1.4.4 — derive opts from product setup
+  // data; fall back to pilots in transition. When neither produces a
+  // value, derivedOptsResolution.ok=false carries the specific
+  // missing-setup blockers (which the caller exposes via the same
+  // mappingBlockers path the NEEDS_MAPPING branch already uses).
+  const derivedOptsResolution = await sourceAllocationBuildOptsForProduct(
+    lotRow?.productId ?? null,
+    lotRow?.productSku ?? "",
   );
+  const sourceBuilt = derivedOptsResolution.ok
+    ? await buildSourceAllocationsForFinishedLot(
+        {
+          finishedLotId,
+          workflowBagId: lotRow?.workflowBagId ?? null,
+          outputProductFamily: outputFamily,
+          outputPoLineItemId: null,
+          unitsPerFinishedUnit: lotRow?.unitsProduced ?? 0,
+        },
+        derivedOptsResolution.opts,
+      )
+    : ({
+        ok: false as const,
+        blockers: derivedOptsResolution.blockers.map((b) => ({
+          code: b.code,
+          message: b.message,
+        })),
+      } as Awaited<ReturnType<typeof buildSourceAllocationsForFinishedLot>>);
 
   const built = await loadAndBuildLumaProductionOutputPayload(finishedLotId, {
     warehouseId: opts?.warehouseId ?? null,
@@ -386,16 +451,28 @@ export async function upsertConsolidatedProductionOutputOpForLot(
     }
 
     const primaryPo = firstSourceReceiptPoLineId(built.payload);
-    const sourceWithPo = await buildSourceAllocationsForFinishedLot(
-      {
-        finishedLotId,
-        workflowBagId: lot.workflowBagId,
-        outputProductFamily: outputFamily,
-        outputPoLineItemId: primaryPo,
-        unitsPerFinishedUnit: built.payload.output.units_produced,
-      },
-      sourceAllocationBuildOptsForSku(lotRow?.productSku ?? ""),
-    );
+    // DYNAMIC-BOM-DERIVATION-v1.4.4 — same dispatcher as the
+    // upstream sourceBuilt call above. derivedOptsResolution was
+    // verified ok earlier (we only reach this branch when sourceBuilt
+    // was ok, which requires the resolution to have succeeded).
+    const sourceWithPo = derivedOptsResolution.ok
+      ? await buildSourceAllocationsForFinishedLot(
+          {
+            finishedLotId,
+            workflowBagId: lot.workflowBagId,
+            outputProductFamily: outputFamily,
+            outputPoLineItemId: primaryPo,
+            unitsPerFinishedUnit: built.payload.output.units_produced,
+          },
+          derivedOptsResolution.opts,
+        )
+      : ({
+          ok: false as const,
+          blockers: derivedOptsResolution.blockers.map((b) => ({
+            code: b.code,
+            message: b.message,
+          })),
+        } as Awaited<ReturnType<typeof buildSourceAllocationsForFinishedLot>>);
 
     if (!sourceWithPo.ok) {
       const blockers = sourceWithPo.blockers;

@@ -61,6 +61,19 @@ vi.mock("@/lib/zoho/production-output-source-allocations", async (importOriginal
   };
 });
 
+// DYNAMIC-BOM-DERIVATION-v1.4.4 — mock the deriver so tests can drive
+// product-data outcomes deterministically.
+vi.mock("@/lib/zoho/derive-normalized-bom-quantities", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/lib/zoho/derive-normalized-bom-quantities")
+    >();
+  return {
+    ...actual,
+    deriveNormalizedBomQuantitiesForProduct: vi.fn(),
+  };
+});
+
 import { requireAdmin } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { upsertZohoProductionOutputPreviewOp, getActiveZohoProductionOutputOpForLot } from "@/lib/db/queries/zoho-production-output";
@@ -70,6 +83,7 @@ import {
   buildSourceAllocationsForFinishedLot,
   persistSourceAllocationsForOp,
 } from "@/lib/zoho/production-output-source-allocations";
+import { deriveNormalizedBomQuantitiesForProduct } from "@/lib/zoho/derive-normalized-bom-quantities";
 import { previewZohoProductionOutputAction } from "./zoho-production-output-preview-actions";
 
 const LOT_ID = "11111111-1111-4111-8111-111111111111";
@@ -273,6 +287,14 @@ beforeEach(() => {
     productFamily: "HYROXI_MIT_A",
   });
   vi.mocked(persistSourceAllocationsForOp).mockResolvedValue(undefined);
+  // DYNAMIC-BOM-DERIVATION-v1.4.4 — default: derivation succeeds with
+  // a single mapped Zoho item ID. Individual tests override.
+  vi.mocked(deriveNormalizedBomQuantitiesForProduct).mockResolvedValue({
+    ok: true,
+    normalizedBomQuantities: { "tablet-component-1": 4 },
+    batchTrackedItemIds: new Set(["tablet-component-1"]),
+    warnings: [],
+  });
 });
 
 afterEach(() => {
@@ -830,6 +852,166 @@ describe("previewZohoProductionOutputAction", () => {
         expect((unitComposite as string).length).toBeGreaterThan(0);
       }
     }
+  });
+
+  // DYNAMIC-BOM-DERIVATION-v1.4.4 — new tests for the deriver-first
+  // dispatcher path.
+
+  it("BlueRaz #36 shape: BOM derivation succeeds from Luma product data, action proceeds past source allocation", async () => {
+    // BlueRaz raw item ID + tabletsPerUnit derived from product data
+    // (no hard-coded pilot contract involved).
+    vi.mocked(deriveNormalizedBomQuantitiesForProduct).mockResolvedValue({
+      ok: true,
+      normalizedBomQuantities: { "5254962000002266128": 4 },
+      batchTrackedItemIds: new Set(["5254962000002266128"]),
+      warnings: [],
+    });
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-v144-1",
+    });
+    mockLotQuery(BLUERAZ_LOT_ROW, undefined, null);
+    vi.mocked(callProductionOutputPreview).mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      body: { preview: true },
+      idempotencyReplay: false,
+    });
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "5254962000004878112",
+      purchaseorderLineItemId: "5254962000004878118",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Snapshot still attaches (v1.4.2 contract intact).
+    const payload = result.payload as Record<string, unknown>;
+    expect(Object.hasOwn(payload, "luma_operation_snapshot")).toBe(true);
+    expect(payload.verification).toEqual({ mode: "snapshot" });
+    // Warehouse still omitted under OPTIONAL (v1.4.0 contract intact).
+    expect(Object.hasOwn(payload, "warehouse_id")).toBe(false);
+    // The derived opts were used.
+    expect(buildSourceAllocationsForFinishedLot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        normalizedBomQuantities: { "5254962000002266128": 4 },
+      }),
+    );
+    // Deriver was called for this product.
+    expect(deriveNormalizedBomQuantitiesForProduct).toHaveBeenCalledWith(
+      BLUERAZ_LOT_ROW.product.id,
+    );
+  });
+
+  it("MISSING_TABLETS_PER_UNIT: action returns PAYLOAD_BLOCKED with the specific Luma-side field name", async () => {
+    vi.mocked(deriveNormalizedBomQuantitiesForProduct).mockResolvedValue({
+      ok: false,
+      blockers: [
+        {
+          code: "MISSING_TABLETS_PER_UNIT",
+          field: "products.tablets_per_unit",
+          message:
+            "Set tablets per unit on the product before running the production-output preview. Edit on /products/" +
+            BLUERAZ_LOT_ROW.product.id +
+            ".",
+        },
+      ],
+    });
+    // Capability OPTIONAL so the warehouse path passes (omit). Then
+    // the BOM-derivation blocker is the next thing to surface.
+    vi.mocked(fetchWarehouseCapability).mockResolvedValueOnce({
+      state: "OPTIONAL",
+      gatewayRequestId: "wh-cap-for-bom-test-1",
+    });
+    mockLotQuery(BLUERAZ_LOT_ROW, undefined, null);
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "5254962000004878112",
+      purchaseorderLineItemId: "5254962000004878118",
+      warehouseId: "",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("PAYLOAD_BLOCKED");
+    expect(result.blockers).toContainEqual(
+      expect.objectContaining({ field: "products.tablets_per_unit" }),
+    );
+    // Generic gateway-level BOM_QUANTITY_PENDING is NOT what we surface.
+    for (const b of result.blockers ?? []) {
+      expect(b.field).not.toBe("BOM_QUANTITY_PENDING");
+    }
+    // No gateway call, no source-allocations builder call.
+    expect(buildSourceAllocationsForFinishedLot).not.toHaveBeenCalled();
+    expect(callProductionOutputPreview).not.toHaveBeenCalled();
+  });
+
+  it("MISSING_ALLOWED_TABLETS: action returns PAYLOAD_BLOCKED with the specific Luma-side field name", async () => {
+    vi.mocked(deriveNormalizedBomQuantitiesForProduct).mockResolvedValue({
+      ok: false,
+      blockers: [
+        {
+          code: "MISSING_ALLOWED_TABLETS",
+          field: "product_allowed_tablets",
+          message:
+            "Add at least one allowed tablet type for this product before running the production-output preview.",
+        },
+      ],
+    });
+    // warehouseId="warehouse-1" satisfies REQUIRED capability → resolves
+    // to use; BOM blocker is the next thing to surface.
+    mockLotQuery(LOT_ROW);
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("PAYLOAD_BLOCKED");
+    expect(result.blockers).toContainEqual(
+      expect.objectContaining({ field: "product_allowed_tablets" }),
+    );
+  });
+
+  it("MISSING_TABLET_ZOHO_ITEM_ID: action returns PAYLOAD_BLOCKED with the specific Luma-side field name", async () => {
+    vi.mocked(deriveNormalizedBomQuantitiesForProduct).mockResolvedValue({
+      ok: false,
+      blockers: [
+        {
+          code: "MISSING_TABLET_ZOHO_ITEM_ID",
+          field: "tablet_types.zoho_item_id",
+          message:
+            "No allowed tablet type has a Zoho item ID. Set zoho_item_id on the tablet type.",
+        },
+      ],
+    });
+    mockLotQuery(LOT_ROW);
+
+    const result = await previewZohoProductionOutputAction({
+      finishedLotId: LOT_ID,
+      purchaseorderId: "po-1",
+      purchaseorderLineItemId: "line-1",
+      warehouseId: "warehouse-1",
+      notes: "",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.kind).toBe("PAYLOAD_BLOCKED");
+    expect(result.blockers).toContainEqual(
+      expect.objectContaining({ field: "tablet_types.zoho_item_id" }),
+    );
   });
 
   it("blocks preview when an approved op is still active", async () => {

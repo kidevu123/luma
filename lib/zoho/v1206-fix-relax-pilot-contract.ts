@@ -103,6 +103,12 @@ export function buildFixRelaxComponentBatches(): ComponentBatchPayloadEntry[] {
   return [];
 }
 
+/**
+ * @deprecated DYNAMIC-BOM-DERIVATION-v1.4.4 — see
+ *   lib/zoho/v1206-choco-drift-pilot-contract.ts for the deprecation
+ *   notice. Pilot contracts are a transition-only fallback; new
+ *   products should be configured via Luma product setup data.
+ */
 export function fixRelaxSourceAllocationBuildOpts(): {
   resolveBatches: false;
   batchTrackedItemIds: Set<string>;

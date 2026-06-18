@@ -119,8 +119,15 @@ describe("FIX Relax pilot receipt proof constants", () => {
 });
 
 describe("FIX Relax consolidated preview wiring", () => {
-  it("routes FIX Relax SKU through sourceAllocationBuildOptsForSku", () => {
-    expect(consolidatedSrc).toMatch(/sourceAllocationBuildOptsForSku/);
+  it("routes FIX Relax SKU through the consolidated dispatcher (sourceAllocationBuildOptsForProduct in v1.4.4+, sourceAllocationBuildOptsForSku previously)", () => {
+    // DYNAMIC-BOM-DERIVATION-v1.4.4 renamed the dispatcher from
+    // sourceAllocationBuildOptsForSku to sourceAllocationBuildOptsForProduct
+    // (the helper now takes productId in addition to sku). Pilot
+    // predicates + opt helpers are unchanged; only the dispatcher
+    // function name moved. Accept either name during the transition.
+    expect(consolidatedSrc).toMatch(
+      /sourceAllocationBuildOptsFor(?:Product|Sku)/,
+    );
     expect(consolidatedSrc).toMatch(/isFixRelaxSku/);
     expect(consolidatedSrc).toMatch(/fixRelaxSourceAllocationBuildOpts/);
     expect(consolidatedSrc).toMatch(/isChocoDriftSku/);

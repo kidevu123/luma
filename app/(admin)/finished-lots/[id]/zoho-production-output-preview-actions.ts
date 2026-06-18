@@ -49,15 +49,97 @@ import {
 import { resolveProductFamily } from "@/lib/zoho/product-family";
 import { buildLumaProductionOutputOperationId } from "@/lib/zoho/luma-production-output-payload";
 import { workflowBags } from "@/lib/db/schema";
+// DYNAMIC-BOM-DERIVATION-v1.4.4 — derive normalizedBomQuantities from
+// product setup data first; fall back to the existing pilot contracts
+// only if no Luma data is configured for the SKU yet. Replaces the
+// previous SKU-only dispatch that required a new pilot contract for
+// every new product (the v1.4.2 BlueRaz #36 blocker).
+import { deriveNormalizedBomQuantitiesForProduct } from "@/lib/zoho/derive-normalized-bom-quantities";
+import {
+  chocoDriftSourceAllocationBuildOpts,
+  isChocoDriftSku,
+} from "@/lib/zoho/v1206-choco-drift-pilot-contract";
+import {
+  fixRelaxSourceAllocationBuildOpts,
+  isFixRelaxSku,
+} from "@/lib/zoho/v1206-fix-relax-pilot-contract";
+import {
+  isSweetTripSku,
+  sweetTripSourceAllocationBuildOpts,
+} from "@/lib/zoho/v1206-sweet-trip-pilot-contract";
 
-// SNAPSHOT-ATTACH-v1.4.1 — match the consolidated path's allocation
-// build options so the preview's snapshot lines up with what a later
-// consolidated commit would produce. Mirrors the local helper in
-// lib/db/queries/zoho-production-output-consolidated.ts.
-function previewSourceAllocationBuildOpts(_sku: string) {
-  return {
-    resolveBatches: process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true",
-  } as const;
+type AllocOpts = {
+  resolveBatches: boolean;
+  normalizedBomQuantities?: Record<string, number>;
+  batchTrackedItemIds?: Set<string>;
+};
+type AllocOptsResolution =
+  | { ok: true; opts: AllocOpts; warnings: Array<{ code: string; field: string; message: string }>; source: "luma" | "pilot" | "default" }
+  | { ok: false; blockers: Array<{ code: string; field: string; message: string }> };
+
+/**
+ * DYNAMIC-BOM-DERIVATION-v1.4.4
+ *
+ * Build source-allocation opts using Luma product data first. Falls
+ * back to the existing pilot contracts only when the Luma-side data
+ * is incomplete AND the SKU still matches a pilot predicate (the
+ * transition fallback). Returns specific blockers when neither the
+ * Luma derivation succeeds nor a pilot matches.
+ *
+ * Pilot contracts are deprecated; do NOT add a new pilot to extend
+ * this dispatcher. New products should be configured via product
+ * setup data (tablets_per_unit + product_allowed_tablets +
+ * tablet_types.zoho_item_id) instead.
+ */
+async function buildAdminPreviewSourceAllocationOpts(
+  productId: string,
+  sku: string,
+): Promise<AllocOptsResolution> {
+  // 1. Primary path — derive from Luma product setup data.
+  const derived = await deriveNormalizedBomQuantitiesForProduct(productId);
+  if (derived.ok) {
+    return {
+      ok: true,
+      source: "luma",
+      warnings: derived.warnings,
+      opts: {
+        resolveBatches:
+          process.env.ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE === "true",
+        normalizedBomQuantities: derived.normalizedBomQuantities,
+        batchTrackedItemIds: derived.batchTrackedItemIds,
+      },
+    };
+  }
+
+  // 2. Transition fallback — existing pilot contracts. NOT extended.
+  if (isChocoDriftSku(sku)) {
+    return {
+      ok: true,
+      source: "pilot",
+      warnings: [],
+      opts: chocoDriftSourceAllocationBuildOpts(),
+    };
+  }
+  if (isFixRelaxSku(sku)) {
+    return {
+      ok: true,
+      source: "pilot",
+      warnings: [],
+      opts: fixRelaxSourceAllocationBuildOpts(),
+    };
+  }
+  if (isSweetTripSku(sku)) {
+    return {
+      ok: true,
+      source: "pilot",
+      warnings: [],
+      opts: sweetTripSourceAllocationBuildOpts(),
+    };
+  }
+
+  // 3. Nothing matched — return the derivation's specific blockers
+  //    so the operator sees exactly which Luma field to fix.
+  return { ok: false, blockers: derived.blockers };
 }
 
 const previewInputSchema = z.object({
@@ -263,6 +345,24 @@ export async function previewZohoProductionOutputAction(
     persistedFamily: lot.product.productFamily,
     name: lot.product.productName ?? "",
   });
+  // DYNAMIC-BOM-DERIVATION-v1.4.4 — derive BOM opts from product
+  // setup data first, then call the allocation builder.
+  const allocResolution = await buildAdminPreviewSourceAllocationOpts(
+    lot.product.id,
+    lot.product.productSku ?? "",
+  );
+  if (!allocResolution.ok) {
+    return {
+      ok: false,
+      kind: "PAYLOAD_BLOCKED",
+      message:
+        "Product setup is incomplete for production-output preview. Fix the listed fields and retry.",
+      blockers: allocResolution.blockers.map((b) => ({
+        field: b.field,
+        message: b.message,
+      })),
+    };
+  }
   const sourceBuilt = await buildSourceAllocationsForFinishedLot(
     {
       finishedLotId: lot.finishedLot.id,
@@ -271,7 +371,7 @@ export async function previewZohoProductionOutputAction(
       outputPoLineItemId: parsed.data.purchaseorderLineItemId,
       unitsPerFinishedUnit: lot.finishedLot.unitsProduced,
     },
-    previewSourceAllocationBuildOpts(lot.product.productSku ?? ""),
+    allocResolution.opts,
   );
   if (!sourceBuilt.ok) {
     return {
