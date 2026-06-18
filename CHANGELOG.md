@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.7] — 2026-06-18
+
+### Fixed
+- **Admin sidebar respects role access.** Nav links are filtered by the signed-in user's role (`STAFF`, `LEAD`, `MANAGER`, `ADMIN`, `OWNER`) using the same gates as each destination page (`requireSession`, `requireLead`, `requireAdmin`). Operators no longer see admin-only pages they cannot open.
+
 ## [1.4.6] — 2026-06-18
 
 ### Fixed

@@ -1,21 +1,6 @@
 "use client";
 
-// NAV-PHASED-1 — process-phased sidebar.
-//
-// Four sections that mirror the real Luma flow: Intake & materials →
-// Run production → Reconciliation & output → Traceability & reporting.
-// Pinned Dashboard/Live floor stay at top; Settings at bottom.
-//
-// Section membership rules:
-//   - Receiving / Materials / Input lots belong with INTAKE — they
-//     describe what enters the floor.
-//   - Workflows / Partial bags / QC / Shift review belong with RUN
-//     PRODUCTION — they describe what's happening on the floor right
-//     now.
-//   - Production output, PO reconciliation, Finished lots, Zoho
-//     output belong together — every step that closes out a run.
-//   - Traceability lookup, Metrics, Productivity, Audit log are the
-//     after-the-fact reporting surfaces.
+// NAV-PHASED-1 — process-phased sidebar, filtered by signed-in role.
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -41,52 +26,32 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  filterAdminNavForRole,
+  type AdminNavItemDef,
+  type UserRole,
+} from "@/lib/auth/admin-nav";
 
-type NavItem = { href: string; label: string; icon: LucideIcon };
-type Section = { heading: string; items: NavItem[] };
-
-const PINNED_TOP: NavItem[] = [
-  { href: "/dashboard",   label: "Dashboard",   icon: LayoutDashboard },
-  { href: "/floor-board", label: "Live floor",  icon: Activity },
-];
-
-const SECTIONS: Section[] = [
-  {
-    heading: "Intake & materials",
-    items: [
-      { href: "/inbound",             label: "Receiving",   icon: Inbox },
-      { href: "/packaging-inventory", label: "Materials",   icon: Boxes },
-      { href: "/batches",             label: "Input lots",  icon: ShieldCheck },
-    ],
-  },
-  {
-    heading: "Run production",
-    items: [
-      { href: "/workflow-submissions", label: "Workflows",             icon: ClipboardList },
-      { href: "/partial-bags",         label: "Partial Bag Workbench", icon: Archive },
-      { href: "/qc-review",            label: "QC review",             icon: ShieldAlert },
-      { href: "/shift-review",         label: "Shift review",          icon: ClipboardCheck },
-    ],
-  },
-  {
-    heading: "Reconciliation & output",
-    items: [
-      { href: "/packaging-output",            label: "Production output", icon: Package },
-      { href: "/po-reconciliation",           label: "PO reconciliation", icon: GitCompare },
-      { href: "/finished-lots",               label: "Finished lots",     icon: PackageCheck },
-      { href: "/zoho-production-operations",  label: "Zoho output",       icon: CloudUpload },
-    ],
-  },
-  {
-    heading: "Traceability & reporting",
-    items: [
-      { href: "/recall",                label: "Traceability lookup", icon: Search },
-      { href: "/metrics",               label: "Metrics",             icon: BarChart3 },
-      { href: "/operator-productivity", label: "Productivity",        icon: Users },
-      { href: "/reports/audit-log",     label: "Audit log",           icon: ScrollText },
-    ],
-  },
-];
+const ICON_BY_HREF: Record<string, LucideIcon> = {
+  "/dashboard": LayoutDashboard,
+  "/floor-board": Activity,
+  "/inbound": Inbox,
+  "/packaging-inventory": Boxes,
+  "/batches": ShieldCheck,
+  "/workflow-submissions": ClipboardList,
+  "/partial-bags": Archive,
+  "/qc-review": ShieldAlert,
+  "/shift-review": ClipboardCheck,
+  "/packaging-output": Package,
+  "/po-reconciliation": GitCompare,
+  "/finished-lots": PackageCheck,
+  "/zoho-production-operations": CloudUpload,
+  "/recall": Search,
+  "/metrics": BarChart3,
+  "/operator-productivity": Users,
+  "/reports/audit-log": ScrollText,
+  "/settings": Sliders,
+};
 
 const EXACT_MATCH_HREFS = new Set(["/settings"]);
 
@@ -100,9 +65,9 @@ function isActive(pathname: string, href: string): boolean {
 function NavLink({
   href,
   label,
-  icon: Icon,
   active,
-}: NavItem & { active: boolean }) {
+}: AdminNavItemDef & { active: boolean }) {
+  const Icon = ICON_BY_HREF[href] ?? Package;
   return (
     <Link
       href={href}
@@ -145,8 +110,10 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname() ?? "";
+  const { pinned, sections, settings } = filterAdminNavForRole(role);
+
   return (
     <aside className="hidden lg:flex w-[232px] shrink-0 flex-col bg-surface border-r border-border sticky top-0 h-dvh">
       <Link
@@ -170,20 +137,18 @@ export function Sidebar() {
       </Link>
 
       <nav className="flex-1 px-2 py-3 overflow-y-auto flex flex-col gap-0">
-        {/* Pinned — Dashboard + Live floor */}
         <ul className="space-y-px mb-2">
-          {PINNED_TOP.map((it) => (
+          {pinned.map((it) => (
             <li key={it.href}>
               <NavLink {...it} active={isActive(pathname, it.href)} />
             </li>
           ))}
         </ul>
 
-        <hr className="border-border/50 mx-1 mb-2" />
+        {sections.length > 0 ? <hr className="border-border/50 mx-1 mb-2" /> : null}
 
-        {/* Main sections */}
         <div className="space-y-3 flex-1">
-          {SECTIONS.map((sec) => (
+          {sections.map((sec) => (
             <div key={sec.heading}>
               <SectionHeading>{sec.heading}</SectionHeading>
               <ul className="space-y-px">
@@ -197,16 +162,12 @@ export function Sidebar() {
           ))}
         </div>
 
-        {/* Settings — bottom of scrollable nav */}
-        <div className="mt-3">
-          <hr className="border-border/50 mx-1 mb-2" />
-          <NavLink
-            href="/settings"
-            label="Settings"
-            icon={Sliders}
-            active={isActive(pathname, "/settings")}
-          />
-        </div>
+        {settings ? (
+          <div className="mt-3">
+            <hr className="border-border/50 mx-1 mb-2" />
+            <NavLink {...settings} active={isActive(pathname, settings.href)} />
+          </div>
+        ) : null}
       </nav>
 
       <div className="border-t border-border bg-surface-2/40 px-4 py-3">
