@@ -47,7 +47,15 @@ import {
   persistSourceAllocationsForOp,
 } from "@/lib/zoho/production-output-source-allocations";
 import { resolveProductFamily } from "@/lib/zoho/product-family";
-import { buildLumaProductionOutputOperationId } from "@/lib/zoho/luma-production-output-payload";
+// SNAPSHOT-OP-ID-MATCH-v1.4.17 — buildLumaProductionOutputOperationId
+// returns "luma-production-output:${id}" (no -preview suffix), which
+// did NOT match the envelope's luma_operation_id (built by
+// buildProductionOutputOperationId in production-output-preview.ts,
+// returning "luma-production-output-preview:${id}"). The mismatch
+// triggered the gateway's LUMA_OPERATION_NOT_PERSISTED blocker. The
+// snapshot now uses buildResult.payload.luma_operation_id directly,
+// so the envelope and snapshot can never drift. The non-preview
+// helper is retained for the future commit path that may use it.
 import { workflowBags } from "@/lib/db/schema";
 // DYNAMIC-BOM-DERIVATION-v1.4.4 — derive normalizedBomQuantities from
 // product setup data first; fall back to the existing pilot contracts
@@ -386,7 +394,7 @@ export async function previewZohoProductionOutputAction(
   }
   const snapshotBuilt = buildLumaOperationSnapshotFromOpRow(
     {
-      lumaOperationId: buildLumaProductionOutputOperationId(lot.finishedLot.id),
+      lumaOperationId: buildResult.payload.luma_operation_id,
       finalizedAt: lot.workflowFinalizedAt,
       productId: lot.product.id,
       productFamily: outputFamily,

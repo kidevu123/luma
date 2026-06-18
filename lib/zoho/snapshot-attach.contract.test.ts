@@ -98,6 +98,50 @@ describe("Upsert persists snapshot-source fields on the op row", () => {
   });
 });
 
+describe("SNAPSHOT-OP-ID-MATCH-v1.4.17 — envelope and snapshot luma_operation_id must match", () => {
+  // BlueRaz #36 deploy of v1.4.12 surfaced the gateway's
+  // LUMA_OPERATION_NOT_PERSISTED blocker: the envelope's
+  // luma_operation_id (built by buildProductionOutputOperationId,
+  // returning "luma-production-output-preview:${id}") did not match
+  // the snapshot's luma_operation_id (built by
+  // buildLumaProductionOutputOperationId, returning the non-preview
+  // variant "luma-production-output:${id}"). The fix sources the
+  // snapshot's id from buildResult.payload.luma_operation_id directly,
+  // so the two can never drift again.
+
+  const src = read(ACTION_PATH);
+
+  it("admin action does NOT use buildLumaProductionOutputOperationId for the snapshot", () => {
+    // The non-preview helper is retained in payload code for a future
+    // commit path, but the preview admin action must not call it —
+    // doing so re-introduces the prefix-mismatch bug.
+    expect(src).not.toMatch(
+      /buildLumaProductionOutputOperationId\(\s*lot\.finishedLot\.id\s*\)/,
+    );
+  });
+
+  it("admin action sources the snapshot's lumaOperationId from buildResult.payload.luma_operation_id", () => {
+    // Pin the exact wire so the snapshot can't accidentally pick up
+    // a different value (e.g., the lot id, the workflow bag id, or
+    // any non-preview-prefixed variant).
+    expect(src).toMatch(
+      /buildLumaOperationSnapshotFromOpRow\([\s\S]{0,400}lumaOperationId:\s*buildResult\.payload\.luma_operation_id/,
+    );
+  });
+
+  it("envelope id builder returns the -preview prefix (pinned at source)", () => {
+    const previewSrc = read("lib/zoho/production-output-preview.ts");
+    expect(previewSrc).toMatch(
+      /export function buildProductionOutputOperationId\([\s\S]{0,200}return\s+`luma-production-output-preview:\$\{finishedLotId\}`/,
+    );
+  });
+
+  it("non-preview helper buildLumaProductionOutputOperationId is still exported (not deleted by this patch)", () => {
+    const payloadSrc = read("lib/zoho/luma-production-output-payload.ts");
+    expect(payloadSrc).toMatch(/export function buildLumaProductionOutputOperationId/);
+  });
+});
+
 describe("No live-write gate references introduced by v1.4.1 patch", () => {
   // The consolidated.ts file legitimately *reads* gates to enforce
   // commit-blocked behavior (the v1.20.6 contract). It is allowed to

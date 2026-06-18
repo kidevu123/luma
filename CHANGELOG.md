@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.17] — 2026-06-18
+
+### Fixed
+- **`LUMA_OPERATION_NOT_PERSISTED` gateway blocker resolved.** The production-output preview admin action was building the `luma_operation_snapshot.luma_operation_id` via `buildLumaProductionOutputOperationId` (returns `luma-production-output:${id}`, no `-preview` prefix) while the envelope was built via `buildProductionOutputOperationId` (returns `luma-production-output-preview:${id}`). The Zoho gateway compared the two and emitted `LUMA_OPERATION_NOT_PERSISTED` when they didn't match. The snapshot now sources its `lumaOperationId` from `buildResult.payload.luma_operation_id`, so envelope and snapshot can never drift. The non-preview helper is retained for a future commit path. Surfaced first on the v1.4.12 BlueRaz #36 preview rerun, after the partial-unique migration unblocked the upsert collision.
+
+### Notes
+- No env changes. Live-write gates remain OFF. No warehouse changes. No payload quantity changes.
+- No deletion of `buildLumaProductionOutputOperationId`; it's now unused on the preview path but the commit path may still reference it.
+- The `SOURCE_ALLOCATION_COMPONENT_NOT_IN_BOM` blocker remains. Gateway investigation showed the Zoho gateway's `SourceAllocation` model accepts only `source_bag_id` / `item_id` / `human_lot_number` / `quantity` — no `assembly_level` — and the per-level validation broadcasts every row across every level. Resolution requires a coordinated gateway-side change to (a) accept `assembly_level` and (b) filter rows by the current level before validating against that level's BOM. Out of scope for this Luma-only patch.
+- The `SOURCE_BAG_ZOHO_RECEIPT_UNCONFIRMED` blocker remains. This is expected pre-live receive behavior and will be resolved by the live receive sequence (separate plan).
+
 ## [1.4.16] — 2026-06-18
 
 ### Fixed
