@@ -389,6 +389,9 @@ export type CloseAllocationSessionInput = {
   endingBalanceSource?: string | null;
   notes?: string | null;
   actor?: AllocationActor | null;
+  /** When true, allow consumed > starting balance and negative ending balance
+   *  (packaging output is authoritative vs vendor label intake). */
+  allowPackagingDerivedOverConsumption?: boolean;
 };
 
 export async function closeAllocationSessionInTx(
@@ -398,7 +401,10 @@ export async function closeAllocationSessionInTx(
   if (input.consumedQty <= 0) {
     return { ok: false, error: "Consumed quantity must be positive." };
   }
-  if (input.endingBalanceQty < 0) {
+  if (
+    input.endingBalanceQty < 0 &&
+    !input.allowPackagingDerivedOverConsumption
+  ) {
     return { ok: false, error: "Ending balance cannot be negative." };
   }
 
@@ -421,10 +427,9 @@ export async function closeAllocationSessionInTx(
     };
   }
 
-  const overAllocError = checkOverAllocation(
-    input.consumedQty,
-    session.startingBalanceQty,
-  );
+  const overAllocError = input.allowPackagingDerivedOverConsumption
+    ? null
+    : checkOverAllocation(input.consumedQty, session.startingBalanceQty);
   if (overAllocError) return { ok: false, error: overAllocError };
 
   const [bagRow] = await tx

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   checkOverAllocation,
   resolveReopenStartingBalance,
@@ -29,5 +31,14 @@ describe("raw-bag allocation lifecycle math", () => {
         9999,
       ),
     ).toBe(998);
+  });
+
+  it("documents packaging-derived over-consumption closeout flag on coordinated issue", () => {
+    const closeoutSrc = readFileSync(
+      resolve(__dirname, "issue-lot-with-allocation-closeout.ts"),
+      "utf8",
+    );
+    expect(closeoutSrc).toMatch(/allowPackagingDerivedOverConsumption: true/);
+    expect(closeoutSrc).not.toMatch(/NEGATIVE_ENDING_BALANCE/);
   });
 });

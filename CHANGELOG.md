@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.4.11] — 2026-06-18
+
+### Fixed
+- **Issue finished lot — over-consumption vs vendor label is a warning, not a blocker.** When packaging-derived tablet consumption exceeds the source bag's intake label count, the repair/closeout form still allows issuing the lot and closing allocation. Negative ending balance remains visible; packaging output is treated as the ledger source of truth.
+
+## [1.4.10] — 2026-06-18
+
+### Fixed
+- **`zoho_production_output_ops.luma_operation_id` uniqueness is now scoped to non-voided rows.** Migration `0067_zoho_prod_output_ops_partial_unique_luma_op` replaces the prior global `UNIQUE INDEX` on `luma_operation_id` with a partial unique index `WHERE voided_at IS NULL`. Voided ops (audit history) no longer block a fresh preview attempt against the same finished lot. The upsert continues to look up active rows only (`isNull(voidedAt)`); no app code change, no retry-suffixed operation IDs, no row deletes, no unvoiding. Unblocks BlueRaz #36 — the v1.4.6 gateway preview returned HTTP 200, then `upsertZohoProductionOutputPreviewOp` crashed on the legacy voided op `114778f7-b64e-4c50-9a57-aba5e2db7651` whose `luma_operation_id` collided with the new INSERT under the prior non-partial constraint.
+
+### Contract (locked)
+- One active (`voided_at IS NULL`) row per `luma_operation_id`.
+- Multiple voided rows for the same `luma_operation_id` are allowed (audit history).
+- The upsert keeps targeting active rows only.
+
+### Notes
+- Constraint swap is additive — preserves all existing rows. The voided op `114778f7-b64e-4c50-9a57-aba5e2db7651` is intentionally left in place as audit history.
+- No env changes. Live-write gates remain OFF. No warehouse changes. No payload quantity changes.
+- No new per-SKU hard-coded contract. No app-level operation-ID rotation. No data deletes.
+
 ## [1.4.9] — 2026-06-18
 
 ### Fixed

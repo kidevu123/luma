@@ -162,14 +162,6 @@ export async function issueFinishedLotWithAllocationCloseout(
     };
   }
 
-  if (input.endingBalanceQty < 0) {
-    return {
-      ok: false,
-      error: "Ending balance cannot be negative.",
-      code: "NEGATIVE_ENDING_BALANCE",
-    };
-  }
-
   const lotInput: CreateFinishedLotInput = {
     productId: input.productId,
     workflowBagId: input.workflowBagId,
@@ -242,6 +234,7 @@ export async function issueFinishedLotWithAllocationCloseout(
           : "FINISHED_LOT_CLOSEOUT",
         notes: [input.notes, input.repairNotes].filter(Boolean).join(" · ") || null,
         actor,
+        allowPackagingDerivedOverConsumption: true,
       });
       if (!closed.ok) throw new Error(closed.error);
     });

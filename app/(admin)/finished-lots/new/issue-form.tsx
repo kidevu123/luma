@@ -102,6 +102,12 @@ export function IssueLotForm({
     isRepairPath && effectiveStartingBalance == null;
   const negativeEndingBalance =
     endingBalanceQty != null && endingBalanceQty < 0;
+  const overConsumptionQty =
+    effectiveStartingBalance != null &&
+    consumedQty != null &&
+    consumedQty > effectiveStartingBalance
+      ? consumedQty - effectiveStartingBalance
+      : null;
 
   React.useEffect(() => {
     if (!selectedProduct || units <= 0) {
@@ -195,7 +201,6 @@ export function IssueLotForm({
       (consumedQty != null &&
         consumedQty > 0 &&
         endingBalanceQty != null &&
-        endingBalanceQty >= 0 &&
         effectiveStartingBalance != null &&
         expectedResult.ok &&
         (!isRepairPath || repairNotes.trim().length >= 8)));
@@ -445,7 +450,7 @@ export function IssueLotForm({
                         <span className="text-text-muted text-xs">Ending balance</span>
                         <span
                           className={`font-mono tabular-nums font-medium ${
-                            negativeEndingBalance ? "text-red-700" : ""
+                            negativeEndingBalance ? "text-amber-800" : ""
                           }`}
                         >
                           {endingBalanceQty != null ? endingBalanceQty.toLocaleString() : "—"}
@@ -456,9 +461,15 @@ export function IssueLotForm({
                       Derived from source bag intake minus tablets consumed. Not editable.
                     </p>
                     {negativeEndingBalance ? (
-                      <p className="text-xs text-red-800">
-                        Consumption exceeds the source bag count. Review product structure,
-                        output units, or the intake record before issuing.
+                      <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+                        Packaging used{" "}
+                        {overConsumptionQty != null
+                          ? `${overConsumptionQty.toLocaleString()} more tablets`
+                          : "more tablets"}{" "}
+                        than the vendor label count on the source bag. Intake
+                        labels are weight-derived estimates — Luma will close
+                        the ledger using packaging output as the source of
+                        truth.
                       </p>
                     ) : null}
                   </div>

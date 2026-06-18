@@ -58,4 +58,9 @@ describe("finished lot issue prefill", () => {
     expect(formSrc).not.toMatch(/id="endingBalanceQty"/);
     expect(formSrc).toMatch(/Derived from source bag intake minus tablets consumed/);
   });
+
+  it("does not block submit when ending balance is negative (packaging over vendor label)", () => {
+    expect(formSrc).not.toMatch(/endingBalanceQty >= 0/);
+    expect(formSrc).toMatch(/packaging output as the source of/);
+  });
 });
