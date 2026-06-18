@@ -44,4 +44,18 @@ describe("finished lot issue prefill", () => {
     expect(formSrc).toContain("issueFinishedLotWithAllocationAndRedirect");
     expect(formSrc).toContain("Issue lot and close allocation");
   });
+
+  it("loads repair starting balance hints for bags without open sessions", () => {
+    expect(pageSrc).toContain("loadRepairStartingBalanceHints");
+    expect(pageSrc).toContain("repairStartingHints");
+  });
+
+  it("does not ask operators to type starting or ending balance on repair path", () => {
+    expect(formSrc).toContain("repairStartingHints");
+    expect(formSrc).toContain("effectiveStartingBalance");
+    expect(formSrc).not.toMatch(/id="repairStartingBalanceQty"/);
+    expect(formSrc).not.toMatch(/Starting balance \(tablets\)/);
+    expect(formSrc).not.toMatch(/id="endingBalanceQty"/);
+    expect(formSrc).toMatch(/Derived from source bag intake minus tablets consumed/);
+  });
 });

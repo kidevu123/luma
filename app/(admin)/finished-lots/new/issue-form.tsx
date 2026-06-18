@@ -46,11 +46,14 @@ export function IssueLotForm({
   products,
   finalizedBags,
   allocationHints,
+  repairStartingHints,
   initialBagId,
 }: {
   products: Product[];
   finalizedBags: FinalizedBag[];
   allocationHints: Record<string, AllocationHint>;
+  /** Server-derived starting balance for repair-path bags (no open session). */
+  repairStartingHints: Record<string, number>;
   initialBagId?: string | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
@@ -72,9 +75,6 @@ export function IssueLotForm({
   const [consumedQty, setConsumedQty] = React.useState<number | null>(null);
   const [endingBalanceQty, setEndingBalanceQty] = React.useState<number | null>(null);
   const [repairNotes, setRepairNotes] = React.useState("");
-  const [repairStartingBalanceQty, setRepairStartingBalanceQty] = React.useState<
-    number | null
-  >(null);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [autoExpiryTouched, setAutoExpiryTouched] = React.useState(false);
@@ -83,6 +83,10 @@ export function IssueLotForm({
   );
   const selectedBag = bagId ? finalizedBags.find((x) => x.id === bagId) : null;
   const allocationHint = bagId ? allocationHints[bagId] ?? null : null;
+  const repairStartingBalance =
+    bagId && !allocationHint ? (repairStartingHints[bagId] ?? null) : null;
+  const effectiveStartingBalance =
+    allocationHint?.startingBalanceQty ?? repairStartingBalance;
   const selectedProduct = products.find((x) => x.id === productId);
   const expectedResult = computeExpectedTabletConsumptionFromProduct(
     selectedProduct?.tabletsPerUnit,
@@ -94,8 +98,10 @@ export function IssueLotForm({
       ? consumedQty - expectedTablets
       : null;
   const isRepairPath = Boolean(selectedBag && !allocationHint);
-  const needsRepairStartingBalance =
-    isRepairPath && allocationHint == null && repairStartingBalanceQty == null;
+  const missingRepairStartingBalance =
+    isRepairPath && effectiveStartingBalance == null;
+  const negativeEndingBalance =
+    endingBalanceQty != null && endingBalanceQty < 0;
 
   React.useEffect(() => {
     if (!selectedProduct || units <= 0) {
@@ -113,24 +119,23 @@ export function IssueLotForm({
       return;
     }
     setConsumedQty(expected.expectedConsumed);
-    const start = allocationHint?.startingBalanceQty ?? repairStartingBalanceQty;
     const ending = computeEndingBalanceFromConsumption(
-      start,
+      effectiveStartingBalance,
       expected.expectedConsumed,
     );
     setEndingBalanceQty(ending);
   }, [
     units,
     selectedProduct,
-    allocationHint?.startingBalanceQty,
-    repairStartingBalanceQty,
+    effectiveStartingBalance,
   ]);
 
   React.useEffect(() => {
-    const start = allocationHint?.startingBalanceQty ?? repairStartingBalanceQty;
-    if (start == null || consumedQty == null) return;
-    setEndingBalanceQty(Math.max(0, start - consumedQty));
-  }, [consumedQty, allocationHint?.startingBalanceQty, repairStartingBalanceQty]);
+    if (effectiveStartingBalance == null || consumedQty == null) return;
+    setEndingBalanceQty(
+      computeEndingBalanceFromConsumption(effectiveStartingBalance, consumedQty),
+    );
+  }, [consumedQty, effectiveStartingBalance]);
 
   React.useEffect(() => {
     if (!bagId) {
@@ -154,7 +159,6 @@ export function IssueLotForm({
     }
     setAutoExpiryTouched(false);
     setRepairNotes("");
-    setRepairStartingBalanceQty(null);
   }, [bagId, finalizedBags]);
 
   React.useEffect(() => {
@@ -192,6 +196,7 @@ export function IssueLotForm({
         consumedQty > 0 &&
         endingBalanceQty != null &&
         endingBalanceQty >= 0 &&
+        effectiveStartingBalance != null &&
         expectedResult.ok &&
         (!isRepairPath || repairNotes.trim().length >= 8)));
 
@@ -246,10 +251,18 @@ export function IssueLotForm({
                 <div className="font-semibold">Repair missing source allocation</div>
                 <p>
                   Repair required because this run predates automatic allocation sessions.
-                  Confirm the source receipt, then close the ledger using Luma&apos;s calculated
-                  tablet consumption.
+                  Luma derives the starting tablet balance from the source bag intake record
+                  and closes the ledger using calculated consumption.
                 </p>
-                <p>Receipt: {selectedBag.receiptNumber ?? "—"}</p>
+                <div className="grid gap-1 sm:grid-cols-2">
+                  <span>Receipt: {selectedBag.receiptNumber ?? "—"}</span>
+                  <span>
+                    Starting balance:{" "}
+                    {effectiveStartingBalance != null
+                      ? `${effectiveStartingBalance.toLocaleString()} tablets`
+                      : "— (intake count missing on bag)"}
+                  </span>
+                </div>
               </div>
             ) : initialBagId ? (
               <div className="rounded-lg border border-warn-300 bg-warn-50 px-3 py-2 text-xs text-warn-800">
@@ -374,25 +387,13 @@ export function IssueLotForm({
                 </div>
                 {isRepairPath ? (
                   <div className="space-y-3">
-                    {needsRepairStartingBalance ? (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="repairStartingBalanceQty">Starting balance (tablets)</Label>
-                        <Input
-                          id="repairStartingBalanceQty"
-                          type="number"
-                          min={1}
-                          value={repairStartingBalanceQty ?? ""}
-                          onChange={(e) =>
-                            setRepairStartingBalanceQty(
-                              e.target.value === "" ? null : Number(e.target.value) || null,
-                            )
-                          }
-                          required
-                        />
-                        <p className="text-[11px] text-text-subtle">
-                          Starting balance missing — enter the physical bag count so Luma can
-                          close the ledger.
-                        </p>
+                    {missingRepairStartingBalance ? (
+                      <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                        This source bag has no pill count on record. Fix the intake record on{" "}
+                        <Link href="/inbound" className="underline font-medium">
+                          Inbound
+                        </Link>{" "}
+                        before repairing allocation.
                       </div>
                     ) : null}
                     <div className="space-y-1.5">
@@ -430,19 +431,36 @@ export function IssueLotForm({
                     </p>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="endingBalanceQty">Ending balance</Label>
-                    <Input
-                      id="endingBalanceQty"
-                      type="number"
-                      min={0}
-                      value={endingBalanceQty ?? ""}
-                      onChange={(e) =>
-                        setEndingBalanceQty(
-                          e.target.value === "" ? null : Number(e.target.value) || null,
-                        )
-                      }
-                      required
-                    />
+                    <Label>Ledger closeout</Label>
+                    <div className="rounded-md border border-border/60 bg-surface px-3 py-2 text-sm space-y-1">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-text-muted text-xs">Starting balance</span>
+                        <span className="font-mono tabular-nums font-medium">
+                          {effectiveStartingBalance != null
+                            ? effectiveStartingBalance.toLocaleString()
+                            : "—"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-text-muted text-xs">Ending balance</span>
+                        <span
+                          className={`font-mono tabular-nums font-medium ${
+                            negativeEndingBalance ? "text-red-700" : ""
+                          }`}
+                        >
+                          {endingBalanceQty != null ? endingBalanceQty.toLocaleString() : "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-text-subtle">
+                      Derived from source bag intake minus tablets consumed. Not editable.
+                    </p>
+                    {negativeEndingBalance ? (
+                      <p className="text-xs text-red-800">
+                        Consumption exceeds the source bag count. Review product structure,
+                        output units, or the intake record before issuing.
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 {consumptionVariance != null && consumptionVariance !== 0 ? (
@@ -488,6 +506,11 @@ export function IssueLotForm({
             />
             {bagId && consumedQty != null ? (
               <>
+                <Row label="Starting bal." value={
+                  effectiveStartingBalance != null
+                    ? effectiveStartingBalance.toLocaleString()
+                    : "—"
+                } />
                 <Row label="Consumed" value={consumedQty.toLocaleString()} />
                 <Row
                   label="Ending bal."
@@ -541,7 +564,7 @@ export function IssueLotForm({
                   repairMissingAllocation: isRepairPath,
                   repairNotes: isRepairPath ? repairNotes : null,
                   repairStartingBalanceQty: isRepairPath
-                    ? repairStartingBalanceQty
+                    ? effectiveStartingBalance
                     : null,
                 })
               : await createFinishedLotAndRedirect(payload);

@@ -12,6 +12,7 @@ import {
   products as productsTable,
   rawBagAllocationSessions,
 } from "@/lib/db/schema";
+import { loadRepairStartingBalanceHints } from "@/lib/production/issue-lot-with-allocation-closeout";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,12 @@ export default async function NewFinishedLotPage({
     }
   }
 
+  const repairBagIds = bagIds.filter((id) => !allocationHints[id]);
+  const repairStartingHints =
+    repairBagIds.length > 0
+      ? await loadRepairStartingBalanceHints(repairBagIds)
+      : {};
+
   return (
     <div className="space-y-5">
       <div>
@@ -111,6 +118,7 @@ export default async function NewFinishedLotPage({
           unitsYielded: r.metrics?.unitsYielded ?? null,
         }))}
         allocationHints={allocationHints}
+        repairStartingHints={repairStartingHints}
         initialBagId={requestedBagId ?? null}
       />
     </div>

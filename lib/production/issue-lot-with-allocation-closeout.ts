@@ -1,6 +1,6 @@
 // LEAD coordinated issue: finished lot + allocation closeout in one transaction.
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import type { CurrentUser } from "@/lib/auth";
 import {
@@ -19,6 +19,7 @@ import {
   closeAllocationSessionInTx,
   openAllocationSessionInTx,
 } from "@/lib/production/raw-bag-allocation-lifecycle";
+import { resolveReopenStartingBalance } from "@/lib/production/bag-allocation";
 import {
   computeEndingBalanceFromConsumption,
   computeExpectedTabletConsumptionFromProduct,
@@ -295,6 +296,108 @@ export async function loadOpenAllocationForWorkflowBag(workflowBagId: string) {
     )
     .limit(1);
   return row ?? null;
+}
+
+/** Pure: derive repair-path starting balance from bag intake + ledger. */
+export function resolveRepairStartingBalanceQty(args: {
+  pillCount: number | null | undefined;
+  declaredPillCount: number | null | undefined;
+  lastClosedSession:
+    | {
+        endingBalanceQty: number | null;
+        startingBalanceQty: number | null;
+        consumedQty: number | null;
+      }
+    | null
+    | undefined;
+}): number | null {
+  const ledger = resolveReopenStartingBalance(
+    args.lastClosedSession ?? null,
+    args.pillCount,
+  );
+  if (ledger != null) return ledger;
+  if (args.declaredPillCount != null && args.declaredPillCount >= 0) {
+    return args.declaredPillCount;
+  }
+  return null;
+}
+
+/** Starting balance hints for workflow bags on the repair (missing session) path. */
+export async function loadRepairStartingBalanceHints(
+  workflowBagIds: readonly string[],
+): Promise<Record<string, number>> {
+  if (workflowBagIds.length === 0) return {};
+
+  const bagRows = await db
+    .select({
+      workflowBagId: workflowBags.id,
+      inventoryBagId: workflowBags.inventoryBagId,
+      pillCount: inventoryBags.pillCount,
+      declaredPillCount: inventoryBags.declaredPillCount,
+    })
+    .from(workflowBags)
+    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+    .where(inArray(workflowBags.id, [...workflowBagIds]));
+
+  const inventoryBagIds = [
+    ...new Set(
+      bagRows
+        .map((r) => r.inventoryBagId)
+        .filter((id): id is string => id != null),
+    ),
+  ];
+
+  const lastClosedByBag = new Map<
+    string,
+    {
+      endingBalanceQty: number | null;
+      startingBalanceQty: number | null;
+      consumedQty: number | null;
+    }
+  >();
+
+  if (inventoryBagIds.length > 0) {
+    const closedRows = await db
+      .select({
+        inventoryBagId: rawBagAllocationSessions.inventoryBagId,
+        endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+        startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
+        consumedQty: rawBagAllocationSessions.consumedQty,
+        closedAt: rawBagAllocationSessions.closedAt,
+      })
+      .from(rawBagAllocationSessions)
+      .where(
+        and(
+          inArray(rawBagAllocationSessions.inventoryBagId, inventoryBagIds),
+          eq(rawBagAllocationSessions.allocationStatus, "CLOSED"),
+        ),
+      )
+      .orderBy(desc(rawBagAllocationSessions.closedAt));
+
+    for (const row of closedRows) {
+      if (!lastClosedByBag.has(row.inventoryBagId)) {
+        lastClosedByBag.set(row.inventoryBagId, {
+          endingBalanceQty: row.endingBalanceQty,
+          startingBalanceQty: row.startingBalanceQty,
+          consumedQty: row.consumedQty,
+        });
+      }
+    }
+  }
+
+  const hints: Record<string, number> = {};
+  for (const row of bagRows) {
+    if (!row.inventoryBagId) continue;
+    const starting = resolveRepairStartingBalanceQty({
+      pillCount: row.pillCount,
+      declaredPillCount: row.declaredPillCount,
+      lastClosedSession: lastClosedByBag.get(row.inventoryBagId) ?? null,
+    });
+    if (starting != null) {
+      hints[row.workflowBagId] = starting;
+    }
+  }
+  return hints;
 }
 
 export function deriveIssueLotPrefill(args: {

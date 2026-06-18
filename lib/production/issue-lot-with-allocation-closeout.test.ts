@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { deriveIssueLotPrefill } from "@/lib/production/issue-lot-with-allocation-closeout";
+import {
+  deriveIssueLotPrefill,
+  resolveRepairStartingBalanceQty,
+} from "@/lib/production/issue-lot-with-allocation-closeout";
 import {
   computeExpectedTabletConsumptionFromProduct,
 } from "@/lib/production/expected-tablet-consumption";
@@ -49,6 +52,42 @@ describe("deriveIssueLotPrefill", () => {
       consumedQty: null,
       endingBalanceQty: null,
     });
+  });
+});
+
+describe("resolveRepairStartingBalanceQty", () => {
+  it("prefers pill_count on a fresh bag", () => {
+    expect(
+      resolveRepairStartingBalanceQty({
+        pillCount: 6693,
+        declaredPillCount: 6693,
+        lastClosedSession: null,
+      }),
+    ).toBe(6693);
+  });
+
+  it("falls back to declared count when pill_count is missing", () => {
+    expect(
+      resolveRepairStartingBalanceQty({
+        pillCount: null,
+        declaredPillCount: 8000,
+        lastClosedSession: null,
+      }),
+    ).toBe(8000);
+  });
+
+  it("uses last closed ending balance for partial reuse", () => {
+    expect(
+      resolveRepairStartingBalanceQty({
+        pillCount: 20000,
+        declaredPillCount: 20000,
+        lastClosedSession: {
+          endingBalanceQty: 4200,
+          startingBalanceQty: 20000,
+          consumedQty: 15800,
+        },
+      }),
+    ).toBe(4200);
   });
 });
 

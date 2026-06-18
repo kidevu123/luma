@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.5] — 2026-06-18
+
+### Fixed
+- **Issue finished lot — repair allocation closeout:** Starting and ending tablet balances are now derived automatically from the linked source bag intake record and calculated consumption. Operators no longer type starting/ending balances on the repair path; Luma loads `pill_count` / declared intake and computes ending balance. Submit is blocked with a clear message when consumption exceeds the bag count (negative ending balance).
+
 ## [1.4.4] — 2026-06-18
 
 ### Fixed

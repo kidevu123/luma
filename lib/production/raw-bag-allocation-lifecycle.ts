@@ -92,6 +92,7 @@ export async function openAllocationSessionInTx(
   const [bag] = await tx
     .select({
       pillCount: inventoryBags.pillCount,
+      declaredPillCount: inventoryBags.declaredPillCount,
     })
     .from(inventoryBags)
     .where(eq(inventoryBags.id, input.inventoryBagId))
@@ -116,14 +117,21 @@ export async function openAllocationSessionInTx(
 
   const startingBalance =
     input.startingBalanceQty ??
-    resolveReopenStartingBalance(lastClosed ?? null, bag.pillCount);
+    resolveReopenStartingBalance(lastClosed ?? null, bag.pillCount) ??
+    (bag.declaredPillCount != null && bag.declaredPillCount >= 0
+      ? bag.declaredPillCount
+      : null);
   const startingSource =
     input.startingBalanceSource ??
     (input.startingBalanceQty != null
       ? "MANUAL_ENTRY"
       : lastClosed != null
         ? "LEDGER_DERIVED"
-        : "VENDOR_DECLARED");
+        : bag.pillCount != null
+          ? "VENDOR_DECLARED"
+          : bag.declaredPillCount != null
+            ? "VENDOR_DECLARED"
+            : "MANUAL_ENTRY");
 
   const inserted = await tx
     .insert(rawBagAllocationSessions)
