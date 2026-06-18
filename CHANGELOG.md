@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.15] — 2026-06-18
+
+### Fixed
+- **Issue finished lot redirect no longer surfaces `NEXT_REDIRECT` as an error.** `redirect()` is called outside the try/catch in the coordinated lot action so successful issue + closeout navigates to the new lot page instead of showing a false failure.
+
 ## [1.4.14] — 2026-06-18
 
 ### Fixed

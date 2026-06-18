@@ -72,6 +72,7 @@ export async function issueFinishedLotWithAllocationAndRedirect(payload: unknown
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+  let finishedLotId: string;
   try {
     const result = await issueFinishedLotWithAllocationCloseout(
       {
@@ -93,14 +94,15 @@ export async function issueFinishedLotWithAllocationAndRedirect(payload: unknown
       actor,
     );
     if (!result.ok) return { error: result.error };
-    revalidatePath("/finished-lots");
-    revalidatePath("/floor-board");
-    revalidatePath("/packaging-output");
-    revalidatePath("/zoho-production-operations");
-    redirect(`/finished-lots/${result.finishedLotId}`);
+    finishedLotId = result.finishedLotId;
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Issue lot failed." };
   }
+  revalidatePath("/finished-lots");
+  revalidatePath("/floor-board");
+  revalidatePath("/packaging-output");
+  revalidatePath("/zoho-production-operations");
+  redirect(`/finished-lots/${finishedLotId}`);
 }
 
 const statusSchema = z.object({

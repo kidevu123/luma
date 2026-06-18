@@ -74,4 +74,19 @@ describe("coordinated lot action schema", () => {
       /endingBalanceQty: z\.coerce\.number\(\)\.int\(\)\.min\(0\)/,
     );
   });
+
+  it("calls redirect outside try/catch so NEXT_REDIRECT is not swallowed", () => {
+    const fnStart = actionsSrc.indexOf(
+      "export async function issueFinishedLotWithAllocationAndRedirect",
+    );
+    const fnEnd = actionsSrc.indexOf(
+      "export async function repairAutoIssueFinishedLotAction",
+    );
+    const fnBody = actionsSrc.slice(fnStart, fnEnd);
+    const redirectIdx = fnBody.indexOf("redirect(`/finished-lots/");
+    const catchIdx = fnBody.lastIndexOf("} catch (err)");
+    expect(redirectIdx).toBeGreaterThan(-1);
+    expect(catchIdx).toBeGreaterThan(-1);
+    expect(redirectIdx).toBeGreaterThan(catchIdx);
+  });
 });
