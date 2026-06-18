@@ -29,6 +29,15 @@ type Props = {
   canMutate: boolean;
 };
 
+/** Production-output ops are reviewed on the finished-lot Zoho card. */
+function zohoOpReviewHref(
+  finishedLotId: string | null,
+  _zohoOpId: string | null,
+): string | null {
+  if (finishedLotId) return `/finished-lots/${finishedLotId}#zoho-push`;
+  return null;
+}
+
 export function WorkbenchRowActions({
   workflowBagId,
   finishedLotId,
@@ -64,15 +73,18 @@ export function WorkbenchRowActions({
     );
   }
   if (zohoOpId) {
-    drilldowns.push(
-      <Link
-        key="zoho"
-        href={`/zoho-production-operations/${zohoOpId}`}
-        className="text-[10.5px] underline-offset-2 hover:underline text-text-muted"
-      >
-        Zoho op
-      </Link>,
-    );
+    const zohoHref = zohoOpReviewHref(finishedLotId, zohoOpId);
+    if (zohoHref) {
+      drilldowns.push(
+        <Link
+          key="zoho"
+          href={zohoHref}
+          className="text-[10.5px] underline-offset-2 hover:underline text-text-muted"
+        >
+          Zoho op
+        </Link>,
+      );
+    }
   }
   if (poId) {
     drilldowns.push(
@@ -220,10 +232,11 @@ function renderPrimary({
           Push to Zoho · blocked
         </button>
       );
-    case "VIEW_ZOHO_OP":
-      return zohoOpId ? (
+    case "VIEW_ZOHO_OP": {
+      const zohoHref = zohoOpReviewHref(finishedLotId, zohoOpId);
+      return zohoHref ? (
         <Link
-          href={`/zoho-production-operations/${zohoOpId}`}
+          href={zohoHref}
           className="inline-flex items-center rounded-md border border-border bg-surface-2 px-2.5 py-1 text-[11.5px] font-medium text-text-strong hover:bg-surface"
         >
           View Zoho op
@@ -231,6 +244,7 @@ function renderPrimary({
       ) : (
         <span className="text-[11px] text-text-subtle">—</span>
       );
+    }
     case "AWAIT_FINALIZATION":
       return (
         <span className="text-[11px] text-text-subtle">

@@ -154,11 +154,13 @@ export default async function FinishedLotDetailPage({
           />
 
           {(user.role === "OWNER" || user.role === "ADMIN") && (
-            <ZohoProductionOutputPreviewCard
-              finishedLotId={id}
-              defaultWarehouseId={process.env.ZOHO_WAREHOUSE_ID?.trim() ?? ""}
-              persistedPreview={existingProductionOutputPreview}
-            />
+            <div id="zoho-push">
+              <ZohoProductionOutputPreviewCard
+                finishedLotId={id}
+                defaultWarehouseId={process.env.ZOHO_WAREHOUSE_ID?.trim() ?? ""}
+                persistedPreview={existingProductionOutputPreview}
+              />
+            </div>
           )}
 
           {lot.lot.notes && (

@@ -170,6 +170,13 @@ describe("No Zoho commits initiated from workbench surfaces", () => {
     );
   });
 
+  it("View Zoho op uses the same finished-lot Zoho preview destination", () => {
+    const src = read(ROW_ACTIONS_PATH);
+    expect(src).toMatch(/function zohoOpReviewHref/);
+    expect(src).toMatch(/case "VIEW_ZOHO_OP"/);
+    expect(src).not.toMatch(/\/zoho-production-operations\/\$\{zohoOpId\}/);
+  });
+
   it("blocked Push to Zoho renders a disabled button (no onClick)", () => {
     const src = read(ROW_ACTIONS_PATH);
     expect(src).toMatch(/data-testid="push-to-zoho-blocked"/);
@@ -228,7 +235,8 @@ describe("Drilldowns are present on every workbench row", () => {
     const src = read(ROW_ACTIONS_PATH);
     expect(src).toMatch(/\/workflow-submissions\?bag=/);
     expect(src).toMatch(/\/finished-lots\/\$\{finishedLotId\}/);
-    expect(src).toMatch(/\/zoho-production-operations\/\$\{zohoOpId\}/);
+    expect(src).toMatch(/#zoho-push/);
+    expect(src).not.toMatch(/\/zoho-production-operations\/\$\{zohoOpId\}/);
     expect(src).toMatch(/\/po-reconciliation\/\$\{poId\}/);
   });
 });

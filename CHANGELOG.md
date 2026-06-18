@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.16] — 2026-06-18
+
+### Fixed
+- **Production output "View Zoho op" no longer 404s.** The action links to the finished lot's Zoho production-output preview card (`/finished-lots/<id>#zoho-push`) instead of a non-existent `/zoho-production-operations/<opId>` detail route.
+
 ## [1.4.15] — 2026-06-18
 
 ### Fixed
