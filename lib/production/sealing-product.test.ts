@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   filterSealingProductsByTabletType,
   getUnmappedProductBanner,
+  resolveSealingProductSelection,
   validateSealingProductPick,
 } from "./sealing-product";
 
@@ -48,6 +49,45 @@ describe("validateSealingProductPick", () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/tablet type/);
+  });
+});
+
+describe("resolveSealingProductSelection", () => {
+  const cardA = {
+    id: "card-a",
+    sku: "CARD-A",
+    name: "Spearmint Card",
+    kind: "CARD",
+    allowedTabletTypeIds: ["tt-1"],
+  };
+  const varietyPack = {
+    id: "var-a",
+    sku: "VAR-A",
+    name: "Variety Pack",
+    kind: "VARIETY",
+    allowedTabletTypeIds: ["tt-1"],
+  };
+
+  it("auto-selects sole CARD when variety pack shares the tablet type", () => {
+    const r = resolveSealingProductSelection({
+      stationKind: "SEALING",
+      candidates: [cardA, varietyPack],
+      tabletTypeId: "tt-1",
+    });
+    expect(r.autoProductId).toBe("card-a");
+    expect(r.options).toHaveLength(1);
+    expect(r.configError).toBeNull();
+  });
+
+  it("returns choose when multiple CARD products match", () => {
+    const cardB = { ...cardA, id: "card-b", sku: "CARD-B", name: "Mint Card" };
+    const r = resolveSealingProductSelection({
+      stationKind: "SEALING",
+      candidates: [cardA, cardB],
+      tabletTypeId: "tt-1",
+    });
+    expect(r.autoProductId).toBeNull();
+    expect(r.options).toHaveLength(2);
   });
 });
 

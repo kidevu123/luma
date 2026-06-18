@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.8] — 2026-06-18
+
+### Fixed
+- **Floor sealing product picker excludes wrong-route SKUs and auto-assigns when unambiguous.** Card-route stations (blister, sealing, packaging) now only offer `CARD` finished goods — variety packs and bottle SKUs are excluded. When a bag's tablet type matches exactly one compatible card product, sealing auto-saves that product instead of showing a dropdown.
+
 ## [1.4.7] — 2026-06-18
 
 ### Fixed

@@ -1,16 +1,4 @@
-// Station kinds that produce CARD (blister) finished goods.
-const CARD_STATION_KINDS: ReadonlySet<string> = new Set([
-  "BLISTER",
-  "SEALING",
-  "PACKAGING",
-]);
-
-// Station kinds that produce BOTTLE finished goods.
-const BOTTLE_STATION_KINDS: ReadonlySet<string> = new Set([
-  "BOTTLE_HANDPACK",
-  "BOTTLE_CAP_SEAL",
-  "BOTTLE_STICKER",
-]);
+import { STATION_KIND_TO_PRODUCT_KINDS } from "@/lib/production/first-op-product";
 
 export interface CandidateProduct {
   id: string;
@@ -24,15 +12,31 @@ export type ProductResolution =
   | { kind: "choose"; candidates: CandidateProduct[] }
   | { kind: "config_error"; message: string; fallback: CandidateProduct[] };
 
+function filterCandidatesByStationKind(
+  stationKind: string | null | undefined,
+  candidateProducts: CandidateProduct[],
+): CandidateProduct[] {
+  if (!stationKind) return candidateProducts;
+  const allowedKinds = STATION_KIND_TO_PRODUCT_KINDS[stationKind];
+  if (!allowedKinds || allowedKinds.length === 0) return candidateProducts;
+  const kindSet = new Set(allowedKinds);
+  return candidateProducts.filter((p) => kindSet.has(p.kind));
+}
+
+function expectedKindsLabel(stationKind: string | null | undefined): string {
+  const allowed = stationKind ? STATION_KIND_TO_PRODUCT_KINDS[stationKind] : undefined;
+  if (allowed?.length === 1) return allowed[0]!;
+  if (allowed && allowed.length > 1) return allowed.join(" or ");
+  return "compatible";
+}
+
 /**
  * Decides which product(s) to present given a station type and allowed product
  * list for a scanned bag's tablet type.
  *
- * - Single candidate → auto-select regardless of station.
- * - Card station (BLISTER/SEALING/PACKAGING) → keep only CARD products.
- * - Bottle station (BOTTLE_HANDPACK/BOTTLE_CAP_SEAL/BOTTLE_STICKER) → keep only BOTTLE products.
- * - COMBINED / unknown station → no filtering; all candidates remain.
- * - After filtering: 1 left → auto; 0 left → config_error with fallback; >1 → choose.
+ * - Filters by STATION_KIND_TO_PRODUCT_KINDS when the station has a mapping.
+ * - After filtering: 1 left → auto; 0 left → config_error; >1 → choose.
+ * - Stations without a mapping (unknown future kinds) show all candidates.
  */
 export function resolveStartProductionProduct({
   stationKind,
@@ -49,29 +53,14 @@ export function resolveStartProductionProduct({
     };
   }
 
-  if (candidateProducts.length === 1) {
-    return { kind: "auto", product: candidateProducts[0]! };
-  }
-
-  // Multiple candidates — try to narrow by station type.
-  let filtered: CandidateProduct[];
-  if (stationKind && CARD_STATION_KINDS.has(stationKind)) {
-    filtered = candidateProducts.filter((p) => p.kind === "CARD");
-  } else if (stationKind && BOTTLE_STATION_KINDS.has(stationKind)) {
-    filtered = candidateProducts.filter((p) => p.kind === "BOTTLE");
-  } else {
-    // COMBINED or unknown — cannot narrow.
-    filtered = candidateProducts;
-  }
+  const filtered = filterCandidatesByStationKind(stationKind, candidateProducts);
 
   if (filtered.length === 1) {
     return { kind: "auto", product: filtered[0]! };
   }
 
   if (filtered.length === 0) {
-    const expected = stationKind && CARD_STATION_KINDS.has(stationKind)
-      ? "CARD"
-      : "BOTTLE";
+    const expected = expectedKindsLabel(stationKind);
     return {
       kind: "config_error",
       message: `No ${expected} products are configured for this tablet type. This station expects ${expected} products. Contact an admin to fix the product mapping.`,

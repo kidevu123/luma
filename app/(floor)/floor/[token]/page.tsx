@@ -42,8 +42,8 @@ import {
   STATION_KIND_TO_PRODUCT_KINDS,
 } from "@/lib/production/first-op-product";
 import {
-  filterSealingProductsByTabletType,
   getUnmappedProductBanner,
+  resolveSealingProductSelection,
   SEALING_STATION_KINDS,
 } from "@/lib/production/sealing-product";
 import {
@@ -622,6 +622,8 @@ export default async function FloorStationPage({
     sku: string;
     name: string;
   }[] = [];
+  let sealingAutoProductId: string | null = null;
+  let sealingProductConfigError: string | null = null;
   let sealingProductFilterHint: string | null = null;
   if (
     currentAtStation &&
@@ -634,6 +636,9 @@ export default async function FloorStationPage({
     );
     sealingProductFilterHint = getSealingProductFilterHint(sealingTabletTypeId);
 
+    const sealingProductKinds =
+      STATION_KIND_TO_PRODUCT_KINDS[station.station.kind] ?? ["CARD"];
+
     const sealingProductsRaw = await db
       .select({
         id: products.id,
@@ -645,7 +650,10 @@ export default async function FloorStationPage({
       .where(
         and(
           eq(products.isActive, true),
-          inArray(products.kind, ["CARD", "VARIETY"]),
+          inArray(
+            products.kind,
+            sealingProductKinds as ("CARD" | "BOTTLE" | "VARIETY")[],
+          ),
         ),
       );
 
@@ -668,16 +676,21 @@ export default async function FloorStationPage({
       sealingTabletsByProduct.set(r.productId, list);
     }
 
-    sealingProductOptionsForForm = filterSealingProductsByTabletType(
-      sealingProductsRaw.map((p) => ({
+    const sealingSelection = resolveSealingProductSelection({
+      stationKind: station.station.kind,
+      candidates: sealingProductsRaw.map((p) => ({
         id: p.id,
         sku: p.sku,
         name: p.name,
+        kind: p.kind,
         allowedTabletTypeIds:
           sealingTabletsByProduct.get(p.id) ?? [],
       })),
-      sealingTabletTypeId,
-    ).map((p) => ({ id: p.id, sku: p.sku, name: p.name }));
+      tabletTypeId: sealingTabletTypeId,
+    });
+    sealingProductOptionsForForm = sealingSelection.options;
+    sealingAutoProductId = sealingSelection.autoProductId;
+    sealingProductConfigError = sealingSelection.configError;
   }
 
   const sealingCardsPerPress = stationUsesSealingCounter(station.station.kind)
@@ -1069,6 +1082,8 @@ export default async function FloorStationPage({
               sealingCardsPerPress={sealingCardsPerPress}
               hasProductMapped={hasProductMapped}
               sealingProductOptions={sealingProductOptionsForForm}
+              sealingAutoProductId={sealingAutoProductId}
+              sealingProductConfigError={sealingProductConfigError}
               sealingProductFilterHint={sealingProductFilterHint}
               rollChangeRole={requiredRollChangeRole}
               handpackTabletContext={handpackTabletContextForForm}

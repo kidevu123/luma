@@ -155,13 +155,21 @@ describe("resolveStartProductionProduct", () => {
     }
   });
 
-  it("auto-selects sole VARIETY product even at BLISTER station (single candidate always wins)", () => {
-    // Single candidate → auto regardless of station; config_error only applies when multiple candidates all mismatch.
+  it("config_error when sole candidate is VARIETY at BLISTER station", () => {
     const r = resolveStartProductionProduct({
       stationKind: "BLISTER",
       candidateProducts: [variety1],
     });
-    expect(r).toEqual({ kind: "auto", product: variety1 });
+    expect(r.kind).toBe("config_error");
+    if (r.kind === "config_error") expect(r.message).toContain("CARD");
+  });
+
+  it("auto-selects sole CARD when CARD and VARIETY share tablet type at SEALING", () => {
+    const r = resolveStartProductionProduct({
+      stationKind: "SEALING",
+      candidateProducts: [card1, variety1],
+    });
+    expect(r).toEqual({ kind: "auto", product: card1 });
   });
 
   it("config_error when BLISTER station has multiple VARIETY products (no CARD)", () => {
@@ -176,12 +184,12 @@ describe("resolveStartProductionProduct", () => {
 
   // --- COMBINED / unknown station ---
 
-  it("choose among all candidates at COMBINED station", () => {
+  it("auto-selects sole CARD product at COMBINED station (bottle filtered out)", () => {
     const r = resolveStartProductionProduct({
       stationKind: "COMBINED",
       candidateProducts: [card1, bottle1],
     });
-    expect(r).toEqual({ kind: "choose", candidates: [card1, bottle1] });
+    expect(r).toEqual({ kind: "auto", product: card1 });
   });
 
   it("choose among all candidates when stationKind is null", () => {
@@ -200,12 +208,12 @@ describe("resolveStartProductionProduct", () => {
     expect(r).toEqual({ kind: "choose", candidates: [card1, bottle1] });
   });
 
-  it("VARIETY product included in choose at COMBINED station", () => {
+  it("auto-selects sole CARD product at COMBINED station when variety also matches", () => {
     const r = resolveStartProductionProduct({
       stationKind: "COMBINED",
       candidateProducts: [card1, variety1],
     });
-    expect(r).toEqual({ kind: "choose", candidates: [card1, variety1] });
+    expect(r).toEqual({ kind: "auto", product: card1 });
   });
 });
 

@@ -140,6 +140,8 @@ export function StageActionButtons({
   sealingCardsPerPress = null,
   hasProductMapped = true,
   sealingProductOptions = [],
+  sealingAutoProductId = null,
+  sealingProductConfigError = null,
   sealingProductFilterHint = null,
   rollChangeRole = null,
   handpackTabletContext = null,
@@ -164,6 +166,10 @@ export function StageActionButtons({
   hasProductMapped?: boolean;
   /** Finished SKU options for sealing close-out when product is missing. */
   sealingProductOptions?: SealingProductOption[];
+  /** When exactly one compatible product remains, auto-save without picker. */
+  sealingAutoProductId?: string | null;
+  /** Shown when station/tablet filtering leaves no valid product. */
+  sealingProductConfigError?: string | null;
   /** Shown when tablet type is unknown and the product list is unfiltered. */
   sealingProductFilterHint?: string | null;
   /** When the bag was paused for a roll swap, drives the inline RollChangeCard. */
@@ -283,6 +289,59 @@ export function StageActionButtons({
     !isHandpackBlister || handpackTabletContext?.status === "resolved";
   const packagingBlockedNoProduct =
     isPackaging && packagingReady && !hasProductMapped;
+
+  const sealingAutoAssigning =
+    showSealingProductPicker && !!sealingAutoProductId && !hasProductMapped;
+
+  const sealingAutoSaveStarted = React.useRef(false);
+  React.useEffect(() => {
+    if (
+      !showSealingProductPicker ||
+      !sealingAutoProductId ||
+      hasProductMapped ||
+      sealingAutoSaveStarted.current
+    ) {
+      return;
+    }
+    sealingAutoSaveStarted.current = true;
+    let cancelled = false;
+    void (async () => {
+      setPending("save-product");
+      setError(null);
+      try {
+        const fd = new FormData();
+        fd.set("token", token);
+        fd.set("workflowBagId", workflowBagId);
+        fd.set("stationId", stationId);
+        fd.set("productId", sealingAutoProductId);
+        const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
+        if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
+        fd.set("clientEventId", newClientEventId());
+        const r = await saveSealingProductAction(fd);
+        if (cancelled) return;
+        if (r?.error) {
+          setError(r.error);
+          sealingAutoSaveStarted.current = false;
+        } else {
+          router.refresh();
+        }
+      } finally {
+        if (!cancelled) setPending(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showSealingProductPicker,
+    sealingAutoProductId,
+    hasProductMapped,
+    workflowBagId,
+    token,
+    stationId,
+    operatorCode,
+    router,
+  ]);
 
   // Release button shows after this station's stage event has fired
   // and the bag is at the station's "ready to release" stage.
@@ -497,7 +556,15 @@ export function StageActionButtons({
           {sealingProductFilterHint ? (
             <p className="text-sm text-amber-800">{sealingProductFilterHint}</p>
           ) : null}
-          {sealingProductOptions.length === 0 ? (
+          {sealingProductConfigError ? (
+            <p className="text-sm text-red-800">{sealingProductConfigError}</p>
+          ) : sealingAutoAssigning ? (
+            <p className="text-sm text-amber-900/90">
+              {pending === "save-product"
+                ? "Assigning product automatically…"
+                : "One compatible product found — assigning automatically…"}
+            </p>
+          ) : sealingProductOptions.length === 0 ? (
             <p className="text-sm text-red-800">
               No active products are configured for this bag&apos;s tablet type.
               Ask a supervisor to set up the product mapping.

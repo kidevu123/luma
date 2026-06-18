@@ -37,15 +37,19 @@ export const PRODUCT_AT_START_STATION_KINDS: ReadonlySet<string> = new Set([
   "BOTTLE_HANDPACK",
 ]);
 
-/** Map station kind -> product kinds eligible to start there. CARD
- *  products and VARIETY products both feed the card/blister route.
- *  COMBINED accepts the same. Bottle stations come later. */
+/** Map station kind -> product kinds eligible at that station.
+ *  Card/blister route stations accept CARD finished goods only.
+ *  Variety packs use the dedicated variety-run workflow, not raw-bag
+ *  sealing. Bottle handpack may still start BOTTLE or VARIETY runs. */
 export const STATION_KIND_TO_PRODUCT_KINDS: Readonly<Record<string, ReadonlyArray<string>>> = {
-  BLISTER: ["CARD", "VARIETY"],
-  HANDPACK_BLISTER: ["CARD", "VARIETY"],
-  COMBINED: ["CARD", "VARIETY"],
-  SEALING: ["CARD", "VARIETY"],
+  BLISTER: ["CARD"],
+  HANDPACK_BLISTER: ["CARD"],
+  COMBINED: ["CARD"],
+  SEALING: ["CARD"],
+  PACKAGING: ["CARD"],
   BOTTLE_HANDPACK: ["BOTTLE", "VARIETY"],
+  BOTTLE_CAP_SEAL: ["BOTTLE"],
+  BOTTLE_STICKER: ["BOTTLE"],
 };
 
 export type FirstOpInput = {

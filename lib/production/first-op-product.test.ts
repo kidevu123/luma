@@ -112,8 +112,9 @@ describe("first-op product selection — registry sanity", () => {
     expect(FIRST_OP_STATION_KINDS.has("PACKAGING")).toBe(false);
   });
 
-  it("STATION_KIND_TO_PRODUCT_KINDS allows VARIETY at both BLISTER and BOTTLE_HANDPACK", () => {
-    expect(STATION_KIND_TO_PRODUCT_KINDS.BLISTER).toContain("VARIETY");
+  it("STATION_KIND_TO_PRODUCT_KINDS allows VARIETY only at BOTTLE_HANDPACK", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS.BLISTER).not.toContain("VARIETY");
+    expect(STATION_KIND_TO_PRODUCT_KINDS.SEALING).not.toContain("VARIETY");
     expect(STATION_KIND_TO_PRODUCT_KINDS.BOTTLE_HANDPACK).toContain("VARIETY");
   });
 
@@ -197,25 +198,16 @@ describe("first-op product selection — BOTTLE_HANDPACK station", () => {
 });
 
 describe("STATION_KIND_TO_PRODUCT_KINDS — product kind mapping per station", () => {
-  it("BLISTER allows CARD and VARIETY only", () => {
-    expect(STATION_KIND_TO_PRODUCT_KINDS["BLISTER"]).toEqual(
-      expect.arrayContaining(["CARD", "VARIETY"]),
-    );
-    expect(STATION_KIND_TO_PRODUCT_KINDS["BLISTER"]).not.toContain("BOTTLE");
+  it("BLISTER allows CARD only", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["BLISTER"]).toEqual(["CARD"]);
   });
 
-  it("HANDPACK_BLISTER allows CARD and VARIETY only", () => {
-    expect(STATION_KIND_TO_PRODUCT_KINDS["HANDPACK_BLISTER"]).toEqual(
-      expect.arrayContaining(["CARD", "VARIETY"]),
-    );
-    expect(STATION_KIND_TO_PRODUCT_KINDS["HANDPACK_BLISTER"]).not.toContain("BOTTLE");
+  it("HANDPACK_BLISTER allows CARD only", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["HANDPACK_BLISTER"]).toEqual(["CARD"]);
   });
 
-  it("COMBINED allows CARD and VARIETY only", () => {
-    expect(STATION_KIND_TO_PRODUCT_KINDS["COMBINED"]).toEqual(
-      expect.arrayContaining(["CARD", "VARIETY"]),
-    );
-    expect(STATION_KIND_TO_PRODUCT_KINDS["COMBINED"]).not.toContain("BOTTLE");
+  it("COMBINED allows CARD only", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["COMBINED"]).toEqual(["CARD"]);
   });
 
   it("BOTTLE_HANDPACK allows BOTTLE and VARIETY only", () => {
@@ -225,11 +217,12 @@ describe("STATION_KIND_TO_PRODUCT_KINDS — product kind mapping per station", (
     expect(STATION_KIND_TO_PRODUCT_KINDS["BOTTLE_HANDPACK"]).not.toContain("CARD");
   });
 
-  it("SEALING allows CARD and VARIETY for sealing-time product mapping", () => {
-    expect(STATION_KIND_TO_PRODUCT_KINDS["SEALING"]).toEqual(
-      expect.arrayContaining(["CARD", "VARIETY"]),
-    );
-    expect(STATION_KIND_TO_PRODUCT_KINDS["PACKAGING"] ?? []).toHaveLength(0);
+  it("SEALING allows CARD only for sealing-time product mapping", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["SEALING"]).toEqual(["CARD"]);
+  });
+
+  it("PACKAGING allows CARD for admin/floor product narrowing", () => {
+    expect(STATION_KIND_TO_PRODUCT_KINDS["PACKAGING"]).toEqual(["CARD"]);
   });
 });
 

@@ -5,6 +5,10 @@
 import {
   STATION_KIND_TO_PRODUCT_KINDS,
 } from "@/lib/production/first-op-product";
+import {
+  resolveStartProductionProduct,
+  type CandidateProduct,
+} from "@/lib/production/start-production";
 
 /** Product kinds eligible when mapping at a card-route sealing station. */
 export const SEALING_STATION_KINDS = new Set(["SEALING", "COMBINED"]);
@@ -77,7 +81,83 @@ export type SealingProductPickResult =
   | { ok: true; productId: string }
   | { ok: false; reason: string };
 
-/** Filter active CARD/VARIETY products to those compatible with a tablet type. */
+export type SealingProductOption = {
+  id: string;
+  sku: string;
+  name: string;
+};
+
+export type SealingProductRowWithTablets = {
+  id: string;
+  sku: string;
+  name: string;
+  kind: string;
+  allowedTabletTypeIds: readonly string[];
+};
+
+export type SealingProductSelection = {
+  options: SealingProductOption[];
+  autoProductId: string | null;
+  configError: string | null;
+};
+
+/** Narrow sealing candidates by tablet type, then by station product-kind rules. */
+export function resolveSealingProductSelection({
+  stationKind,
+  candidates,
+  tabletTypeId,
+}: {
+  stationKind: string;
+  candidates: readonly SealingProductRowWithTablets[];
+  tabletTypeId: string | null;
+}): SealingProductSelection {
+  const tabletFiltered = filterSealingProductsByTabletType(candidates, tabletTypeId);
+  const resolution = resolveStartProductionProduct({
+    stationKind,
+    candidateProducts: tabletFiltered.map(
+      (p): CandidateProduct => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        kind: p.kind,
+      }),
+    ),
+  });
+
+  if (resolution.kind === "auto") {
+    return {
+      options: [
+        {
+          id: resolution.product.id,
+          sku: resolution.product.sku,
+          name: resolution.product.name,
+        },
+      ],
+      autoProductId: resolution.product.id,
+      configError: null,
+    };
+  }
+
+  if (resolution.kind === "choose") {
+    return {
+      options: resolution.candidates.map((p) => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+      })),
+      autoProductId: null,
+      configError: null,
+    };
+  }
+
+  return {
+    options: [],
+    autoProductId: null,
+    configError: resolution.message,
+  };
+}
+
+/** Filter active products to those compatible with a tablet type. */
 export function filterSealingProductsByTabletType<
   T extends { id: string; allowedTabletTypeIds: readonly string[] },
 >(products: readonly T[], tabletTypeId: string | null): T[] {
@@ -111,10 +191,7 @@ export function validateSealingProductPick(
       reason: `Product ${input.product.sku ?? input.product.id.slice(0, 8)} is inactive.`,
     };
   }
-  const allowedKinds = STATION_KIND_TO_PRODUCT_KINDS[input.stationKind] ?? [
-    "CARD",
-    "VARIETY",
-  ];
+  const allowedKinds = STATION_KIND_TO_PRODUCT_KINDS[input.stationKind] ?? ["CARD"];
   if (!allowedKinds.includes(input.product.kind)) {
     return {
       ok: false,
