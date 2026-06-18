@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.4.12] — 2026-06-18
+
+### Fixed
+- **Partial-unique migration `0067_zoho_prod_output_ops_partial_unique_luma_op` lands here.** The v1.4.10 CHANGELOG entry below describes the same partial-unique migration work but its files were not deployed — v1.4.10 was never released as a tagged build, and v1.4.11 shipped on top of it with the vendor-label fix only. v1.4.12 carries the actual migration SQL, the schema mirror update, the `_journal.json` registration, and the migration contract tests. Behavior, contract, and posture are identical to the v1.4.10 entry — see below for full detail.
+
+### Notes
+- No env changes. Live-write gates remain OFF. No warehouse changes. No payload quantity changes.
+- v1.4.11 vendor-label fix (commit `6745de9`) preserved by construction.
+- No row deletes; the voided op `114778f7-b64e-4c50-9a57-aba5e2db7651` remains in place as audit history.
+
 ## [1.4.11] — 2026-06-18
 
 ### Fixed

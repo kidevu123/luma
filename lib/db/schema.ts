@@ -1602,7 +1602,13 @@ export const zohoProductionOutputOps = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("zoho_prod_output_ops_luma_op_unique").on(t.lumaOperationId),
+    // PARTIAL-UNIQUE-LUMA-OP-v1.4.10 — uniqueness scoped to non-voided
+    // rows. Voided rows are audit history and may share a
+    // luma_operation_id with the active row that supersedes them.
+    // Schema mirror of drizzle/0067_zoho_prod_output_ops_partial_unique_luma_op.sql.
+    uniqueIndex("zoho_prod_output_ops_luma_op_unique")
+      .on(t.lumaOperationId)
+      .where(sql`voided_at IS NULL`),
     uniqueIndex("zoho_prod_output_ops_active_lot_unique")
       .on(t.finishedLotId)
       .where(sql`voided_at IS NULL`),
