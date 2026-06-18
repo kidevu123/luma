@@ -64,3 +64,14 @@ describe("finished lot issue prefill", () => {
     expect(formSrc).toMatch(/packaging output as the source of/);
   });
 });
+
+describe("coordinated lot action schema", () => {
+  const actionsSrc = readFileSync(resolve(dir, "../actions.ts"), "utf8");
+
+  it("allows negative endingBalanceQty for packaging-derived closeout", () => {
+    expect(actionsSrc).toMatch(/endingBalanceQty: z\.coerce\.number\(\)\.int\(\)/);
+    expect(actionsSrc).not.toMatch(
+      /endingBalanceQty: z\.coerce\.number\(\)\.int\(\)\.min\(0\)/,
+    );
+  });
+});

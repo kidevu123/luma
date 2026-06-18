@@ -58,7 +58,7 @@ export async function createFinishedLotAndRedirect(payload: unknown) {
 const coordinatedLotSchema = lotSchema.extend({
   workflowBagId: z.string().uuid(),
   consumedQty: z.coerce.number().int().positive(),
-  endingBalanceQty: z.coerce.number().int().min(0),
+  endingBalanceQty: z.coerce.number().int(),
   repairMissingAllocation: z.boolean().optional(),
   repairNotes: z.string().max(2000).optional().nullable(),
   repairStartingBalanceQty: z.coerce.number().int().positive().optional().nullable(),

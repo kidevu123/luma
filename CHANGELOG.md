@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.13] — 2026-06-18
+
+### Fixed
+- **Issue finished lot action accepts negative ending balance.** The coordinated lot Zod schema no longer requires `endingBalanceQty >= 0`, so repair allocation closeout can submit when packaging consumption exceeds the vendor label count (v1.4.11 UI/server closeout path).
+
 ## [1.4.12] — 2026-06-18
 
 ### Fixed
