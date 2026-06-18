@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.6] — 2026-06-18
+
+### Fixed
+- **Dynamic BOM derivation matches the pilot contract's batch-tracking semantics.** `deriveNormalizedBomQuantitiesFromRows` now returns an empty `batchTrackedItemIds` Set regardless of how many tablets it derives, mirroring the existing Choco Drift / Sweet Trip / FIX Relax pilot contracts. The v1.4.4 deriver populated the Set with every derived raw item ID, which triggered Zoho batch resolution for tablets whose lots aren't registered as Zoho batches — that surfaced as `ZOHO_BATCH_MISSING` for BlueRaz lot `CA4RA16` during the v1.4.4 BlueRaz #36 preview attempt. Batch tracking remains opt-in; a future explicit mechanism can enable per-item tracking when operators register Zoho batches. The `normalizedBomQuantities` derivation is unchanged.
+
+### Notes
+- No migration. No env changes. Live-write gates remain OFF.
+- No new per-SKU hard-coded contract. No BlueRaz pilot.
+- No payload quantity changes. No warehouse changes.
+- v1.4.5 repair-allocation balance auto-derive (commit `7ddf6c0`) preserved by construction.
+
 ## [1.4.5] — 2026-06-18
 
 ### Fixed

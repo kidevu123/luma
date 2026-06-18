@@ -39,9 +39,13 @@ describe("deriveNormalizedBomQuantitiesFromRows — BlueRaz fixture", () => {
     expect(r.normalizedBomQuantities).toEqual({
       [BLUERAZ.primaryRawItemId]: BLUERAZ.tabletsPerUnit,
     });
-    // batchTrackedItemIds mirrors keys so callers can pass it as a Set.
-    expect(r.batchTrackedItemIds.has(BLUERAZ.primaryRawItemId)).toBe(true);
-    expect(r.batchTrackedItemIds.size).toBe(1);
+    // BATCH-TRACKING-CONTRACT-v1.4.5 — match the pilot contracts and
+    // return an empty batchTrackedItemIds set so batch resolution is
+    // skipped per item by default (pre-v1.4.5 this returned a
+    // populated Set, which triggered ZOHO_BATCH_MISSING for any
+    // tablet whose lot wasn't registered as a Zoho batch).
+    expect(r.batchTrackedItemIds).toBeInstanceOf(Set);
+    expect(r.batchTrackedItemIds.size).toBe(0);
     expect(r.warnings).toEqual([]);
   });
 
@@ -72,7 +76,38 @@ describe("deriveNormalizedBomQuantitiesFromRows — BlueRaz fixture", () => {
       [BLUERAZ.primaryRawItemId]: BLUERAZ.tabletsPerUnit,
       [BLUERAZ.secondaryRawItemId]: BLUERAZ.tabletsPerUnit,
     });
-    expect(r.batchTrackedItemIds.size).toBe(2);
+    // BATCH-TRACKING-CONTRACT-v1.4.5 — even with two allowed tablets
+    // mapped, batchTrackedItemIds stays empty so the downstream
+    // builder skips batch resolution for both. Match pilot contracts.
+    expect(r.batchTrackedItemIds.size).toBe(0);
+  });
+
+  // BATCH-TRACKING-CONTRACT-v1.4.5 — explicit contract pin: the
+  // deriver returns the same shape for batchTrackedItemIds as the
+  // existing pilot contracts (empty Set). If a future patch adds an
+  // opt-in mechanism, this test should be updated AND the pilots
+  // should be migrated to that opt-in too — not selectively widened.
+  it("returns an empty batchTrackedItemIds Set regardless of how many tablets are derived (matches pilot contract)", () => {
+    const r = deriveNormalizedBomQuantitiesFromRows({
+      product: { id: "p-1", tabletsPerUnit: 4 },
+      allowedTablets: [
+        { tabletTypeId: "t-1", tabletTypeName: "A", zohoItemId: "zoho-A", isPrimary: true },
+        { tabletTypeId: "t-2", tabletTypeName: "B", zohoItemId: "zoho-B", isPrimary: false },
+        { tabletTypeId: "t-3", tabletTypeName: "C", zohoItemId: "zoho-C", isPrimary: false },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.normalizedBomQuantities).toEqual({
+      "zoho-A": 4,
+      "zoho-B": 4,
+      "zoho-C": 4,
+    });
+    expect(r.batchTrackedItemIds).toBeInstanceOf(Set);
+    expect(r.batchTrackedItemIds.size).toBe(0);
+    // Per pilot contract: any caller passing this opts to the
+    // existing builder treats it the same as the pilot opts (no
+    // batch resolution for any tablet).
   });
 });
 

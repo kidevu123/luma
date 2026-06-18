@@ -178,11 +178,22 @@ export function deriveNormalizedBomQuantitiesFromRows(input: {
   const tabletsPerUnit = product.tabletsPerUnit as number;
 
   const normalizedBomQuantities: Record<string, number> = {};
+  // BATCH-TRACKING-CONTRACT-v1.4.5 — match the existing pilot
+  // contracts (Choco Drift / Sweet Trip / FIX Relax) which all
+  // return an EMPTY batchTrackedItemIds set. Populating this Set
+  // with every derived raw item ID triggers Zoho batch resolution
+  // for tablets whose lots are not registered as Zoho batches,
+  // which caused ZOHO_BATCH_MISSING for BlueRaz lot CA4RA16 in
+  // the v1.4.4 BlueRaz #36 preview attempt. Batch tracking is an
+  // opt-in concern; operators register Zoho batches first, then
+  // a future explicit mechanism can enable per-item tracking.
+  // Until that mechanism exists, the deriver leaves the Set empty
+  // so the source-allocation builder treats every tablet as
+  // NOT_BATCH_TRACKED — same as the pilot path.
   const batchTrackedItemIds = new Set<string>();
   for (const t of withZohoId) {
     const id = t.zohoItemId as string;
     normalizedBomQuantities[id] = tabletsPerUnit;
-    batchTrackedItemIds.add(id);
   }
 
   const warnings = withoutZohoId.map((t) => ({
