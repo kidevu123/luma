@@ -159,6 +159,7 @@ export function buildChocoDriftOperationSnapshot(input: {
         item_id: CHOCO_DRIFT_RAW_TABLET_ITEM_ID,
         human_lot_number: CHOCO_DRIFT_HUMAN_LOT_NUMBER,
         quantity: sourceQuantity,
+        assembly_level: "unit_assembly",
       },
     ],
   };

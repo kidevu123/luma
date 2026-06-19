@@ -403,11 +403,16 @@ export async function previewZohoProductionOutputAction(
       workflowBagId: lot.finishedLot.workflowBagId,
       finishedLotId: lot.finishedLot.id,
     },
+    // ASSEMBLY-LEVEL-SCOPING-v1.4.18 — thread componentRole into the
+    // snapshot builder so each row carries an assembly_level for the
+    // gateway's per-level BOM check. Raw bag sessions resolve to
+    // unit_assembly via deriveSourceAllocationAssemblyLevel.
     sourceBuilt.rows.map((row) => ({
       lumaInventoryBagId: row.lumaInventoryBagId,
       zohoComponentItemId: row.zohoComponentItemId,
       humanLotNumber: row.humanLotNumber,
       quantityAllocated: row.quantityAllocated,
+      componentRole: row.componentRole,
     })),
   );
   if (!snapshotBuilt.ok) {

@@ -12,11 +12,39 @@ import {
 import { resolveProductFamily } from "@/lib/zoho/product-family";
 import type { LumaProductionOutputPayload } from "@/lib/zoho/luma-production-output-payload";
 
+// ASSEMBLY-LEVEL-SCOPING-v1.4.18 — Zoho gateway v1.28.0 validates each
+// source allocation row against the BOM of a SINGLE assembly level
+// (per-row scoped, not broadcast). Luma stamps the level so the
+// gateway routes each row to the right BOM. Raw tablet bags feed
+// unit_assembly; re-work flows that consume intermediates should
+// stamp the level whose BOM contains the consumed item.
+export type LumaSnapshotAssemblyLevel =
+  | "unit_assembly"
+  | "display_assembly"
+  | "case_assembly";
+
+/**
+ * Derive the assembly_level for a source allocation from its
+ * componentRole. Today every Luma source allocation comes from a
+ * raw_bag_allocation_sessions row (raw tablet → unit assembly), so
+ * this returns "unit_assembly" for every value. componentRole here
+ * is the variety-flavor identifier ("PRIMARY", "FLAVOR_A", …) — it
+ * does NOT name a BOM level by itself. Keep the switch greppable
+ * for when re-work paths begin to emit non-raw rows.
+ */
+export function deriveSourceAllocationAssemblyLevel(
+  componentRole: string | null,
+): LumaSnapshotAssemblyLevel {
+  void componentRole;
+  return "unit_assembly";
+}
+
 export type LumaOperationSnapshotSourceAllocation = {
   source_bag_id: string;
   item_id: string;
   human_lot_number: string;
   quantity: number;
+  assembly_level: LumaSnapshotAssemblyLevel;
 };
 
 export type LumaOperationSnapshot = {
@@ -59,6 +87,8 @@ export function buildLumaOperationSnapshotFromOpRow(
     zohoComponentItemId: string;
     humanLotNumber: string;
     quantityAllocated: string | number;
+    /** Variety-flavor identifier; used to derive assembly_level. */
+    componentRole?: string | null;
   }>,
 ): SnapshotBuildResult {
   const blockers: Array<{ code: string; message: string }> = [];
@@ -94,6 +124,9 @@ export function buildLumaOperationSnapshotFromOpRow(
         item_id: row.zohoComponentItemId,
         human_lot_number: row.humanLotNumber,
         quantity: Number(row.quantityAllocated),
+        assembly_level: deriveSourceAllocationAssemblyLevel(
+          row.componentRole ?? null,
+        ),
       })),
     },
   };
@@ -219,6 +252,7 @@ export async function buildLumaOperationSnapshotFromPersistedOp(
       item_id: row.zohoComponentItemId,
       human_lot_number: row.humanLotNumber,
       quantity: Number(row.quantityAllocated),
+      assembly_level: deriveSourceAllocationAssemblyLevel(row.componentRole),
     })),
   };
 

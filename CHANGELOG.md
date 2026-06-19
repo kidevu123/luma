@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.18] — 2026-06-19
+
+### Fixed
+- **`SOURCE_ALLOCATION_COMPONENT_NOT_IN_BOM` blocker — Luma half resolved.** The Zoho gateway v1.28.0 now validates each `luma_operation_snapshot.source_allocations[]` row against a single `assembly_level`'s BOM (per-row scoped, not broadcast). Luma now stamps `assembly_level` on every row. Implementation: new `deriveSourceAllocationAssemblyLevel(componentRole)` helper in `lib/zoho/luma-operation-snapshot.ts` (returns `unit_assembly` today because all source allocations come from `raw_bag_allocation_sessions` = raw tablets into unit assembly); helper is forward-compatible for re-work flows. Admin action and pilot script thread `componentRole` through to the snapshot builder. Pilot contracts (Choco Drift, FIX Relax, Sweet Trip) gain the literal `assembly_level: "unit_assembly"` on their hard-coded source rows.
+
+### Added — read-only audit / dry-run tooling for source-bag receive coverage
+- `scripts/audit-source-bag-zoho-receive-coverage.ts` — read-only TSV report of every source bag referenced by finished_lot_raw_bags, its Zoho receive state, and per-bag eligibility for a bag-finish receive preview.
+- `scripts/backfill-source-bag-zoho-receive-previews.ts` — dry-run by default; supports `--inventory-bag-id`, `--finished-lot-id`, `--limit`, `--apply-preview-only`. The apply path is currently a planned no-op (logs what it would do) to keep the safety surface minimal; wiring it to the staging-actions module is a separate owner-approved follow-up.
+
+### Notes
+- No env changes. Live-write gates remain OFF.
+- The `SOURCE_BAG_ZOHO_RECEIPT_UNCONFIRMED` blocker is unchanged — it depends on Zoho receives being committed per source bag (data, not code). The audit shows 36 of 38 source bags have no `zoho_raw_bag_receives` row.
+- `BOM_COMPONENT_INSUFFICIENT_STOCK` for the Sweet Trip display intermediate is also untouched — it reflects Zoho's negative stock for `5254962000006219049` (production has run ahead of Zoho commits). Self-resolves once Luma starts committing production output.
+- `buildLumaProductionOutputOperationId` still retained per v1.4.17 hold.
+
 ## [1.4.17] — 2026-06-18
 
 ### Fixed
