@@ -195,9 +195,13 @@ function freshWorld(overrides: Partial<World> = {}): World {
 }
 
 function arm(world: World) {
+  // The real db.transaction generic wants a full PgTransaction with
+  // schema, nestedIndex, rollback, etc. The route only consumes the
+  // narrow tx surface modelled by makeTx(world), so the mock impl
+  // is cast to `never` to satisfy strict TS without changing runtime.
   vi.mocked(db.transaction).mockImplementation(
-    async (cb: (tx: ReturnType<typeof makeTx>) => Promise<unknown>) =>
-      cb(makeTx(world)),
+    (async (cb: (tx: ReturnType<typeof makeTx>) => Promise<unknown>) =>
+      cb(makeTx(world))) as never,
   );
 }
 
