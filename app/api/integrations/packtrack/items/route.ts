@@ -107,6 +107,19 @@ export async function POST(req: Request) {
   const { material_code, material_name, kind, unit_of_measure, zoho_item_id } =
     parsed.data;
 
+  // Normalised — null/blank ↔ "no value". Lets us treat "" and null the
+  // same, which Drizzle and Postgres do not.
+  const incomingZohoId =
+    typeof zoho_item_id === "string" && zoho_item_id.trim() !== ""
+      ? zoho_item_id.trim()
+      : null;
+
+  type Outcome =
+    | "REGISTERED" // first time we saw this material_code
+    | "UPDATED" // existed but we filled in a missing zoho_item_id
+    | "ALREADY_MAPPED" // no changes needed
+    | "ZOHO_ID_CONFLICT_REVIEW_REQUIRED"; // incoming vs existing differ — operator review
+
   // ── Upsert in a single transaction ───────────────────────────────
   try {
     const result = await db.transaction(async (tx) => {
@@ -121,7 +134,10 @@ export async function POST(req: Request) {
         );
       }
 
-      // 2. Already fully mapped? Return early (idempotent).
+      // 2. Look up the existing mapping (if any). We no longer short-
+      //    circuit here — we still need to inspect the linked
+      //    packaging_materials row so we can backfill a missing
+      //    zoho_item_id without leaving stale state in Luma.
       const [existingMapping] = await tx
         .select({
           id: externalItemMappings.id,
@@ -135,22 +151,24 @@ export async function POST(req: Request) {
             eq(externalItemMappings.isActive, true),
           ),
         );
-      if (existingMapping?.materialItemId) {
-        return {
-          created: false,
-          materialId: existingMapping.materialItemId,
-        };
-      }
 
-      // 3. Find or create packaging_material (sku is our stable key).
+      // 3. Find or create the packaging_material row (sku is our stable key).
       let materialId: string;
+      let existingZohoId: string | null = null;
+      let createdMaterial = false;
+
       const [existingMat] = await tx
-        .select({ id: packagingMaterials.id })
+        .select({ id: packagingMaterials.id, zohoItemId: packagingMaterials.zohoItemId })
         .from(packagingMaterials)
         .where(eq(packagingMaterials.sku, material_code));
 
       if (existingMat) {
         materialId = existingMat.id;
+        existingZohoId =
+          typeof existingMat.zohoItemId === "string" &&
+          existingMat.zohoItemId.trim() !== ""
+            ? existingMat.zohoItemId.trim()
+            : null;
       } else {
         const [inserted] = await tx
           .insert(packagingMaterials)
@@ -160,7 +178,7 @@ export async function POST(req: Request) {
             kind,
             category: "PACKAGING",
             uom: unit_of_measure,
-            ...(zoho_item_id != null ? { zohoItemId: zoho_item_id } : {}),
+            ...(incomingZohoId != null ? { zohoItemId: incomingZohoId } : {}),
           })
           .returning({ id: packagingMaterials.id });
         if (!inserted) {
@@ -169,12 +187,53 @@ export async function POST(req: Request) {
           );
         }
         materialId = inserted.id;
+        existingZohoId = incomingZohoId;
+        createdMaterial = true;
       }
 
-      // 4. Create the external_item_mapping.
-      //    If an incomplete (materialItemId=null) mapping already exists,
-      //    patch it rather than inserting a duplicate.
-      if (existingMapping && !existingMapping.materialItemId) {
+      // 4. zoho_item_id reconciliation on an existing packaging_material.
+      //    Rules (PT identity is owned by material_code, NOT zoho_item_id):
+      //      • incoming null  → leave existing alone, no-op
+      //      • existing null  → backfill from incoming
+      //      • equal          → no-op
+      //      • different      → CONFLICT, never silently overwrite
+      let zohoOutcome:
+        | "UPDATED"
+        | "ALREADY_SET"
+        | "CONFLICT"
+        | "NO_INCOMING"
+        | "JUST_CREATED" = "NO_INCOMING";
+      if (createdMaterial) {
+        zohoOutcome = incomingZohoId != null ? "JUST_CREATED" : "NO_INCOMING";
+      } else if (incomingZohoId == null) {
+        zohoOutcome = "NO_INCOMING";
+      } else if (existingZohoId == null) {
+        await tx
+          .update(packagingMaterials)
+          .set({ zohoItemId: incomingZohoId })
+          .where(eq(packagingMaterials.id, materialId));
+        zohoOutcome = "UPDATED";
+      } else if (existingZohoId === incomingZohoId) {
+        zohoOutcome = "ALREADY_SET";
+      } else {
+        zohoOutcome = "CONFLICT";
+      }
+
+      // 5. Mapping side — either nothing exists, or an incomplete
+      //    mapping was left behind by an older bug. Both are upserted
+      //    in the same transaction.
+      let createdMapping = false;
+      if (!existingMapping) {
+        await tx.insert(externalItemMappings).values({
+          externalSystemId: system.id,
+          externalItemId: material_code,
+          externalItemName: material_name,
+          materialItemId: materialId,
+          mappingType: "PACKAGING_MATERIAL",
+          isActive: true,
+        });
+        createdMapping = true;
+      } else if (!existingMapping.materialItemId) {
         await tx
           .update(externalItemMappings)
           .set({
@@ -184,37 +243,69 @@ export async function POST(req: Request) {
             updatedAt: new Date(),
           })
           .where(eq(externalItemMappings.id, existingMapping.id));
-      } else {
-        await tx.insert(externalItemMappings).values({
-          externalSystemId: system.id,
-          externalItemId: material_code,
-          externalItemName: material_name,
-          materialItemId: materialId,
-          mappingType: "PACKAGING_MATERIAL",
-          isActive: true,
-        });
       }
 
-      return { created: true, materialId };
+      const outcome: Outcome =
+        zohoOutcome === "CONFLICT"
+          ? "ZOHO_ID_CONFLICT_REVIEW_REQUIRED"
+          : createdMaterial || createdMapping
+            ? "REGISTERED"
+            : zohoOutcome === "UPDATED"
+              ? "UPDATED"
+              : "ALREADY_MAPPED";
+
+      return {
+        outcome,
+        materialId,
+        existingZohoId,
+        incomingZohoId,
+      };
     });
+
+    const {
+      outcome,
+      materialId,
+      existingZohoId: existingZohoIdAfter,
+      incomingZohoId: incomingZohoIdEcho,
+    } = result;
 
     console.log(
       "[packtrack.items]",
       JSON.stringify({
-        outcome: result.created ? "REGISTERED" : "ALREADY_MAPPED",
+        outcome,
         material_code,
-        luma_material_id: result.materialId,
+        luma_material_id: materialId,
+        existing_zoho_item_id: existingZohoIdAfter,
+        incoming_zoho_item_id: incomingZohoIdEcho,
       }),
     );
+
+    if (outcome === "ZOHO_ID_CONFLICT_REVIEW_REQUIRED") {
+      return NextResponse.json(
+        {
+          ok: false,
+          outcome,
+          error: "ZOHO_ID_CONFLICT_REVIEW_REQUIRED",
+          material_code,
+          luma_material_id: materialId,
+          existing_zoho_item_id: existingZohoIdAfter,
+          incoming_zoho_item_id: incomingZohoIdEcho,
+        },
+        { status: 409 },
+      );
+    }
 
     return NextResponse.json(
       {
         ok: true,
+        outcome,
+        // Backwards-compat: PackTrack today reads ``created`` to decide
+        // whether to log "registered" vs "already mapped".
+        created: outcome === "REGISTERED",
         material_code,
-        created: result.created,
-        luma_material_id: result.materialId,
+        luma_material_id: materialId,
       },
-      { status: result.created ? 201 : 200 },
+      { status: outcome === "REGISTERED" ? 201 : 200 },
     );
   } catch (err) {
     console.error("[packtrack.items] failed:", err);
