@@ -14,7 +14,7 @@ import {
   zohoRawBagReceives,
 } from "@/lib/db/schema";
 import {
-  buildRawBagReceiveIdempotencyKey,
+  buildBagFinishReceiveIdempotencyKey,
 } from "@/lib/zoho/source-receipt-evidence";
 export { parseZohoPurchaseReceiveId } from "@/lib/zoho/zoho-purchase-receive-id";
 import { previewBagFinishReceive, commitBagFinishReceive } from "@/lib/zoho/bag-finish-receive";
@@ -39,7 +39,7 @@ export function buildRawBagIntakeReceivePayload(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     dry_run: opts?.dryRun !== false,
-    luma_operation_id: buildRawBagReceiveIdempotencyKey(input.inventoryBagId),
+    luma_operation_id: buildBagFinishReceiveIdempotencyKey(input.inventoryBagId),
     luma_bag_id: input.inventoryBagId,
     luma_workflow_session_id: input.lumaReceiveId,
     purchaseorder_id: input.zohoPoId,
@@ -124,7 +124,7 @@ async function upsertRawBagReceiveRow(
   buildInput: RawBagReceiveBuildInput,
   actor: Pick<CurrentUser, "id"> | null,
 ) {
-  const idempotencyKey = buildRawBagReceiveIdempotencyKey(buildInput.inventoryBagId);
+  const idempotencyKey = buildBagFinishReceiveIdempotencyKey(buildInput.inventoryBagId);
   const now = new Date();
 
   const [existing] = await db
@@ -250,7 +250,7 @@ export async function seedPendingRawBagReceiveRows(
   );
 
   for (const seed of seeds) {
-    const idempotencyKey = buildRawBagReceiveIdempotencyKey(seed.inventoryBagId);
+    const idempotencyKey = buildBagFinishReceiveIdempotencyKey(seed.inventoryBagId);
     const [existing] = await db
       .select({ id: zohoRawBagReceives.id })
       .from(zohoRawBagReceives)
@@ -411,7 +411,7 @@ export async function setRawBagReconciliationStatus(
     if (!idCheck.ok) return idCheck;
   }
 
-  const idempotencyKey = buildRawBagReceiveIdempotencyKey(inventoryBagId);
+  const idempotencyKey = buildBagFinishReceiveIdempotencyKey(inventoryBagId);
   const [existing] = await db
     .select({ id: zohoRawBagReceives.id })
     .from(zohoRawBagReceives)

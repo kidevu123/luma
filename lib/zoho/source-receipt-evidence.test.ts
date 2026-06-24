@@ -3,7 +3,7 @@ import {
   deriveLegacyBagReconciliationStatus,
   evaluateSourceReceiptEvidenceForProductionOutput,
   isSourceReceiptConfirmedForAssembly,
-  buildRawBagReceiveIdempotencyKey,
+  buildBagFinishReceiveIdempotencyKey,
   type SourceReceiptEvidence,
 } from "./source-receipt-evidence";
 
@@ -118,7 +118,7 @@ describe("evaluateSourceReceiptEvidenceForProductionOutput", () => {
 
   it("uses stable bag-level idempotency key", () => {
     expect(
-      buildRawBagReceiveIdempotencyKey(
+      buildBagFinishReceiveIdempotencyKey(
         "4a02fc5b-27e4-412e-888a-bf24f84b7d38",
       ),
     ).toBe(

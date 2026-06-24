@@ -1,7 +1,7 @@
 // ZOHO-SOURCE-RECEIPT-CONTRACT — canonical outbound field for Zoho Integration v1.20.8+.
 
 import type { SourceReceiptEvidence } from "@/lib/zoho/source-receipt-evidence";
-import { buildRawBagReceiveIdempotencyKey } from "@/lib/zoho/source-receipt-evidence";
+import { buildBagFinishReceiveIdempotencyKey } from "@/lib/zoho/source-receipt-evidence";
 
 /** Zoho Integration purchase-receive lifecycle (API lowercase). */
 export type ZohoApiReceiveStatus =
@@ -79,7 +79,7 @@ export function buildOutboundSourceReceipt(
     receive_status: evidence.api_receive_status,
     reconciliation_status: evidence.api_reconciliation_status,
     received_at: evidence.received_at,
-    receive_idempotency_key: buildRawBagReceiveIdempotencyKey(
+    receive_idempotency_key: buildBagFinishReceiveIdempotencyKey(
       evidence.source_bag_id,
     ),
   };

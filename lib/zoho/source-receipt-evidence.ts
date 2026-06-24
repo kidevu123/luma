@@ -144,11 +144,6 @@ export function evaluateSourceReceiptEvidenceForProductionOutput(
   return { ok: true, assemblyOnly: true };
 }
 
-/** @deprecated Use buildBagFinishReceiveIdempotencyKey — bag-finish policy v1.21. */
-export function buildRawBagReceiveIdempotencyKey(inventoryBagId: string): string {
-  return buildBagFinishReceiveIdempotencyKey(inventoryBagId);
-}
-
 /** One Zoho purchase receive per physical bag; idempotency scoped to inventory_bag_id. */
 export function buildBagFinishReceiveIdempotencyKey(inventoryBagId: string): string {
   return `luma-bag-finish-receive:${inventoryBagId}`;

@@ -5,10 +5,7 @@ import {
 } from "./bag-finish-receive-quantity";
 import { assessBagFinishReceiveEligibility } from "./bag-finish-receive-eligibility";
 import { buildBagFinishReceivePayload } from "./bag-finish-receive";
-import {
-  buildBagFinishReceiveIdempotencyKey,
-  buildRawBagReceiveIdempotencyKey,
-} from "./source-receipt-evidence";
+import { buildBagFinishReceiveIdempotencyKey } from "./source-receipt-evidence";
 import { validateZohoPurchaseReceiveIdCandidate } from "./receipt-id-validation";
 import { buildOutboundSourceReceipts } from "./source-receipt-contract";
 import type { SourceReceiptEvidence } from "./source-receipt-evidence";
@@ -186,14 +183,6 @@ describe("production-output assembly-only gate", () => {
     });
     expect(mapped.quantity_good).toBe(10);
     expect(mapped.quantity_loose).toBe(0);
-  });
-});
-
-describe("idempotency alias", () => {
-  it("raw bag key aliases to bag-finish key", () => {
-    expect(buildRawBagReceiveIdempotencyKey(BAG_A)).toBe(
-      buildBagFinishReceiveIdempotencyKey(BAG_A),
-    );
   });
 });
 

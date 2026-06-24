@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.5.2] — 2026-06-24
+
+### Changed
+- **Retired deprecated `buildRawBagReceiveIdempotencyKey` alias in `lib/zoho/source-receipt-evidence.ts`.** The function was a one-line passthrough to the canonical `buildBagFinishReceiveIdempotencyKey` in the same file (output: `luma-bag-finish-receive:${inventoryBagId}`). The migration is behavior-preserving: every production call site previously resolved through the alias to the same canonical body.
+
+### Migrated callers
+- `lib/zoho/raw-bag-intake-receive.ts` — 1 import + 4 call sites (lines 42, 127, 253, 414)
+- `lib/zoho/source-receipt-contract.ts` — 1 import + 1 call site (line 82)
+- `lib/zoho/source-receipt-evidence.test.ts` — 1 import + 1 call site (stable-key contract test, now pinned against the canonical export; same expected string `luma-bag-finish-receive:4a02fc5b-…`)
+- `lib/zoho/bag-finish-receive.test.ts` — removed the redundant `describe("idempotency alias", …)` block (it asserted `alias === canonical`; meaningless after retirement). Updated the import to drop the alias.
+
+### Notes
+- No env changes. No DB migrations. No live-write gate flips. No Zoho writes.
+- Test count: 4578 → **4577** (the 1-case "alias matches canonical" describe block was removed; the substantive "stable bag-level idempotency key" test still pins the exact string `luma-bag-finish-receive:${inventoryBagId}` shape via the canonical function).
+- Idempotency semantics preserved: the canonical produces the exact same string the alias had been delegating to.
+
 ## [1.5.1] — 2026-06-24
 
 ### Changed
