@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.5.4] — 2026-06-24
+
+### Changed
+- **Retired deprecated `classifyBatchLookupResponse` wrapper in `lib/zoho/component-batch-resolution.ts`.** The wrapper extracted `item_id` / `human_lot_number` from the response body's TOP LEVEL and forwarded them to the canonical `classifyBatchResolveResponse`. For its only (test-only) consumer, both bodies lacked those top-level fields, so the wrapper effectively called `classifyBatchResolveResponse(body, "", "")`. The migration replaces the wrapper-via-test pattern with an explicit `("", "")` call, producing identical output.
+
+### Migrated callers
+- `lib/zoho/production-output-v1206.test.ts` — 1 import + 2 call sites (lines 109, 124) now call `classifyBatchResolveResponse` directly with explicit `("", "")` args. Inline comment documents that this matches the wrapper's prior behavior for these specific bodies.
+
+### Behavior preservation proof
+- The canonical's UNIQUE branch uses `itemId` / `humanLotNumber` only as **fallback values** when the body lacks `obj.item_id` / `obj.human_lot_number` (lines 173-174, 196-197).
+- For the UNIQUE test (`{ resolved: true, resolution: "unique", batch_id: "...", batch_number, available_balance }`): body lacks top-level `item_id`/`human_lot_number`; the wrapper passed `""`; explicit `""` passes identical args. Result shape unchanged.
+- For the AMBIGUOUS test (`{ resolution: "ambiguous", candidates: [...] }`): body lacks top-level `item_id`/`human_lot_number`; `parseCandidates` is called with `("", "")` either way. Test only asserts `result.status === "AMBIGUOUS"`; candidate-array shape from `parseCandidates` is unchanged by the wrapper-vs-direct distinction.
+
+### Notes
+- No env changes. No DB migrations. No live-write gate flips. No Zoho writes.
+- Test count: 4577 → **4577** (no test cases removed; the 2 cases retained their assertions verbatim — only the function call signature was updated).
+- Wrapper was the last `@deprecated`-tagged identity/normalizing alias with manageable caller surface. The remaining `@deprecated` tags are all documented intentional fallbacks / compatibility shims (per v1.5.3 CHANGELOG).
+
 ## [1.5.3] — 2026-06-24
 
 ### Changed

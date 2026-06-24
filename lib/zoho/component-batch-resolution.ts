@@ -203,16 +203,6 @@ export function classifyBatchResolveResponse(
   return missingBase;
 }
 
-/** @deprecated use classifyBatchResolveResponse */
-export function classifyBatchLookupResponse(body: unknown): BatchLookupResult {
-  const obj = body != null && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  return classifyBatchResolveResponse(
-    body,
-    String(obj.item_id ?? ""),
-    String(obj.human_lot_number ?? ""),
-  );
-}
-
 function isClassifiableBatchResolveHttpStatus(status: number): boolean {
   return status === 200 || status === 404 || status === 422;
 }

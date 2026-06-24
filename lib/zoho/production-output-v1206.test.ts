@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyBatchLookupResponse } from "@/lib/zoho/component-batch-resolution";
+import { classifyBatchResolveResponse } from "@/lib/zoho/component-batch-resolution";
 import {
   buildLumaProductionOutputPayloadFromContext,
   type LumaProductionOutputPayload,
@@ -106,13 +106,20 @@ describe("component_batches payload", () => {
 
 describe("batch resolution", () => {
   it("classifies unique batch lookup", () => {
-    const result = classifyBatchLookupResponse({
-      resolved: true,
-      resolution: "unique",
-      batch_id: "5254962000009999001",
-      batch_number: "CA4PI16",
-      available_balance: 100,
-    });
+    // Inputs match the prior classifyBatchLookupResponse wrapper:
+    // body lacks top-level item_id/human_lot_number, so the wrapper
+    // delegated with `""` for both — direct call preserves shape.
+    const result = classifyBatchResolveResponse(
+      {
+        resolved: true,
+        resolution: "unique",
+        batch_id: "5254962000009999001",
+        batch_number: "CA4PI16",
+        available_balance: 100,
+      },
+      "",
+      "",
+    );
     expect(result.status).toBe("UNIQUE");
     if (result.status === "UNIQUE") {
       expect(result.batchId).toBe("5254962000009999001");
@@ -121,13 +128,17 @@ describe("batch resolution", () => {
   });
 
   it("classifies ambiguous batch lookup", () => {
-    const result = classifyBatchLookupResponse({
-      resolution: "ambiguous",
-      candidates: [
-        { batch_id: "a", human_lot_number: "CA4PI16", item_id: "1" },
-        { batch_id: "b", human_lot_number: "CA4PI16", item_id: "1" },
-      ],
-    });
+    const result = classifyBatchResolveResponse(
+      {
+        resolution: "ambiguous",
+        candidates: [
+          { batch_id: "a", human_lot_number: "CA4PI16", item_id: "1" },
+          { batch_id: "b", human_lot_number: "CA4PI16", item_id: "1" },
+        ],
+      },
+      "",
+      "",
+    );
     expect(result.status).toBe("AMBIGUOUS");
   });
 });
