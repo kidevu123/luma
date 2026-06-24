@@ -11,7 +11,8 @@ vi.mock("@/lib/db", () => ({
   db: { select: () => ({ from: () => ({ where: () => [] }) }) },
 }));
 
-import { inferRole, nextLotStatusForUnmount } from "./active-rolls";
+import { nextLotStatusForUnmount } from "./active-rolls";
+import { inferRollRole } from "./roll-role";
 
 // Mirror the schema shape used in roll-actions.ts. The actual schema
 // lives inline there alongside the action; replicate it here so a
@@ -262,23 +263,23 @@ describe("nextLotStatusForUnmount", () => {
   });
 });
 
-describe("inferRole", () => {
+describe("inferRollRole (canonical; alias inferRole retired in v1.5.1)", () => {
   it("PVC_ROLL → PVC", () => {
-    expect(inferRole("PVC_ROLL", null)).toBe("PVC");
+    expect(inferRollRole("PVC_ROLL", null)).toBe("PVC");
   });
   it("FOIL_ROLL → FOIL", () => {
-    expect(inferRole("FOIL_ROLL", null)).toBe("FOIL");
+    expect(inferRollRole("FOIL_ROLL", null)).toBe("FOIL");
   });
   it("BLISTER_FOIL → FOIL (legacy alias)", () => {
-    expect(inferRole("BLISTER_FOIL", null)).toBe("FOIL");
+    expect(inferRollRole("BLISTER_FOIL", null)).toBe("FOIL");
   });
   it("explicit payload role wins over kind inference", () => {
-    expect(inferRole("PVC_ROLL", "FOIL")).toBe("FOIL");
-    expect(inferRole("FOIL_ROLL", "PVC")).toBe("PVC");
+    expect(inferRollRole("PVC_ROLL", "FOIL")).toBe("FOIL");
+    expect(inferRollRole("FOIL_ROLL", "PVC")).toBe("PVC");
   });
   it("unknown payload role falls through to kind inference", () => {
-    expect(inferRole("PVC_ROLL", "OTHER")).toBe("PVC");
-    expect(inferRole("PVC_ROLL", undefined)).toBe("PVC");
+    expect(inferRollRole("PVC_ROLL", "OTHER")).toBe("PVC");
+    expect(inferRollRole("PVC_ROLL", undefined)).toBe("PVC");
   });
 });
 

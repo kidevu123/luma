@@ -172,16 +172,6 @@ export async function getActiveRollsForMachine(
   });
 }
 
-/** Pure helper. Prefers the explicit role from the mount event's
- *  payload, falls back to inferring from the material kind. */
-/** @deprecated Use inferRollRole from roll-role.ts in client-safe code. */
-export function inferRole(
-  materialKind: string,
-  payloadRole: string | null | undefined,
-): "PVC" | "FOIL" {
-  return inferRollRole(materialKind, payloadRole);
-}
-
 /** Pure helper used by the unmount action to decide the next lot
  *  status given an ending weight. Caller is responsible for handling
  *  null (no ending weight given) — the spec says: keep IN_USE→AVAILABLE

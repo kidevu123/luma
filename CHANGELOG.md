@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.1] — 2026-06-24
+
+### Changed
+- **Retired deprecated `inferRole` alias in `lib/production/active-rolls.ts`.** The function was a one-line passthrough to the canonical `inferRollRole` in `lib/production/roll-role.ts` and had zero production callers — only `lib/production/active-rolls.test.ts` referenced it. The test now imports + calls `inferRollRole` directly, the alias is deleted (~10 LOC), and the canonical helper in `roll-role.ts` is unchanged. Behavior-preserving consolidation: every code path that previously resolved through the alias now resolves to the same `inferRollRole` body it was already calling internally.
+
+### Notes
+- No env changes. No DB migrations. No live-write gate flips. No Zoho writes.
+- Pure cleanup: `npm run test` count unchanged at 4578/4578 (the 6 test cases still run, now pinned against the canonical export).
+
 ## [1.5.0] — 2026-06-24
 
 ### Added — partial-bags safe-allocation backfill
