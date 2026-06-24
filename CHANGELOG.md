@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.5] — 2026-06-24
+
+### Documentation
+- **Backfilled missing v1.1.x and v1.2.0 release notes** in the historical section of this file (between v1.3.0 and v1.0.2). Entries are paraphrased directly from the commit bodies (`91509a1`, `a697ad0`, `ff6de66`) with no invented details. Resolves pending changelog task: *"backfill CHANGELOG.md entries for v1.1.0, v1.1.1, v1.2.0"*. The v1.3.0 entry already existed and was not touched.
+
+### Notes
+- Documentation-only change. No code edits, no schema changes, no tests added, no behavior changes.
+- Test count unchanged at 4577. All four gates remain clean.
+
 ## [1.5.4] — 2026-06-24
 
 ### Changed
@@ -271,6 +280,68 @@
 ### Notes
 - No env changes. Live-write gates remain OFF (observation mode).
 - No Zoho v1.23.0 cached-endpoint integration yet (`/zoho/cached/*` paths are still unused). Cached warehouse dropdown will replace the free-text input once the gateway ships v1.23.0.
+
+## [1.2.0] — 2026-06-16
+
+### Added
+- **Overs/extras resolution workflow.** Operator-driven decision panel for raw-bag receives that hit the staged `NEEDS_REVIEW` + `OVER_RECEIVE_EXCEEDS_PO_REMAINING` blocker (per `docs/OVERS_EXTRAS_RESOLUTION_DESIGN.md`). Four decisions:
+  - `adjust_down` — lowers staged qty, freshens idempotency key + buffer, transitions row back to `PENDING` for the next commit attempt
+  - `hold_for_po_update` — `HELD` with `held_reason` carrying the operator note (tag persists until unhold, which re-clears it)
+  - `needs_overs_po` — row stays `NEEDS_REVIEW` with the awaiting-overs-PO tag visible in the staging UI sub-queue
+  - `reconciled_manually` — terminal `VOIDED` with operator-supplied reason
+- New panel `app/(admin)/partial-bags/[inventoryBagId]/zoho-receive/overs-resolution-panel.tsx` (308 LOC).
+
+### Scope guards (pinned by source-level contract tests)
+- Cron still skips `NEEDS_REVIEW`.
+- Manual commit-now still blocked while `NEEDS_REVIEW`.
+- `inventory_bags.declared_pill_count` is never mutated.
+- No split-receive and no auto-create overs PO in v1.2.0.
+- Bag edit / regenerate clears `overs_decision_*` (audit log preserves prior decision history).
+
+### Schema
+- Migration `0065` adds six additive columns to `zoho_raw_bag_receives` (`overs_decision`, `overs_decision_at`, `overs_decision_by_user_id`, `overs_decision_note`, `adjusted_received_quantity`, `parent_op_id`) plus a partial index on `overs_decision`. No DROP / RENAME / type change.
+
+### Tests
+- 60 new tests (32 pure helpers + 28 source-level contract). Total suite at release: 4251/4251 passing; tsc clean; next build clean.
+
+### Notes
+- No env changes. Live-write gates remain OFF (observation mode).
+- Inventory bags and the Zoho gateway are never touched by this workflow; the staging buffer remains the only source of write intent.
+
+## [1.1.1] — 2026-06-16
+
+### Fixed
+- **Forward new v1.1.0 env vars to the app container.** `docker-compose.yml` only forwards env vars listed under `services.app.environment`. v1.1.0 added three new vars (`LUMA_CRON_SECRET`, `ZOHO_AUTO_COMMIT_ENABLED`, `ZOHO_AUTO_COMMIT_BUFFER_HOURS`) that were set in `/etc/luma/.env` on LXC 122 but never reached the container — the cron endpoint returned 503 because `LUMA_CRON_SECRET` was unset inside the process. Adds those three vars to the compose environment block with fail-closed defaults (`LUMA_CRON_SECRET` empty → 503; `ZOHO_AUTO_COMMIT_ENABLED=false` → cron is a no-op; `ZOHO_AUTO_COMMIT_BUFFER_HOURS=24` → production review window).
+
+### Notes
+- Build-system fix only. No behavior change in Luma or the gateway.
+
+## [1.1.0] — 2026-06-16
+
+### Added — Zoho staging-buffer system
+
+Operators can run by hand or auto-commit on a 24h review window.
+
+### Schema
+- Migration `0062` — extends `zoho_raw_bag_receive_status` enum with `HELD`, `NEEDS_MAPPING`, `COMMITTING`, `VOIDED`.
+- Migration `0063` — staging-buffer columns on `zoho_raw_bag_receives` and `zoho_production_output_ops` (`auto_commit_eligible_at`, `held_at`, `voided_at`, `void_reason`, `commit_idempotency_key`, `commit_attempt_count`, `commit_request_payload`, `mapping_blockers`). Adds `products.zoho_live_commit_enabled`.
+- Migration `0064` — extends `zoho_raw_bag_receive_status` with `NEEDS_REVIEW` for business-decision blockers (overs, etc.).
+- All additive; schema.ts mirrored; journal updated.
+
+### Shared commit functions
+- `lib/zoho/shared-raw-bag-receive-commit.ts` and `lib/zoho/shared-production-output-commit.ts` — one path per surface, used by both manual and auto-commit callers. Each:
+  - pre-flight gate via `resolveAutoCommitWriteGates()` BEFORE claim, so guard-blocked never burns `commit_attempt_count` and never calls the live gateway
+  - atomic conditional `UPDATE` claim: status → `COMMITTING` with attempt count +1 only on real attempts
+  - state machine: `PENDING` / `PREVIEWED` / `FAILED` → `COMMITTING` → `COMMITTED` / `NEEDS_MAPPING` / `NEEDS_REVIEW` / `FAILED` / `PENDING`-retry
+  - distinct result kinds: `COMMITTED`, `STATE_BLOCKED`, `GUARD_BLOCKED`, `NEEDS_MAPPING`, `NEEDS_REVIEW`, `TRANSPORT_RETRYABLE`, `PERMANENT_FAILURE`
+  - commit-trigger suffix appended to frozen notes RIGHT BEFORE the gateway call; frozen body is never mutated
+
+### Frozen payloads + accounting notes
+- `lib/zoho/zoho-commit-notes.ts` — pure helpers per op type; priority identifiers (Luma op id, receipt #, bag #, lot #, SKU, qty) preserved on truncation; commit-trigger suffix always preserved.
+- `lib/zoho/freeze-raw-bag-receive-payload.ts` — freezes payload + accounting notes at preview/seed time and replays verbatim on commit.
+
+### Cron + env
+- New `LUMA_CRON_SECRET`, `ZOHO_AUTO_COMMIT_ENABLED`, `ZOHO_AUTO_COMMIT_BUFFER_HOURS` env vars (cron is a no-op while `ZOHO_AUTO_COMMIT_ENABLED=false`).
 
 ## [1.0.2] — 2026-06-02
 
