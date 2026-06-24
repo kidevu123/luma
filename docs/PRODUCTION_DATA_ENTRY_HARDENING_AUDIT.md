@@ -291,7 +291,7 @@ For a **QR card** (floor scan picker):
 | Unit | `floor-readiness.test.ts` — all statuses, legacy vs intake paths |
 | Integration | Extend `scan-card-form.test.ts` / `actions.test.ts` — block unlinked ASSIGNED card |
 | Regression | Admin start still passes with fully linked QA bag |
-| Smoke | Auth smoke unchanged; optional script `scripts/audit-floor-readiness-counts.ts` (read-only) |
+| Smoke | Auth smoke unchanged; optional read-only audit script (not yet implemented; would count floor-readiness rows by status) |
 | Manual | Pre-shift checklist: badge green on intake bags before floor scan |
 
 ---

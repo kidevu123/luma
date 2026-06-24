@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.6] — 2026-06-24
+
+### Documentation
+- **Corrected two phantom script references in docs.**
+  - `docs/COMMERCIAL_TRACEABILITY_PLAN.md:500` referenced `scripts/verify-commercial-trace-7.ts`; the actual on-disk filename is `scripts/verify-commercial-trace.ts` (the script's own header confirms it implements COMMERCIAL-TRACE-7 — only the filename lacks the `-7`).
+  - `docs/PRODUCTION_DATA_ENTRY_HARDENING_AUDIT.md:294` referenced `scripts/audit-floor-readiness-counts.ts`; this script was a planned-but-never-built optional helper. Replaced with descriptive prose preserving the original intent.
+
+### Notes
+- Documentation-only change. No code edits, no schema changes, no tests added, no behavior changes.
+- Test count unchanged at 4577. All four gates remain clean (lint, tsc, vitest, next build).
+
 ## [1.5.5] — 2026-06-24
 
 ### Documentation

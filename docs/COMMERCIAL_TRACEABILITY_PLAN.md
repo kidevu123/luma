@@ -497,7 +497,7 @@ Stop. Owner reviews vision correction + supersession of NEXUS-0..6.
 - Stop: in-process mock-receiver verify script proves the customer-safe vs CSR scopes return the right field set; HIGH-only filtering works; cross-customer requests get 404.
 
 ### COMMERCIAL-TRACE-7 — staging verification with mock invoice + finished lot
-- `scripts/verify-commercial-trace-7.ts` — seeds a QA invoice + QA finished lot, runs the suggestion engine, confirms via the action, hits all three Nexus endpoints, asserts the customer scope hides supplier_lot and the CSR scope shows it. Cleanup.
+- `scripts/verify-commercial-trace.ts` — seeds a QA invoice + QA finished lot, runs the suggestion engine, confirms via the action, hits all three Nexus endpoints, asserts the customer scope hides supplier_lot and the CSR scope shows it. Cleanup.
 - Stop: verify script exits 0.
 
 ### COMMERCIAL-TRACE-8 — live Zoho verification after tokens are refreshed
