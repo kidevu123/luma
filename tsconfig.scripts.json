@@ -1,0 +1,37 @@
+// Typecheck gate for the operational scripts exposed via package.json.
+//
+// Scope: intentionally limited to the npm-script entrypoints listed below
+// (migrate / seed / rebuild-read-models / replay-workflow-events /
+// synthesize-legacy / staging seed+cleanup / validation-snapshot /
+// repair-qr-inventory / fix-station-handpack-kind / verify-deploy /
+// audit-product-zoho-readiness). Transitively imported files are still
+// type-checked by tsc as part of the program.
+//
+// The base ./tsconfig.json excludes the entire `scripts` directory, so
+// this child config intentionally overrides `exclude` to ["node_modules"]
+// so the explicit `include` list is not re-excluded by inheritance.
+//
+// Out of scope (intentionally NOT covered by this gate):
+//   - scripts/_*.ts pilot scripts (`_pilot-*`)
+//   - one-off historical / repair backfills (e.g. apply-bag45-*.ts,
+//     dry-run-bag45-*.ts, repair-bag-card-104-*.ts)
+//   - Python scripts (legacy-export-tt.py)
+//   - shell scripts (setup-https.sh)
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "scripts/migrate.ts",
+    "scripts/seed.ts",
+    "scripts/rebuild-read-models.ts",
+    "scripts/replay-workflow-events.ts",
+    "scripts/synthesize-legacy.ts",
+    "scripts/seed-staging-validation-data.ts",
+    "scripts/cleanup-staging-validation-data.ts",
+    "scripts/validation-snapshot.ts",
+    "scripts/repair-qr-inventory.ts",
+    "scripts/fix-station-handpack-kind.ts",
+    "scripts/verify-deploy.ts",
+    "scripts/audit-product-zoho-readiness.ts"
+  ],
+  "exclude": ["node_modules"]
+}

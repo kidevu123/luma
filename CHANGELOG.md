@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.7] — 2026-06-24
+
+### Tooling
+- **Added `npm run typecheck:scripts` gate** for the 12 operational scripts exposed via `package.json` (migrate, seed, rebuild-read-models, replay-workflow-events, synthesize-legacy, staging seed/cleanup, validation-snapshot, repair-qr-inventory, fix-station-handpack-kind, verify-deploy, audit-product-zoho-readiness).
+- New `tsconfig.scripts.json` extends the base config with an explicit `include` list of those 12 entrypoints and overrides `exclude` to `["node_modules"]` so the base `exclude: ["scripts", ...]` rule does not re-skip the included files. Transitively imported files remain type-checked as part of the program.
+- Pilot scripts (`scripts/_*.ts`), historical/repair backfills, Python scripts, and shell scripts are intentionally out of scope and remain excluded.
+
+### Notes
+- All 12 operational scripts passed strict TS on first run (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`); no script edits required.
+- App typecheck, lint, vitest, and next build all unchanged. Test count unchanged at 4577.
+
 ## [1.5.6] — 2026-06-24
 
 ### Documentation
