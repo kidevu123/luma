@@ -7,6 +7,13 @@ const sidebarSrc = readFileSync(
   join(process.cwd(), "components/admin/sidebar.tsx"),
   "utf8",
 );
+// NAV-PHASED-1 — operator-facing labels moved to lib/auth/admin-nav.ts
+// (sidebar.tsx now only carries the href→icon mapping). Tests that
+// pin a label must read from admin-nav.ts.
+const adminNavSrc = readFileSync(
+  join(process.cwd(), "lib/auth/admin-nav.ts"),
+  "utf8",
+);
 
 describe("PARTIAL-BAG-RESTART · /production/start", () => {
   it("redirects to floor-board when inventoryBagId is absent", () => {
@@ -26,7 +33,7 @@ describe("STATION-NAV-CLEANUP-1 · admin sidebar", () => {
   });
 
   it("still links Production output", () => {
-    expect(sidebarSrc).toMatch(/href:\s*"\/packaging-output"/);
-    expect(sidebarSrc).toMatch(/Production output/);
+    expect(sidebarSrc).toMatch(/"\/packaging-output"/);
+    expect(adminNavSrc).toMatch(/label:\s*"Production output"/);
   });
 });

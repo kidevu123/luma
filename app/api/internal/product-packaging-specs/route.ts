@@ -42,7 +42,7 @@ export async function GET(req: Request) {
   > = {};
   for (const r of rows) {
     if (!grouped[r.productSku]) grouped[r.productSku] = [];
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     grouped[r.productSku]!.push({
       material_code: r.materialCode,
       qty_per_unit: r.qtyPerUnit,

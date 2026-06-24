@@ -8,6 +8,12 @@ const sidebarSrc = readFileSync(
   join(__dirname, "../../../../components/admin/sidebar.tsx"),
   "utf8",
 );
+// NAV-PHASED-1 — labels moved to lib/auth/admin-nav.ts; sidebar.tsx
+// now only carries href→icon.
+const adminNavSrc = readFileSync(
+  join(__dirname, "../../../../lib/auth/admin-nav.ts"),
+  "utf8",
+);
 
 describe("AUDIT-LOG-1 · audit log page", () => {
   it("requires lead role for supervisor access", () => {
@@ -41,6 +47,6 @@ describe("AUDIT-LOG-1 · audit log page", () => {
 describe("AUDIT-LOG-1 · sidebar nav", () => {
   it("links Audit log under Reports section", () => {
     expect(sidebarSrc).toMatch(/\/reports\/audit-log/);
-    expect(sidebarSrc).toMatch(/Audit log/);
+    expect(adminNavSrc).toMatch(/label:\s*"Audit log"/);
   });
 });

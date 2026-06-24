@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.4.19] — 2026-06-24
+
+### Changed
+- **Cleanup sprint (Phase 0/0.5/2 — no behavior change).** Repaired the lint command, re-pinned 4 outdated test assertions, fixed 2 real `<a>` → `<Link>` violations, removed 5 stale `eslint-disable` directives, deleted confirmed dead-code module `lib/production/diagnostics.ts` + its paired shape-only fixture test, and pruned 9 untracked debris pilots from the local working tree.
+
+### Tooling
+- Replaced the deprecated `next lint` with `eslint .` driven by a new `eslint.config.mjs` flat config (Next.js `@next/next` recommended + core-web-vitals rules). Added `@typescript-eslint/parser` + `@typescript-eslint/eslint-plugin` (rule definitions only; no rules enabled — so existing inline `// eslint-disable-next-line @typescript-eslint/*` directives resolve). `npm run lint` now runs non-interactively and reports findings; PR gate becomes meaningful.
+
+### Tests
+- `lib/zoho/partial-unique-luma-op-migration.test.ts`: pin migration `0067` by tag-lookup instead of last-journal-entry so the test stays green as future migrations append.
+- `app/(admin)/production/start/page.test.ts` and `app/(admin)/reports/audit-log/page.test.ts`: read the label assertion from `lib/auth/admin-nav.ts` (its current home after the NAV-PHASED-1 refactor) instead of `components/admin/sidebar.tsx`.
+- `app/(floor)/floor/[token]/page.test.ts`: replace the obsolete `filterSealingProductsByTabletType` assertion with checks for the current shared helper (`lib/production/sealing-product`, `resolveSealingProductSelection`, `sealingTabletsByProduct`).
+
+### Notes
+- No env changes. No deploy gates flipped. No DB migrations. No production code behavior change.
+- Confirmed test count delta: 4584 → 4578 after removing the diagnostics fixture (its 6 contract tests pinned shape of a runtime-orphan module).
+- `lib/production/diagnostics.ts` had zero runtime callers across `app/`, `lib/`, `components/`, `scripts/`. Its only reference was the paired `diagnostics.test.ts` (pure-shape fixture, "Phase E.5 — diagnostic layer contract tests") — both deleted together.
+
 ## [1.4.18] — 2026-06-19
 
 ### Fixed

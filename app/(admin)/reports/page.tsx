@@ -9,6 +9,7 @@
 // fast for now, but the read model lets us add per-employee, per-
 // shift, per-product cuts later without re-architecting.
 
+import Link from "next/link";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
@@ -315,7 +316,7 @@ export default async function ReportsPage() {
                   <p className="text-[11px] text-text-subtle mt-2 leading-relaxed">
                     Figures reflect consumption recorded via finished lot issuance (BOM × units produced).
                     For detailed runway analysis, see{" "}
-                    <a href="/metrics/forecast" className="underline">Forecast</a>.
+                    <Link href="/metrics/forecast" className="underline">Forecast</Link>.
                   </p>
                 </>
               )}

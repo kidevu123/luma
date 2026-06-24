@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { Plus, Trash2, Save, AlertCircle, Info } from "lucide-react";
 import type { TabletType, PurchaseOrder } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
@@ -111,9 +112,9 @@ export function ReceiveWizard({
             Receive pills
           </a>
           . For packaging, go to{" "}
-          <a href="/inbound/packaging-materials" className="underline font-medium">
+          <Link href="/inbound/packaging-materials" className="underline font-medium">
             Receive packaging
-          </a>
+          </Link>
           .
         </span>
       </div>

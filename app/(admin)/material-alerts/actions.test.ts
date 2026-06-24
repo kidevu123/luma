@@ -226,7 +226,7 @@ describe("PackTrack discipline in actions.ts", () => {
     // Static scan: only sendMaterialRecommendationToPackTrackAction is
     // allowed to mention sendRecommendationToPackTrack. The
     // acknowledge / dismiss helpers must not.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
     const src = fs.readFileSync(
@@ -261,7 +261,7 @@ describe("PackTrack discipline in actions.ts", () => {
   });
 
   it("actions.ts does not contain PO-creation language", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
     const src = fs.readFileSync(

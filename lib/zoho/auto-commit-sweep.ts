@@ -60,9 +60,9 @@ const PER_PASS_LIMIT = 25;
 // from cron action; the role string makes that distinction obvious
 // in the timeline.
 export const CRON_ACTOR: Pick<CurrentUser, "id" | "role"> = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   id: null as any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   role: "CRON" as any,
 };
 

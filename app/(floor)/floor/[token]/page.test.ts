@@ -335,7 +335,14 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
 
   it("loads sealing product options when bag has no product at sealing station", () => {
     expect(pageSrc).toMatch(/sealingProductOptionsForForm/);
-    expect(pageSrc).toMatch(/filterSealingProductsByTabletType/);
+    // The page now resolves the option list through the shared helper
+    // at lib/production/sealing-product (resolveSealingProductSelection)
+    // instead of an inline filterSealingProductsByTabletType call.
+    expect(pageSrc).toMatch(
+      /from "@\/lib\/production\/sealing-product"/,
+    );
+    expect(pageSrc).toMatch(/resolveSealingProductSelection/);
+    expect(pageSrc).toMatch(/sealingTabletsByProduct/);
     expect(pageSrc).toMatch(/hasProductMapped/);
     expect(pageSrc).toMatch(/sealingProductOptions=\{sealingProductOptionsForForm\}/);
   });

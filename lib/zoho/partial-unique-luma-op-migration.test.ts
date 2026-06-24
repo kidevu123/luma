@@ -70,20 +70,24 @@ describe("migration 0067 — partial unique on luma_operation_id (shape)", () =>
 
 describe("migration 0067 — journal registration", () => {
   it("registers idx=66, tag=0067_zoho_prod_output_ops_partial_unique_luma_op", () => {
-    const last = JOURNAL.entries[JOURNAL.entries.length - 1];
-    expect(last).toBeTruthy();
-    expect(last?.idx).toBe(66);
-    expect(last?.tag).toBe(
-      "0067_zoho_prod_output_ops_partial_unique_luma_op",
+    // Find-by-tag so this pin stays valid as newer migrations append.
+    const entry = JOURNAL.entries.find(
+      (e) => e.tag === "0067_zoho_prod_output_ops_partial_unique_luma_op",
     );
+    expect(entry).toBeTruthy();
+    expect(entry?.idx).toBe(66);
   });
 
   it("uses a strictly-greater 'when' than the previous entry", () => {
-    const n = JOURNAL.entries.length;
-    expect(n).toBeGreaterThanOrEqual(2);
-    const last = JOURNAL.entries[n - 1]!;
-    const prev = JOURNAL.entries[n - 2]!;
-    expect(last.when).toBeGreaterThan(prev.when);
+    // Same find-by-tag scoping: assert 0067's `when` is strictly
+    // greater than 0066's, not "last vs second-to-last".
+    const idx = JOURNAL.entries.findIndex(
+      (e) => e.tag === "0067_zoho_prod_output_ops_partial_unique_luma_op",
+    );
+    expect(idx).toBeGreaterThanOrEqual(1);
+    const entry = JOURNAL.entries[idx]!;
+    const prev = JOURNAL.entries[idx - 1]!;
+    expect(entry.when).toBeGreaterThan(prev.when);
   });
 });
 
