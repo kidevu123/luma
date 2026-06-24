@@ -26,6 +26,7 @@ import { formatRemainingEstimate } from "@/lib/production/partial-bag-lifecycle"
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { PartialBagCorrectionMenu } from "./correction-menu";
+import { BackfillSafeAllocationsButton } from "./backfill-allocations-button";
 
 export const dynamic = "force-dynamic";
 
@@ -224,11 +225,13 @@ export default async function PartialBagWorkbenchPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <BackfillSafeAllocationsButton />
             <p className="text-xs text-text-muted mb-3">
               These in-flight runs have no allocation session on their raw bag,
               so consumption is not landing on the ledger. A lead can repair
               each one from the station screen (yellow warning → Repair
-              allocation), or it will be forced to a closeout at run end.
+              allocation), bulk-backfill safe rows above, or force closeout at
+              run end.
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">

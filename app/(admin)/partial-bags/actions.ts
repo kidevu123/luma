@@ -17,6 +17,11 @@ import {
   voidPartialBagRecord,
   type PartialBagCorrectionResult,
 } from "@/lib/production/partial-bag-admin-corrections";
+import {
+  applySafeActiveAllocationBackfill,
+  loadActiveWorkflowBagBackfillReport,
+  summarizeBackfillReport,
+} from "@/lib/production/backfill-missing-active-allocation";
 
 const resolveSchema = z.object({
   inventoryBagId: z.string().uuid(),
@@ -166,4 +171,44 @@ export async function voidPartialBagRecordAction(
   });
   if (result.ok) revalidatePartialBagSurfaces();
   return result;
+}
+
+export type BackfillSafeMissingAllocationsResult =
+  | {
+      ok: true;
+      repaired: number;
+      skipped: number;
+      sessionIds: string[];
+      errors: Array<{ workflowBagId: string; error: string }>;
+    }
+  | { ok: false; error: string };
+
+export async function backfillSafeMissingAllocationsAction(): Promise<BackfillSafeMissingAllocationsResult> {
+  const actor = await requireLead();
+  const report = await loadActiveWorkflowBagBackfillReport();
+  const summary = summarizeBackfillReport(report);
+  if (summary.safeCount === 0) {
+    return {
+      ok: true,
+      repaired: 0,
+      skipped: summary.total,
+      sessionIds: [],
+      errors: [],
+    };
+  }
+
+  const result = await applySafeActiveAllocationBackfill({
+    actor: { id: actor.id, role: actor.role },
+  });
+
+  revalidatePath("/partial-bags");
+  revalidatePath("/admin/partial-bags");
+
+  return {
+    ok: true,
+    repaired: result.repaired.length,
+    skipped: summary.total - summary.safeCount + result.skipped.length,
+    sessionIds: result.repaired.map((r) => r.sessionId),
+    errors: result.errors,
+  };
 }

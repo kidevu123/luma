@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.5.0] — 2026-06-24
+
+### Added — partial-bags safe-allocation backfill
+
+- **Bulk backfill of missing OPEN allocation sessions on active workflow runs.** When an active workflow bag has no `raw_bag_allocation_sessions` row, downstream consumption never lands on the ledger; previously a lead had to repair each run from the station screen or wait for forced closeout. The new path lets a lead bulk-repair every **SAFE-classified** active run in one click.
+- New admin affordance: `<BackfillSafeAllocationsButton />` rendered in the partial-bags workbench card (`/admin/partial-bags`). Runs the new server action `backfillSafeMissingAllocationsAction` (`app/(admin)/partial-bags/actions.ts`), reports `repaired` / `skipped` counts inline, and only operates on classifications the helper labels `SAFE_OPEN_ALLOCATION`.
+- New library module `lib/production/backfill-missing-active-allocation.ts` (801 LOC) — pure logic + transactional apply path. Default disposition: dry-run report only. Writes one audit row per session via `writeAudit` ("BACKFILL-ALLOCATION-v0.4.109" notes). Hard rules baked in: does not close allocations, does not issue lots, does not touch Zoho.
+- Paired contract test `lib/production/backfill-missing-active-allocation.test.ts` (465 LOC) — pins the classification ladder and the apply gate.
+- CLI runner `scripts/backfill-missing-active-allocations.ts` for ops-style invocation (dry-run by default; `--apply --yes` required to write).
+
+### Notes
+
+- No env changes. No live-write gate flips. No DB migrations. No Zoho writes.
+- Backfill function is gated to the SAFE classification only; AMBIGUOUS / CONFLICTING_OPEN_SESSION / FINALIZED runs are skipped (counted toward `skipped`, never silently repaired).
+- The lib + test + button + action + page wiring + CLI are interconnected and shipped together so the repo's tracked state stays consistent — partial trees of this feature are not viable (the tracked `partial-bags/actions.ts` and `page.tsx` import directly from the previously-untracked lib + button).
+
 ## [1.4.19] — 2026-06-24
 
 ### Changed
