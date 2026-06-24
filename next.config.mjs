@@ -3,12 +3,11 @@ const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
   experimental: {
-    serverComponentsExternalPackages: ["pg", "postgres", "pg-boss", "argon2", "sql.js"],
+    serverComponentsExternalPackages: ["pg", "postgres", "argon2", "sql.js"],
   },
   serverExternalPackages: [
     "pg",
     "postgres",
-    "pg-boss",
     "argon2",
     "sql.js",
     "@opentelemetry/sdk-node",

@@ -17,7 +17,11 @@ batch genealogy so every finished lot's pedigree is one query away.
 
 Next.js 15 (App Router) + React 19 + TypeScript strict
 (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
-Postgres 16 via Drizzle. pg-boss for jobs. Argon2id for local password
+Postgres 16 via Drizzle. Background jobs were originally planned on
+pg-boss but never implemented; cron-style jobs currently run via
+systemd timers + bearer-authed `/api/cron/*` routes (e.g.
+`/api/cron/zoho-auto-commit`). The pg-boss dependency was removed in
+v1.5.8. Argon2id for local password
 hashing (Authentik OIDC primary). Tailwind v3 + shadcn primitives copied
 in. OpenTelemetry -> Prometheus on port 9464, traces optional via OTLP.
 Single multi-stage Dockerfile, deploys to LXC 122 (`luma`,
@@ -38,8 +42,11 @@ Single multi-stage Dockerfile, deploys to LXC 122 (`luma`,
 5. **Output** — zoho_pushes (calls `zoho-integration-service` on LXC
    9503; never direct OAuth from this app).
 6. **Read models** — read_station_live, read_bag_state,
-   read_daily_throughput, read_material_burn. Refreshed by pg-boss
-   projector jobs subscribed to `pg_notify` on workflow_events.
+   read_daily_throughput, read_material_burn. Projector refresh via
+   pg-boss was planned but never implemented (dependency removed in
+   v1.5.8); read models are currently maintained by the projector
+   modules in `lib/projector/*` called from synchronous write paths
+   and from rebuild scripts (`npm run rebuild:read-models`).
 
 ## Conventions (locked)
 

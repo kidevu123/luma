@@ -49,18 +49,25 @@
      PACKAGING_SNAPSHOT, BOTTLE_*.
    - Force-release card with reason (LEAD+ only).
 4. Server-Sent Events endpoint streaming live board updates.
-5. pg-boss projector worker that listens on `pg_notify('workflow_events')`
-   and updates: `read_station_live`, `read_bag_state`,
+5. Projector that updates: `read_station_live`, `read_bag_state`,
    `read_daily_throughput`, `read_material_burn`. One row written per
-   event, idempotent on `event.id`.
+   event, idempotent on `event.id`. Originally planned as a pg-boss
+   worker subscribed to `pg_notify('workflow_events')`; pg-boss was
+   removed in v1.5.8 without ever being wired. Read models are
+   currently maintained by the modules in `lib/projector/*` invoked
+   from synchronous write paths plus the `rebuild:read-models` script.
 6. On `BAG_FINALIZED`: create `finished_lots` row + insert
    `finished_lot_inputs` (tablet batch from inventory_bag + packaging
    batches via BOM × FIFO over packaging_lots).
 
 ## Phase 5 — output (Zoho push)
 
-1. Zoho push: when finished_lot enters RELEASED status, enqueue a
-   pg-boss job that POSTs to `zoho-integration-service`.
+1. Zoho push: when finished_lot enters RELEASED status, the staging
+   buffer (v1.1.0) records the push intent; a bearer-authed cron route
+   (`/api/cron/zoho-auto-commit`, driven by a systemd timer on LXC 122)
+   drains the buffer and POSTs to `zoho-integration-service`. The
+   original plan was a pg-boss job; pg-boss was removed in v1.5.8
+   without ever being wired.
 2. Track in `zoho_pushes`. Retry with exponential backoff.
 3. Admin override: re-push, mark resolved.
 

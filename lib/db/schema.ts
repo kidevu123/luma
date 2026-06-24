@@ -2779,8 +2779,11 @@ export const readMaterialUsageLearning = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Context 6 — Read models (denormalized projections, refreshed by pg-boss
-//                          jobs that listen to workflow_events.pg_notify)
+// Context 6 — Read models (denormalized projections; maintained by the
+//                          projector modules in lib/projector/* called from
+//                          synchronous write paths and the rebuild script.
+//                          A pg-boss worker was planned but never wired;
+//                          dependency removed in v1.5.8.)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Current state of every active station. One row per station. */

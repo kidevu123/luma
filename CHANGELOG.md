@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.8] — 2026-06-24
+
+### Dependencies
+- **Removed four confirmed-unused packages.** Pre-removal grep confirmed zero runtime imports for each.
+  - `react-grid-layout` (^2.2.3) — no grid dashboards in the codebase.
+  - `@types/react-grid-layout` (^1.3.6) — types for the package above.
+  - `recharts` (^3.8.1) — no chart components in the codebase.
+  - `pg-boss` (^10.1.5) — described in CLAUDE.md / docs/phases.md as the planned projector worker + Zoho push driver, but was never wired. Tests at `app/(admin)/finished-lots/[id]/zoho-production-output-preview-wiring.test.ts:139,142` and `lib/db/queries/zoho-production-output.test.ts:280` already pin the absence with negative `expect(...).not.toContain("pg-boss")` assertions; these were left intact.
+
+### Tooling
+- **`next.config.mjs` cleanup.** Removed dangling `"pg-boss"` references from both `experimental.serverComponentsExternalPackages` and `serverExternalPackages` since the package no longer exists. No behavioral change — Next.js was instructing the bundler to externalize a package that was never imported.
+
+### Documentation
+- **`CLAUDE.md`** — "pg-boss for jobs" replaced with an honest description: pg-boss was planned but never implemented; cron-style jobs currently run via systemd timers + bearer-authed `/api/cron/*` routes. "Read models refreshed by pg-boss projector jobs" replaced with the actual mechanism (projector modules in `lib/projector/*` invoked from synchronous write paths and the `rebuild:read-models` script).
+- **`docs/phases.md`** — Phase 4 projector step and Phase 5 Zoho push step rewritten to describe what actually exists (synchronous projector + cron-route staging-buffer drain), with a note that pg-boss was the original plan and was removed in v1.5.8.
+- **`lib/db/schema.ts:2782`** — Context 6 header comment updated to match the same reality.
+- Planning docs that describe HYPOTHETICAL future pg-boss handlers (e.g. `docs/ZOHO_LIVE_SYNC_PLAN.md`, `docs/ZOHO_ITEM_SYNC_PLAN.md`, `docs/CLAUDE_BUILD_QUEUE.md`) were intentionally NOT modified — they document plans, not current architecture, and removing them would lose intent. Historical CHANGELOG entries that mention "no worker/pg-boss" were also intentionally not touched — they are accurate historical statements about what was deferred at the time of those releases.
+
+### Notes
+- No app code changes (only the schema.ts comment, the Next config externalization list, and four package.json lines).
+- No script changes. No test changes. No behavior changes.
+- Test count unchanged at 4577. All five gates clean.
+
 ## [1.5.7] — 2026-06-24
 
 ### Tooling
