@@ -222,10 +222,6 @@ export async function ensureOpenRawBagAllocationSessionForWorkflowBag(
   };
 }
 
-/** @deprecated use ensureOpenRawBagAllocationSessionForWorkflowBag */
-export const ensureOpenAllocationForProductionStartInTx =
-  ensureOpenRawBagAllocationSessionForWorkflowBag;
-
 export type CloseAllocationForProductionOutputInput = {
   workflowBagId: string;
   productId: string;

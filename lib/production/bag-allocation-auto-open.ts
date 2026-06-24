@@ -3,7 +3,7 @@
 //
 // NOTE: production start paths use the canonical
 // lib/production/raw-bag-allocation-lifecycle.ts helpers
-// (ensureOpenAllocationForProductionStartInTx). This module exists for
+// (ensureOpenRawBagAllocationSessionForWorkflowBag). This module exists for
 // the REPAIR path only: a run already in flight whose allocation is
 // missing (legacy start) or prematurely closed (reopen). It adds the
 // repair-specific semantics the lifecycle helper does not cover:

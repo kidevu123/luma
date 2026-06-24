@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.5.3] — 2026-06-24
+
+### Changed
+- **Removed 6 dead `@deprecated` aliases with zero production and zero test callers.** All were identity passthroughs or unused dead exports left behind by past renames. Behavior-preserving cleanup.
+
+### Retired symbols
+- `CHOCO_DRIFT_BOM_QUANTITY_PER_UNIT` (`lib/zoho/v1206-choco-drift-pilot-contract.ts`) — alias of `CHOCO_DRIFT_RAW_TABLET_BOM_QUANTITY_PER_UNIT`
+- `CHOCO_DRIFT_RAW_COMPONENT_ITEM_ID` (same file) — alias of `CHOCO_DRIFT_RAW_TABLET_ITEM_ID`
+- `buildChocoDriftNonBatchComponentBatches` (same file) — identity passthrough to `buildChocoDriftComponentBatches`
+- `isConsolidatedProductionOutputEnabled` (`lib/zoho/production-output-config.ts`) — identity passthrough to `isProductionOutputPersistEnabled`
+- `lookupZohoComponentBatch` (`lib/zoho/component-batch-resolution.ts`) — shape-normalizing passthrough to `resolveZohoComponentBatch`
+- `ensureOpenAllocationForProductionStartInTx` (`lib/production/raw-bag-allocation-lifecycle.ts`) — `const` re-export of `ensureOpenRawBagAllocationSessionForWorkflowBag`
+
+### Doc update
+- `lib/production/bag-allocation-auto-open.ts` header comment updated to reference the canonical `ensureOpenRawBagAllocationSessionForWorkflowBag` instead of the now-deleted alias.
+
+### Held (still in use)
+- `ZOHO_PRODUCTION_OUTPUT_ENABLED_ENV` — though `@deprecated`, the constant is still **read by its own file** at `production-output-config.ts:74` for legacy detection (`legacyEnabledFlagSeen`). KEPT.
+- `classifyBatchLookupResponse` — still consumed by `production-output-v1206.test.ts`. The wrapper does data extraction (item_id, human_lot_number from body) so it's not a pure identity passthrough. HELD for a dedicated PR.
+- `CommitSource` type + `source` field on `RawBagReceiveNotesInput` (`lib/zoho/zoho-commit-notes.ts`) — comments document these as compatibility shims still in use (audit-log structuring + tested in `zoho-commit-notes.test.ts:92-93`). KEPT.
+- v1206 pilot contracts as a whole (`@deprecated DYNAMIC-BOM-DERIVATION-v1.4.4`) — transition fallback for legacy pilot SKUs per v1.4.4 design intent. KEPT.
+
+### Notes
+- No env changes. No DB migrations. No live-write gate flips. No Zoho writes.
+- Test count: 4577 → **4577** (no test deletions — the retired symbols had zero test callers).
+
 ## [1.5.2] — 2026-06-24
 
 ### Changed

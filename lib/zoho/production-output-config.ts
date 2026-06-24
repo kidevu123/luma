@@ -139,16 +139,6 @@ export function isProductionOutputCommitEnabled(
   );
 }
 
-/**
- * @deprecated Prefer isProductionOutputPersistEnabled.
- * True when consolidated op persistence path is active (not live commit).
- */
-export function isConsolidatedProductionOutputEnabled(
-  env: Record<string, string | undefined> = process.env,
-): boolean {
-  return isProductionOutputPersistEnabled(env);
-}
-
 export function isLegacyAssemblyEnqueueEnabled(
   env: Record<string, string | undefined> = process.env,
 ): boolean {

@@ -27,12 +27,6 @@ export const CHOCO_DRIFT_RAW_TABLET_ITEM_NAME = "Chocolate Brown 100mg B Tablet"
 /** Confirmed live Zoho BOM: 4 raw tablets per finished single. */
 export const CHOCO_DRIFT_RAW_TABLET_BOM_QUANTITY_PER_UNIT = 4;
 
-/** @deprecated use CHOCO_DRIFT_RAW_TABLET_BOM_QUANTITY_PER_UNIT */
-export const CHOCO_DRIFT_BOM_QUANTITY_PER_UNIT = CHOCO_DRIFT_RAW_TABLET_BOM_QUANTITY_PER_UNIT;
-
-/** @deprecated use CHOCO_DRIFT_RAW_TABLET_ITEM_ID */
-export const CHOCO_DRIFT_RAW_COMPONENT_ITEM_ID = CHOCO_DRIFT_RAW_TABLET_ITEM_ID;
-
 /** Internal physical traceability only — not sent to Zoho assembly/batch payload. */
 export const CHOCO_DRIFT_HUMAN_LOT_NUMBER = "152-000166";
 
@@ -125,11 +119,6 @@ export function deriveChocoDriftBomConsumption(unitAssemblyQuantity: number): Ar
 /** Confirmed: no component_batches for Choco Drift (non-batch-tracked BOM). */
 export function buildChocoDriftComponentBatches(): ComponentBatchPayloadEntry[] {
   return [];
-}
-
-/** @deprecated use buildChocoDriftComponentBatches */
-export function buildChocoDriftNonBatchComponentBatches(): ComponentBatchPayloadEntry[] {
-  return buildChocoDriftComponentBatches();
 }
 
 export function buildChocoDriftOperationSnapshot(input: {

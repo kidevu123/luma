@@ -306,17 +306,3 @@ export async function resolveZohoComponentBatch(opts: {
   }
 }
 
-/** @deprecated use resolveZohoComponentBatch */
-export async function lookupZohoComponentBatch(opts: {
-  itemId: string;
-  humanLotNumber: string;
-  env?: Record<string, string | undefined>;
-  fetchImpl?: FetchLike;
-}): Promise<
-  | { ok: true; result: BatchLookupResult }
-  | { ok: false; kind: "config" | "network" | "service"; message: string }
-> {
-  const resolved = await resolveZohoComponentBatch(opts);
-  if (!resolved.ok) return resolved;
-  return { ok: true, result: resolved.result };
-}
