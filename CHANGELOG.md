@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.22] — 2026-06-25
+
+### Refactor
+- **D-2 duplication reduction:** Shared static source-scan helpers in `lib/test/source-scan.ts` (`readRepoSource`, `grepRepo`, `grepRepoSymbol`) for guard/contract tests.
+
+### Tests
+- Migrated `raw-bag-intake-receive-deprecated.test.ts`, `zoho-live-commit-eligibility-guard.test.ts`, and `commit-source-dedup.test.ts` to the shared helper.
+- `lib/test/source-scan.test.ts` — focused helper smoke tests.
+
+### Notes
+- Test-only. No runtime, Zoho write, schema, or route changes.
+
 ## [1.5.21] — 2026-06-25
 
 ### Refactor
