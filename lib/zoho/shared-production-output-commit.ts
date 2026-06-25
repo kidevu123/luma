@@ -39,11 +39,10 @@ import {
 } from "@/lib/zoho/shared-raw-bag-receive-commit";
 import {
   appendCommitTriggerToNotes,
+  type CommitSource,
   type CommitTrigger,
 } from "@/lib/zoho/zoho-commit-notes";
 import { resolveAutoCommitWriteGates } from "@/lib/zoho/auto-commit-write-gates";
-
-export type ProductionOutputCommitSource = "manual" | "auto";
 
 export type ProductionOutputCommitCallInput = {
   requestPayload: Record<string, unknown>;
@@ -114,7 +113,7 @@ export type SharedProductionOutputCommitResult =
 
 export type SharedProductionOutputCommitInput = {
   opId: string;
-  source: ProductionOutputCommitSource;
+  source: CommitSource;
   actor: CurrentUser;
   /** Inject the gateway caller so the live cron and unit tests can
    *  share the same wrapper. Phase G wires the live caller. */
@@ -128,7 +127,7 @@ export type SharedProductionOutputCommitInput = {
  *  expired. */
 async function checkPreCommitGate(
   opId: string,
-  source: ProductionOutputCommitSource,
+  source: CommitSource,
   now: Date,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const [row] = await db

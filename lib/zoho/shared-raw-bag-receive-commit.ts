@@ -74,11 +74,12 @@ import {
 } from "@/lib/zoho/zoho-purchase-receive-id";
 import {
   appendCommitTriggerToNotes,
+  type CommitSource,
   type CommitTrigger,
 } from "@/lib/zoho/zoho-commit-notes";
 import { resolveAutoCommitWriteGates } from "@/lib/zoho/auto-commit-write-gates";
 
-export type CommitSource = "manual" | "auto";
+export type { CommitSource };
 
 export type CommitMappingBlocker = {
   code: string;

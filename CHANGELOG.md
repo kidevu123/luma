@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.21] — 2026-06-25
+
+### Refactor
+- **D-1 duplication reduction:** `CommitSource` (`"manual" | "auto"`) now has a single canonical definition in `lib/zoho/zoho-commit-notes.ts`. `shared-raw-bag-receive-commit.ts` re-exports it; `shared-production-output-commit.ts` drops the parallel `ProductionOutputCommitSource` alias.
+
+### Tests
+- `lib/zoho/commit-source-dedup.test.ts` — guard against reintroducing duplicate commit-source type definitions.
+
+### Notes
+- Type-only. No Zoho write behavior, payload, or route changes.
+
 ## [1.5.20] — 2026-06-25
 
 ### Refactor
