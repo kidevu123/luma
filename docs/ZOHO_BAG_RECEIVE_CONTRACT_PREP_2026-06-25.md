@@ -234,3 +234,63 @@ Rationale: core payload + domain values already match (M5); the only true blocke
 | This section | `docs/ZOHO_BAG_RECEIVE_CONTRACT_PREP_2026-06-25.md` §10 |
 
 **No runtime preview/commit/freeze migration, no live Zoho writes, no schema/env changes, no idempotency-namespace collapse, no notes-format change in Z-4.**
+
+---
+
+## 11. Phase Z-5 — preview key alignment (2026-06-25)
+
+**Goal:** Re-run the dual-run after service **S-2** and confirm the preview idempotency key mismatch (M1) is resolved.
+
+### 11.1 Service S-2
+
+| Item | Value |
+|------|-------|
+| Service commit | `4b5615cb1c90928007623e7d38e72aaa342b5590` |
+| Change | Build endpoint accepts optional `preview_idempotency_key`; when provided, the service **echoes it verbatim** |
+| Unchanged by S-2 | commit keys, receive keys, notes, preview route, commit route, idempotency persistence, audit behavior |
+| Reachability (re-checked) | `/health` 200 (`v1.28.0`); build route present (auth-required) |
+| Live capture from dev workstation | Still not possible (no bearer secret) — deterministic fixture + env-gated live test retained |
+
+### 11.2 Luma client change (isolated)
+
+- `buildBagReceiveBuildRequestBody(domain)` — attaches `preview_idempotency_key: "luma-bag-finish-receive:<inventory_bag_id>"` (Luma's existing per-bag key).
+- `callBagReceiveBuildService` now sends that body + sets the `Idempotency-Key` header to the same value.
+- Still **not** wired into runtime preview/commit/freeze. No namespace collapse — Luma keeps minting its own key; the service just echoes it.
+
+### 11.3 Preview key echo — M1 RESOLVED
+
+| | Luma | Service (S-2, key supplied) |
+|---|------|----------------------------|
+| Preview idempotency key | `luma-bag-finish-receive:<bag_id>` | `luma-bag-finish-receive:<bag_id>` (echoed) |
+| Verdict | — | **MATCH** |
+
+Regression guard: when no preview key is supplied, S-2 still falls back to `luma-bag-receive-preview:<luma_receive_id>` (pinned in tests).
+
+### 11.4 Remaining mismatch table (honest)
+
+| # | Mismatch | Status after Z-5 | Owner / action |
+|---|----------|------------------|----------------|
+| M1 | Preview idempotency key | **RESOLVED** (S-2 echo) | Service echoes Luma's per-bag key |
+| M2 | Commit idempotency key (`rbg-*`) | **OPEN — stays Luma-owned** | Commit/frozen replay remains local until replay parity proven |
+| M3 | Receive/source-receipt key | **OPEN — stays Luma-owned** | Production-output gate depends on it; keep Luma-owned |
+| M4 | Notes body format | **OPEN — approval-gated** | Service notes (`luma_receive_id`+`quantity_source`) differ from Luma's priority list; change needs explicit approval |
+| M5 | Core domain + Zoho values | **MATCH** | Safe for a future preview-build switch |
+
+### 11.5 Recommendation for next phase
+
+**Stop here for runtime; Luma runtime stays unchanged.** Two acceptable next steps, both contract-only:
+
+1. **Preferred — stop / hold.** With M1 resolved and core values matching, a future preview-build switch is technically unblocked, but commit/frozen replay (M2/M3) and notes (M4) remain Luma-owned by hard rule. No further contract work is required to keep the system correct. Recommend pausing until a product decision authorizes a runtime preview switch.
+2. **Optional Z-6 (contract-only) — align notes formatting in the service build endpoint**, then update the dual-run to assert notes equality. This must NOT touch Luma's runtime notes builder or commit/frozen replay, and requires explicit approval (M4 is approval-gated).
+
+**Do not** migrate runtime preview/commit, collapse idempotency namespaces, or change notes formatting without a dedicated, approved brief.
+
+### 11.6 Z-5 deliverables
+
+| Artifact | Path |
+|----------|------|
+| Updated isolated client (preview-key echo) | `lib/zoho/bag-receive-build-service-client.ts` |
+| Updated dual-run tests (M1 passes; M2/M3/M4 documented) | `lib/zoho/bag-receive-build-dual-run.contract.test.ts` |
+| This section | `docs/ZOHO_BAG_RECEIVE_CONTRACT_PREP_2026-06-25.md` §11 |
+
+**No runtime migration, no live Zoho writes, no commit/receive idempotency changes, no notes-format change, no schema/env changes in Z-5.**

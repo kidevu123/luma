@@ -61,6 +61,28 @@ export function bagFinishReceiveBuildInputToDomainRequest(
   };
 }
 
+/** Service build request body. S-2 added the optional
+ *  `preview_idempotency_key`: when supplied, the service echoes it
+ *  verbatim. Luma supplies its existing per-bag preview key so the
+ *  service-built preview key matches Luma's namespace (Z-5 / M1). */
+export type BagReceiveBuildRequestBody = ProposedBagReceiveDomainRequest & {
+  preview_idempotency_key: string;
+};
+
+/** Pure: attach Luma's per-bag preview idempotency key to the domain
+ *  request. This does NOT collapse Luma's namespaces — it tells the
+ *  service to echo the SAME key Luma already mints locally. */
+export function buildBagReceiveBuildRequestBody(
+  domain: ProposedBagReceiveDomainRequest,
+): BagReceiveBuildRequestBody {
+  return {
+    ...domain,
+    preview_idempotency_key: buildBagFinishReceiveIdempotencyKey(
+      domain.inventory_bag_id,
+    ),
+  };
+}
+
 /** Documented S-1 build response shape. */
 export type BagReceiveBuildServiceResponse = {
   zoho_purchase_receive_payload: Record<string, unknown>;
@@ -105,10 +127,11 @@ export async function callBagReceiveBuildService(
   // endpoint does not persist it (read-only). We use the preview
   // namespace so the gateway can correlate a build with the eventual
   // preview without minting a new key kind.
+  const requestBody = buildBagReceiveBuildRequestBody(domain);
   const headers = buildAssemblyServiceHeaders({
     bearerSecret: config.bearerSecret,
     brand: config.brand,
-    idempotencyKey: buildBagFinishReceiveIdempotencyKey(domain.inventory_bag_id),
+    idempotencyKey: requestBody.preview_idempotency_key,
   });
 
   const url = `${config.baseUrl}${BAG_RECEIVE_BUILD_PATH}`;
@@ -120,7 +143,7 @@ export async function callBagReceiveBuildService(
     r = await fetchImpl(url, {
       method: "POST",
       headers,
-      body: JSON.stringify(domain),
+      body: JSON.stringify(requestBody),
       signal: ctrl.signal,
     });
     clearTimeout(tid);

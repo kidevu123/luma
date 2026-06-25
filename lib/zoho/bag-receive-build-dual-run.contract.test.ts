@@ -22,6 +22,7 @@ import { buildRawBagCommitIdempotencyKey } from "./shared-raw-bag-receive-commit
 import { buildRawBagReceiveNotes } from "./zoho-commit-notes";
 import {
   bagFinishReceiveBuildInputToDomainRequest,
+  buildBagReceiveBuildRequestBody,
   callBagReceiveBuildService,
   diffBagReceiveBuild,
   parseBagReceiveBuildResponse,
@@ -81,19 +82,26 @@ function buildLumaSnapshot(
   };
 }
 
-// ─── Documented S-1 service fixture ────────────────────────────────────────
+// ─── Documented S-2 service fixture ────────────────────────────────────────
 //
-// Faithful encoding of the S-1 build contract rules from the Z-4 brief:
+// Faithful encoding of the build contract after service S-2:
 //   - normalized_request echoes the domain request values
-//   - preview key = luma-bag-receive-preview:<luma_receive_id>
-//   - notes include luma_receive_id + quantity_source (different from Luma)
+//   - preview key is ECHOED from the request's optional
+//     preview_idempotency_key when supplied (S-2). When omitted, the
+//     service falls back to its own luma-bag-receive-preview:<receive>.
+//   - notes still include luma_receive_id + quantity_source (UNCHANGED
+//     by S-2 — different from Luma; recorded as a remaining mismatch)
+//   - commit/receive keys UNCHANGED by S-2 (service per-receive)
 //   - internal_receipt_number is allowed to be null
 // The exact Zoho payload structure + commit/receive key formats are only
 // fully knowable from a live capture; placeholders are clearly marked.
 
 function buildDocumentedServiceFixture(
   domain: ProposedBagReceiveDomainRequest,
+  opts?: { suppliedPreviewKey?: string },
 ): BagReceiveBuildServiceResponse {
+  const previewKey =
+    opts?.suppliedPreviewKey ?? `luma-bag-receive-preview:${domain.luma_receive_id}`;
   return {
     zoho_purchase_receive_payload: {
       purchaseorder_id: domain.zoho_purchaseorder_id,
@@ -107,7 +115,8 @@ function buildDocumentedServiceFixture(
       date: domain.receive_date,
       notes: `luma_receive_id: ${domain.luma_receive_id}\nquantity_source: ${domain.quantity_source}`,
     },
-    preview_idempotency_key: `luma-bag-receive-preview:${domain.luma_receive_id}`,
+    // S-2: service echoes the supplied preview key verbatim.
+    preview_idempotency_key: previewKey,
     commit_idempotency_key: `luma-bag-receive-commit:${domain.luma_receive_id}`,
     receive_idempotency_key: `luma-bag-receive:${domain.inventory_bag_id}`,
     normalized_request: { ...domain },
@@ -149,9 +158,13 @@ describe("Z-4 · domain request mapper", () => {
 
 // ─── Deterministic dual-run (fixture = documented S-1 contract) ─────────────
 
-describe("Z-4 · dual-run vs documented S-1 build contract", () => {
+describe("Z-5 · dual-run vs documented S-2 build contract", () => {
   const luma = buildLumaSnapshot(CANONICAL_BUILD_INPUT);
-  const service = buildDocumentedServiceFixture(luma.domain);
+  // Luma now supplies its per-bag preview key; S-2 echoes it verbatim.
+  const requestBody = buildBagReceiveBuildRequestBody(luma.domain);
+  const service = buildDocumentedServiceFixture(luma.domain, {
+    suppliedPreviewKey: requestBody.preview_idempotency_key,
+  });
   const diff = diffBagReceiveBuild(luma, service);
 
   it("service normalized_request echoes every Luma domain value (core MATCH)", () => {
@@ -173,25 +186,32 @@ describe("Z-4 · dual-run vs documented S-1 build contract", () => {
     expect(payload.date).toBe(luma.domain.receive_date);
   });
 
-  it("preview idempotency key DIFFERS (namespace + key source field)", () => {
-    // Luma: luma-bag-finish-receive:<inventory_bag_id>
-    // Service: luma-bag-receive-preview:<luma_receive_id>
-    expect(diff.previewKey.equal).toBe(false);
+  it("M1 RESOLVED — preview idempotency key now MATCHES exactly (S-2 echo)", () => {
+    expect(diff.previewKey.equal).toBe(true);
     expect(diff.previewKey.luma).toBe(`luma-bag-finish-receive:${BAG_A}`);
-    expect(diff.previewKey.service).toBe("luma-bag-receive-preview:recv-1");
+    expect(diff.previewKey.service).toBe(`luma-bag-finish-receive:${BAG_A}`);
   });
 
-  it("commit idempotency key DIFFERS (Luma rbg-* vs service per-receive)", () => {
+  it("the request body carries Luma's per-bag preview key (no namespace collapse)", () => {
+    expect(requestBody.preview_idempotency_key).toBe(
+      `luma-bag-finish-receive:${BAG_A}`,
+    );
+    // Domain fields are unchanged by adding the preview key.
+    expect(requestBody.inventory_bag_id).toBe(BAG_A);
+    expect(requestBody.zoho_purchaseorder_id).toBe(luma.domain.zoho_purchaseorder_id);
+  });
+
+  it("M2 STILL OPEN — commit idempotency key DIFFERS (Luma rbg-* stays local)", () => {
     expect(diff.commitKey.equal).toBe(false);
     expect(diff.commitKey.luma).toMatch(/^rbg-[0-9a-f]{32}$/);
   });
 
-  it("receive idempotency key DIFFERS (namespace)", () => {
+  it("M3 STILL OPEN — receive/source-receipt key DIFFERS (stays Luma-owned)", () => {
     expect(diff.receiveKey.equal).toBe(false);
     expect(diff.receiveKey.luma).toBe(`luma-bag-finish-receive:${BAG_A}`);
   });
 
-  it("notes format DIFFERS (service: luma_receive_id+quantity_source; Luma: priority field list)", () => {
+  it("M4 STILL OPEN — notes format DIFFERS (unchanged by S-2; approval-gated)", () => {
     expect(diff.notesEqual).toBe(false);
     expect(luma.notes).toContain("Luma op:");
     expect(luma.notes).toContain("Internal receipt #: 352176");
@@ -213,6 +233,15 @@ describe("Z-4 · dual-run vs documented S-1 build contract", () => {
     expect(previewPayload.raw_item_id).toBe(luma.domain.zoho_raw_item_id);
     expect(previewPayload.received_quantity).toBe(luma.domain.received_quantity);
     expect(previewPayload.receive_date).toBe(luma.domain.receive_date);
+    // Luma's preview payload idempotency_key equals the echoed service key.
+    expect(previewPayload.idempotency_key).toBe(service.preview_idempotency_key);
+  });
+
+  it("without a supplied preview key, S-2 still falls back to its own namespace (regression guard)", () => {
+    const fallback = buildDocumentedServiceFixture(luma.domain);
+    const fallbackDiff = diffBagReceiveBuild(luma, fallback);
+    expect(fallbackDiff.previewKey.equal).toBe(false);
+    expect(fallback.preview_idempotency_key).toBe("luma-bag-receive-preview:recv-1");
   });
 });
 
@@ -297,6 +326,11 @@ describe("Z-4 · live dual-run (env-gated)", () => {
         `normalized_request mismatches: ${JSON.stringify(
           diff.normalizedRequestFieldDiffs.filter((d) => !d.equal),
         )}`,
+      ).toBe(true);
+      // S-2: the supplied preview key must be echoed verbatim (M1 resolved).
+      expect(
+        diff.previewKey.equal,
+        `preview key not echoed: luma=${diff.previewKey.luma} service=${diff.previewKey.service}`,
       ).toBe(true);
     },
   );

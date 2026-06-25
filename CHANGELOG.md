@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.27] — 2026-06-25
+
+### Tests
+- **Z-5 Zoho boundary:** dual-run re-run after service S-2 (`4b5615cb`). Luma's isolated build client now supplies `preview_idempotency_key: luma-bag-finish-receive:<inventory_bag_id>`; the service echoes it verbatim, so **M1 (preview key mismatch) is RESOLVED**. `lib/zoho/bag-receive-build-dual-run.contract.test.ts` updated to assert the match, with a regression guard for the no-key fallback. M2 (commit key), M3 (receive key), and M4 (notes format) remain documented as Luma-owned / approval-gated — not changed.
+
+### Added
+- `buildBagReceiveBuildRequestBody` in `lib/zoho/bag-receive-build-service-client.ts` — attaches Luma's per-bag preview key to the build request without collapsing namespaces. Still isolated from runtime preview/commit/freeze.
+
+### Docs
+- `docs/ZOHO_BAG_RECEIVE_CONTRACT_PREP_2026-06-25.md` §11 — S-2 echo behavior, M1 resolution, remaining mismatch table, recommended next phase (hold runtime; optional contract-only notes alignment).
+
+### Notes
+- Contract/tests/docs only. No runtime migration, no live Zoho writes, no commit/receive idempotency changes, no notes-format change, no schema/env changes.
+
 ## [1.5.26] — 2026-06-25
 
 ### Tests
