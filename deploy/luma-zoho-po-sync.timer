@@ -1,7 +1,10 @@
 [Unit]
-Description=Daily Luma Zoho purchase-order sync at 03:59 (server local time)
+Description=Daily Luma Zoho purchase-order sync at 03:59 US Eastern
 
 [Timer]
+# LXC host runs UTC, but ops are on US Eastern. Fire at 03:59 America/New_York
+# (EST/EDT with DST) regardless of the system clock timezone.
+Timezone=America/New_York
 OnCalendar=*-*-* 03:59:00
 Persistent=true
 AccuracySec=1min

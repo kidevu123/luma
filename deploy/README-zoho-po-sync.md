@@ -3,12 +3,12 @@
 ## Files in this directory
 
 - `luma-zoho-po-sync.service` — systemd service unit (one-shot curl)
-- `luma-zoho-po-sync.timer`   — systemd timer (daily at 03:59 server local time)
+- `luma-zoho-po-sync.timer`   — systemd timer (daily at 03:59 US Eastern)
 
 ## What the cron does
 
-Once per day at **03:59 in the server's local timezone**, the timer
-triggers the service, which `POST`s to
+Once per day at **03:59 US Eastern** (`America/New_York`, EST/EDT with
+DST), the timer triggers the service, which `POST`s to
 `http://localhost:3000/api/cron/zoho-po-sync` with a bearer token.
 The route:
 
@@ -50,7 +50,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now luma-zoho-po-sync.timer
 ```
 
-Verify the timer fires at 03:59 **server local time**:
+Verify the timer fires at 03:59 **US Eastern** (not UTC — the LXC host
+clock stays UTC, but the timer unit sets `Timezone=America/New_York`):
 
 ```bash
 timedatectl
