@@ -363,7 +363,7 @@ Migration applied. New rows carry `employee_id`. Leaderboard renders names. Type
 - `/genealogy/[bagId]` — unmapped event types now render as a real default badge (slate border + slate-800 fill, same h-5 / px-1.5 rhythm as styled badges) with a `title` attr labelling them generic.
 - `/floor-board` — bottle-line empty state now uses a status dot + horizontal layout + right-aligned `idle` tag, matching LaneRow rhythm; replaces the weak dashed-box prose.
 
-No business-logic, loader, projector, migration, or formula changes anywhere. ConfidenceBadge / MetricCard primitives untouched. Dead `app/(admin)/floor-board/_components/` directory left in place for a separate cleanup phase. New `lib/production/command-center-polish.test.ts` adds 17 static guards (emoji regex against Unicode pictograph / dingbat blocks, banned-phrase scan, ConfidenceBadge presence). Verified 2026-05-14: tsc clean / vitest 1225/1225 / next build clean / staging live at SHA `41fa733` / all 4 polished routes return 200 / auth-smoke 47/47 PASS.
+No business-logic, loader, projector, migration, or formula changes anywhere. ConfidenceBadge / MetricCard primitives untouched. `app/(admin)/floor-board/_components/` is live (v2 board); older notes calling it dead referred to the removed widget-grid filenames. New `lib/production/command-center-polish.test.ts` adds 17 static guards (emoji regex against Unicode pictograph / dingbat blocks, banned-phrase scan, ConfidenceBadge presence). Verified 2026-05-14: tsc clean / vitest 1225/1225 / next build clean / staging live at SHA `41fa733` / all 4 polished routes return 200 / auth-smoke 47/47 PASS.
 
 ---
 

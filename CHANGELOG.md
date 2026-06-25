@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.18] — 2026-06-25
+
+### Cleanup
+- **Removed vacuous placeholder tests** from `synthesizer-dryrun.test.ts`, `active-rolls.test.ts`, and `material-learning.test.ts`. Replaced synthesizer placeholders with source-file dry-run guard checks.
+
+### Docs
+- **Corrected stale floor-board notes** in `docs/CURRENT_PHASE_STATUS.md` and `docs/CLAUDE_BUILD_QUEUE.md`: `app/(admin)/floor-board/_components/` is live (v2 board), not dead.
+
+### Notes
+- Added `scripts/_pilot-*.ts` to `.gitignore` for untracked staging debris; six tracked pilot scripts remain in git and runbooks.
+
 ## [1.5.17] — 2026-06-25
 
 ### Cleanup

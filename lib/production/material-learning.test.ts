@@ -282,31 +282,10 @@ describe("standard resolution invariants", () => {
 
 describe("H.x3 / VALIDATION-2C hook contract", () => {
   it("emits ROLL_COUNTER_SEGMENT_RECORDED — not MATERIAL_CONSUMED_*", () => {
-    // VALIDATION-2C: counter segments are not weight consumption.
-    // Weight consumption is derived later from segments × standard
-    // OR from net_weight ÷ total_yield once depleted.
     const emitted = "ROLL_COUNTER_SEGMENT_RECORDED";
     expect(emitted).toBe("ROLL_COUNTER_SEGMENT_RECORDED");
     expect(emitted).not.toBe("MATERIAL_CONSUMED_ACTUAL");
     expect(emitted).not.toBe("MATERIAL_CONSUMED_ESTIMATED");
-  });
-
-  it("does not emit when no roll mounted", () => {
-    // Documented in material-consumption-hook.ts:
-    //   "if (rolls.length === 0) return; // no rolls mounted — skip"
-    expect(true).toBe(true);
-  });
-
-  it("does not emit when machine_count is missing or non-positive", () => {
-    // Documented in material-consumption-hook.ts:
-    //   "if (counterSegment == null || ... <= 0) return;"
-    expect(true).toBe(true);
-  });
-
-  it("emits one segment row per active role (PVC + FOIL each get their own)", () => {
-    // Documented in material-consumption-hook.ts:
-    //   "if (!std) continue; // no standard — skip honestly, never fabricate"
-    expect(true).toBe(true);
   });
 
   it("payload includes the segment-ledger contract keys", () => {

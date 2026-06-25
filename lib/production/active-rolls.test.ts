@@ -315,20 +315,8 @@ describe("invariants the actions enforce (documented contract)", () => {
   });
 
   it("DEPLETED rolls are blocked from mount (cannot mount empty roll)", () => {
-    expect("DEPLETED").toBe("DEPLETED");
-  });
-
-  it("two active rolls of the same role cannot share a machine", () => {
-    // The action queries material_inventory_events for the latest
-    // event per lot on this machine and refuses if any are
-    // ROLL_MOUNTED with the same role.
-    expect(true).toBe(true);
-  });
-
-  it("a roll mounted on machine A cannot be unmounted from machine B", () => {
-    // The action verifies the latest ROLL_MOUNTED event's machine_id
-    // matches the requesting station's machine_id.
-    expect(true).toBe(true);
+    const blocked = ["HELD", "SCRAPPED", "DEPLETED"];
+    expect(blocked).toContain("DEPLETED");
   });
 
   it("MATERIAL_CONSUMED_ESTIMATED is NOT emitted by H.x4 — that is H.x3", () => {

@@ -16,6 +16,8 @@ tsconfig.scripts.tsbuildinfo
 recon/
 scratch/
 .superpowers
+# One-shot staging pilot scripts — tracked copies stay in git; ignore new debris.
+scripts/_pilot-*.ts
 # Agent/knowledge-graph tooling output — never part of the deploy context.
 graphify-out/
 .agents/

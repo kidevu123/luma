@@ -1014,7 +1014,7 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
   - Future pages opt into the system by importing from `@/components/production/ui` and using whichever primitives fit; no required prefab layout.
 - Remaining UI gaps (deferred):
   - The four pages still use a mix of local `Panel`, `Card`, and the new `ProductionSection`. A future sweep could consolidate, but bumping more sections risks scope creep.
-  - Dead `app/(admin)/floor-board/_components/` directory still present (noted in polish v1 closeout).
+  - `app/(admin)/floor-board/_components/` is **live** (v2 board: act-now-rail, kpi-deck, line-lane, etc.). Older docs incorrectly called this directory dead after the widget-grid command center was removed.
   - Six-axis Stat helper deleted from `/recall` — `ProductionIdentityBlock` is now the only summary-stat renderer there.
 - Next unchecked phase in `docs/CLAUDE_BUILD_QUEUE.md`: **Zoho live sync** — replace the H.x0.5 stub with a live Zoho item sync (read + write, idempotent, reconciles against Luma `products` and `tablet_types`).
 
@@ -1057,7 +1057,7 @@ Append-only log. Each entry: phase name, date (UTC), result, notes. Latest entry
   - No emoji glyphs visible on any polished page (enforced both by the regex test and the live render).
   - No fake data introduced.
 - Remaining UI gaps (deferred):
-  - Dead `app/(admin)/floor-board/_components/` directory (9 unused files, noted in the floor-board page.tsx comment). Not deleted in this phase — pure cleanup, scope-adjacent.
+  - `app/(admin)/floor-board/_components/` is **live** (v2 board components). Not dead — superseded only the old widget-grid filenames from the 2026-05 command-center plan.
   - `<table>` headers on `/operator-productivity` and other admin tables don't yet have sticky positioning for long scrolls; not in the polish brief.
   - The 4 polished pages still use server-rendered date strings (ISO snippets); a global "render dates in the company timezone via a shared helper" pass would be a follow-up.
   - QC reason-code chips on the floor-board QC alert panel could read directly from the QC-1 enum rather than free-text; tracked elsewhere.
