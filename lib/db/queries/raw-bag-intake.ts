@@ -14,7 +14,7 @@
 //     intake "result" panel and the standalone Lookup receipt / batch
 //     surface.
 
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { DEFAULT_INTAKE_BATCH_STATUS } from "@/lib/production/batch-production-guard";
 import { db } from "@/lib/db";
 import {
@@ -316,17 +316,49 @@ export async function createRawBagIntakeAtomic(
             error: `Supplier lot ${lot} is already registered to a different tablet type. Select the matching product or ask an admin to review batch ${lot}.`,
           };
         }
-        await tx
+        // RECEIVING-HARDENING-v1.5.11 — atomic SQL-level increment.
+        // Two concurrent intakes against the same supplier lot must
+        // BOTH have their qty applied; the previous JS read-modify-write
+        // form (existingBatch.qtyReceived + lotDeclared) could lose a
+        // delta under READ COMMITTED. RETURNING gives us the post-update
+        // totals for the audit row below.
+        const [updatedBatch] = await tx
           .update(batches)
           .set({
-            qtyReceived: existingBatch.qtyReceived + lotDeclared,
-            qtyOnHand: existingBatch.qtyOnHand + lotDeclared,
+            qtyReceived: sql`${batches.qtyReceived} + ${lotDeclared}`,
+            qtyOnHand: sql`${batches.qtyOnHand} + ${lotDeclared}`,
             ...(existingBatch.tabletTypeId == null
               ? { tabletTypeId: input.tabletTypeId }
               : {}),
           })
-          .where(eq(batches.id, existingBatch.id));
+          .where(eq(batches.id, existingBatch.id))
+          .returning();
+        if (!updatedBatch) {
+          throw new Error(`intake: batch update empty for lot ${lot}`);
+        }
         batchIdByLot.set(lot, existingBatch.id);
+        await writeAudit(
+          {
+            actorId: actor.id,
+            actorRole: actor.role,
+            action: "batch.qty_increment",
+            targetType: "Batch",
+            targetId: existingBatch.id,
+            before: {
+              qtyReceived: existingBatch.qtyReceived,
+              qtyOnHand: existingBatch.qtyOnHand,
+              tabletTypeId: existingBatch.tabletTypeId,
+            },
+            after: {
+              batchNumber: lot,
+              tabletTypeId: updatedBatch.tabletTypeId,
+              deltaQuantity: lotDeclared,
+              qtyReceived: updatedBatch.qtyReceived,
+              qtyOnHand: updatedBatch.qtyOnHand,
+            },
+          },
+          tx,
+        );
       } else {
         const [newBatch] = await tx
           .insert(batches)
@@ -558,6 +590,16 @@ function mapIntakePersistenceError(err: unknown): string {
         return "That supplier lot is already registered. Select the matching tablet type or ask an admin to review the existing batch.";
       }
       const detail = pg.detail ?? "";
+      if (
+        pg.constraint_name === "receives_name_unique" ||
+        detail.includes("receive_name")
+      ) {
+        // RECEIVING-HARDENING-v1.5.11 — receive_seq is computed from
+        // existing receive count; two concurrent saves against the same
+        // PO can both compute the same {PO}-R{N} name. The second INSERT
+        // hits this unique violation. Surface a clear retry prompt.
+        return "Another receive was created for this PO at the same time. Refresh and try again so Luma can assign the next receive number.";
+      }
       if (
         pg.constraint_name?.includes("internal_receipt") ||
         detail.includes("internal_receipt")

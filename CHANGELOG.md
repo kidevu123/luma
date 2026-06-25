@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.11] — 2026-06-25
+
+### Receiving (hardening)
+- **Atomic supplier-lot batch quantity increment.** When `createRawBagIntakeAtomic` reuses an existing supplier-lot batch (the v1.5.9 reuse path), `qtyReceived` and `qtyOnHand` are now incremented via SQL-level expressions (`sql\`${batches.qtyReceived} + ${lotDeclared}\``) against the live column instead of a JS read-modify-write (`existingBatch.qtyReceived + lotDeclared`). Under READ COMMITTED, two concurrent intakes against the same supplier lot could previously read the same baseline and overwrite each other's deltas; the atomic form composes correctly.
+- **Audit row on batch reuse.** The reuse branch now writes a `batch.qty_increment` audit-log row containing the actor, the existing batch id, the `before` totals (`qtyReceived`, `qtyOnHand`, `tabletTypeId`), and the `after` snapshot (the delta added plus the post-update totals returned by the UPDATE … RETURNING). Brings the reuse path in line with the "every mutation writes audit_log" invariant from `CLAUDE.md`. The new-batch INSERT branch's existing `batch.create` audit is unchanged.
+
+### Fixed
+- **Friendlier error when two saves race the same PO.** `mapIntakePersistenceError` now recognizes the `receives_name_unique` constraint (or a `receive_name` detail string) and returns: *"Another receive was created for this PO at the same time. Refresh and try again so Luma can assign the next receive number."* — instead of the generic "duplicate record" message. `{PO}-R{seq}` race conditions surface a clear retry prompt. Existing `batches_kind_number_unique`, `internal_receipt`, `bag_qr`, and generic fallback branches are untouched.
+
+### Tests
+- `lib/db/queries/raw-bag-intake-batch-reuse.test.ts` — new file (16 tests) pinning the four phases above. Same source-text-contract style as `lib/db/queries/batches.test.ts:84-88`. Asserts: lookup keys on `(kind, batch_number)`, cross-product mismatch returns the friendly error, the new-batch INSERT branch still writes `batch.create`, `sql` is imported from drizzle-orm, both `qtyReceived` and `qtyOnHand` use column-relative SQL increments (and explicitly forbid the JS read-modify-write form), the reuse update still scopes by `eq(batches.id, existingBatch.id)`, `batch.qty_increment` audit row is present with the expected `targetType` / `targetId` / `deltaQuantity`, and `mapIntakePersistenceError` carries the new `receives_name_unique` branch and friendly copy while preserving the existing fallback and `internal_receipt` / `bag_qr` branches.
+
+### Notes
+- No schema changes. No migrations. No dependency changes. No route/nav/UI changes.
+- No edits to `lib/zoho/shared-raw-bag-receive-commit.ts`, `lib/zoho/bag-finish-receive.ts`, `lib/zoho/freeze-raw-bag-receive-payload.ts`, or any `drizzle/*` file.
+- Test count: 4584 → **4600** (+16 new, none weakened or removed).
+- All five gates clean: typecheck, typecheck:scripts, eslint, vitest, next build.
+
+### Intentionally deferred (out of scope for this PR)
+- **Unique receipt-number migration (audit LF-1 / Phase E).** Would close the concurrent-duplicate-receipts gap by adding a `UNIQUE` partial index on `inventory_bags.internal_receipt_number`. Requires a Drizzle migration; out of scope per this PR's no-schema rule.
+- **Zoho seed failure repair path (audit LF-5 / Phase D).** When `seedPendingRawBagReceiveRows` throws after the transaction commits, bag rows exist without staging rows; today only a `console.error` records this. The bag-finish preview lazily creates the staging row, but bags that never get a preview attempt remain un-seeded. A future PR can add an audit row + a `npm run repair:resend-pending-zoho-seeds` script.
+- **Dead-code tagging in `lib/zoho/raw-bag-intake-receive.ts` (audit DH-1 / DH-4 / Phase G).** `upsertRawBagReceiveRow` and `buildRawBagIntakeReceivePayload` are suspected unused in production paths. A future PR can add `@deprecated` tags + a zero-importers guard test. No deletions until callers are fully verified.
+
 ## [1.5.10] — 2026-06-25
 
 ### Navigation / UX (labeling only — no route changes)
