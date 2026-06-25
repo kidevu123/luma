@@ -261,3 +261,18 @@ Alternative Z-2 (if product prefers payload work): add a **contract test suite**
 **Unchanged:** bag receive, production output, PO sync, commits, frozen payloads, env gates, `zoho_credentials` schema.
 
 **Next (Z-3+):** payload-builder / BOM mapping migration behind service contracts — not started.
+
+---
+
+## 12. Phase Z-3 closeout (2026-06-25)
+
+**Scope:** Bag receive payload contract proof only. Tests + docs; no runtime migration.
+
+| Deliverable | Path |
+|-------------|------|
+| Contract tests | `lib/zoho/bag-receive-service-boundary.contract.test.ts` |
+| Prep note | `docs/ZOHO_BAG_RECEIVE_CONTRACT_PREP_2026-06-25.md` |
+
+**Pinned:** payload path map, mapping blockers before build, frozen payload + `rbg-*` idempotency, shared commit frozen-first replay, proposed `ProposedBagReceiveDomainRequest` derivation.
+
+**Recommended Z-4:** read-only service build endpoint + Luma dual-run equivalence against freeze output (see prep doc §8).

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.25] — 2026-06-25
+
+### Tests
+- **Z-3 Zoho boundary:** `lib/zoho/bag-receive-service-boundary.contract.test.ts` pins bag receive payload paths, mapping blockers, frozen replay contract, dual idempotency namespaces, and preparatory `ProposedBagReceiveDomainRequest` derivation.
+
+### Docs
+- `docs/ZOHO_BAG_RECEIVE_CONTRACT_PREP_2026-06-25.md` — bag receive ownership table, field classification, migration blockers, recommended Z-4 scope.
+- `docs/ZOHO_BOUNDARY_AUDIT_2026-06-25.md` — Z-3 closeout cross-link.
+
+### Notes
+- Contract/tests/docs only. No runtime, payload shape, commit, frozen-payload, or service migration changes.
+
 ## [1.5.24] — 2026-06-25
 
 ### Refactor
