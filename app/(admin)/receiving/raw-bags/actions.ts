@@ -39,15 +39,20 @@ import type { PurchaseReceiveVerificationResult } from "@/lib/zoho/purchase-rece
 export async function createRawBagIntakeAction(
   raw: unknown,
 ): Promise<CreateRawBagIntakeResult> {
-  const actor = await requireLead();
-  const result = await createRawBagIntakeAtomic(raw, actor);
-  if (result.ok) {
-    revalidatePath("/receiving/raw-bags");
-    revalidatePath("/inbound");
-    revalidatePath("/recall");
-    revalidatePath("/qr-cards");
+  try {
+    const actor = await requireLead();
+    const result = await createRawBagIntakeAtomic(raw, actor);
+    if (result.ok) {
+      revalidatePath("/receiving/raw-bags");
+      revalidatePath("/inbound");
+      revalidatePath("/recall");
+      revalidatePath("/qr-cards");
+    }
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
   }
-  return result;
 }
 
 export type RawBagLookupActionResult = RawBagLookupResult & {

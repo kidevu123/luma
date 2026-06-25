@@ -80,6 +80,12 @@ describe("intake paths create RELEASED batches", () => {
       expect(src).not.toMatch(/status:\s*"QUARANTINE"/);
     });
   }
+
+  it("raw-bag-intake.ts resolves tablet batches by kind+batch_number only", () => {
+    const src = readFileSync(resolve(here, "raw-bag-intake.ts"), "utf8");
+    expect(src).toMatch(/Unique index is \(kind, batch_number\)/);
+    expect(src).toMatch(/mapIntakePersistenceError/);
+  });
 });
 
 describe("batches page UX", () => {

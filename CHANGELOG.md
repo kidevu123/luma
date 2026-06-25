@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.5.9] — 2026-06-25
+
+### Fixed
+- **Raw-bag intake save 500 on existing supplier lots.** Batch lookup filtered by `(kind, batch_number, tablet_type_id)` but the database unique index is only `(kind, batch_number)`. A second receive for the same supplier lot could miss the existing batch row and hit a Postgres duplicate-key 500 surfaced as a generic Server Components error. Lookup now keys on `(kind, batch_number)` and returns a clear error when the lot belongs to a different tablet type.
+- **Post-save Zoho seed failures no longer mask a successful intake.** If bag rows commit but `seedPendingRawBagReceiveRows` throws, the action still returns success so operators are not prompted to re-save duplicate receipts.
+
 ## [1.5.8] — 2026-06-24
 
 ### Dependencies

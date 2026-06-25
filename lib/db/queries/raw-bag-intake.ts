@@ -88,9 +88,11 @@ export async function createRawBagIntakeAtomic(
     pendingReceiveSeeds: readonly PendingRawBagReceiveSeed[];
   };
 
-  const txResult = await db.transaction(async (tx): Promise<
-    CreateRawBagIntakeResult | IntakeTxSuccess
-  > => {
+  let txResult: CreateRawBagIntakeResult | IntakeTxSuccess;
+  try {
+    txResult = await db.transaction(async (tx): Promise<
+      CreateRawBagIntakeResult | IntakeTxSuccess
+    > => {
     // ── Resolve PO + vendor + ordered qty ────────────────────────
     let resolvedPoId: string | null = null;
     let resolvedPoLineId: string | null = null;
@@ -294,24 +296,34 @@ export async function createRawBagIntakeAtomic(
         0,
       );
 
+      // Unique index is (kind, batch_number) — not tablet_type_id. Look
+      // up by lot number alone, then guard against cross-product reuse.
       const [existingBatch] = await tx
         .select()
         .from(batches)
         .where(
-          and(
-            eq(batches.kind, "TABLET"),
-            eq(batches.batchNumber, lot),
-            eq(batches.tabletTypeId, input.tabletTypeId),
-          ),
+          and(eq(batches.kind, "TABLET"), eq(batches.batchNumber, lot)),
         )
         .limit(1);
 
       if (existingBatch) {
+        if (
+          existingBatch.tabletTypeId != null &&
+          existingBatch.tabletTypeId !== input.tabletTypeId
+        ) {
+          return {
+            ok: false,
+            error: `Supplier lot ${lot} is already registered to a different tablet type. Select the matching product or ask an admin to review batch ${lot}.`,
+          };
+        }
         await tx
           .update(batches)
           .set({
             qtyReceived: existingBatch.qtyReceived + lotDeclared,
             qtyOnHand: existingBatch.qtyOnHand + lotDeclared,
+            ...(existingBatch.tabletTypeId == null
+              ? { tabletTypeId: input.tabletTypeId }
+              : {}),
           })
           .where(eq(batches.id, existingBatch.id));
         batchIdByLot.set(lot, existingBatch.id);
@@ -512,7 +524,10 @@ export async function createRawBagIntakeAtomic(
       bagIds: inserted.map((r) => r.id),
       pendingReceiveSeeds,
     };
-  });
+    });
+  } catch (err) {
+    return { ok: false, error: mapIntakePersistenceError(err) };
+  }
 
   if (!txResult.ok) {
     return txResult;
@@ -522,9 +537,44 @@ export async function createRawBagIntakeAtomic(
     return txResult;
   }
 
-  await seedPendingRawBagReceiveRows(txResult.pendingReceiveSeeds, actor);
+  try {
+    await seedPendingRawBagReceiveRows(txResult.pendingReceiveSeeds, actor);
+  } catch (err) {
+    console.error("raw_bag_intake: zoho seed failed after bags saved", err);
+  }
   const { pendingReceiveSeeds: _seeds, ...publicResult } = txResult;
   return publicResult;
+}
+
+function mapIntakePersistenceError(err: unknown): string {
+  if (err && typeof err === "object" && "code" in err) {
+    const pg = err as {
+      code?: string;
+      constraint_name?: string;
+      detail?: string;
+    };
+    if (pg.code === "23505") {
+      if (pg.constraint_name === "batches_kind_number_unique") {
+        return "That supplier lot is already registered. Select the matching tablet type or ask an admin to review the existing batch.";
+      }
+      const detail = pg.detail ?? "";
+      if (
+        pg.constraint_name?.includes("internal_receipt") ||
+        detail.includes("internal_receipt")
+      ) {
+        return "One of those receipt numbers is already in use.";
+      }
+      if (
+        pg.constraint_name?.includes("bag_qr") ||
+        detail.includes("bag_qr")
+      ) {
+        return "One of those bag QR codes is already in use.";
+      }
+      return "A duplicate record blocked this save. Refresh the page and check whether the receive already landed.";
+    }
+  }
+  if (err instanceof Error) return err.message;
+  return "Save failed unexpectedly. Try again or contact support.";
 }
 
 // Small helper — Drizzle's `inArray` shape varies between versions; we
