@@ -33,6 +33,16 @@ export type RawBagReceiveBuildInput = {
   warehouseId?: string | null;
 };
 
+/**
+ * @deprecated v1.5.15 — superseded by buildBagFinishReceivePayload in
+ * lib/zoho/bag-finish-receive.ts. The canonical builder emits the
+ * flat BagFinishReceiveRequest shape (source_bag_id + flat fields)
+ * accepted by the gateway today; this older builder emits a legacy
+ * line_items[] array shape that no production caller targets. Only the
+ * paired test file imports it. Slated for removal once a no-importer
+ * guard test has run green for at least one release cycle. Do not add
+ * new callers — use buildBagFinishReceivePayload instead.
+ */
 export function buildRawBagIntakeReceivePayload(
   input: RawBagReceiveBuildInput,
   opts?: { dryRun?: boolean },
@@ -120,6 +130,19 @@ async function loadRawBagReceiveContext(inventoryBagId: string) {
   };
 }
 
+/**
+ * @deprecated v1.5.15 — dead code path. Has zero callers across
+ * production / tests / scripts (confirmed by no-importer guard test
+ * in raw-bag-intake-receive-deprecated.test.ts). The canonical writers
+ * to zoho_raw_bag_receives are:
+ *   - seedPendingRawBagReceiveRows (this file) for new intake seeds
+ *   - upsertRawBagReceiveRow in lib/zoho/bag-finish-receive.ts for
+ *     preview/commit flows
+ *   - setRawBagReconciliationStatus (this file) for reconciliation
+ *     state updates
+ * Function is not exported. Retained only to keep the change
+ * behavior-preserving for one release cycle before removal.
+ */
 async function upsertRawBagReceiveRow(
   buildInput: RawBagReceiveBuildInput,
   actor: Pick<CurrentUser, "id"> | null,

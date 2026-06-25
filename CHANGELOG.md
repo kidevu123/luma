@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.5.15] — 2026-06-25
+
+### Cleanup
+- **Tagged two dead helpers in `lib/zoho/raw-bag-intake-receive.ts` as `@deprecated`.** Caller grep across production code, tests, scripts, and docs confirmed:
+  - `buildRawBagIntakeReceivePayload` (exported, line 36) — emits a legacy `line_items[]` payload shape; only the paired test file calls it; no production callers. Canonical replacement: `buildBagFinishReceivePayload` in `lib/zoho/bag-finish-receive.ts` (flat `BagFinishReceiveRequest` shape).
+  - `upsertRawBagReceiveRow` (NOT exported, line 123) — zero callers anywhere in the repo; not the same as the live same-named writer in `lib/zoho/bag-finish-receive.ts:224`. Canonical writers to `zoho_raw_bag_receives` today are `seedPendingRawBagReceiveRows` (same file, for new intake seeds), the `bag-finish-receive.ts` version of `upsertRawBagReceiveRow` (for preview/commit flows), and `setRawBagReconciliationStatus` (same file, for reconciliation state).
+- Both helpers are retained in place to keep this change behavior-preserving. Slated for removal in a later release once the no-importer guards have run green for one cycle.
+
+### Tests
+- `lib/zoho/raw-bag-intake-receive-deprecated.test.ts` — new file (4 tests). Greps the repo to assert neither helper has gained a new caller, and re-reads the file to assert each deprecated symbol still carries an `@deprecated` JSDoc block pointing at the canonical replacement. Excludes node_modules/`.next` and (for the in-file caller check) JSDoc and comment lines so prose mentions don't count as references.
+
+### Notes
+- No production code paths changed. No schema/migration changes. No env-gate flips. No Zoho live-write behavior changes.
+- Test count: 4609 → 4613 (+4 new guard tests).
+- All five gates clean: typecheck, typecheck:scripts, eslint, vitest, next build.
+
 ## [1.5.14] — 2026-06-25
 
 ### Fixed
