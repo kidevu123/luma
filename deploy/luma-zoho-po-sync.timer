@@ -2,9 +2,8 @@
 Description=Daily Luma Zoho purchase-order sync at 03:59 US Eastern
 
 [Timer]
-# LXC host runs UTC, but ops are on US Eastern. Fire at 03:59 America/New_York
-# (EST/EDT with DST) regardless of the system clock timezone.
-Timezone=America/New_York
+# Fire at 03:59 on the LXC host clock. The LXC must use America/New_York
+# (see deploy/README-zoho-po-sync.md — timedatectl set-timezone).
 OnCalendar=*-*-* 03:59:00
 Persistent=true
 AccuracySec=1min

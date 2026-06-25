@@ -3,7 +3,7 @@
 ## [1.5.14] — 2026-06-25
 
 ### Fixed
-- **Daily PO sync timer now fires at 03:59 US Eastern, not UTC.** The LXC host clock stays UTC, but `luma-zoho-po-sync.timer` sets `Timezone=America/New_York` so the job runs at 03:59 Eastern (EST/EDT with DST).
+- **Daily PO sync timer now fires at 03:59 US Eastern, not UTC.** Production LXC 122 `timedatectl` set to `America/New_York`; timer `OnCalendar` unchanged at `03:59:00` local. Runbook updated with the timezone prerequisite.
 
 ## [1.5.13] — 2026-06-25
 

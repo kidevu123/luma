@@ -7,8 +7,8 @@
 
 ## What the cron does
 
-Once per day at **03:59 US Eastern** (`America/New_York`, EST/EDT with
-DST), the timer triggers the service, which `POST`s to
+Once per day at **03:59 US Eastern** (EST/EDT), the timer triggers the
+service, which `POST`s to
 `http://localhost:3000/api/cron/zoho-po-sync` with a bearer token.
 The route:
 
@@ -43,6 +43,16 @@ LUMA_CRON_SECRET=<same-secret-as-above>
 
 ## Install commands (on LXC 122 `luma`)
 
+The LXC host clock must be **US Eastern**. On a fresh host (or if the
+timer previously fired at the wrong hour while the clock was UTC):
+
+```bash
+sudo timedatectl set-timezone America/New_York
+timedatectl   # should show Time zone: America/New_York (EST or EDT)
+```
+
+Then install the timer:
+
 ```bash
 sudo cp /opt/luma/deploy/luma-zoho-po-sync.service /etc/systemd/system/
 sudo cp /opt/luma/deploy/luma-zoho-po-sync.timer   /etc/systemd/system/
@@ -50,12 +60,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now luma-zoho-po-sync.timer
 ```
 
-Verify the timer fires at 03:59 **US Eastern** (not UTC — the LXC host
-clock stays UTC, but the timer unit sets `Timezone=America/New_York`):
+Verify the timer fires at 03:59 **US Eastern**:
 
 ```bash
-timedatectl
 sudo systemctl list-timers luma-zoho-po-sync.timer --no-pager
+# NEXT should read … 03:59:00 EDT (or EST in winter), not UTC
 ```
 
 ## Verification commands
