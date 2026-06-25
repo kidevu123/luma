@@ -186,8 +186,8 @@ export default async function ZohoOperationsPage({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Zoho Operations (legacy)"
-        description="Legacy atomic assembly/receive ops (TABLET_RECEIVE, UNIT_ASSEMBLE, etc.). Dry-run and history only when consolidated production output is enabled — live finished-lot Zoho writes use /zoho-production-operations instead. NEEDS_MAPPING rows require operator action before dry-run can proceed."
+        title="Zoho operations (legacy atomic-ops history)"
+        description="Legacy atomic assembly/receive ops history (TABLET_RECEIVE, UNIT_ASSEMBLE, etc.). This is a HISTORY VIEW — current finished-lot Zoho writes go through the consolidated production-output queue at /zoho-production-operations. When the consolidated path is enabled, only dry-run + history surfaces remain here. NEEDS_MAPPING rows require operator action before dry-run can proceed."
       />
 
       {/* Lot filter strip */}

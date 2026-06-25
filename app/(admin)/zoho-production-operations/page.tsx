@@ -79,7 +79,7 @@ export default async function ZohoProductionOperationsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Zoho production output"
-        description="Consolidated production-output ops. Persist and preview are independent of live commit. Commit is operator-driven only — Approve for auto-commit (cron) or Approve & commit now (immediate), both via the same shared idempotent path."
+        description="Current consolidated production-output queue. Persist and preview are independent of live commit. Commit is operator-driven only — Approve for auto-commit (cron) or Approve & commit now (immediate), both via the same shared idempotent path. The legacy atomic-ops history view is at /zoho-operations."
       />
 
       <div className="rounded-xl border border-border bg-surface px-4 py-3 space-y-2">

@@ -45,7 +45,7 @@ export default async function PoReconciliationListPage({
           href="/po-reconciliation-v2"
           className="text-cyan-700 hover:text-cyan-800 underline"
         >
-          New 8-bucket view →
+          Multi-scope variance lens →
         </Link>
       </div>
 

@@ -117,7 +117,7 @@ export default async function PoReconciliationV2Page({
           href="/po-reconciliation"
           className="text-cyan-700 hover:text-cyan-800 underline"
         >
-          ← legacy PO reconciliation
+          ← Per-PO lens
         </Link>
       </div>
 

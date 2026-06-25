@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.5.10] — 2026-06-25
+
+### Navigation / UX (labeling only — no route changes)
+- **`/zoho-operations`** page header retitled to "Zoho operations (legacy atomic-ops history)" with a clearer description that explicitly calls it a HISTORY VIEW and points at `/zoho-production-operations` for current writes.
+- **`/zoho-production-operations`** page description updated to call it the "current consolidated production-output queue" and reference `/zoho-operations` as the legacy history view.
+- **Sidebar label** for `/zoho-production-operations` changed from "Zoho output" to "Zoho production output" to match the page title and settings-hub label.
+- **Settings hub** previously linked only to legacy `/zoho-operations` with a hint that misleadingly described it as the active sync path. Replaced with two entries: `/zoho-production-operations` ("Zoho production output", labeled as the current queue) and `/zoho-operations` ("Zoho operations (legacy)", labeled as history and pointing operators at the current queue in its hint).
+- **`/po-reconciliation` ↔ `/po-reconciliation-v2` cross-links** relabeled. v1's "New 8-bucket view →" replaced with "Multi-scope variance lens →"; v2's "← legacy PO reconciliation" replaced with "← Per-PO lens". The two pages are different lenses on the same domain, not legacy-vs-current; the prior wording was misleading.
+- **`/inbound/new`** intentionally NOT changed — already correctly labeled "Legacy receive wizard" with a supervisor-fallback amber banner; the existing inbound page test forbids any promotion to a primary CTA.
+- **`/roll-management` and `/production-capacity`** intentionally NOT changed — earlier audits flagged them as sidebar orphans, but they are reachable via `components/ui/materials-tabs.tsx` and `components/ui/metrics-tabs.tsx` respectively. They are hidden from the main sidebar by design.
+
+### Tests
+- `app/(admin)/settings/settings-page.test.ts` — extended with a new describe block (`settings hub · Zoho routes are labeled by current-vs-legacy`, 3 tests) pinning that the new `/zoho-production-operations` hub entry exists and is labeled as current, that `/zoho-operations` is labeled as legacy, and that the legacy entry's hint points at the current queue.
+- `app/(admin)/po-reconciliation/page.cross-link.test.ts` — new file (3 tests) pinning the new cross-link wording in both directions and forbidding the prior misleading strings.
+
+### Notes
+- No route deletions. No redirects. No schema/migration changes. No Zoho logic changes. No dependency changes.
+- Test count: 4584 (verified end-of-phase). All five gates clean.
+
 ## [1.5.9] — 2026-06-25
 
 ### Fixed

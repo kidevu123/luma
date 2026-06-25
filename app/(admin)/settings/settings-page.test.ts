@@ -4,6 +4,7 @@ import { join } from "path";
 import {
   canAccessDangerZone,
   filterSettingsHubForRole,
+  SETTINGS_HUB_SECTIONS,
   visibleSettingsHubHrefs,
 } from "@/lib/auth/settings-hub";
 
@@ -27,6 +28,7 @@ describe("settings hub · role-filtered links", () => {
     const hrefs = visibleSettingsHubHrefs("MANAGER");
     expect(hrefs).toContain("/material-reconciliation");
     expect(hrefs).toContain("/zoho-operations");
+    expect(hrefs).toContain("/zoho-production-operations");
     expect(hrefs).not.toContain("/settings/users");
     expect(hrefs).not.toContain("/products");
     expect(hrefs).not.toContain("/shift-review");
@@ -58,5 +60,34 @@ describe("settings hub · role-filtered links", () => {
     const sections = filterSettingsHubForRole("MANAGER");
     expect(sections.map((s) => s.heading)).not.toContain("Team");
     expect(sections.map((s) => s.heading)).not.toContain("Production setup");
+  });
+});
+
+describe("settings hub · Zoho routes are labeled by current-vs-legacy (v1.5.9)", () => {
+  function findItem(href: string) {
+    for (const sec of SETTINGS_HUB_SECTIONS) {
+      const it = sec.items.find((i) => i.href === href);
+      if (it) return it;
+    }
+    return undefined;
+  }
+
+  it("/zoho-production-operations is labeled as the current production-output queue", () => {
+    const it = findItem("/zoho-production-operations");
+    expect(it).toBeDefined();
+    expect(it!.label.toLowerCase()).toContain("production output");
+    expect(it!.hint.toLowerCase()).toContain("current");
+  });
+
+  it("/zoho-operations is labeled as legacy in the settings hub", () => {
+    const it = findItem("/zoho-operations");
+    expect(it).toBeDefined();
+    expect(it!.label.toLowerCase()).toContain("legacy");
+    expect(it!.hint.toLowerCase()).toContain("legacy");
+  });
+
+  it("the legacy hub entry points operators at the current queue in its hint", () => {
+    const it = findItem("/zoho-operations");
+    expect(it!.hint.toLowerCase()).toContain("zoho production output");
   });
 });

@@ -169,10 +169,17 @@ export const SETTINGS_HUB_SECTIONS: SettingsHubSectionDef[] = [
         minRole: "ADMIN",
       },
       {
+        href: "/zoho-production-operations",
+        icon: "Webhook",
+        label: "Zoho production output",
+        hint: "current consolidated production-output queue — operator review and approve",
+        minRole: "SESSION",
+      },
+      {
         href: "/zoho-operations",
         icon: "Webhook",
-        label: "Zoho Operations",
-        hint: "assembly operations sync — push production runs to Zoho Manufacturing",
+        label: "Zoho operations (legacy)",
+        hint: "legacy atomic-ops history — current finished-lot writes use Zoho production output",
         minRole: "SESSION",
       },
       {

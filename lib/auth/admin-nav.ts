@@ -73,7 +73,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSectionDef[] = [
       { href: "/finished-lots", label: "Finished lots", minRole: "SESSION" },
       {
         href: "/zoho-production-operations",
-        label: "Zoho output",
+        label: "Zoho production output",
         minRole: "SESSION",
       },
     ],
