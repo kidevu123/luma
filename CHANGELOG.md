@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.23] — 2026-06-25
+
+### Tests
+- **D-3 BOM dispatcher audit:** `lib/zoho/bom-dispatcher-behavior.contract.test.ts` pins call sites, structural differences, and scenario matrix for `sourceAllocationBuildOptsForProduct` vs `buildAdminPreviewSourceAllocationOpts`. Proves paths are intentionally non-equivalent (nullable `productId` generic fallback, admin blocker-only tail, admin `source`/`warnings` shape).
+
+### Notes
+- Audit/contract only. No production logic, Zoho payload, schema, or UI changes.
+
 ## [1.5.22] — 2026-06-25
 
 ### Refactor
