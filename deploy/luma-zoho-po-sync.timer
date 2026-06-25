@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Luma Zoho purchase-order sync at 03:59 (server local time)
+
+[Timer]
+OnCalendar=*-*-* 03:59:00
+Persistent=true
+AccuracySec=1min
+Unit=luma-zoho-po-sync.service
+
+[Install]
+WantedBy=timers.target

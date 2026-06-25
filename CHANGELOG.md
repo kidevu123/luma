@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.12] — 2026-06-25
+
+### Added
+- **Daily Zoho PO sync cron.** New bearer-authed `POST /api/cron/zoho-po-sync` route runs `syncPurchaseOrdersFromZoho()` on a schedule so tablet POs land in the receive dropdown without a manual sync click. Gated by `ZOHO_PO_SYNC_ENABLED=true`; persists one `zoho_sync_runs` row (`PURCHASE_ORDERS`, `source=cron`) and an audit row per pass. Systemd timer `luma-zoho-po-sync.timer` fires daily at **03:59 server local time**. Manual **Sync POs from Zoho** on `/receiving/raw-bags` is unchanged.
+
+### Documentation
+- **`deploy/README-zoho-po-sync.md`** — install, env, verification, and rollback runbook for the daily PO sync timer.
+
 ## [1.5.11] — 2026-06-25
 
 ### Receiving (hardening)
