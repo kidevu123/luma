@@ -147,3 +147,90 @@ Why this over other options:
 | Audit cross-link | `docs/ZOHO_BOUNDARY_AUDIT_2026-06-25.md` §12 |
 
 **No runtime, schema, env, or payload shape changes in Z-3.**
+
+---
+
+## 10. Phase Z-4 — dual-run equivalence (2026-06-25)
+
+**Goal:** Prove Luma's local bag-receive builder against the service's new read-only build endpoint **before** any runtime migration. Equivalence proof only.
+
+### 10.1 Service endpoint availability (preflight, Task 0)
+
+| Check | Result |
+|-------|--------|
+| Service reachable (`GET /health`) | **Yes** — HTTP 200, `version: 1.28.0`, `db_connected: true` |
+| Build route present (`POST /zoho/luma/bag-receive/build`) | **Yes** — returns `ZOHO_AUTH_MISSING` (Bearer required), not 404 → route registered |
+| Capability `luma.raw_intake.build` | Expected per S-1; confirmed via build-route presence (no public capability list endpoint) |
+| Luma local creds for live call | **Not provisioned on this workstation** — no `.env`, no `ZOHO_SERVICE_BEARER_SECRET` |
+
+**Honesty note:** A live authenticated capture was **not possible from the dev workstation** (no bearer secret). The deterministic dual-run therefore compares Luma's real builder output against a fixture that **encodes the S-1 documented contract**. A second, **env-gated live dual-run test** (`it.skipIf`) calls the real endpoint and runs the same diff — it is **skipped** wherever creds are absent (CI/local) and provides the real proof when run in the deployed environment. No equivalence was faked.
+
+### 10.2 Luma request mapper (isolated, not wired to runtime)
+
+- `lib/zoho/bag-receive-build-service-client.ts`
+  - `bagFinishReceiveBuildInputToDomainRequest()` — `BagFinishReceiveBuildInput` → `ProposedBagReceiveDomainRequest`
+  - `callBagReceiveBuildService()` — read-only `POST /zoho/luma/bag-receive/build`, Bearer auth, **not** gated on `ZOHO_DRY_RUN_WRITES_ENABLED` (no side effects), **not** imported by any preview/commit/freeze path
+  - `parseBagReceiveBuildResponse()`, `diffBagReceiveBuild()` — pure response parse + diff
+
+### 10.3 Dual-run comparison results
+
+Canonical input: full-bag Choco receive (qty 7219, PO/line/item mapped).
+
+| Axis | Luma | Service (S-1) | Verdict |
+|------|------|---------------|---------|
+| Domain values (bag, receive, qty, source, date, PO, line, item) | from build input | `normalized_request` echo | **MATCH** |
+| Core Zoho PR values (PO id, line id, item id, qty, date) | `buildBagFinishReceivePayload` | `zoho_purchase_receive_payload` | **MATCH** |
+| `internal_receipt_number` nullability | `string \| null` (already nullable) | nullable | **MATCH** (no real divergence) |
+| Preview idempotency key | `luma-bag-finish-receive:<inventory_bag_id>` | `luma-bag-receive-preview:<luma_receive_id>` | **MISMATCH** |
+| Commit idempotency key | `rbg-<sha256>` (op + PO + line + qty + date) | service per-receive key | **MISMATCH** |
+| Receive idempotency key | `luma-bag-finish-receive:<inventory_bag_id>` | service per-receive key | **MISMATCH** |
+| Notes body | priority field list (`Luma op`, `Receipt #`, `Bag #`, `Internal receipt #`, `Qty`, …) | `luma_receive_id` + `quantity_source` | **MISMATCH** |
+| Blockers / warnings (happy path) | n/a | `[]` / `[]` | **MATCH** |
+
+### 10.4 Mismatch table + classification
+
+| # | Mismatch | Classification | Action |
+|---|----------|----------------|--------|
+| M1 | Preview key namespace + source field (`bag_id` vs `luma_receive_id`) | **Must align before migration** | Do NOT collapse Luma namespaces (hard rule). Service should expose Luma's per-bag preview key OR Luma keeps minting it locally. Domain decision in Z-5. |
+| M2 | Commit key format (`rbg-*` vs service key) | **Must align before migration** | Commit/frozen replay stays Luma-local; service must not own commit idempotency until replay parity proven. |
+| M3 | Receive (source-receipt) key namespace | **Must align before migration** | `buildOutboundSourceReceipts` feeds production-output gating; key must stay stable. Keep Luma-owned. |
+| M4 | Notes body fields/format | **Intentional difference (do not auto-fix)** | Per hard rule, notes formatting change needs explicit approval. Service notes are sparser; Luma's accounting notes are richer. Reconcile only after approval. |
+| M5 | Core domain + Zoho values | **Harmless / equivalent** | Safe to rely on for preview build migration. |
+
+### 10.5 Idempotency key comparison
+
+| Key | Luma namespace | Service namespace | Collapse allowed? |
+|-----|----------------|-------------------|-------------------|
+| Preview | `luma-bag-finish-receive:` (per bag) | `luma-bag-receive-preview:` (per receive) | **No** (hard rule) |
+| Commit | `rbg-` (hash) | service per-receive | **No** — stays Luma-local through migration |
+| Receive (source receipt) | `luma-bag-finish-receive:` | service per-receive | **No** — production-output gate depends on it |
+
+### 10.6 Notes-format comparison
+
+- **Luma** (`buildRawBagReceiveNotes`): priority-ordered `label: value` lines, never-drop top 5 (`Luma op`, `Receipt #`, `Bag #`, `Internal receipt #`, `Qty`), 2000-char cap, accounting-rich.
+- **Service** (S-1 build): includes `luma_receive_id` + `quantity_source`.
+- **Verdict:** different content + format. Not byte-equal. Classified **intentional / approval-gated (M4)** — not changed in Z-4.
+
+### 10.7 Blocker comparison
+
+Happy-path build returns empty `blockers`/`warnings`. Luma's mapping guards (`loadBagFinishReceiveContext`) reject missing PO/line/item **before** building a payload. Service blocker semantics for missing mapping were not exercised live (no creds); to be confirmed in the env-gated live run.
+
+### 10.8 Recommendation for Z-5
+
+**Outcome 2 — align service build output first (minor/structural mismatches), keep Luma builder + commit/frozen replay local.**
+
+Concretely, the single narrow Z-5 step:
+
+> Reconcile the **preview idempotency key** contract (M1) only: either (a) have the service accept/echo Luma's per-bag preview key, or (b) confirm Luma continues minting `luma-bag-finish-receive:<bag_id>` and the service treats it as opaque. Add a contract test pinning the agreed behavior. **Do not** touch commit/receive keys (M2/M3), notes (M4), or switch runtime preview to the service yet.
+
+Rationale: core payload + domain values already match (M5); the only true blocker to a *preview-build* switch is the preview-key contract. Commit/frozen replay and notes remain Luma-owned by hard rule until separately approved.
+
+### 10.9 Z-4 deliverables
+
+| Artifact | Path |
+|----------|------|
+| Isolated mapper + read-only client + diff | `lib/zoho/bag-receive-build-service-client.ts` |
+| Dual-run equivalence tests (15 deterministic + 1 env-gated live) | `lib/zoho/bag-receive-build-dual-run.contract.test.ts` |
+| This section | `docs/ZOHO_BAG_RECEIVE_CONTRACT_PREP_2026-06-25.md` §10 |
+
+**No runtime preview/commit/freeze migration, no live Zoho writes, no schema/env changes, no idempotency-namespace collapse, no notes-format change in Z-4.**

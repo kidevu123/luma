@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.26] — 2026-06-25
+
+### Tests
+- **Z-4 Zoho boundary:** `lib/zoho/bag-receive-build-dual-run.contract.test.ts` dual-runs Luma's local bag-receive builder against the service `POST /zoho/luma/bag-receive/build` read-only endpoint. Deterministic comparison vs the documented S-1 contract (core domain/Zoho values MATCH; preview/commit/receive idempotency keys + notes MISMATCH and are recorded, not changed). Includes an env-gated live dual-run that is skipped without `ZOHO_SERVICE_BEARER_SECRET`.
+
+### Added
+- `lib/zoho/bag-receive-build-service-client.ts` — isolated, read-only build client + `bagFinishReceiveBuildInputToDomainRequest` mapper + `diffBagReceiveBuild`. Not wired into preview/commit/freeze runtime paths.
+
+### Docs
+- `docs/ZOHO_BAG_RECEIVE_CONTRACT_PREP_2026-06-25.md` §10 — service availability, dual-run results, mismatch table, idempotency/notes comparison, recommended Z-5 (align preview-key contract only).
+
+### Notes
+- Equivalence proof only. No runtime preview/commit/freeze migration, no live Zoho writes, no schema/env changes, no idempotency-namespace collapse, no notes-format change. Service confirmed deployed (v1.28.0); live capture not possible from the dev workstation (no bearer secret) — proven via documented contract + env-gated live test.
+
 ## [1.5.25] — 2026-06-25
 
 ### Tests
