@@ -33,43 +33,6 @@ export type RawBagReceiveBuildInput = {
   warehouseId?: string | null;
 };
 
-/**
- * @deprecated v1.5.15 — superseded by buildBagFinishReceivePayload in
- * lib/zoho/bag-finish-receive.ts. The canonical builder emits the
- * flat BagFinishReceiveRequest shape (source_bag_id + flat fields)
- * accepted by the gateway today; this older builder emits a legacy
- * line_items[] array shape that no production caller targets. Only the
- * paired test file imports it. Slated for removal once a no-importer
- * guard test has run green for at least one release cycle. Do not add
- * new callers — use buildBagFinishReceivePayload instead.
- */
-export function buildRawBagIntakeReceivePayload(
-  input: RawBagReceiveBuildInput,
-  opts?: { dryRun?: boolean },
-): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
-    dry_run: opts?.dryRun !== false,
-    luma_operation_id: buildBagFinishReceiveIdempotencyKey(input.inventoryBagId),
-    luma_bag_id: input.inventoryBagId,
-    luma_workflow_session_id: input.lumaReceiveId,
-    purchaseorder_id: input.zohoPoId,
-    date: input.receiveDate,
-    line_items: [
-      {
-        line_item_id: input.zohoLineItemId,
-        item_id: input.zohoTabletItemId,
-        quantity: input.declaredPillCount,
-        unit: "pcs",
-      },
-    ],
-    notes: `Luma raw-bag intake receive for ${input.internalReceiptNumber ?? input.inventoryBagId}`,
-  };
-  if (input.warehouseId) {
-    payload.warehouse_id = input.warehouseId;
-  }
-  return payload;
-}
-
 async function loadRawBagReceiveContext(inventoryBagId: string) {
   const [row] = await db
     .select({
@@ -128,76 +91,6 @@ async function loadRawBagReceiveContext(inventoryBagId: string) {
       receiveDate,
     },
   };
-}
-
-/**
- * @deprecated v1.5.15 — dead code path. Has zero callers across
- * production / tests / scripts (confirmed by no-importer guard test
- * in raw-bag-intake-receive-deprecated.test.ts). The canonical writers
- * to zoho_raw_bag_receives are:
- *   - seedPendingRawBagReceiveRows (this file) for new intake seeds
- *   - upsertRawBagReceiveRow in lib/zoho/bag-finish-receive.ts for
- *     preview/commit flows
- *   - setRawBagReconciliationStatus (this file) for reconciliation
- *     state updates
- * Function is not exported. Retained only to keep the change
- * behavior-preserving for one release cycle before removal.
- */
-async function upsertRawBagReceiveRow(
-  buildInput: RawBagReceiveBuildInput,
-  actor: Pick<CurrentUser, "id"> | null,
-) {
-  const idempotencyKey = buildBagFinishReceiveIdempotencyKey(buildInput.inventoryBagId);
-  const now = new Date();
-
-  const [existing] = await db
-    .select()
-    .from(zohoRawBagReceives)
-    .where(eq(zohoRawBagReceives.inventoryBagId, buildInput.inventoryBagId))
-    .limit(1);
-
-  if (existing?.zohoReceiveStatus === "COMMITTED" && existing.zohoPurchaseReceiveId) {
-    return { ok: false as const, reason: "This bag already has a committed Zoho purchase receive." };
-  }
-
-  const values = {
-    inventoryBagId: buildInput.inventoryBagId,
-    receiveId: buildInput.lumaReceiveId,
-    zohoPurchaseorderId: buildInput.zohoPoId,
-    zohoPurchaseorderLineItemId: buildInput.zohoLineItemId,
-    zohoReceivedQuantity: buildInput.declaredPillCount,
-    zohoReceiveIdempotencyKey: idempotencyKey,
-    reconciliationStatus: "UNCONFIRMED" as const,
-    lastAttemptAt: now,
-    updatedAt: now,
-  };
-
-  if (existing) {
-    await db
-      .update(zohoRawBagReceives)
-      .set(values)
-      .where(eq(zohoRawBagReceives.id, existing.id));
-    return { ok: true as const, rowId: existing.id };
-  }
-
-  const [inserted] = await db
-    .insert(zohoRawBagReceives)
-    .values(values)
-    .returning({ id: zohoRawBagReceives.id });
-
-  await writeAudit({
-    actorId: actor?.id ?? null,
-    actorRole: null,
-    action: "zoho_raw_bag_receive.created",
-    targetType: "ZohoRawBagReceive",
-    targetId: inserted!.id,
-    after: {
-      inventoryBagId: buildInput.inventoryBagId,
-      quantity: buildInput.declaredPillCount,
-    },
-  });
-
-  return { ok: true as const, rowId: inserted!.id };
 }
 
 export async function previewRawBagIntakeReceive(

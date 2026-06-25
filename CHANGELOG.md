@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.16] — 2026-06-25
+
+### Cleanup
+- **Removed two dead helpers from `lib/zoho/raw-bag-intake-receive.ts`.** After v1.5.15 no-importer guards ran green, deleted:
+  - `buildRawBagIntakeReceivePayload` — legacy `line_items[]` payload builder; canonical replacement remains `buildBagFinishReceivePayload` in `lib/zoho/bag-finish-receive.ts`.
+  - local `upsertRawBagReceiveRow` — zero callers; canonical writers remain `seedPendingRawBagReceiveRows`, `upsertRawBagReceiveRow` in `bag-finish-receive.ts`, and `setRawBagReconciliationStatus`.
+
+### Tests
+- Removed obsolete `buildRawBagIntakeReceivePayload` unit tests from `lib/zoho/raw-bag-intake-receive.test.ts` (kept `parseZohoPurchaseReceiveId` tests).
+- Converted `lib/zoho/raw-bag-intake-receive-deprecated.test.ts` to forbidden-reintroduction guards plus canonical-path presence checks.
+
+### Notes
+- No production behavior changes. No schema/migration changes. No Zoho live-write changes.
+
 ## [1.5.15] — 2026-06-25
 
 ### Cleanup
