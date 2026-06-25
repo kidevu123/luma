@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.5.17] — 2026-06-25
+
+### Cleanup
+- **Removed confirmed-dead UI and server-action debris (~850+ lines).**
+  - `components/production/luma-ui.tsx` — never imported; live pages use `components/production/ui.tsx`.
+  - `app/(admin)/packaging-output/auto-issue-controls.tsx` + `actions.ts` — superseded by `backlog-row-actions.tsx` + `repairAutoIssueFinishedLotAction`.
+  - `app/(floor)/floor/[token]/source-allocation-panel.tsx` — built but never wired to the floor page.
+  - `app/(admin)/floor-board/_hooks/use-floor-live-refresh.ts` — superseded by inline SSE in `live-refresh.tsx`.
+- **Pruned Zoho note-input dead fields.** Removed ignored `source?` from `RawBagReceiveNotesInput` / `ProductionOutputNotesInput`; commit trigger still appended at commit time via `appendCommitTriggerToNotes`.
+- **Simplified raw-bag intake module.** Dropped unused `RawBagReceiveBuildInput` export, `parseZohoPurchaseReceiveId` re-export, and redundant bag query in `verifyRawBagHistoricalZohoReceive`.
+- **Deleted 7 untracked local `_pilot-*` script debris files** from the working tree.
+
+### Tests
+- `finished-lots-backlog.test.ts` — pins live per-row repair path instead of deleted bulk auto-issue actions.
+- `raw-bag-intake-receive.test.ts` — imports `parseZohoPurchaseReceiveId` from canonical module.
+- `zoho-live-commit-eligibility-guard.test.ts` — new guard: module stays test-only until queue UI wires it.
+
+### Notes
+- No production behavior changes on live Zoho commit paths. Tracked staging pilot scripts under `scripts/_pilot-*` retained.
+
 ## [1.5.16] — 2026-06-25
 
 ### Cleanup

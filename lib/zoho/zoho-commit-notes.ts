@@ -30,10 +30,7 @@
 //     That's required because the body gets frozen into the payload
 //     at preview/seed time and replayed verbatim on commit.
 
-/** @deprecated Source-of-commit lives in the commit-trigger suffix
- *  (see {@link CommitTrigger}), not the frozen notes body. Kept as a
- *  type alias only because the seed/freeze code still passes it for
- *  audit-log structuring. */
+/** Audit-log label for freeze-time seed vs manual regeneration. */
 export type CommitSource = "manual" | "auto";
 
 /** The actual trigger that fired the commit. Appended to the frozen
@@ -57,11 +54,6 @@ export type RawBagReceiveNotesInput = {
   /** Always present. */
   receiveDate: string;
   receivedQuantity: number;
-  /** @deprecated Source-of-commit is now appended at commit time via
-   *  {@link appendCommitTriggerToNotes}. The frozen body no longer
-   *  includes it. Kept as an optional input only for callers that
-   *  haven't been migrated yet — currently ignored by the builder. */
-  source?: CommitSource;
 
   // Optional identifiers, included when supplied.
   lumaReceiveId?: string | null;
@@ -125,8 +117,6 @@ export function buildRawBagReceiveNotes(
 export type ProductionOutputNotesInput = {
   lumaOperationId: string;
   finishedLotId: string;
-  /** @deprecated See note on RawBagReceiveNotesInput.source. */
-  source?: CommitSource;
   unitsProduced: number;
 
   finishedLotNumber?: string | null;

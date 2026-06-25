@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseZohoPurchaseReceiveId } from "./raw-bag-intake-receive";
+import { parseZohoPurchaseReceiveId } from "./zoho-purchase-receive-id";
 
 const ZOHO_ENTITY_ID = "5254962000001234567";
 

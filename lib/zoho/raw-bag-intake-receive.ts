@@ -16,22 +16,9 @@ import {
 import {
   buildBagFinishReceiveIdempotencyKey,
 } from "@/lib/zoho/source-receipt-evidence";
-export { parseZohoPurchaseReceiveId } from "@/lib/zoho/zoho-purchase-receive-id";
 import { previewBagFinishReceive, commitBagFinishReceive } from "@/lib/zoho/bag-finish-receive";
 import { validateZohoPurchaseReceiveIdCandidate } from "@/lib/zoho/receipt-id-validation";
 import { verifyHistoricalZohoPurchaseReceive } from "@/lib/zoho/purchase-receive-verification";
-
-export type RawBagReceiveBuildInput = {
-  inventoryBagId: string;
-  lumaReceiveId: string;
-  internalReceiptNumber: string | null;
-  declaredPillCount: number;
-  zohoPoId: string;
-  zohoLineItemId: string;
-  zohoTabletItemId: string;
-  receiveDate: string;
-  warehouseId?: string | null;
-};
 
 async function loadRawBagReceiveContext(inventoryBagId: string) {
   const [row] = await db
@@ -120,15 +107,9 @@ export async function verifyRawBagHistoricalZohoReceive(
   const ctx = await loadRawBagReceiveContext(inventoryBagId);
   if (!ctx.ok) return ctx;
 
-  const [bagMeta] = await db
-    .select({ internalReceiptNumber: inventoryBags.internalReceiptNumber })
-    .from(inventoryBags)
-    .where(eq(inventoryBags.id, inventoryBagId))
-    .limit(1);
-
   return verifyHistoricalZohoPurchaseReceive({
     candidateZohoPurchaseReceiveId,
-    internalReceiptNumber: bagMeta?.internalReceiptNumber ?? null,
+    internalReceiptNumber: ctx.buildInput.internalReceiptNumber,
     lumaDeclaredQuantity: ctx.buildInput.declaredPillCount,
     lumaZohoPoId: ctx.buildInput.zohoPoId,
     lumaZohoLineItemId: ctx.buildInput.zohoLineItemId,

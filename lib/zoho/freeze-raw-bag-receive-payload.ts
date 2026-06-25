@@ -159,7 +159,6 @@ async function freezeRawBagReceivePayloadInternal(
     vendorBarcode: ctx.vendorBarcode,
     receivedQuantity,
     receiveDate,
-    source,
   });
 
   const frozenPayload: FrozenRawBagReceivePayload = {

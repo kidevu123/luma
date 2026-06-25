@@ -295,9 +295,8 @@ export async function previewZohoProductionOutputAction(
   // canonical helper and prepend them to any operator-supplied notes.
   // These are FROZEN into the payload so the same string arrives at
   // commit time whether the buffer expires or an operator pushes by
-  // hand. Source = "auto" because the staging buffer's default
-  // disposition is auto-commit; the Luma audit log captures the
-  // actual trigger separately for the rare manual-override case.
+  // Commit trigger (manual vs auto) is appended at commit time via
+  // appendCommitTriggerToNotes — not in the frozen preview body.
   const accountingNotes = buildProductionOutputNotes(
     {
       lumaOperationId: lot.finishedLot.id,
@@ -307,7 +306,6 @@ export async function previewZohoProductionOutputAction(
       casesProduced: lot.finishedLot.casesProduced,
       looseDisplaysProduced: lot.finishedLot.displaysProduced,
       looseSinglesProduced: lot.metrics?.looseCards ?? null,
-      source: "auto",
     },
     // production-output gateway notes column caps at 1000 per the
     // existing preview validator. The shared helper truncates safely

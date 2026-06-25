@@ -24,8 +24,8 @@ const pageSrc = readFileSync(
   join(__dirname, "../../../app/(admin)/packaging-output/page.tsx"),
   "utf8",
 );
-const actionsSrc = readFileSync(
-  join(__dirname, "../../../app/(admin)/packaging-output/actions.ts"),
+const backlogActionsSrc = readFileSync(
+  join(__dirname, "../../../app/(admin)/packaging-output/backlog-row-actions.tsx"),
   "utf8",
 );
 
@@ -75,10 +75,8 @@ describe("Production Output backlog tooling", () => {
     expect(pageSrc).not.toMatch(/>Units</);
   });
 
-  it("bulk sweep is sequential and reports blockers instead of swallowing them", () => {
-    expect(actionsSrc).toMatch(/for \(const row of backlog\)/);
-    expect(actionsSrc).toMatch(/blocked: results\.filter\(\(r\) => !r\.ok\)\.length/);
-    expect(actionsSrc).toMatch(/requireAdmin/);
-    expect(actionsSrc).toMatch(/repairAutoIssueFinishedLotForWorkflowBag/);
+  it("per-row auto-issue uses the live repair path", () => {
+    expect(backlogActionsSrc).toMatch(/repairAutoIssueFinishedLotAction/);
+    expect(backlogActionsSrc).toMatch(/AUTO_ISSUE_NOW/);
   });
 });

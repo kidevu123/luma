@@ -87,12 +87,6 @@ describe("buildRawBagReceiveNotes — frozen body", () => {
       buildRawBagReceiveNotes(FULL_RAW_BAG),
     );
   });
-
-  it("ignores the deprecated source param entirely (no body-level Source line either way)", () => {
-    const withManual = buildRawBagReceiveNotes({ ...FULL_RAW_BAG, source: "manual" });
-    const withAuto = buildRawBagReceiveNotes({ ...FULL_RAW_BAG, source: "auto" });
-    expect(withManual).toBe(withAuto);
-  });
 });
 
 describe("buildRawBagReceiveNotes — safe truncation", () => {
