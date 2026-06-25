@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.20] — 2026-06-25
+
+### Refactor
+- **D-1 duplication reduction:** `finished-lots/[id]/zoho-queue-card.tsx` now imports shared `ZohoOpStatusChip` from `zoho-operations/_status-chip.tsx` instead of a byte-identical local `OpStatusChip` copy (~18 lines removed).
+
+### Tests
+- `app/(admin)/finished-lots/[id]/zoho-queue-card.test.ts` — guard that the queue card reuses the shared chip and does not reintroduce a local duplicate.
+
+### Notes
+- Presentational only. No Zoho write behavior, payload, or route changes.
+
 ## [1.5.19] — 2026-06-25
 
 ### Cleanup

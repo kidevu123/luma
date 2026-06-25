@@ -2,34 +2,14 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Clock, XCircle, AlertCircle, MinusCircle, ArrowRight } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
+import { ZohoOpStatusChip } from "@/app/(admin)/zoho-operations/_status-chip";
 import { createZohoQueueAction } from "./zoho-enqueue-actions";
 import type { ZohoAssemblyOp } from "@/lib/db/schema";
-
-// ─── Status chip ──────────────────────────────────────────────────────────────
-
-function OpStatusChip({ status }: { status: ZohoAssemblyOp["status"] }) {
-  const cfg: Record<ZohoAssemblyOp["status"], { cls: string; icon: React.ElementType; label: string }> = {
-    PENDING:       { cls: "bg-surface-2 text-text-muted border-border/60",        icon: Clock,         label: "Pending"        },
-    IN_PROGRESS:   { cls: "bg-info-50 text-info-700 border-info-500/40",          icon: Clock,         label: "In progress"    },
-    SUCCEEDED:     { cls: "bg-good-50 text-good-700 border-good-500/40",          icon: CheckCircle2,  label: "Succeeded"      },
-    FAILED:        { cls: "bg-danger-50 text-danger-700 border-danger-500/40",    icon: XCircle,       label: "Failed"         },
-    NEEDS_MAPPING: { cls: "bg-warn-50 text-warn-700 border-warn-500/40",          icon: AlertCircle,   label: "Needs mapping"  },
-    SKIPPED:       { cls: "bg-surface-2 text-text-muted border-border/60",        icon: MinusCircle,   label: "Skipped"        },
-  };
-  const c = cfg[status];
-  const Icon = c.icon;
-  return (
-    <span className={`inline-flex items-center gap-1 h-5 px-1.5 rounded-sm border text-[10px] font-semibold uppercase tracking-wide ${c.cls}`}>
-      <Icon className="h-3 w-3" />
-      {c.label}
-    </span>
-  );
-}
 
 function KindLabel({ opKind }: { opKind: ZohoAssemblyOp["opKind"] }) {
   const labels: Record<ZohoAssemblyOp["opKind"], string> = {
@@ -155,7 +135,7 @@ export function ZohoQueueCard({
                 <TR key={op.id}>
                   <TD className="tabular-nums text-xs text-text-muted">{op.opSequence ?? "—"}</TD>
                   <TD><KindLabel opKind={op.opKind} /></TD>
-                  <TD><OpStatusChip status={op.status} /></TD>
+                  <TD><ZohoOpStatusChip status={op.status} /></TD>
                   <TD className="text-right tabular-nums font-semibold">{op.quantity.toLocaleString()}</TD>
                   <TD className="font-mono text-[10px] text-text-muted truncate max-w-[240px]">{op.idempotencyKey}</TD>
                 </TR>
