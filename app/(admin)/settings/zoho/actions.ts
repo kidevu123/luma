@@ -7,7 +7,11 @@ import { requireOwner } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { zohoCredentials, companies } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
-import { testConnection } from "@/lib/zoho/client";
+import {
+  checkZohoGatewayHealth,
+  deriveZohoReadiness,
+  fetchZohoBrandStatus,
+} from "@/lib/integrations/zoho/gateway";
 
 const schema = z.object({
   organizationId: z.string().min(1).max(40),
@@ -106,9 +110,28 @@ export async function saveZohoCredentialsAction(formData: FormData) {
 export async function testZohoConnectionAction() {
   await requireOwner();
   try {
-    const companyId = await getCompanyId();
-    const r = await testConnection(companyId);
-    return { ok: true as const, ...r };
+    const health = await checkZohoGatewayHealth();
+    const shouldProbeBrand = health.status === "CONNECTED";
+    const brand = shouldProbeBrand ? await fetchZohoBrandStatus() : null;
+    const { readiness, message } = deriveZohoReadiness({ health, brand });
+
+    if (readiness !== "READY_FOR_DRY_RUN") {
+      return { error: message };
+    }
+
+    const selected =
+      brand && (brand.kind === "OK" || brand.kind === "NEEDS_REAUTH")
+        ? brand.brand
+        : null;
+    if (!selected) {
+      return { error: message };
+    }
+
+    return {
+      ok: true as const,
+      organizationName: selected.brandKey,
+      organizationId: selected.organizationId ?? selected.brandKey,
+    };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Test failed." };
   }

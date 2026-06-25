@@ -528,20 +528,20 @@ export default async function ZohoGatewayPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Legacy direct-OAuth path</CardTitle>
+          <CardTitle>Legacy credential form</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-text-muted">
           <p>
-            <code>lib/zoho/client.ts</code> handles per-company OAuth directly
-            against Zoho. It backs the existing{" "}
+            The{" "}
             <Link href="/settings/zoho" className="underline">
               /settings/zoho
             </Link>{" "}
-            credentials page. Per the ZOHO-0 plan, live sync from ZOHO-2 onward
-            does NOT use the direct-OAuth path — it goes through the gateway
-            documented above. The legacy code stays in place for now; its only
-            live use is the read-only "Test connection" button on{" "}
-            <code>/settings/zoho</code>.
+            page still stores per-company OAuth credential fields and the
+            app-level warehouse default in <code>zoho_credentials</code>.
+            As of Z-2, its Test connection button probes this integration
+            gateway (<code>/health</code> + <code>/status</code>) — Luma no
+            longer calls Zoho APIs directly. Live sync from ZOHO-2 onward has
+            always used the gateway path documented above.
           </p>
           <p>
             No Zoho refresh / access tokens are stored or refreshed by anything

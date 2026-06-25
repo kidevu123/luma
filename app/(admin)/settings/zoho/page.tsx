@@ -1,8 +1,7 @@
 // Zoho Inventory credentials. Owner-only — credentials are
-// effectively a master key for the company's Zoho org. We display
-// the existing values masked + a Test connection button so the
-// operator can confirm tokens still work without round-tripping
-// to Zoho's UI.
+// effectively a master key for the company's Zoho org. The Test
+// connection button probes the integration gateway (/health + /status);
+// stored OAuth fields remain for warehouse defaults and legacy reference.
 
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";

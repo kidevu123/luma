@@ -244,4 +244,20 @@ Alternative Z-2 (if product prefers payload work): add a **contract test suite**
 | `ZOHO_PRODUCTION_OUTPUT_BATCH_RESOLVE` | Batch resolution opt-in |
 | `ZOHO_ALLOW_SCRIPT_COMMIT_BYPASS` | Controlled window scripts only |
 
-(Legacy OAuth credentials live in **`zoho_credentials`** DB table, used only by `lib/zoho/client.ts`.)
+(Legacy OAuth credential fields live in **`zoho_credentials`** DB table for warehouse defaults and the `/settings/zoho` form. **Z-2 (2026-06-25, `v1.5.24`):** removed `lib/zoho/client.ts`; Test connection on that page now uses gateway readiness only — no direct Zoho API calls remain in Luma runtime code.)
+
+---
+
+## 11. Phase Z-2 closeout (2026-06-25)
+
+**Commit:** `v1.5.24` — settings Test connection routed through `lib/integrations/zoho/gateway.ts`.
+
+| Before | After |
+|--------|-------|
+| `testZohoConnectionAction` → `lib/zoho/client.ts` `testConnection` → OAuth refresh + `GET zohoapis.com/.../organizations/:id` | `testZohoConnectionAction` → `checkZohoGatewayHealth` + `fetchZohoBrandStatus` + `deriveZohoReadiness` |
+| `lib/zoho/client.ts` present (direct OAuth) | **Deleted** — zero runtime importers |
+| No guard against direct API reintroduction | `lib/zoho/zoho-direct-api-boundary-guard.test.ts` |
+
+**Unchanged:** bag receive, production output, PO sync, commits, frozen payloads, env gates, `zoho_credentials` schema.
+
+**Next (Z-3+):** payload-builder / BOM mapping migration behind service contracts — not started.

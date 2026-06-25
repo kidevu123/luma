@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.24] — 2026-06-25
+
+### Refactor
+- **Z-2 Zoho boundary:** `/settings/zoho` Test connection now probes the integration gateway (`checkZohoGatewayHealth` + `fetchZohoBrandStatus` + `deriveZohoReadiness`) instead of direct Zoho OAuth/API. Removed unused `lib/zoho/client.ts` (OAuth refresh, `testConnection`, unwired `createPurchaseReceive` stub).
+
+### Tests
+- `lib/zoho/zoho-direct-api-boundary-guard.test.ts` — guard against `zohoapis.com`, `Zoho-oauthtoken`, and `lib/zoho/client` reintroduction; assert settings action uses gateway path.
+
+### Notes
+- Settings UX preserved (`organizationName` / `organizationId` success shape). `zoho_credentials` table and credential form unchanged; warehouse default still read from that row. No bag receive, production output, PO sync, commit, or frozen-payload changes.
+
 ## [1.5.23] — 2026-06-25
 
 ### Tests
