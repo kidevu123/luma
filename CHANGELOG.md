@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.5.13] — 2026-06-25
+
+### Fixed
+- **`ZOHO_PO_SYNC_ENABLED` now reaches the app container.** The daily PO sync cron gate was added to `/etc/luma/.env` but missing from `docker-compose.yml`, so the route always returned `status: skipped`. Wired through the app service environment block.
+
 ## [1.5.12] — 2026-06-25
 
 ### Added
