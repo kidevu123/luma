@@ -173,6 +173,10 @@ curl -s -X GET \
 
 ### Step 1.6 — Re-preview lot 352167
 
+> **Note:** `scripts/_pilot-sweet-trip-352167-preview.ts` was never checked in.
+> Archived Sweet Trip / FIX Relax one-shots live under
+> `scripts/archive/pilot/` (see README there). Do not run without owner approval.
+
 ```bash
 ssh root@192.168.1.190 "pct exec 122 -- docker exec luma-app-1 \
   node_modules/.bin/tsx scripts/_pilot-sweet-trip-352167-preview.ts" \

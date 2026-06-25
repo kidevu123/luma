@@ -1,6 +1,6 @@
 // Pilot #2 — Sweet Trip floor walkthrough via real floor server actions.
 //
-//   ALLOW_STAGING_QA_DATA=true npx tsx scripts/_pilot-sweet-trip-floor-walkthrough.ts
+//   ALLOW_STAGING_QA_DATA=true npx tsx scripts/archive/pilot/_pilot-sweet-trip-floor-walkthrough.ts
 //
 // No live Zoho writes. Does not enable commit gates.
 

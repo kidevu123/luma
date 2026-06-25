@@ -1,8 +1,8 @@
 #!/usr/bin/env npx tsx
 // Pilot #2 — scoped Sweet Trip master-data prep (single product + tablet type only).
 //
-//   ALLOW_STAGING_QA_DATA=true npx tsx scripts/_pilot-sweet-trip-prep-master-data.ts
-//   ALLOW_STAGING_QA_DATA=true npx tsx scripts/_pilot-sweet-trip-prep-master-data.ts --apply
+//   ALLOW_STAGING_QA_DATA=true npx tsx scripts/archive/pilot/_pilot-sweet-trip-prep-master-data.ts
+//   ALLOW_STAGING_QA_DATA=true npx tsx scripts/archive/pilot/_pilot-sweet-trip-prep-master-data.ts --apply
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";

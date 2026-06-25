@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.5.19] — 2026-06-25
+
+### Cleanup
+- **Archived six tracked staging pilot one-shots** to `scripts/archive/pilot/` (git history preserved via rename):
+  - `_pilot-sweet-trip-po-commit-once.ts`
+  - `_pilot-sweet-trip-po-commit-retry-once.ts`
+  - `_pilot-sweet-trip-floor-walkthrough.ts`
+  - `_pilot-sweet-trip-prep-master-data.ts`
+  - `_pilot-fix-relax-po-commit-once.ts`
+  - `_pilot-fix-relax-po-preview.ts`
+- Added `scripts/archive/pilot/README.md` — historical one-shots, not deploy/runtime; operator approval required.
+
+### Docs
+- `docs/runbooks/2026-06-19-luma-live-write-proof.md` — notes missing preview script; points to archive path.
+- `VERSIONING.md` / `tsconfig.scripts.json` — archive location documented.
+
+### Notes
+- No app/runtime imports. Root `scripts/_pilot-*.ts` gitignore unchanged (blocks new debris only).
+- Script behavior unchanged; usage comments updated to archive paths.
+
 ## [1.5.18] — 2026-06-25
 
 ### Cleanup

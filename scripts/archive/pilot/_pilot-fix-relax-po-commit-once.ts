@@ -3,7 +3,7 @@
 // Luma gates open/close in-process via withPilotProductionOutputCommitWindow.
 // Zoho CT 9503 requires shell trap — see docs/CONTROLLED_PRODUCTION_OUTPUT_COMMIT_WINDOW.md
 //
-//   ALLOW_STAGING_QA_DATA=true npx tsx scripts/_pilot-fix-relax-po-commit-once.ts
+//   ALLOW_STAGING_QA_DATA=true npx tsx scripts/archive/pilot/_pilot-fix-relax-po-commit-once.ts
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";

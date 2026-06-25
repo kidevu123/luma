@@ -12,7 +12,7 @@
 // so the explicit `include` list is not re-excluded by inheritance.
 //
 // Out of scope (intentionally NOT covered by this gate):
-//   - scripts/_*.ts pilot scripts (`_pilot-*`)
+//   - scripts/_*.ts root pilots and scripts/archive/pilot/ (`_pilot-*`)
 //   - one-off historical / repair backfills (e.g. apply-bag45-*.ts,
 //     dry-run-bag45-*.ts, repair-bag-card-104-*.ts)
 //   - Python scripts (legacy-export-tt.py)

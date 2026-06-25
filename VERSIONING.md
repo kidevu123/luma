@@ -72,7 +72,7 @@ If you're unsure whether a change is breaking: ask "could this break a bookmark,
 
 - WIP commits on a feature branch (bump once at merge, not per commit)
 - Documentation-only changes to this file or to `CLAUDE.md` (still commit them, just no version bump)
-- Tooling changes that don't ship code (`.claude/`, dev scripts under `scripts/_pilot-*`)
+- Tooling changes that don't ship code (`.claude/`, ad-hoc pilots under `scripts/_pilot-*` at repo root — gitignored; archived copies live under `scripts/archive/pilot/`)
 
 ## History note
 
