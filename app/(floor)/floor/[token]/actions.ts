@@ -43,6 +43,10 @@ import {
   STATION_STARTED_RESUME_FROM_STAGE,
   formatFloorStationBagOpenError,
   STATIONS_THAT_FINALIZE,
+  isBottleFinishingEvent,
+  bottleFinishingAlreadyFired,
+  bothBottleFinishingDone,
+  missingBottleFinishingSteps,
 } from "@/lib/production/stage-progression";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
 import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
@@ -1286,6 +1290,27 @@ export async function fireStageEventAction(
       return { error: progression.reason };
     }
 
+    // BOTTLE-ORDER-FLEX-1: cap-seal and sticker run in either order and
+    // both accept a bag at SEALED, so the stage prereq alone would let an
+    // operator fire the SAME finishing step twice. Reject a duplicate of a
+    // finishing step that already ran on this bag — each runs exactly once.
+    if (isBottleFinishingEvent(eventType)) {
+      const priorTypes = (
+        await db
+          .select({ eventType: workflowEvents.eventType })
+          .from(workflowEvents)
+          .where(eq(workflowEvents.workflowBagId, workflowBagId))
+      ).map((r) => r.eventType);
+      if (bottleFinishingAlreadyFired(eventType, priorTypes)) {
+        return {
+          error:
+            eventType === "BOTTLE_CAP_SEAL_COMPLETE"
+              ? "This bag has already been cap-sealed."
+              : "This bag has already been stickered.",
+        };
+      }
+    }
+
     const isSealingSegment = eventType === SEALING_SEGMENT_EVENT;
     const isSealingFinal = eventType === "SEALING_COMPLETE";
     const isPureSealingStation = station.kind === "SEALING";
@@ -2079,6 +2104,7 @@ export async function packagingCompleteAction(
               id: products.id,
               name: products.name,
               sku: products.sku,
+              kind: products.kind,
               unitsPerDisplay: products.unitsPerDisplay,
               displaysPerCase: products.displaysPerCase,
             })
@@ -2086,6 +2112,22 @@ export async function packagingCompleteAction(
             .where(eq(products.id, bagRow.productId))
         )[0] ?? null
       : null;
+    // BOTTLE-ORDER-FLEX-1: the Packaging station is the terminal finalize
+    // step for bottles. Both finishing steps (cap-seal AND sticker) must
+    // have run first — they're interchangeable in order, but packaging
+    // refuses to close a bottle that skipped one. (Card products are
+    // unaffected; they have no bottle finishing events.)
+    if (productRow?.kind === "BOTTLE") {
+      const pkgPriorTypes = pkgEventSlices.map((e) => e.eventType);
+      if (!bothBottleFinishingDone(pkgPriorTypes)) {
+        const missing = missingBottleFinishingSteps(pkgPriorTypes);
+        return {
+          error: `This bottle bag still needs ${missing.join(
+            " and ",
+          )} before it can be packaged.`,
+        };
+      }
+    }
     const prereq = checkPackagingPrereqs({
       bag: { id: bagRow.id, productId: bagRow.productId ?? null },
       product: productRow ?? null,

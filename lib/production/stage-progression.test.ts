@@ -5,6 +5,11 @@ import {
   STATION_PICKUP_FROM_STAGE,
   STATION_STARTED_RESUME_FROM_STAGE,
   STATIONS_THAT_FINALIZE,
+  BOTTLE_FINISHING_EVENTS,
+  isBottleFinishingEvent,
+  bottleFinishingAlreadyFired,
+  bothBottleFinishingDone,
+  missingBottleFinishingSteps,
   checkStageProgression,
   formatFloorStationBagOpenError,
 } from "./stage-progression";
@@ -107,9 +112,16 @@ describe("stage progression — full forward pipeline", () => {
     ["PACKAGING_COMPLETE", "PACKAGED", false],
     ["BOTTLE_HANDPACK_COMPLETE", "STARTED", true],
     ["BOTTLE_HANDPACK_COMPLETE", "BLISTERED", false],
+    // BOTTLE-ORDER-FLEX-1: cap-seal and sticker run in either order after
+    // fill (BLISTERED). The first runs from BLISTERED, the second from
+    // SEALED. Both stage prereqs therefore accept BLISTERED *or* SEALED.
     ["BOTTLE_CAP_SEAL_COMPLETE", "BLISTERED", true],
+    ["BOTTLE_CAP_SEAL_COMPLETE", "SEALED", true],
     ["BOTTLE_CAP_SEAL_COMPLETE", "STARTED", false],
+    ["BOTTLE_CAP_SEAL_COMPLETE", "PACKAGED", false],
+    ["BOTTLE_STICKER_COMPLETE", "BLISTERED", true],
     ["BOTTLE_STICKER_COMPLETE", "SEALED", true],
+    ["BOTTLE_STICKER_COMPLETE", "STARTED", false],
     ["BOTTLE_STICKER_COMPLETE", "PACKAGED", false],
   ];
   for (const [eventType, stage, allowed] of cases) {
@@ -170,11 +182,133 @@ describe("station release / finalize policy", () => {
     expect(STATIONS_THAT_FINALIZE.has("COMBINED")).toBe(true);
   });
 
-  it("Bottle pipeline: HANDPACK + CAP_SEAL release forward; STICKER finalizes", () => {
+  it("Bottle pipeline: HANDPACK + CAP_SEAL + STICKER all release forward; only PACKAGING finalizes", () => {
+    // BOTTLE-ORDER-FLEX-1: the bottle route is now
+    // fill → (cap-seal | sticker, either order) → packaging. Both
+    // finishing stations release the bag forward (at SEALED) so the
+    // Packaging station is always the terminal finalize step — matching
+    // the card route. Sticker no longer finalizes.
     expect(STATION_RELEASE_FROM_STAGE.BOTTLE_HANDPACK).toBe("BLISTERED");
     expect(STATION_RELEASE_FROM_STAGE.BOTTLE_CAP_SEAL).toBe("SEALED");
-    expect(STATION_RELEASE_FROM_STAGE.BOTTLE_STICKER).toBeUndefined();
-    expect(STATIONS_THAT_FINALIZE.has("BOTTLE_STICKER")).toBe(true);
+    expect(STATION_RELEASE_FROM_STAGE.BOTTLE_STICKER).toBe("SEALED");
+    expect(STATIONS_THAT_FINALIZE.has("BOTTLE_STICKER")).toBe(false);
+    expect(STATIONS_THAT_FINALIZE.has("PACKAGING")).toBe(true);
+  });
+});
+
+describe("BOTTLE-ORDER-FLEX-1 — cap-seal and sticker run in either order", () => {
+  it("both finishing stations can pick up a freshly-filled bag (BLISTERED) or a half-finished one (SEALED)", () => {
+    expect(STATION_PICKUP_FROM_STAGE.BOTTLE_CAP_SEAL).toEqual([
+      "BLISTERED",
+      "SEALED",
+    ]);
+    expect(STATION_PICKUP_FROM_STAGE.BOTTLE_STICKER).toEqual([
+      "BLISTERED",
+      "SEALED",
+    ]);
+  });
+
+  it("BOTTLE_FINISHING_EVENTS is exactly cap-seal + sticker", () => {
+    expect([...BOTTLE_FINISHING_EVENTS]).toEqual([
+      "BOTTLE_CAP_SEAL_COMPLETE",
+      "BOTTLE_STICKER_COMPLETE",
+    ]);
+  });
+
+  it("isBottleFinishingEvent only matches the two finishing events", () => {
+    expect(isBottleFinishingEvent("BOTTLE_CAP_SEAL_COMPLETE")).toBe(true);
+    expect(isBottleFinishingEvent("BOTTLE_STICKER_COMPLETE")).toBe(true);
+    expect(isBottleFinishingEvent("BOTTLE_HANDPACK_COMPLETE")).toBe(false);
+    expect(isBottleFinishingEvent("SEALING_COMPLETE")).toBe(false);
+  });
+
+  it("bottleFinishingAlreadyFired blocks a SECOND cap-seal or sticker on the same bag", () => {
+    // Sticker already done; trying to sticker again is rejected even
+    // though the bag sits at SEALED (which the stage prereq allows).
+    expect(
+      bottleFinishingAlreadyFired("BOTTLE_STICKER_COMPLETE", [
+        "BOTTLE_HANDPACK_COMPLETE",
+        "BOTTLE_STICKER_COMPLETE",
+      ]),
+    ).toBe(true);
+    // Cap-seal not yet done → allowed.
+    expect(
+      bottleFinishingAlreadyFired("BOTTLE_CAP_SEAL_COMPLETE", [
+        "BOTTLE_HANDPACK_COMPLETE",
+        "BOTTLE_STICKER_COMPLETE",
+      ]),
+    ).toBe(false);
+    // Non-finishing events are never blocked by this guard.
+    expect(
+      bottleFinishingAlreadyFired("BOTTLE_HANDPACK_COMPLETE", [
+        "BOTTLE_HANDPACK_COMPLETE",
+      ]),
+    ).toBe(false);
+  });
+
+  it("bothBottleFinishingDone is true only when BOTH cap-seal and sticker fired", () => {
+    expect(bothBottleFinishingDone(["BOTTLE_HANDPACK_COMPLETE"])).toBe(false);
+    expect(
+      bothBottleFinishingDone([
+        "BOTTLE_HANDPACK_COMPLETE",
+        "BOTTLE_STICKER_COMPLETE",
+      ]),
+    ).toBe(false);
+    expect(
+      bothBottleFinishingDone([
+        "BOTTLE_HANDPACK_COMPLETE",
+        "BOTTLE_CAP_SEAL_COMPLETE",
+        "BOTTLE_STICKER_COMPLETE",
+      ]),
+    ).toBe(true);
+  });
+
+  it("missingBottleFinishingSteps lists operator-facing labels for what's left", () => {
+    expect(missingBottleFinishingSteps(["BOTTLE_HANDPACK_COMPLETE"])).toEqual([
+      "cap-sealing",
+      "stickering",
+    ]);
+    expect(
+      missingBottleFinishingSteps([
+        "BOTTLE_HANDPACK_COMPLETE",
+        "BOTTLE_CAP_SEAL_COMPLETE",
+      ]),
+    ).toEqual(["stickering"]);
+    expect(
+      missingBottleFinishingSteps([
+        "BOTTLE_CAP_SEAL_COMPLETE",
+        "BOTTLE_STICKER_COMPLETE",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("end-to-end stage prereqs allow sticker-first AND seal-first orders", () => {
+    // Sticker-first: fill(BLISTERED) → sticker → seal.
+    expect(
+      checkStageProgression({
+        eventType: "BOTTLE_STICKER_COMPLETE",
+        currentStage: "BLISTERED",
+      }).allowed,
+    ).toBe(true);
+    expect(
+      checkStageProgression({
+        eventType: "BOTTLE_CAP_SEAL_COMPLETE",
+        currentStage: "SEALED",
+      }).allowed,
+    ).toBe(true);
+    // Seal-first: fill(BLISTERED) → seal → sticker.
+    expect(
+      checkStageProgression({
+        eventType: "BOTTLE_CAP_SEAL_COMPLETE",
+        currentStage: "BLISTERED",
+      }).allowed,
+    ).toBe(true);
+    expect(
+      checkStageProgression({
+        eventType: "BOTTLE_STICKER_COMPLETE",
+        currentStage: "SEALED",
+      }).allowed,
+    ).toBe(true);
   });
 });
 

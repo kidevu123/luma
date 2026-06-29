@@ -116,8 +116,10 @@ export async function ensureLiveReadModelCoverage(
               WHEN 'PACKAGING_SNAPSHOT' THEN 'PACKAGED'
               WHEN 'PACKAGING_COMPLETE' THEN 'PACKAGED'
               WHEN 'BOTTLE_HANDPACK_COMPLETE' THEN 'BLISTERED'
+              -- BOTTLE-ORDER-FLEX-1: cap-seal + sticker both land at SEALED
+              -- (interchangeable order); PACKAGED comes only from packaging.
               WHEN 'BOTTLE_CAP_SEAL_COMPLETE' THEN 'SEALED'
-              WHEN 'BOTTLE_STICKER_COMPLETE' THEN 'PACKAGED'
+              WHEN 'BOTTLE_STICKER_COMPLETE' THEN 'SEALED'
               WHEN 'BAG_FINALIZED' THEN 'FINALIZED'
             END
           FROM workflow_events we

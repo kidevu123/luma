@@ -137,8 +137,13 @@ const STAGE_FOR_EVENT: Record<string, string> = {
   PACKAGING_SNAPSHOT: "PACKAGED",
   PACKAGING_COMPLETE: "PACKAGED", // rich-payload variant of SNAPSHOT
   BOTTLE_HANDPACK_COMPLETE: "BLISTERED",
+  // BOTTLE-ORDER-FLEX-1: cap-seal and sticker are interchangeable
+  // finishing steps; both land the bag at SEALED. The bag advances to
+  // PACKAGED only at the Packaging station (PACKAGING_COMPLETE), which is
+  // the terminal finalize step for bottles too. (Sticker previously
+  // mapped to PACKAGED + finalized at the sticker station.)
   BOTTLE_CAP_SEAL_COMPLETE: "SEALED",
-  BOTTLE_STICKER_COMPLETE: "PACKAGED",
+  BOTTLE_STICKER_COMPLETE: "SEALED",
   BAG_FINALIZED: "FINALIZED",
 };
 
@@ -153,7 +158,11 @@ const THROUGHPUT_COLUMN: Record<string, string> = {
   BOTTLE_CAP_SEAL_COMPLETE: "bags_sealed",
   PACKAGING_SNAPSHOT: "bags_packaged",
   PACKAGING_COMPLETE: "bags_packaged",
-  BOTTLE_STICKER_COMPLETE: "bags_packaged",
+  // BOTTLE-ORDER-FLEX-1: stickering is an intermediate finishing op, not
+  // a packaging milestone. Bottles count toward bags_packaged at the
+  // Packaging station (PACKAGING_COMPLETE), so BOTTLE_STICKER_COMPLETE no
+  // longer increments a throughput counter (it would double-count packaged
+  // bags or mislabel a still-in-finishing bag).
   BAG_FINALIZED: "bags_finalized",
 };
 

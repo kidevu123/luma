@@ -1135,8 +1135,12 @@ const STATION_PREREQ_STAGE: Record<string, string> = {
   PACKAGING: "SEALED",
   COMBINED: "STARTED", // first action is BLISTER_COMPLETE
   BOTTLE_HANDPACK: "STARTED",
+  // BOTTLE-ORDER-FLEX-1: cap-seal and sticker are interchangeable; their
+  // primary entry stage is BLISTERED, but both also accept SEALED (handled
+  // by the explicit bottle exception in BagAdvancedBanner). The single
+  // value here is just the primary/first-run stage.
   BOTTLE_CAP_SEAL: "BLISTERED",
-  BOTTLE_STICKER: "SEALED",
+  BOTTLE_STICKER: "BLISTERED",
 };
 
 /** QC-3 — pending REWORK_SENT events for the current bag that have
@@ -1259,6 +1263,16 @@ function BagAdvancedBanner({
         </p>
       </div>
     );
+  }
+  // BOTTLE-ORDER-FLEX-1: cap-seal and sticker run in either order, so
+  // both are "ready" for a freshly-filled bag (BLISTERED) or one the
+  // other finishing station already handled (SEALED). No out-of-sequence
+  // warning for either stage.
+  if (
+    (stationKind === "BOTTLE_CAP_SEAL" || stationKind === "BOTTLE_STICKER") &&
+    (currentStage === "BLISTERED" || currentStage === "SEALED")
+  ) {
+    return null;
   }
   const prereq = STATION_PREREQ_STAGE[stationKind];
   if (!prereq || currentStage === prereq) return null;

@@ -357,13 +357,20 @@ export function StageActionButtons({
     releaseAtStage != null &&
     currentStage === releaseAtStage;
   const releaseLabel =
-    stationKind === "BLISTER" || stationKind === "BOTTLE_HANDPACK"
+    stationKind === "BLISTER"
       ? "Release to sealing queue"
-      : stationKind === "SEALING" || stationKind === "BOTTLE_CAP_SEAL"
+      : stationKind === "SEALING"
         ? "Release to packaging queue"
-        : stationKind === "BOTTLE_STICKER"
+        : // BOTTLE-ORDER-FLEX-1: after fill, cap-seal and sticker run in
+          // either order, and after either finishing step the bag goes to
+          // whichever step is left or on to packaging — so the bottle
+          // stations use a neutral "next station" label.
+          stationKind === "BOTTLE_HANDPACK"
           ? "Release to finishing queue"
-          : "Release to next station";
+          : stationKind === "BOTTLE_CAP_SEAL" ||
+              stationKind === "BOTTLE_STICKER"
+            ? "Release to next station"
+            : "Release to next station";
 
   // Only stations that finalize show the Finalize button — legacy
   // fallback when a bag is PACKAGED but not yet finalized (e.g. Bag

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.0] — 2026-06-29
+
+### Changed
+- **BOTTLE-ORDER-FLEX-1 — flexible bottle finishing order.** The bottle route is now `fill → (cap-seal | sticker, either order) → packaging`. Fill is always first and the Packaging station is always the terminal finalize step; cap-seal and sticker run in whichever order production demands. Operators were blocked at Bottle Stickering with *"This bag is not ready for this station yet (currently BLISTERED)"* because the old route hard-required cap-seal (SEALED) before stickering. Now either finishing station accepts a just-filled bag (BLISTERED) or one the other finishing station already handled (SEALED); both land the bag at SEALED.
+  - `lib/production/stage-progression.ts`: `BOTTLE_CAP_SEAL_COMPLETE` / `BOTTLE_STICKER_COMPLETE` stage prereqs and station pickups now accept `BLISTERED` **or** `SEALED`; `BOTTLE_STICKER` releases forward at `SEALED` (no longer finalizes); `STATIONS_THAT_FINALIZE` no longer includes `BOTTLE_STICKER`. New helpers `isBottleFinishingEvent` / `bottleFinishingAlreadyFired` (each finishing step runs exactly once) / `bothBottleFinishingDone` / `missingBottleFinishingSteps`.
+  - `lib/projector/index.ts`, `lib/projector/live-read-models.ts`, `lib/legacy/read-model-synthesizer.ts`: `BOTTLE_STICKER_COMPLETE` now folds to stage `SEALED` (was `PACKAGED`); `PACKAGED` comes only from the Packaging station. `BOTTLE_STICKER_COMPLETE` no longer increments a throughput counter (avoids double-counting packaged bags).
+  - `app/(floor)/floor/[token]/actions.ts`: a duplicate cap-seal / sticker on the same bag is rejected; the Packaging station refuses to finalize a `kind=BOTTLE` bag until **both** finishing steps have run, with a clear operator message naming what's left. Bottle products already carry packaging structure (`units_per_display`/`displays_per_case`), so units-yielded, tablet consumption, and finished-lot/PO reconciliation compute correctly through the existing Packaging finalize.
+  - `app/(floor)/floor/[token]/page.tsx`, `stage-action-buttons.tsx`, `lib/floor-command/production-lines.ts`: the floor UI no longer shows an out-of-sequence warning at a finishing station for a BLISTERED/SEALED bottle; release labels and the line-layout doc reflect the flexible middle.
+
 ## [1.5.27] — 2026-06-25
 
 ### Tests

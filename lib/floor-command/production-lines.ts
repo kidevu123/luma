@@ -2,7 +2,11 @@
  * Canonical production line definitions for floor-board layout.
  *
  * Card route (primary at Haute): raw bag → blister → sealing → packaging → finalize.
- * Bottle route: handpack → cap seal → sticker → packaging.
+ * Bottle route: handpack → (cap seal | sticker, either order) → packaging.
+ *   BOTTLE-ORDER-FLEX-1: fill is always first and packaging always last,
+ *   but cap-seal and sticker run in whichever order production demands;
+ *   the board lists them left-to-right for layout only — it is not the
+ *   enforced sequence (see lib/production/stage-progression.ts).
  *
  * Station ordering on /floor-board follows these steps left-to-right.
  * See docs/PRODUCTION_LINE_LAYOUT.md for operator-facing explanation.

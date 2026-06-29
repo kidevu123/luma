@@ -17,22 +17,34 @@ export const EVENT_STAGE_PREREQ: Readonly<Record<string, ReadonlyArray<string>>>
   PACKAGING_SNAPSHOT: ["SEALED"],
   PACKAGING_COMPLETE: ["SEALED"],
   BOTTLE_HANDPACK_COMPLETE: ["STARTED"],
-  BOTTLE_CAP_SEAL_COMPLETE: ["BLISTERED"],
-  BOTTLE_STICKER_COMPLETE: ["SEALED"],
+  // BOTTLE-ORDER-FLEX-1: cap-seal and sticker run in EITHER order after
+  // fill. Whichever runs first fires from BLISTERED and lands the bag at
+  // SEALED; the second fires from SEALED and keeps it at SEALED. Both
+  // therefore accept BLISTERED or SEALED. The "exactly once each" rule is
+  // enforced separately (bottleFinishingAlreadyFired) since the stage
+  // prereq alone can't tell a first run from a duplicate.
+  BOTTLE_CAP_SEAL_COMPLETE: ["BLISTERED", "SEALED"],
+  BOTTLE_STICKER_COMPLETE: ["BLISTERED", "SEALED"],
 };
 
 // A station may release a bag forward only after that station's stage
 // event has fired. Blister releases bags at BLISTERED, sealing at
-// SEALED, packaging/sticker never releases (they finalize). The card
-// is NOT touched by release; it stays ASSIGNED to travel with the bag.
+// SEALED, packaging never releases (it finalizes). The card is NOT
+// touched by release; it stays ASSIGNED to travel with the bag.
+//
+// BOTTLE-ORDER-FLEX-1: both bottle finishing stations (cap-seal and
+// sticker) release forward at SEALED so the bag always travels on to
+// the Packaging station, which is the single terminal finalize step for
+// both card and bottle routes. (Previously BOTTLE_STICKER finalized.)
 export const STATION_RELEASE_FROM_STAGE: Readonly<Record<string, string>> = {
   BLISTER: "BLISTERED",
   HANDPACK_BLISTER: "BLISTERED",
   SEALING: "SEALED",
   BOTTLE_HANDPACK: "BLISTERED",
   BOTTLE_CAP_SEAL: "SEALED",
-  // PACKAGING, COMBINED, BOTTLE_STICKER do NOT release forward — the
-  // bag is closed by BAG_FINALIZED at the last station.
+  BOTTLE_STICKER: "SEALED",
+  // PACKAGING + COMBINED do NOT release forward — the bag is closed by
+  // BAG_FINALIZED at the last station.
 };
 
 // A station may pick up a bag whose current stage matches one of the
@@ -48,8 +60,13 @@ export const STATION_PICKUP_FROM_STAGE: Readonly<Record<string, ReadonlyArray<st
   // is still running (overlap scan). PACKAGING_COMPLETE still requires
   // SEALED — the Complete button stays gated until upstream finishes.
   PACKAGING: ["BLISTERED", "SEALED"],
-  BOTTLE_CAP_SEAL: ["BLISTERED"],
-  BOTTLE_STICKER: ["SEALED"],
+  // BOTTLE-ORDER-FLEX-1: cap-seal and sticker are interchangeable. Each
+  // can claim a just-filled bag (BLISTERED) or one the other finishing
+  // station already handled (SEALED). The "exactly once each" rule
+  // (bottleFinishingAlreadyFired) stops a station re-claiming a bag it
+  // already processed.
+  BOTTLE_CAP_SEAL: ["BLISTERED", "SEALED"],
+  BOTTLE_STICKER: ["BLISTERED", "SEALED"],
   // BLISTER + BOTTLE_HANDPACK + COMBINED accept the bag via first
   // CARD_ASSIGNED on an IDLE card, not via pickup of an ASSIGNED card.
 };
@@ -89,13 +106,64 @@ export function formatFloorStationBagOpenError(args: {
 
 // Station kinds that finalize a bag (close the workflow + return QR
 // to IDLE). Anything else MUST use release, not finalize.
-// BOTTLE_STICKER is the last station in the bottle pipeline so it
-// finalizes there rather than releasing forward.
+// BOTTLE-ORDER-FLEX-1: the Packaging station is the single terminal
+// step for both routes. Bottle bags release forward from cap-seal and
+// sticker and finalize at PACKAGING (gated on bothBottleFinishingDone),
+// so BOTTLE_STICKER no longer finalizes.
 export const STATIONS_THAT_FINALIZE: ReadonlySet<string> = new Set([
   "PACKAGING",
   "COMBINED",
-  "BOTTLE_STICKER",
 ]);
+
+// BOTTLE-ORDER-FLEX-1 — the two bottle finishing completion events. They
+// run in either order after fill; both land the bag at SEALED. Packaging
+// finalizes once BOTH have fired (bothBottleFinishingDone).
+export const BOTTLE_FINISHING_EVENTS = [
+  "BOTTLE_CAP_SEAL_COMPLETE",
+  "BOTTLE_STICKER_COMPLETE",
+] as const;
+
+const BOTTLE_FINISHING_STEP_LABEL: Readonly<Record<string, string>> = {
+  BOTTLE_CAP_SEAL_COMPLETE: "cap-sealing",
+  BOTTLE_STICKER_COMPLETE: "stickering",
+};
+
+/** True for the cap-seal / sticker completion events (order-independent). */
+export function isBottleFinishingEvent(eventType: string): boolean {
+  return (BOTTLE_FINISHING_EVENTS as readonly string[]).includes(eventType);
+}
+
+/** True when this exact finishing event already fired for the bag.
+ *  Prevents a second cap-seal or a second sticker — each runs once.
+ *  The stage prereq alone can't catch this because a bag at SEALED is a
+ *  valid input stage for both the first-run-second-station and a
+ *  duplicate of the already-done station. */
+export function bottleFinishingAlreadyFired(
+  eventType: string,
+  priorEventTypes: readonly string[],
+): boolean {
+  return (
+    isBottleFinishingEvent(eventType) && priorEventTypes.includes(eventType)
+  );
+}
+
+/** True once BOTH bottle finishing steps have fired for the bag — the
+ *  gate for completing/finalizing packaging on a bottle bag. */
+export function bothBottleFinishingDone(
+  priorEventTypes: readonly string[],
+): boolean {
+  return BOTTLE_FINISHING_EVENTS.every((e) => priorEventTypes.includes(e));
+}
+
+/** Operator-facing labels for the finishing steps not yet done. Used to
+ *  explain why a bottle bag cannot be packaged/finalized yet. */
+export function missingBottleFinishingSteps(
+  priorEventTypes: readonly string[],
+): string[] {
+  return BOTTLE_FINISHING_EVENTS.filter(
+    (e) => !priorEventTypes.includes(e),
+  ).map((e) => BOTTLE_FINISHING_STEP_LABEL[e] ?? e);
+}
 
 export type StageProgressionResult =
   | { allowed: true }
