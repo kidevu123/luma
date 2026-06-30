@@ -117,8 +117,14 @@ function AssignmentCell({
   if (bag) {
     const shortWorkflowId = `${bag.id.slice(0, 8)}…`;
     const details: string[] = [];
-    const stage = workflowState?.isFinalized
-      ? "FINALIZED"
+    // P2-PARTIAL-KEEP: a card that is still ASSIGNED while its workflow bag is
+    // FINALIZED is a partial bag held for reuse — the run closed but the QR was
+    // intentionally kept on the physical bag (it still has product). Surface
+    // that explicitly instead of a bare "FINALIZED" so admins can see the QR is
+    // still active/resumable, with the last product it ran.
+    const isHeldPartial = workflowState?.isFinalized === true;
+    const stage = isHeldPartial
+      ? null
       : workflowState?.isPaused
         ? `${workflowState.stage ?? "UNKNOWN"} · paused`
         : workflowState?.stage;
@@ -134,10 +140,23 @@ function AssignmentCell({
 
     return (
       <div className="text-[11px] leading-snug space-y-0.5">
-        <div>
-          <span className="text-blue-700 font-medium">Active workflow</span>
-          <span className="font-mono text-text-muted"> · {shortWorkflowId}</span>
-        </div>
+        {isHeldPartial ? (
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-300">
+              Partial · QR held for reuse
+            </span>
+            {productName ? (
+              <span className="text-[10px] text-text-subtle">
+                last run: {productName}
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <div>
+            <span className="text-blue-700 font-medium">Active workflow</span>
+            <span className="font-mono text-text-muted"> · {shortWorkflowId}</span>
+          </div>
+        )}
         {details.length > 0 ? (
           <div className="text-text-muted">{details.join(" · ")}</div>
         ) : (

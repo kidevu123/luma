@@ -2015,6 +2015,15 @@ const packagingCompleteSchema = z.object({
   keepBagPartial: z
     .union([z.literal("true"), z.literal("1"), z.literal("on")])
     .optional(),
+  // Optional operator estimate of tablets remaining when keeping partial.
+  // Recorded on the BAG_FINALIZED event as a labelled estimate only — it never
+  // overwrites the OUTPUT_DERIVED allocation balance used by reconciliation.
+  partialRemainingEstimate: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(100000)
+    .optional(),
   clientEventId: clientEventIdField,
 });
 
@@ -2032,11 +2041,17 @@ export async function packagingCompleteAction(
     rippedCards: formData.get("rippedCards") || 0,
     operatorCode: formData.get("operatorCode") || undefined,
     keepBagPartial: formData.get("keepBagPartial") || undefined,
+    partialRemainingEstimate:
+      formData.get("partialRemainingEstimate") || undefined,
     clientEventId: pickClientEventId(formData),
   });
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   const keepBagPartial = parsed.data.keepBagPartial != null;
+  // Only honor the estimate when the operator is actually keeping the bag partial.
+  const partialRemainingEstimate = keepBagPartial
+    ? parsed.data.partialRemainingEstimate ?? null
+    : null;
   try {
     const station = await authStation(parsed.data.token, parsed.data.stationId);
     if (station.kind !== "PACKAGING" && station.kind !== "COMBINED") {
@@ -2229,6 +2244,9 @@ export async function packagingCompleteAction(
           accountability,
           deferQrRelease: isBottleBag,
           keepPartial: keepBagPartial && isBottleBag,
+          ...(isBottleBag && partialRemainingEstimate != null
+            ? { remainingEstimate: partialRemainingEstimate }
+            : {}),
           ...(parsed.data.clientEventId
             ? { clientEventId: parsed.data.clientEventId }
             : {}),
@@ -2592,6 +2610,11 @@ const finalizeSchema = z.object({
   token: z.string(),
   workflowBagId: z.string().uuid(),
   stationId: z.string().uuid(),
+  // P2-PARTIAL-KEEP: explicit operator keep-partial on the manual finalize
+  // fallback (mirrors the packaging close-out control).
+  keepBagPartial: z
+    .union([z.literal("true"), z.literal("1"), z.literal("on")])
+    .optional(),
   clientEventId: clientEventIdField,
 });
 
@@ -2602,9 +2625,11 @@ export async function finalizeBagAction(
     token: formData.get("token"),
     workflowBagId: formData.get("workflowBagId"),
     stationId: formData.get("stationId"),
+    keepBagPartial: formData.get("keepBagPartial") || undefined,
     clientEventId: pickClientEventId(formData),
   });
   if (!parsed.success) return { error: "Invalid input." };
+  const keepBagPartial = parsed.data.keepBagPartial != null;
   try {
     const station = await authStation(parsed.data.token, parsed.data.stationId);
     // Finalize is the END of the production cycle — only stations that
@@ -2628,6 +2653,19 @@ export async function finalizeBagAction(
       };
     }
 
+    // P2-PARTIAL-KEEP: the manual Finalize fallback must not drop a partial
+    // bottle bag's QR. Unlike the packaging path there is no production-output
+    // close here, so we decide the release from the CURRENT allocation session:
+    // hold the QR whenever the remaining is unknown or > 0 (or the operator
+    // kept it partial), release only when the session proves the bag empty.
+    // Card/variety finalize keeps its existing immediate-release behavior.
+    const [bagProduct] = await db
+      .select({ kind: products.kind })
+      .from(workflowBags)
+      .leftJoin(products, eq(products.id, workflowBags.productId))
+      .where(eq(workflowBags.id, parsed.data.workflowBagId));
+    const isBottleBag = bagProduct?.kind === "BOTTLE";
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: parsed.data.stationId,
@@ -2636,10 +2674,19 @@ export async function finalizeBagAction(
         workflowBagId: parsed.data.workflowBagId,
         stationId: parsed.data.stationId,
         accountability,
+        deferQrRelease: isBottleBag,
+        keepPartial: keepBagPartial && isBottleBag,
         ...(parsed.data.clientEventId
           ? { clientEventId: parsed.data.clientEventId }
           : {}),
       });
+      if (isBottleBag) {
+        await resolveDeferredQrReleaseAfterPackaging(tx, {
+          workflowBagId: parsed.data.workflowBagId,
+          keepPartial: keepBagPartial,
+          accountability,
+        });
+      }
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Finalize failed." };
@@ -2664,7 +2711,11 @@ type StationAccountability = Awaited<
  *    production-output allocation close has computed the true remaining balance
  *    (the projector HOLDS the QR; the packaging action re-decides).
  *  - keepPartial: the operator explicitly kept the physical bag as a partial;
- *    the QR is never returned to the unused pool. */
+ *    the QR is never returned to the unused pool.
+ *  - remainingEstimate: an OPTIONAL operator-entered estimate of tablets left
+ *    in the bag. Stored as an immutable, clearly-labelled estimate on the event
+ *    only — it never overwrites the OUTPUT_DERIVED allocation-session balance
+ *    that PO reconciliation reads (luma-data-honesty: estimate ≠ confirmed). */
 async function projectBagFinalizedEvent(
   tx: DbTx,
   args: {
@@ -2674,11 +2725,16 @@ async function projectBagFinalizedEvent(
     clientEventId?: string | null | undefined;
     deferQrRelease?: boolean;
     keepPartial?: boolean;
+    remainingEstimate?: number | null;
   },
 ): Promise<void> {
   const partialPayload: Record<string, unknown> = {};
   if (args.deferQrRelease) partialPayload.defer_qr_release = true;
   if (args.keepPartial) partialPayload.bag_remains_partial = true;
+  if (args.remainingEstimate != null && args.remainingEstimate >= 0) {
+    partialPayload.operator_remaining_estimate = args.remainingEstimate;
+    partialPayload.operator_remaining_estimate_source = "OPERATOR_ESTIMATE";
+  }
   await projectEvent(tx, {
     workflowBagId: args.workflowBagId,
     stationId: args.stationId,
@@ -2865,6 +2921,7 @@ async function maybeAutoFinalizeAfterPackagingComplete(
     accountability: StationAccountability;
     deferQrRelease?: boolean;
     keepPartial?: boolean;
+    remainingEstimate?: number | null;
   },
 ): Promise<boolean> {
   if (!AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS.has(args.stationKind)) {
@@ -2897,6 +2954,9 @@ async function maybeAutoFinalizeAfterPackagingComplete(
     accountability: args.accountability,
     ...(args.deferQrRelease ? { deferQrRelease: true } : {}),
     ...(args.keepPartial ? { keepPartial: true } : {}),
+    ...(args.remainingEstimate != null
+      ? { remainingEstimate: args.remainingEstimate }
+      : {}),
     ...(finalizeClientEventId ? { clientEventId: finalizeClientEventId } : {}),
   });
   return true;

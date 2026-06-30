@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.8.0] — 2026-06-30
+
+### Fixed
+- **Closed the last bottle-partial QR-drop path: manual finalize.** The v1.7.0 fix only protected the packaging *auto*-finalize path. The manual `finalizeBagAction` (the legacy "Finalize" button, used when a bag is PACKAGED but auto-finalize didn't fire) emitted a bare `BAG_FINALIZED` with no defer/keep intent, so a bottle bag with a still-OPEN allocation session (the common case) had its QR released to the unused pool even when physically partial. Manual finalize now, for BOTTLE bags only, defers the QR-release decision and re-resolves it from the current allocation session — holding the QR whenever the remaining is unknown or > 0 (or the operator kept it partial), releasing only when the bag is confirmed empty. Card/variety finalize is unchanged. `app/(floor)/floor/[token]/actions.ts`.
+
+### Added
+- **Operator clarity at packaging close-out (floor).** The bottle keep-partial control now leads with "Is this bag empty or does it still have product?", uses the explicit copy "This bag still has product — keep QR with this bag", and warns "Only leave this unchecked if the bag is empty — that returns the QR to the unused pool." The manual Finalize confirm dialog is now bottle-aware (no longer claims the card always returns to the IDLE pool). `app/(floor)/floor/[token]/stage-action-buttons.tsx`.
+- **Optional remaining-count estimate.** When keeping a bottle bag partial, the operator may enter an estimated tablets-remaining. It is stored as a clearly-labelled estimate on the `BAG_FINALIZED` event payload (`operator_remaining_estimate` / `_source: OPERATOR_ESTIMATE`) and **never** overwrites the `OUTPUT_DERIVED` allocation-session balance that PO reconciliation reads (luma-data-honesty: estimate ≠ confirmed).
+- **Admin visibility.** The admin QR-cards list now shows a "Partial · QR held for reuse" badge with the last run's product whenever a card is still `ASSIGNED` while its workflow bag is finalized (the held-partial signal). The partial-bags workbench already surfaces remaining estimate, last product, and resumability.
+
+### Tests
+- `lib/production/bottle-partial-lifecycle.test.ts` — new decision-level end-to-end of the full lifecycle (keep partial → QR held → resumable → different bottle product → released only when empty) through the real helpers.
+- `app/(floor)/floor/[token]/actions.test.ts`, `stage-action-buttons.test.ts` — regression guards for the manual-finalize defer, bottle-scoping, the labelled estimate (never wired into `endingBalanceQty`), and the floor copy.
+
+### Notes
+- **Audit result:** the remaining `qr_cards → IDLE` paths are intentional explicit overrides — supervisor wrong-route reset (`CARD_FORCE_RELEASED`, auditable) and legacy-import orphan release (ops migration only); both are out of the partial-keep scope and were left as-is. No DB-integration (Postgres) test harness exists in the default vitest run; a true DB-backed bottle-partial E2E is a documented follow-up via the `scripts/verify-*.ts` staging pattern. A held partial bottle bag with no allocation session is held (safe) but needs an admin closeout before floor reuse.
+
 ## [1.7.0] — 2026-06-30
 
 ### Added

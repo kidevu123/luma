@@ -353,6 +353,70 @@ describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () =
   });
 });
 
+describe("P2-PARTIAL-KEEP · QR is never dropped for a partial bottle bag", () => {
+  const finalizeBlock = (() => {
+    const i = actionsSrc.indexOf("export async function finalizeBagAction");
+    const j = actionsSrc.indexOf("// ── release to next station");
+    return actionsSrc.slice(i, j);
+  })();
+  const pkgBlock = (() => {
+    const i = actionsSrc.indexOf("export async function packagingCompleteAction");
+    const j = actionsSrc.indexOf("export async function lookupCardByTokenAction");
+    return actionsSrc.slice(i, j);
+  })();
+
+  it("projector releases the QR through the intent-aware guard, not the raw session rule", () => {
+    expect(projectorSrc).toMatch(/shouldReleaseQrAtFinalizationWithIntent/);
+    // The old un-guarded helper must not be the one wired into the finalize branch.
+    expect(projectorSrc).not.toMatch(
+      /if \(shouldReleaseQrAtFinalization\(wfSession/,
+    );
+  });
+
+  it("MANUAL finalizeBagAction defers + re-decides QR release for bottle bags (A2 gap closed)", () => {
+    // Determines the product kind and only defers for bottles.
+    expect(finalizeBlock).toMatch(/products\.kind/);
+    expect(finalizeBlock).toMatch(/const isBottleBag = bagProduct\?\.kind === "BOTTLE"/);
+    // Defers the projector release and re-resolves after, never a bare finalize.
+    expect(finalizeBlock).toMatch(/deferQrRelease: isBottleBag/);
+    expect(finalizeBlock).toMatch(/if \(isBottleBag\)[\s\S]*resolveDeferredQrReleaseAfterPackaging/);
+    // Carries the explicit operator keep-partial override.
+    expect(finalizeBlock).toMatch(/keepPartial: keepBagPartial && isBottleBag/);
+  });
+
+  it("manual finalize is still a no-op deferral for card/variety (release behavior unchanged)", () => {
+    // deferQrRelease is gated on isBottleBag, so non-bottle bags keep the
+    // existing immediate session-rule release.
+    expect(finalizeBlock).toMatch(/deferQrRelease: isBottleBag/);
+    expect(finalizeBlock).not.toMatch(/deferQrRelease: true(?![\s\S]*isBottleBag)/);
+  });
+
+  it("packaging keep-partial + defer is scoped to bottle products only", () => {
+    expect(pkgBlock).toMatch(/const isBottleBag = productRow\?\.kind === "BOTTLE"/);
+    expect(pkgBlock).toMatch(/deferQrRelease: isBottleBag/);
+    expect(pkgBlock).toMatch(/keepPartial: keepBagPartial && isBottleBag/);
+    expect(pkgBlock).toMatch(/if \(isBottleBag\)[\s\S]*resolveDeferredQrReleaseAfterPackaging/);
+  });
+
+  it("deferred release only drops the QR when the bag is confirmed empty", () => {
+    const i = actionsSrc.indexOf("function resolveDeferredQrReleaseAfterPackaging");
+    const block = actionsSrc.slice(i, i + 1600);
+    expect(block).toMatch(/shouldReleaseQrAfterPackagingClose/);
+    expect(block).toMatch(/status: "IDLE", assignedWorkflowBagId: null/);
+    // Held bags are audited rather than released.
+    expect(block).toMatch(/floor\.bag_kept_partial/);
+  });
+
+  it("operator remaining estimate is stored as a labelled estimate, never as the reconciliation balance", () => {
+    expect(actionsSrc).toMatch(/operator_remaining_estimate/);
+    expect(actionsSrc).toMatch(/operator_remaining_estimate_source/);
+    // The estimate rides the BAG_FINALIZED payload only — it must not be wired
+    // into endingBalanceQty / the OUTPUT_DERIVED allocation close.
+    expect(actionsSrc).not.toMatch(/endingBalanceQty:\s*partialRemainingEstimate/);
+    expect(actionsSrc).not.toMatch(/endingBalanceQty:\s*remainingEstimate/);
+  });
+});
+
 describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
   it("imports sealing product helpers", () => {
     expect(actionsSrc).toMatch(/from "@\/lib\/production\/sealing-product"/);

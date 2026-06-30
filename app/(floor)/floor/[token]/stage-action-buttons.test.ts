@@ -629,12 +629,24 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging g
 
   it("packaging payload keys unchanged in close-out form", () => {
     const pkgIdx = src.indexOf("function PackagingCompleteForm");
-    const pkgBlock = src.slice(pkgIdx, pkgIdx + 8000);
+    const pkgBlock = src.slice(pkgIdx, pkgIdx + 10000);
     expect(pkgBlock).toMatch(/fd\.set\("masterCases"/);
     expect(pkgBlock).toMatch(/fd\.set\("displaysMade"/);
     expect(pkgBlock).toMatch(/fd\.set\("looseCards"/);
     expect(pkgBlock).toMatch(/fd\.set\("damagedPackaging"/);
     expect(pkgBlock).toMatch(/fd\.set\("rippedCards"/);
+  });
+
+  it("P2-PARTIAL-KEEP · bottle close-out exposes keep-partial + optional remaining estimate", () => {
+    const pkgIdx = src.indexOf("function PackagingCompleteForm");
+    const pkgBlock = src.slice(pkgIdx, pkgIdx + 10000);
+    // Bottle-scoped keep-partial control with clear empty-vs-partial copy.
+    expect(pkgBlock).toMatch(/isBottle/);
+    expect(pkgBlock).toMatch(/keep QR with this bag/i);
+    expect(pkgBlock).toMatch(/Only leave this unchecked if the bag is empty/i);
+    // Submits keepBagPartial and the optional estimate.
+    expect(pkgBlock).toMatch(/fd\.set\("keepBagPartial", "true"\)/);
+    expect(pkgBlock).toMatch(/fd\.set\("partialRemainingEstimate"/);
   });
 });
 

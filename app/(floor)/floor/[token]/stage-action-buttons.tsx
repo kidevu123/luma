@@ -419,8 +419,14 @@ export function StageActionButtons({
 
   async function finalize() {
     if (!workflowBagId) return;
-    if (!confirm("Finalize this bag? Closes the production cycle and returns the card to the IDLE pool."))
-      return;
+    // P2-PARTIAL-KEEP: for bottle bags the QR is kept with the bag when it
+    // still has product (released only when the bag is confirmed empty), so the
+    // old "returns the card to the IDLE pool" wording is not accurate here.
+    const finalizeConfirm =
+      productKind === "BOTTLE"
+        ? "Finalize this bag? Closes the production cycle. If the bag still has product its QR stays with the bag for the next run; it returns to the unused pool only when the bag is empty."
+        : "Finalize this bag? Closes the production cycle and returns the card to the IDLE pool.";
+    if (!confirm(finalizeConfirm)) return;
     setPending("finalize");
     setError(null);
     try {
@@ -1073,8 +1079,10 @@ function PackagingCompleteForm({
   const [damagedPackaging, setDamagedPackaging] = React.useState("");
   const [rippedCards, setRippedCards] = React.useState("");
   // P2-PARTIAL-KEEP: bottle runs usually end on a partial bag. The operator
-  // marks "still has product" so the QR stays on the physical bag for reuse.
+  // marks "still has product" so the QR stays on the physical bag for reuse,
+  // optionally noting an estimated tablets-remaining for the next operator.
   const [keepBagPartial, setKeepBagPartial] = React.useState(false);
+  const [partialRemaining, setPartialRemaining] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1181,27 +1189,59 @@ function PackagingCompleteForm({
           partial. The QR stays assigned to this bag so the same bag can be
           scanned into a later run (even a different product). */}
       {isBottle && (
-        <label
-          className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
-            keepBagPartial
-              ? "border-amber-400 bg-amber-50"
-              : "border-border bg-surface"
+        <div
+          className={`rounded-lg border px-3 py-2.5 space-y-2 transition-colors ${
+            keepBagPartial ? "border-amber-400 bg-amber-50" : "border-border bg-surface"
           }`}
         >
-          <input
-            type="checkbox"
-            checked={keepBagPartial}
-            onChange={(e) => setKeepBagPartial(e.target.checked)}
-            className="mt-0.5 h-5 w-5 shrink-0 accent-amber-600"
-          />
-          <span className="text-xs leading-snug text-text-muted">
-            <span className="block text-sm font-semibold text-amber-900">
-              Bag still has product — keep as partial
+          <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-subtle">
+            Is this bag empty or does it still have product?
+          </p>
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={keepBagPartial}
+              onChange={(e) => setKeepBagPartial(e.target.checked)}
+              className="mt-0.5 h-5 w-5 shrink-0 accent-amber-600"
+            />
+            <span className="text-xs leading-snug text-text-muted">
+              <span className="block text-sm font-semibold text-amber-900">
+                This bag still has product — keep QR with this bag
+              </span>
+              The QR stays on this physical bag — it is{" "}
+              <span className="font-semibold">not</span> returned to the unused
+              pool. Scan the same bag to start the next run, even a different
+              bottle product.
             </span>
-            The QR stays on this bag (not returned to the unused pool). Scan the
-            same bag to start the next run — even a different product.
-          </span>
-        </label>
+          </label>
+
+          {keepBagPartial ? (
+            <label className="block pl-7">
+              <span className="block text-xs font-medium text-text-muted mb-1">
+                Estimated tablets left (optional)
+              </span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={partialRemaining}
+                onChange={(e) => setPartialRemaining(e.target.value)}
+                onWheel={(e) => e.currentTarget.blur()}
+                placeholder="e.g. 4200"
+                className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
+              />
+              <span className="block text-[11px] text-text-subtle mt-1">
+                Rough estimate for the next operator — not used for inventory
+                counts.
+              </span>
+            </label>
+          ) : (
+            <p className="pl-7 text-[11px] font-medium text-amber-700">
+              Only leave this unchecked if the bag is empty — that returns the QR
+              to the unused pool.
+            </p>
+          )}
+        </div>
       )}
 
       <div className="grid grid-cols-2 gap-2">
@@ -1228,7 +1268,12 @@ function PackagingCompleteForm({
               fd.set("looseCards", looseCards || "0");
               fd.set("damagedPackaging", damagedPackaging || "0");
               fd.set("rippedCards", rippedCards || "0");
-              if (keepBagPartial) fd.set("keepBagPartial", "true");
+              if (keepBagPartial) {
+                fd.set("keepBagPartial", "true");
+                if (partialRemaining.trim() !== "") {
+                  fd.set("partialRemainingEstimate", partialRemaining.trim());
+                }
+              }
               const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
               if (badgeCode) fd.set("operatorCode", badgeCode);
               fd.set("clientEventId", newClientEventId());
