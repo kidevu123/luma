@@ -261,7 +261,13 @@ export async function closeVarietyRunAction(
             .limit(1);
 
       if (parentCard && parentCard.status === "ASSIGNED") {
-        await tx.update(qrCards).set({ status: "IDLE" }).where(eq(qrCards.id, parentCard.id));
+        // Confirmed variety-run close → release the VARIETY_PACK card. Clear
+        // assignedWorkflowBagId with the status so an IDLE card never retains a
+        // stale assignment (matches every other release path).
+        await tx
+          .update(qrCards)
+          .set({ status: "IDLE", assignedWorkflowBagId: null })
+          .where(eq(qrCards.id, parentCard.id));
         await writeAudit({
           actorId: accountability.enteredByUserId ?? null,
           actorRole: null,

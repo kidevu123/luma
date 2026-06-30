@@ -173,7 +173,10 @@ export async function editInventoryBag(
           if (oldCard && shouldReleaseQrAtBagEdit(oldCard, bag.status)) {
             await tx
               .update(qrCards)
-              .set({ status: "IDLE" as const })
+              // shouldReleaseQrAtBagEdit only releases intake-reserved cards
+              // (assignedWorkflowBagId already null), but clear it explicitly so
+              // the "IDLE ⇒ no assignment" invariant is uniform across all paths.
+              .set({ status: "IDLE" as const, assignedWorkflowBagId: null })
               .where(eq(qrCards.scanToken, bag.bagQrCode));
             await writeAudit(
               {

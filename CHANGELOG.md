@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.11.1] — 2026-06-30
+
+### Fixed
+- **VARIETY_PACK QR release now clears `assignedWorkflowBagId`.** On variety-run close (`closeVarietyRunAction`), the VARIETY_PACK card was set to `IDLE` but kept its `assignedWorkflowBagId` — violating the "IDLE ⇒ no assignment" invariant (the last same-class case after the v1.11.0 RAW_BAG fixes). Now cleared with the status, gated on the card still being `ASSIGNED` so in-progress cards are untouched. `app/(floor)/floor/[token]/variety-run-actions.ts`.
+- **Bag-edit intake-reserved release** now also clears `assignedWorkflowBagId` explicitly. The `shouldReleaseQrAtBagEdit` guard already only releases intake-reserved cards (assignment already null), so this is a defensive no-op that makes the invariant uniform across every release path. `lib/db/queries/bag-edits.ts`.
+
+### Added
+- **Global IDLE-invariant regression test** (`lib/production/qr-idle-invariant.test.ts`) — scans the entire `app/` + `lib/` tree and fails if any `.set({ … status: "IDLE" … })` on a qr card omits `assignedWorkflowBagId: null`. Backstops every future release path. Plus VARIETY_PACK + bag-edit assertions in `qr-release-consistency.test.ts`, and a Scenario C (variety release) added to the staging-only `scripts/verify-bottle-partial-qr-release-e2e.ts`.
+
+### Data
+- **One-time production cleanup** of the single pre-existing stale row (`Bag Card 115`: status `IDLE` with a leftover `assignedWorkflowBagId`). Ran the exact scoped statement `UPDATE qr_cards SET assigned_workflow_bag_id = NULL WHERE status = 'IDLE' AND assigned_workflow_bag_id IS NOT NULL` after confirming exactly one matching row, not in use (no live station pin). Before: 1 → after: 0. No other rows affected.
+
+### Notes
+- Audited every `qr_cards.status = "IDLE"` write site: all automatic release paths now clear the assignment; card creation (default IDLE on insert) and retire (`RETIRED`, guarded against mid-production) are out of scope by design. No change to the bottle partial-bag contract; no schema changes.
+
 ## [1.11.0] — 2026-06-30
 
 ### Fixed

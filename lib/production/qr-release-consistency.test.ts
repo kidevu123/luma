@@ -12,6 +12,8 @@ const closeActionsSrc = repo("app/(floor)/floor/[token]/bag-allocation-actions.t
 const adminCorrectionsSrc = repo("lib/production/partial-bag-admin-corrections.ts");
 const lifecycleSrc = repo("lib/production/raw-bag-allocation-lifecycle.ts");
 const packagingActionsSrc = repo("app/(floor)/floor/[token]/actions.ts");
+const varietyActionsSrc = repo("app/(floor)/floor/[token]/variety-run-actions.ts");
+const bagEditsSrc = repo("lib/db/queries/bag-edits.ts");
 const partialBagsSrc = repo("lib/production/partial-bags.ts");
 const partialPageSrc = repo("app/(admin)/partial-bags/page.tsx");
 
@@ -38,6 +40,30 @@ describe("QR release consistency — releasing a RAW_BAG QR clears assignedWorkf
       expect(src).toMatch(/EMPTIED|DEPLETED/);
     });
   }
+
+  it("VARIETY_PACK release on variety-run close clears assignedWorkflowBagId", () => {
+    // Only the confirmed close-out release sets IDLE; it must clear the
+    // assignment, gated on the card still being ASSIGNED.
+    expect(varietyActionsSrc).not.toMatch(/\.set\(\{\s*status:\s*"IDLE"\s*\}\)/);
+    expect(varietyActionsSrc).toMatch(
+      /status:\s*"IDLE",\s*assignedWorkflowBagId:\s*null/,
+    );
+    // The release is inside the `parentCard.status === "ASSIGNED"` branch — it
+    // does not touch a card that is not currently assigned/in-progress.
+    expect(varietyActionsSrc).toMatch(
+      /parentCard\.status === "ASSIGNED"[\s\S]*status: "IDLE", assignedWorkflowBagId: null/,
+    );
+    // Assignment-on-start is untouched (still sets ASSIGNED, no null clear).
+    expect(varietyActionsSrc).toMatch(/\.set\(\{ status: "ASSIGNED" \}\)/);
+  });
+
+  it("bag-edit intake-reserved release also upholds the invariant", () => {
+    expect(bagEditsSrc).toMatch(
+      /status:\s*"IDLE" as const,\s*assignedWorkflowBagId:\s*null/,
+    );
+    // Still gated on the intake-reserved helper (never releases an in-flight card).
+    expect(bagEditsSrc).toMatch(/shouldReleaseQrAtBagEdit/);
+  });
 
   it("held-partial packaging path holds the QR (releases ONLY inside the confirmed-empty branch)", () => {
     const i = packagingActionsSrc.indexOf(

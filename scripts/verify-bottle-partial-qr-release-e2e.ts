@@ -6,6 +6,8 @@
 //     status stays ASSIGNED and assignedWorkflowBagId is preserved.
 //   • A confirmed-empty deplete RELEASES the QR — status IDLE *and*
 //     assignedWorkflowBagId is cleared (the v1.10.1 fix).
+//   • A variety-run close RELEASES the VARIETY_PACK QR — status IDLE *and*
+//     assignedWorkflowBagId is cleared (the v1.11.1 fix).
 //
 // It exercises the real floor server actions (closeAllocationSessionAction /
 // markBagDepletedAction), creates only QA-marked rows, and deletes every one of
@@ -68,6 +70,7 @@ type Ids = {
   workflowBagIds: string[];
   inventoryBagIds: string[];
   sessionIds: string[];
+  varietyRunIds: string[];
 };
 
 async function main(): Promise<void> {
@@ -80,9 +83,13 @@ async function main(): Promise<void> {
     workflowBags,
     inventoryBags,
     rawBagAllocationSessions,
+    varietyRuns,
   } = await import("@/lib/db/schema");
   const { closeAllocationSessionAction, markBagDepletedAction } = await import(
     "@/app/(floor)/floor/[token]/bag-allocation-actions"
+  );
+  const { closeVarietyRunAction } = await import(
+    "@/app/(floor)/floor/[token]/variety-run-actions"
   );
 
   const ids: Ids = {
@@ -90,6 +97,7 @@ async function main(): Promise<void> {
     workflowBagIds: [],
     inventoryBagIds: [],
     sessionIds: [],
+    varietyRunIds: [],
   };
   const token = randomUUID();
 
@@ -196,6 +204,51 @@ async function main(): Promise<void> {
     );
     log("Scenario B OK — confirmed-empty deplete released the QR (IDLE, assignment cleared).");
 
+    // ── Scenario C — variety-run close RELEASES the VARIETY_PACK QR ─
+    const varietyToken = `${QA_MARKER}-variety-${randomUUID().slice(0, 8)}`;
+    const [vWf] = await db
+      .insert(workflowBags)
+      .values({ finalizedAt: new Date() })
+      .returning({ id: workflowBags.id });
+    ids.workflowBagIds.push(vWf!.id);
+    const [varietyCard] = await db
+      .insert(qrCards)
+      .values({
+        label: `${QA_MARKER}-variety`,
+        scanToken: varietyToken,
+        status: "ASSIGNED",
+        cardType: "VARIETY_PACK",
+        assignedWorkflowBagId: vWf!.id,
+      })
+      .returning({ id: qrCards.id });
+    ids.cardIds.push(varietyCard!.id);
+    const [vRun] = await db
+      .insert(varietyRuns)
+      .values({
+        parentScanToken: varietyToken,
+        varietyQrCardId: varietyCard!.id,
+        status: "OPEN",
+      })
+      .returning({ id: varietyRuns.id });
+    ids.varietyRunIds.push(vRun!.id);
+
+    const fdVariety = new FormData();
+    fdVariety.set("token", token);
+    fdVariety.set("stationId", ids.stationId);
+    fdVariety.set("varietyRunId", vRun!.id);
+    const vRes = await closeVarietyRunAction(fdVariety);
+    assert(!("error" in vRes), `variety close errored: ${(vRes as { error?: string }).error}`);
+    const [vCard] = await db
+      .select({ status: qrCards.status, assigned: qrCards.assignedWorkflowBagId })
+      .from(qrCards)
+      .where(eq(qrCards.id, varietyCard!.id));
+    assert(vCard?.status === "IDLE", "released VARIETY_PACK QR must be IDLE");
+    assert(
+      vCard?.assigned === null,
+      "released VARIETY_PACK QR must clear assignedWorkflowBagId (v1.11.1 fix)",
+    );
+    log("Scenario C OK — variety-run close released the VARIETY_PACK QR (IDLE, assignment cleared).");
+
     log("PASS — QR release consistency verified.");
   } finally {
     // ── Cleanup — delete every QA-marked row ─────────────────────
@@ -207,7 +260,13 @@ async function main(): Promise<void> {
       inventoryBags,
       rawBagAllocationSessions,
       rawBagAllocationEvents,
+      varietyRuns,
     } = await import("@/lib/db/schema");
+    if (ids.varietyRunIds.length) {
+      await db
+        .delete(varietyRuns)
+        .where(inArray(varietyRuns.id, ids.varietyRunIds));
+    }
     if (ids.sessionIds.length) {
       await db
         .delete(rawBagAllocationEvents)
