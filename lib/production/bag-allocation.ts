@@ -927,6 +927,25 @@ export function bagFinalizeDefersQrRelease(
   return !!payload && payload.defer_qr_release === true;
 }
 
+/** The OPTIONAL operator-entered estimate of tablets remaining, read from a
+ *  BAG_FINALIZED payload. This is an operator GUESS for the next operator — it
+ *  is deliberately distinct from the system-calculated (OUTPUT_DERIVED)
+ *  allocation-session balance and must never be displayed as the authoritative
+ *  remaining (luma-data-honesty: estimate ≠ confirmed). Returns null unless the
+ *  payload carries a non-negative estimate tagged with the OPERATOR_ESTIMATE
+ *  source. */
+export function bottleFinalizePayloadRemainingEstimate(
+  payload: Record<string, unknown> | null | undefined,
+): number | null {
+  if (!payload) return null;
+  if (payload.operator_remaining_estimate_source !== "OPERATOR_ESTIMATE") {
+    return null;
+  }
+  const raw = payload.operator_remaining_estimate;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return null;
+  return Math.floor(raw);
+}
+
 /** QR release decision at BAG_FINALIZED that honors operator/packaging intent
  *  first, then falls back to the allocation-session rule. Explicit keep-partial
  *  and packaging deferral both HOLD the QR. */

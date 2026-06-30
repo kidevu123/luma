@@ -1,4 +1,4 @@
-import { eq, and, asc, or } from "drizzle-orm";
+import { eq, and, asc, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   qrCards,
@@ -30,6 +30,30 @@ export async function listQrCards() {
         lastEventAt: readBagState.lastEventAt,
       },
       productName: products.name,
+      productKind: products.kind,
+      // P2-PARTIAL-KEEP — held-partial visibility for the QR-cards list.
+      // System-calculated remaining = the latest closed/returned allocation
+      // session's OUTPUT_DERIVED ending balance (scalar subselect, no row
+      // fan-out). Operator estimate = the optional operator guess recorded on
+      // the latest BAG_FINALIZED event payload — surfaced as a DISTINCT value,
+      // never merged with the system figure.
+      systemRemainingQty: sql<number | null>`(
+        SELECT s.ending_balance_qty
+        FROM raw_bag_allocation_sessions s
+        WHERE s.workflow_bag_id = ${workflowBags.id}
+          AND s.allocation_status IN ('CLOSED', 'RETURNED_TO_STOCK')
+        ORDER BY s.closed_at DESC NULLS LAST
+        LIMIT 1
+      )`,
+      operatorRemainingEstimate: sql<number | null>`(
+        SELECT (e.payload->>'operator_remaining_estimate')::int
+        FROM workflow_events e
+        WHERE e.workflow_bag_id = ${workflowBags.id}
+          AND e.event_type = 'BAG_FINALIZED'
+          AND e.payload->>'operator_remaining_estimate_source' = 'OPERATOR_ESTIMATE'
+        ORDER BY e.occurred_at DESC
+        LIMIT 1
+      )`,
       intakeBag: {
         id: inventoryBags.id,
         internalReceiptNumber: inventoryBags.internalReceiptNumber,

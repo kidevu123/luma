@@ -29,6 +29,9 @@ type QrCardRow = {
     lastEventAt: Date | null;
   } | null;
   productName: string | null;
+  productKind: string | null;
+  systemRemainingQty: number | null;
+  operatorRemainingEstimate: number | null;
   intakeBag: {
     id: string | null;
     internalReceiptNumber: string | null;
@@ -102,12 +105,18 @@ function AssignmentCell({
   bag,
   workflowState,
   productName,
+  productKind,
+  systemRemainingQty,
+  operatorRemainingEstimate,
   intakeBag,
 }: {
   card: QrCardRow["card"];
   bag: QrCardRow["bag"];
   workflowState: QrCardRow["workflowState"];
   productName: string | null;
+  productKind: string | null;
+  systemRemainingQty: number | null;
+  operatorRemainingEstimate: number | null;
   intakeBag: QrCardRow["intakeBag"];
 }) {
   if (card.status !== "ASSIGNED") {
@@ -141,14 +150,38 @@ function AssignmentCell({
     return (
       <div className="text-[11px] leading-snug space-y-0.5">
         {isHeldPartial ? (
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-300">
-              Partial · QR held for reuse
-            </span>
-            {productName ? (
-              <span className="text-[10px] text-text-subtle">
-                last run: {productName}
+          <div className="space-y-0.5">
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-300">
+                {productKind === "BOTTLE" ? "Partial bottle · QR held for reuse" : "Partial · QR held for reuse"}
               </span>
+              {productName ? (
+                <span className="text-[10px] text-text-subtle">
+                  last run: {productName}
+                </span>
+              ) : null}
+            </div>
+            {/* System-calculated vs operator-estimated remaining are shown
+                separately and labelled — never merged (estimate ≠ confirmed). */}
+            {systemRemainingQty != null || operatorRemainingEstimate != null ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                <span className="text-text-muted">
+                  System remaining:{" "}
+                  <span className="font-medium tabular-nums text-text-strong">
+                    {systemRemainingQty != null
+                      ? systemRemainingQty.toLocaleString()
+                      : "unknown"}
+                  </span>
+                </span>
+                {operatorRemainingEstimate != null ? (
+                  <span className="text-text-muted">
+                    Operator est.:{" "}
+                    <span className="font-medium tabular-nums text-text-strong">
+                      ~{operatorRemainingEstimate.toLocaleString()}
+                    </span>
+                  </span>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : (
@@ -418,7 +451,7 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              {filtered.map(({ card, bag, workflowState, productName, intakeBag }) => (
+              {filtered.map(({ card, bag, workflowState, productName, productKind, systemRemainingQty, operatorRemainingEstimate, intakeBag }) => (
                 <tr
                   key={card.id}
                   className={`hover:bg-surface-2/40 transition-colors ${
@@ -445,6 +478,9 @@ export function QrCardsList({ rows }: { rows: QrCardRow[] }) {
                       bag={bag}
                       workflowState={workflowState}
                       productName={productName}
+                      productKind={productKind}
+                      systemRemainingQty={systemRemainingQty}
+                      operatorRemainingEstimate={operatorRemainingEstimate}
                       intakeBag={intakeBag}
                     />
                   </td>

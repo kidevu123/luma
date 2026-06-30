@@ -11,10 +11,12 @@ export function WorkflowRecoveryForm({
   workflowBagId,
   bagFinalized,
   hasFinishedLot,
+  heldPartialBottle = false,
 }: {
   workflowBagId: string;
   bagFinalized: boolean;
   hasFinishedLot: boolean;
+  heldPartialBottle?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [state, formAction, pending] = useActionState(workflowRecoveryAction, null);
@@ -50,6 +52,19 @@ export function WorkflowRecoveryForm({
       <input type="hidden" name="workflowBagId" value={workflowBagId} />
       <input type="hidden" name="confirm" value={confirmed ? "true" : ""} />
       <p className="text-[11px] font-semibold text-red-900">Wrong route / assignment recovery</p>
+      {heldPartialBottle ? (
+        <div className="rounded border border-red-400 bg-red-100 px-2 py-1.5 text-[10px] leading-snug text-red-950">
+          <p className="font-bold uppercase tracking-wide">
+            ⚠ QR held for a partial bottle bag
+          </p>
+          <p className="mt-0.5">
+            This QR is currently kept with a <strong>partial bottle bag</strong>{" "}
+            (it still has product and is held for the next run). Recovering this
+            bag will remove the QR from that physical bag. Only continue if the
+            bag is actually being <strong>abandoned, relabeled, or corrected</strong>.
+          </p>
+        </div>
+      ) : null}
       <p className="text-[10px] text-red-900/90 leading-snug">
         This does not erase history. It appends recovery events and may release the QR card so the
         correct workflow can be started.

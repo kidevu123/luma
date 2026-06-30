@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.9.0] — 2026-06-30
+
+### Added
+- **Operator remaining estimate is now surfaced in admin (was write-only).** The optional `operator_remaining_estimate` recorded on `BAG_FINALIZED` (v1.8.0) was previously only visible as raw JSON in the genealogy timeline. It is now read and shown as a clearly-labelled, non-authoritative value:
+  - **Partial-bags workbench** — a new "Operator est. ~N" line under the Remaining cell, derived from the bag's `BAG_FINALIZED` payload with zero new joins. When it differs from the system-calculated remaining, both are shown and the operator line is flagged "differs from system" (never silently overwritten). `app/(admin)/partial-bags/page.tsx`, `lib/production/partial-bags.ts`.
+  - **QR-cards list** — for a held partial bottle card, the "Partial bottle · QR held for reuse" badge now shows **System remaining** and **Operator est.** as two distinct labelled values. Added via scalar correlated subselects on the loader (latest closed allocation session balance + latest `BAG_FINALIZED` operator estimate) — no row fan-out. `lib/db/queries/qr-cards.ts`, `app/(admin)/qr-cards/qr-cards-list.tsx`.
+- **New pure helpers** `bottleFinalizePayloadRemainingEstimate` (reads the estimate only when tagged `OPERATOR_ESTIMATE`) and `formatOperatorRemainingEstimate`; `formatRemainingEstimate` now labels the `OPERATOR_ESTIMATE` source. `lib/production/bag-allocation.ts`, `lib/production/partial-bag-resolution-constants.ts`.
+
+### Changed
+- **Partial-aware supervisor override.** The wrong-route / `CARD_FORCE_RELEASED` recovery flow now detects when the bag is a held partial bottle (BOTTLE + finalized + QR still assigned + `bag_remains_partial`). The recovery form shows a strong warning — "This QR is currently kept with a partial bottle bag … recovering will remove the QR from that physical bag; only continue if the bag is being abandoned, relabeled, or corrected." The override remains possible (the confirm checkbox still gates submit) and is **audited**: a `workflow_recovery.held_partial_bottle_override` audit entry is written and the `CARD_FORCE_RELEASED` event payload carries `held_partial_bottle: true` when a release occurs. `app/(admin)/workflow-submissions/{actions.ts,_workflow-recovery-form.tsx,workflow-table.tsx}`.
+
+### Data honesty
+- System-calculated remaining (OUTPUT_DERIVED allocation balance) and operator-estimated remaining are always shown as **separate, distinctly-labelled** values across all admin surfaces. The operator estimate never overwrites the system balance that PO reconciliation reads (estimate ≠ confirmed).
+
+### Tests
+- `lib/production/partial-bag-resolution-constants.test.ts` (formatter labels), new operator-estimate reader cases in `lib/production/bag-allocation.test.ts`, and `app/(admin)/held-partial-admin-visibility.test.ts` (structural coverage of the QR-cards loader/list, partial-bags surfacing, and the supervisor warning + audit). Existing v1.7/v1.8 bottle-partial coverage unchanged.
+
+### Notes
+- Optional staging E2E script not added (kept change focused); suggested shape documented in the deploy report. No Postgres integration harness exists in the default vitest run.
+
 ## [1.8.0] — 2026-06-30
 
 ### Fixed

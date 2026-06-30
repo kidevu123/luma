@@ -139,6 +139,28 @@ function SectionTable({
                       {sourceLabel ? ` · ${sourceLabel}` : ""}
                     </p>
                   ) : null}
+                  {/* Operator-entered estimate — shown separately from the
+                      system-calculated remaining above, never merged. If the
+                      two disagree, both are visible so the discrepancy is
+                      obvious rather than silently overwritten. */}
+                  {row.operatorRemainingEstimate != null ? (
+                    <p
+                      className={`mt-0.5 text-[10px] ${
+                        row.remainingEstimate != null &&
+                        row.operatorRemainingEstimate !== row.remainingEstimate
+                          ? "text-amber-700 font-medium"
+                          : "text-text-muted"
+                      }`}
+                      title="Operator's guess at run close — not an inventory count."
+                    >
+                      Operator est. ~
+                      {row.operatorRemainingEstimate.toLocaleString()}
+                      {row.remainingEstimate != null &&
+                      row.operatorRemainingEstimate !== row.remainingEstimate
+                        ? " · differs from system"
+                        : ""}
+                    </p>
+                  ) : null}
                 </td>
                 <td className="py-2 pr-3 align-top">
                   <div>{row.lastUsedProductName ?? "—"}</div>

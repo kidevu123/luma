@@ -306,11 +306,33 @@ export async function workflowRecoveryAction(
       if (!bag) throw new Error("Workflow bag not found.");
 
       const events = await tx
-        .select({ eventType: workflowEvents.eventType })
+        .select({
+          eventType: workflowEvents.eventType,
+          payload: workflowEvents.payload,
+        })
         .from(workflowEvents)
         .where(eq(workflowEvents.workflowBagId, parsed.data.workflowBagId))
         .orderBy(desc(workflowEvents.occurredAt))
         .limit(20);
+
+      // P2-PARTIAL-KEEP: detect whether this recovery would disturb a QR that
+      // is currently held for a partial bottle bag, so the override is clearly
+      // audited (and, when a release actually happens, flagged on the event).
+      const [assignedCard] = await tx
+        .select({ id: qrCards.id })
+        .from(qrCards)
+        .where(eq(qrCards.assignedWorkflowBagId, parsed.data.workflowBagId))
+        .limit(1);
+      const bagRemainsPartial = events.some(
+        (e) =>
+          e.eventType === "BAG_FINALIZED" &&
+          (e.payload as Record<string, unknown> | null)?.bag_remains_partial ===
+            true,
+      );
+      const heldPartialBottle =
+        bag.productKind === "BOTTLE" &&
+        Boolean(assignedCard) &&
+        (state.isFinalized || bagRemainsPartial);
 
       const [lot] = await tx
         .select({ id: finishedLots.id, status: finishedLots.status })
@@ -398,12 +420,35 @@ export async function workflowRecoveryAction(
             recovery_kind: parsed.data.recoveryKind,
             reason: parsed.data.reason,
             admin_recovery: true,
+            ...(heldPartialBottle ? { held_partial_bottle: true } : {}),
           },
           clientEventId: `workflow-recovery-release:${parsed.data.workflowBagId}`,
           enteredByUserId: actor.id,
           accountabilitySource: "SUPERVISOR_OVERRIDE",
           accountableEmployeeNameSnapshot: actor.email,
         });
+      }
+
+      // P2-PARTIAL-KEEP: a recovery on a QR held for a partial bottle bag is a
+      // deliberate supervisor override of the partial-keep protection — record
+      // it explicitly (independent of whether a hard reset/release ran).
+      if (heldPartialBottle) {
+        await writeAudit(
+          {
+            actorId: actor.id,
+            actorRole: "ADMIN",
+            action: "workflow_recovery.held_partial_bottle_override",
+            targetType: "WorkflowBag",
+            targetId: parsed.data.workflowBagId,
+            after: {
+              recovery_kind: parsed.data.recoveryKind,
+              reason: parsed.data.reason,
+              qr_released: resetAllowed,
+              product_name: bag.productName,
+            },
+          },
+          tx,
+        );
       }
 
       if (lot && !zohoCommitted && finishedLotAction === "ON_HOLD") {

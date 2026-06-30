@@ -24,6 +24,7 @@ import {
   isWorkflowBagResumableAtSealingAfterPartialPackaging,
 } from "@/lib/production/sealing-partial-closeout";
 import { canRestartAvailablePartialRawBag } from "@/lib/production/partial-bag-restart";
+import { bottleFinalizePayloadRemainingEstimate } from "@/lib/production/bag-allocation";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -86,6 +87,10 @@ export interface PartialBagAdminRow extends AvailablePartialBagRow {
   eligibilityNote: string;
   activeWorkflowBagId: string | null;
   inventoryStatus: string;
+  /** Optional operator-entered remaining ESTIMATE from the latest
+   *  BAG_FINALIZED event. Distinct from the system-calculated
+   *  remainingEstimate (OUTPUT_DERIVED session balance) — never merged. */
+  operatorRemainingEstimate: number | null;
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────
@@ -302,6 +307,9 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
     eligibilityNote: "Ready for a new production run.",
     activeWorkflowBagId: null,
     inventoryStatus: "AVAILABLE",
+    // Ready rows are keyed off inventory bags only (no workflow-event access),
+    // so no operator estimate is available here — surfaced on blocked/held rows.
+    operatorRemainingEstimate: null,
   }));
   const listedBagIds = new Set(adminRows.map((r) => r.bagId));
 
@@ -439,6 +447,13 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
       .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0))[0];
 
     const provenance = deriveRemainingProvenance(sessions);
+    // Operator estimate (if any) from the bag's BAG_FINALIZED event — kept
+    // distinct from the system-calculated remainingEstimate above.
+    const operatorRemainingEstimate =
+      wfEvents
+        .filter((e) => e.eventType === "BAG_FINALIZED")
+        .map((e) => bottleFinalizePayloadRemainingEstimate(e.payload))
+        .find((v) => v != null) ?? null;
 
     adminRows.push({
       bagId: candidate.inventoryBagId,
@@ -462,6 +477,7 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
       eligibilityNote: note,
       activeWorkflowBagId: candidate.workflowBagId,
       inventoryStatus: candidate.inventoryStatus,
+      operatorRemainingEstimate,
     });
     listedBagIds.add(candidate.inventoryBagId);
   }

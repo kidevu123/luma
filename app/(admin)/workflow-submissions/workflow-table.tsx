@@ -210,6 +210,17 @@ function ExpandedContent({
   const hasFinishedLot = genealogy.events.some(
     (e) => e.eventType === "FINISHED_GOODS_RELEASED",
   );
+  // P2-PARTIAL-KEEP — a finalized BOTTLE bag whose BAG_FINALIZED explicitly
+  // kept the bag partial holds its QR for reuse. Warn supervisors before a
+  // recovery removes that QR from the physical bag.
+  const heldPartialBottle =
+    bag.productKind === "BOTTLE" &&
+    Boolean(bag.isFinalized) &&
+    genealogy.events.some(
+      (e) =>
+        e.eventType === "BAG_FINALIZED" &&
+        getPayloadRecord(e.payload)["bag_remains_partial"] === true,
+    );
   const canShowMissingBlisterRepair =
     canAdminRepair &&
     bag.stage === "STARTED" &&
@@ -243,6 +254,7 @@ function ExpandedContent({
             workflowBagId={bag.id}
             bagFinalized={Boolean(bag.isFinalized)}
             hasFinishedLot={hasFinishedLot}
+            heldPartialBottle={heldPartialBottle}
           />
         </div>
       ) : null}

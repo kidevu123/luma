@@ -55,14 +55,26 @@ export function formatRemainingEstimate(args: {
   const sourceLabel =
     source === "SUPERVISOR_ESTIMATE"
       ? "supervisor estimate"
-      : source === "WEIGH_BACK"
-        ? "weigh-back"
-        : source === "PHYSICAL_COUNT"
-          ? "counted"
-          : confidence === "MEDIUM"
-            ? "estimate"
-            : "low confidence";
+      : source === "OPERATOR_ESTIMATE"
+        ? "operator estimate"
+        : source === "WEIGH_BACK"
+          ? "weigh-back"
+          : source === "PHYSICAL_COUNT"
+            ? "counted"
+            : confidence === "MEDIUM"
+              ? "estimate"
+              : "low confidence";
   return `~${n} (${sourceLabel})`;
+}
+
+/** Operator-entered remaining ESTIMATE display (client-safe). Always rendered
+ *  as an explicit, non-authoritative estimate so it can never be mistaken for
+ *  the system-calculated remaining. Returns null when there is no estimate. */
+export function formatOperatorRemainingEstimate(
+  estimate: number | null | undefined,
+): string | null {
+  if (estimate == null) return null;
+  return `~${estimate.toLocaleString()} (operator estimate)`;
 }
 
 /** Human label for endingBalanceSource on allocation sessions. */

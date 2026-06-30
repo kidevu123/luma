@@ -22,6 +22,7 @@ import {
   isPartialBagResume,
   bagFinalizePayloadKeepsPartial,
   bagFinalizeDefersQrRelease,
+  bottleFinalizePayloadRemainingEstimate,
   shouldReleaseQrAtFinalizationWithIntent,
   shouldReleaseQrAfterPackagingClose,
 } from "./bag-allocation";
@@ -947,5 +948,51 @@ describe("shouldReleaseQrAfterPackagingClose", () => {
   it("HOLDS whenever the operator explicitly kept the bag partial, regardless of computed ending", () => {
     expect(shouldReleaseQrAfterPackagingClose({ keepPartial: true, endingBalanceQty: 0 })).toBe(false);
     expect(shouldReleaseQrAfterPackagingClose({ keepPartial: true, endingBalanceQty: -10 })).toBe(false);
+  });
+});
+
+describe("bottleFinalizePayloadRemainingEstimate (operator estimate reader)", () => {
+  it("returns the estimate only when tagged with the OPERATOR_ESTIMATE source", () => {
+    expect(
+      bottleFinalizePayloadRemainingEstimate({
+        operator_remaining_estimate: 4200,
+        operator_remaining_estimate_source: "OPERATOR_ESTIMATE",
+      }),
+    ).toBe(4200);
+  });
+  it("ignores an estimate without the OPERATOR_ESTIMATE source tag", () => {
+    expect(
+      bottleFinalizePayloadRemainingEstimate({ operator_remaining_estimate: 4200 }),
+    ).toBeNull();
+    expect(
+      bottleFinalizePayloadRemainingEstimate({
+        operator_remaining_estimate: 4200,
+        operator_remaining_estimate_source: "OUTPUT_DERIVED",
+      }),
+    ).toBeNull();
+  });
+  it("returns null for missing/invalid/negative values", () => {
+    expect(bottleFinalizePayloadRemainingEstimate(null)).toBeNull();
+    expect(bottleFinalizePayloadRemainingEstimate({})).toBeNull();
+    expect(
+      bottleFinalizePayloadRemainingEstimate({
+        operator_remaining_estimate: -5,
+        operator_remaining_estimate_source: "OPERATOR_ESTIMATE",
+      }),
+    ).toBeNull();
+    expect(
+      bottleFinalizePayloadRemainingEstimate({
+        operator_remaining_estimate: "4200",
+        operator_remaining_estimate_source: "OPERATOR_ESTIMATE",
+      }),
+    ).toBeNull();
+  });
+  it("floors a fractional estimate", () => {
+    expect(
+      bottleFinalizePayloadRemainingEstimate({
+        operator_remaining_estimate: 4200.9,
+        operator_remaining_estimate_source: "OPERATOR_ESTIMATE",
+      }),
+    ).toBe(4200);
   });
 });
