@@ -410,10 +410,18 @@ export function ScanCardForm({
           <div className="rounded-lg border-2 border-amber-300 bg-amber-50/70 p-3 space-y-2">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
               <RotateCcw className="h-4 w-4" />
-              This is a partial bag
+              {partialConfirm.context.previousProductKind === "BOTTLE"
+                ? "Partial bottle bag held for reuse"
+                : "This is a partial bag"}
+            </p>
+            <p className="text-[11px] leading-snug text-amber-900/90">
+              This QR is still attached to a physical bag that has product left.
+              Continue to reuse the <span className="font-semibold">same bag</span>{" "}
+              for this run — you can run a different product than last time. It is
+              not a fresh unused QR.
             </p>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-amber-900">
-              <dt className="text-amber-800/70">Previous product</dt>
+              <dt className="text-amber-800/70">Last run product</dt>
               <dd>{partialConfirm.context.previousProductName ?? "—"}</dd>
               <dt className="text-amber-800/70">Previously consumed</dt>
               <dd className="tabular-nums">
@@ -421,7 +429,7 @@ export function ScanCardForm({
                   ? partialConfirm.context.lastConsumedQty.toLocaleString()
                   : "unknown"}
               </dd>
-              <dt className="text-amber-800/70">Estimated remaining</dt>
+              <dt className="text-amber-800/70">System remaining</dt>
               <dd className="tabular-nums font-medium">
                 {formatRemainingEstimate({
                   remainingEstimate: partialConfirm.context.remainingEstimate,
@@ -429,8 +437,18 @@ export function ScanCardForm({
                   source: partialConfirm.context.remainingSource,
                 })}
               </dd>
-              <dt className="text-amber-800/70">Confidence</dt>
-              <dd>{partialConfirm.context.remainingConfidence ?? "—"}</dd>
+              {partialConfirm.context.operatorRemainingEstimate != null ? (
+                <>
+                  <dt className="text-amber-800/70">Operator estimate</dt>
+                  <dd className="tabular-nums font-medium">
+                    ~
+                    {partialConfirm.context.operatorRemainingEstimate.toLocaleString()}{" "}
+                    <span className="font-normal text-amber-800/70">
+                      (operator&apos;s note)
+                    </span>
+                  </dd>
+                </>
+              ) : null}
               <dt className="text-amber-800/70">Supplier lot</dt>
               <dd className="font-mono text-[11px]">
                 {partialConfirm.context.supplierLot ?? "—"}
@@ -496,7 +514,7 @@ export function ScanCardForm({
                 }}
                 className="h-11 rounded-lg bg-amber-700 text-white text-sm font-semibold disabled:opacity-60"
               >
-                {pending ? "Starting…" : "Confirm — start from partial"}
+                {pending ? "Starting…" : "Continue with this partial bag"}
               </button>
             </div>
           </div>

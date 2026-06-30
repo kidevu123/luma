@@ -400,10 +400,11 @@ describe("P2-PARTIAL-KEEP · QR is never dropped for a partial bottle bag", () =
 
   it("deferred release only drops the QR when the bag is confirmed empty", () => {
     const i = actionsSrc.indexOf("function resolveDeferredQrReleaseAfterPackaging");
-    const block = actionsSrc.slice(i, i + 1600);
+    const block = actionsSrc.slice(i, i + 2400);
     expect(block).toMatch(/shouldReleaseQrAfterPackagingClose/);
     expect(block).toMatch(/status: "IDLE", assignedWorkflowBagId: null/);
-    // Held bags are audited rather than released.
+    // Both outcomes are audited with a distinct, understandable reason.
+    expect(block).toMatch(/floor\.bag_qr_released_empty/);
     expect(block).toMatch(/floor\.bag_kept_partial/);
   });
 

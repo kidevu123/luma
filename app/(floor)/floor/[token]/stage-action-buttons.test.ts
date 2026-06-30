@@ -629,7 +629,7 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging g
 
   it("packaging payload keys unchanged in close-out form", () => {
     const pkgIdx = src.indexOf("function PackagingCompleteForm");
-    const pkgBlock = src.slice(pkgIdx, pkgIdx + 10000);
+    const pkgBlock = src.slice(pkgIdx, pkgIdx + 13000);
     expect(pkgBlock).toMatch(/fd\.set\("masterCases"/);
     expect(pkgBlock).toMatch(/fd\.set\("displaysMade"/);
     expect(pkgBlock).toMatch(/fd\.set\("looseCards"/);
@@ -637,14 +637,16 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · sealing product picker + packaging g
     expect(pkgBlock).toMatch(/fd\.set\("rippedCards"/);
   });
 
-  it("P2-PARTIAL-KEEP · bottle close-out exposes keep-partial + optional remaining estimate", () => {
+  it("P2-PARTIAL-KEEP · bottle close-out forces an explicit empty-vs-partial choice", () => {
     const pkgIdx = src.indexOf("function PackagingCompleteForm");
-    const pkgBlock = src.slice(pkgIdx, pkgIdx + 10000);
-    // Bottle-scoped keep-partial control with clear empty-vs-partial copy.
+    const pkgBlock = src.slice(pkgIdx, pkgIdx + 13000);
+    // Bottle-scoped explicit two-choice control (radio), not an ambiguous box.
     expect(pkgBlock).toMatch(/isBottle/);
+    expect(pkgBlock).toMatch(/Bag is empty — release QR/);
     expect(pkgBlock).toMatch(/keep QR with this bag/i);
-    expect(pkgBlock).toMatch(/Only leave this unchecked if the bag is empty/i);
-    // Submits keepBagPartial and the optional estimate.
+    expect(pkgBlock).toMatch(/name="bottle-bag-outcome"/);
+    expect(pkgBlock).toMatch(/bottlePartialChoice/);
+    // Submits keepBagPartial (derived from the choice) and the optional estimate.
     expect(pkgBlock).toMatch(/fd\.set\("keepBagPartial", "true"\)/);
     expect(pkgBlock).toMatch(/fd\.set\("partialRemainingEstimate"/);
   });

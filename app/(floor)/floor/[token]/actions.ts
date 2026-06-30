@@ -2992,6 +2992,24 @@ async function resolveDeferredQrReleaseAfterPackaging(
       .update(qrCards)
       .set({ status: "IDLE", assignedWorkflowBagId: null })
       .where(eq(qrCards.assignedWorkflowBagId, args.workflowBagId));
+    // Record WHY the QR returned to the unused pool — bag confirmed empty at
+    // packaging close-out — so the release reason is clear in the audit trail
+    // (distinct from a supervisor force-release).
+    await writeAudit(
+      {
+        actorId: args.accountability.enteredByUserId ?? null,
+        actorRole: null,
+        action: "floor.bag_qr_released_empty",
+        targetType: "WorkflowBag",
+        targetId: args.workflowBagId,
+        after: {
+          released_to_idle: true,
+          reason: "bag_confirmed_empty",
+          remaining_qty: wfSession?.endingBalanceQty ?? null,
+        },
+      },
+      tx,
+    );
     return;
   }
 

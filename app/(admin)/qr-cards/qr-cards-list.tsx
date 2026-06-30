@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { RetireButton } from "./forms";
 import { isQrCardMidProduction } from "@/lib/production/qr-card-retire";
 import { sortQrRows, matchesQrSearch } from "@/lib/production/qr-sort";
+import { derivePartialBagAttention } from "@/lib/production/partial-bag-attention";
 
 type QrCardType = "RAW_BAG" | "VARIETY_PACK" | "WORKFLOW_TRAVELER" | "UNKNOWN";
 
@@ -132,6 +133,11 @@ function AssignmentCell({
     // that explicitly instead of a bare "FINALIZED" so admins can see the QR is
     // still active/resumable, with the last product it ran.
     const isHeldPartial = workflowState?.isFinalized === true;
+    const attention = derivePartialBagAttention({
+      isHeldPartial,
+      systemRemainingQty,
+      operatorRemainingEstimate,
+    });
     const stage = isHeldPartial
       ? null
       : workflowState?.isPaused
@@ -155,12 +161,23 @@ function AssignmentCell({
               <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-300">
                 {productKind === "BOTTLE" ? "Partial bottle · QR held for reuse" : "Partial · QR held for reuse"}
               </span>
+              {attention.needsReview ? (
+                <span
+                  className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-800 ring-1 ring-red-300"
+                  title={attention.reason ?? undefined}
+                >
+                  Needs review
+                </span>
+              ) : null}
               {productName ? (
                 <span className="text-[10px] text-text-subtle">
                   last run: {productName}
                 </span>
               ) : null}
             </div>
+            {attention.needsReview && attention.reason ? (
+              <p className="text-[10px] text-red-700">{attention.reason}</p>
+            ) : null}
             {/* System-calculated vs operator-estimated remaining are shown
                 separately and labelled — never merged (estimate ≠ confirmed). */}
             {systemRemainingQty != null || operatorRemainingEstimate != null ? (

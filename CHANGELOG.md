@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.10.0] — 2026-06-30
+
+### Added — bottle partial-bag workflow completion
+- **Floor close-out now forces an explicit empty-vs-partial decision.** The bottle packaging close-out replaces the single "keep partial" checkbox with a required two-choice control — **"Bag is empty — release QR"** vs **"Bag still has product — keep QR with this bag"** — each with helper text on exactly what happens to the QR. Save is disabled until the operator chooses, so closing the run no longer implies the bag is empty. The Save button label reflects the choice ("Save & release QR" / "Save & keep bag"). The optional remaining estimate is tied to the partial choice and stays safe-when-blank (the QR is still held). `app/(floor)/floor/[token]/stage-action-buttons.tsx`.
+- **Scan/resume of a held partial bottle bag is now obvious.** The partial-reuse confirmation panel is bottle-aware ("Partial bottle bag held for reuse"), states that the QR is still attached to the same physical bag and that a different bottle product can be run, shows **system remaining and operator estimate as separate labelled rows**, and the confirm button reads "Continue with this partial bag". `PartialReuseContext` / `loadPartialReuseContext` now carry `operatorRemainingEstimate` (from the latest `BAG_FINALIZED`) and `previousProductKind`. `app/(floor)/floor/[token]/scan-card-form.tsx`, `lib/production/partial-bags.ts`.
+- **Admin "Needs review" signal.** The QR-cards list shows a red "Needs review" chip on a held partial bottle bag only when it is genuinely ambiguous — unknown system remaining, or an operator estimate that differs materially from the system figure (≥100 tablets and ≥25%). Healthy held partials are never flagged. Pure helper `derivePartialBagAttention` (`lib/production/partial-bag-attention.ts`). `app/(admin)/qr-cards/qr-cards-list.tsx`.
+- **Clear empty-release audit.** When a bottle bag is confirmed empty at packaging close-out and its QR returns to IDLE, a `floor.bag_qr_released_empty` audit entry (`reason: bag_confirmed_empty`) is now written — previously this release was silent. The held path keeps its `floor.bag_kept_partial` audit, so the trail distinguishes "released because empty" from "kept partial". `app/(floor)/floor/[token]/actions.ts`.
+
+### Notes
+- No change to the QR-retention contract: partial bottle QRs stay ASSIGNED; packaging completion and manual finalize still hold partial/unknown QRs; the QR only returns to IDLE when confirmed empty; the operator estimate remains separate from system-calculated remaining; supervisor override stays warned + audited. No schema changes, no data mutation. Known follow-ups: finalized held partials with no allocation session are surfaced on the QR-cards list (the partial-bags workbench still filters `isFinalized = false`); manual close/deplete actions leave `assignedWorkflowBagId` set when releasing a RAW_BAG card.
+
 ## [1.9.1] — 2026-06-30
 
 ### Fixed

@@ -1082,7 +1082,11 @@ function PackagingCompleteForm({
   // P2-PARTIAL-KEEP: bottle runs usually end on a partial bag. The operator
   // marks "still has product" so the QR stays on the physical bag for reuse,
   // optionally noting an estimated tablets-remaining for the next operator.
-  const [keepBagPartial, setKeepBagPartial] = React.useState(false);
+  // P2-PARTIAL-KEEP: bottle close-out forces an explicit empty-vs-partial
+  // decision (no implicit "closing the run means empty"). "" = not yet chosen.
+  const [bottlePartialChoice, setBottlePartialChoice] = React.useState<
+    "" | "empty" | "partial"
+  >("");
   const [partialRemaining, setPartialRemaining] = React.useState("");
   const containerRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -1094,6 +1098,9 @@ function PackagingCompleteForm({
   // → packaging), so the keep-partial control below is shown for bottles.
   const isVariety = productKind === "VARIETY";
   const isBottle = productKind === "BOTTLE";
+  const keepBagPartial = bottlePartialChoice === "partial";
+  // Bottles must explicitly choose empty vs partial before the close-out saves.
+  const bottleChoiceMissing = isBottle && bottlePartialChoice === "";
   const looseLabel = isVariety ? "Loose units" : "Loose cards";
   const reworkLabel = "Needs rework / return to sealing";
   const rippedLabel = "Ripped / unusable";
@@ -1185,38 +1192,62 @@ function PackagingCompleteForm({
         </div>
       )}
 
-      {/* P2-PARTIAL-KEEP — keep the physical bag as a partial at run end.
-          Shown for bottle runs, where the last bag of a run is usually
-          partial. The QR stays assigned to this bag so the same bag can be
-          scanned into a later run (even a different product). */}
+      {/* P2-PARTIAL-KEEP — explicit empty-vs-partial decision at bottle run
+          end. Closing the run does NOT imply the bag is empty: the operator
+          must pick one. "Partial" keeps the QR on the physical bag for reuse;
+          "empty" returns it to the unused pool. */}
       {isBottle && (
-        <div
+        <fieldset
           className={`rounded-lg border px-3 py-2.5 space-y-2 transition-colors ${
-            keepBagPartial ? "border-amber-400 bg-amber-50" : "border-border bg-surface"
+            bottleChoiceMissing
+              ? "border-amber-400 bg-amber-50/60"
+              : keepBagPartial
+                ? "border-amber-400 bg-amber-50"
+                : "border-emerald-300 bg-emerald-50/40"
           }`}
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-subtle">
+          <legend className="px-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-text-subtle">
             Is this bag empty or does it still have product?
-          </p>
+          </legend>
+
+          {/* Empty → release QR */}
           <label className="flex items-start gap-2.5 cursor-pointer">
             <input
-              type="checkbox"
-              checked={keepBagPartial}
-              onChange={(e) => setKeepBagPartial(e.target.checked)}
+              type="radio"
+              name="bottle-bag-outcome"
+              checked={bottlePartialChoice === "empty"}
+              onChange={() => setBottlePartialChoice("empty")}
+              className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600"
+            />
+            <span className="text-xs leading-snug text-text-muted">
+              <span className="block text-sm font-semibold text-emerald-900">
+                Bag is empty — release QR
+              </span>
+              The QR returns to the unused pool. Use this only when the physical
+              bag has no tablets left.
+            </span>
+          </label>
+
+          {/* Partial → keep QR with bag */}
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="radio"
+              name="bottle-bag-outcome"
+              checked={bottlePartialChoice === "partial"}
+              onChange={() => setBottlePartialChoice("partial")}
               className="mt-0.5 h-5 w-5 shrink-0 accent-amber-600"
             />
             <span className="text-xs leading-snug text-text-muted">
               <span className="block text-sm font-semibold text-amber-900">
-                This bag still has product — keep QR with this bag
+                Bag still has product — keep QR with this bag
               </span>
-              The QR stays on this physical bag — it is{" "}
-              <span className="font-semibold">not</span> returned to the unused
-              pool. Scan the same bag to start the next run, even a different
-              bottle product.
+              The QR stays on this physical bag (not returned to the pool). Scan
+              the same bag to start the next run — even a different bottle
+              product.
             </span>
           </label>
 
-          {keepBagPartial ? (
+          {bottlePartialChoice === "partial" ? (
             <label className="block pl-7">
               <span className="block text-xs font-medium text-text-muted mb-1">
                 Estimated tablets left (optional)
@@ -1233,17 +1264,19 @@ function PackagingCompleteForm({
                 className="block w-full h-12 px-3 rounded-lg bg-surface border border-border text-base tabular-nums"
               />
               <span className="block text-[11px] text-text-subtle mt-1">
-                Rough estimate for the next operator — not used for inventory
-                counts.
+                Rough note for the next operator — not used for inventory counts.
+                Leave blank if unsure; the QR is still kept with the bag.
               </span>
             </label>
-          ) : (
+          ) : null}
+
+          {bottleChoiceMissing ? (
             <p className="pl-7 text-[11px] font-medium text-amber-700">
-              Only leave this unchecked if the bag is empty — that returns the QR
-              to the unused pool.
+              Choose one to finish close-out — closing the run does not assume
+              the bag is empty.
             </p>
-          )}
-        </div>
+          ) : null}
+        </fieldset>
       )}
 
       <div className="grid grid-cols-2 gap-2">
@@ -1257,7 +1290,7 @@ function PackagingCompleteForm({
         </button>
         <button
           type="button"
-          disabled={pending}
+          disabled={pending || bottleChoiceMissing}
           onClick={async () => {
             setPending(true);
             try {
@@ -1296,7 +1329,13 @@ function PackagingCompleteForm({
           }}
           className="h-14 rounded-xl bg-emerald-700 text-white text-base font-semibold disabled:opacity-60"
         >
-          {pending ? "Saving…" : "Save & close"}
+          {pending
+            ? "Saving…"
+            : isBottle && bottlePartialChoice === "partial"
+              ? "Save & keep bag"
+              : isBottle && bottlePartialChoice === "empty"
+                ? "Save & release QR"
+                : "Save & close"}
         </button>
       </div>
     </div>

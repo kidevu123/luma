@@ -4,7 +4,7 @@
 // closed/returned allocation session. No new DB status needed — derived
 // from existing rawBagAllocationSessions ledger.
 
-import { asc, eq, inArray, isNotNull, and, notInArray } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNotNull, and, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   batches,
@@ -502,10 +502,17 @@ export async function loadPartialBagAdminRows(): Promise<PartialBagAdminRow[]> {
 
 export type PartialReuseContext = {
   previousProductName: string | null;
+  /** Product kind of the last run (e.g. BOTTLE) — lets the floor tailor the
+   *  partial-reuse panel ("partial bottle bag"). */
+  previousProductKind: string | null;
   lastConsumedQty: number | null;
+  /** System-calculated remaining (OUTPUT_DERIVED allocation balance). */
   remainingEstimate: number | null;
   remainingConfidence: string | null;
   remainingSource: string | null;
+  /** Optional operator-entered estimate from the last BAG_FINALIZED — shown
+   *  SEPARATELY from the system figure, never merged. */
+  operatorRemainingEstimate: number | null;
   supplierLot: string | null;
   declaredPillCount: number | null;
   closedSessionCount: number;
@@ -529,11 +536,40 @@ export async function loadPartialReuseContext(
       consumedQty: rawBagAllocationSessions.consumedQty,
       closedAt: rawBagAllocationSessions.closedAt,
       productName: products.name,
+      productKind: products.kind,
     })
     .from(rawBagAllocationSessions)
     .leftJoin(products, eq(products.id, rawBagAllocationSessions.productId))
     .where(eq(rawBagAllocationSessions.inventoryBagId, inventoryBagId))
     .orderBy(asc(rawBagAllocationSessions.openedAt));
+
+  // Operator estimate (if any) from the most-recent BAG_FINALIZED of a workflow
+  // bag that used this inventory bag — kept separate from the system figure.
+  const finalizedRows = await tx
+    .select({ payload: workflowEvents.payload })
+    .from(workflowEvents)
+    .innerJoin(
+      workflowBags,
+      eq(workflowBags.id, workflowEvents.workflowBagId),
+    )
+    .where(
+      and(
+        eq(workflowBags.inventoryBagId, inventoryBagId),
+        eq(workflowEvents.eventType, "BAG_FINALIZED"),
+      ),
+    )
+    .orderBy(desc(workflowEvents.occurredAt))
+    .limit(5);
+  let operatorRemainingEstimate: number | null = null;
+  for (const row of finalizedRows) {
+    const est = bottleFinalizePayloadRemainingEstimate(
+      row.payload as Record<string, unknown> | null,
+    );
+    if (est != null) {
+      operatorRemainingEstimate = est;
+      break;
+    }
+  }
 
   const [bagRow] = await tx
     .select({
@@ -569,10 +605,12 @@ export async function loadPartialReuseContext(
 
   return {
     previousProductName: last?.productName ?? null,
+    previousProductKind: last?.productKind ?? null,
     lastConsumedQty: last?.consumedQty ?? null,
     remainingEstimate: deriveRemainingEstimate(sessions),
     remainingConfidence: provenance.confidence,
     remainingSource: provenance.source,
+    operatorRemainingEstimate,
     supplierLot: bagRow?.supplierLot ?? null,
     declaredPillCount: bagRow?.declaredPillCount ?? null,
     closedSessionCount: closed.length,
