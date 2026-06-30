@@ -368,7 +368,10 @@ export async function closeAllocationSessionAction(
           .where(eq(qrCards.scanToken, bagQrCode))
           .limit(1);
         if (rawCard && rawCard.cardType === "RAW_BAG" && rawCard.status === "ASSIGNED") {
-          await tx.update(qrCards).set({ status: "IDLE" }).where(eq(qrCards.id, rawCard.id));
+          await tx
+            .update(qrCards)
+            .set({ status: "IDLE", assignedWorkflowBagId: null })
+            .where(eq(qrCards.id, rawCard.id));
           await writeAudit({
             actorId: accountability.enteredByUserId ?? null,
             actorRole: null,
@@ -569,7 +572,10 @@ export async function markBagDepletedAction(
           .where(eq(qrCards.scanToken, bagQrCode))
           .limit(1);
         if (rawCard && rawCard.cardType === "RAW_BAG" && rawCard.status === "ASSIGNED") {
-          await tx.update(qrCards).set({ status: "IDLE" }).where(eq(qrCards.id, rawCard.id));
+          await tx
+            .update(qrCards)
+            .set({ status: "IDLE", assignedWorkflowBagId: null })
+            .where(eq(qrCards.id, rawCard.id));
           await writeAudit({
             actorId: accountability.enteredByUserId ?? null,
             actorRole: null,

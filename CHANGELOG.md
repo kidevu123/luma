@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.11.0] — 2026-06-30
+
+### Fixed
+- **Manual depletion/closeout now clears `assignedWorkflowBagId` when releasing a RAW_BAG QR.** The manual close/deplete/admin-correction paths set a RAW_BAG card to `IDLE` on confirmed-empty but left `assignedWorkflowBagId` pointing at the old bag — inconsistent with the projector / packaging / supervisor release paths. All four confirmed-empty release sites (`closeAllocationSessionAction`, `markBagDepletedAction`, `releaseQrIfEmptied`, `closeAllocationSessionInTx`) now clear the assignment too. This only affects confirmed-empty/depleted releases; held-partial paths still never touch the card, so a partial QR stays `ASSIGNED` with its assignment intact. `app/(floor)/floor/[token]/bag-allocation-actions.ts`, `lib/production/partial-bag-admin-corrections.ts`, `lib/production/raw-bag-allocation-lifecycle.ts`.
+
+### Added
+- **"Held finalized partial bottle bags" section on the Partial Bag Workbench.** A finalized bottle bag whose QR is kept for reuse could be invisible to the allocation-session-keyed sections (no OPEN session / not AVAILABLE). A new section keys off the QR card itself — any `ASSIGNED` card on a finalized `BOTTLE` workflow bag — showing the QR, last-run product, system remaining, operator estimate, and a "Needs review" vs "Held · reusable" status (via `derivePartialBagAttention`, so healthy held partials are not alarmed). System remaining + operator estimate use scalar subselects (no row fan-out). `lib/production/partial-bags.ts` (`loadHeldFinalizedPartialBottleBags`), `app/(admin)/partial-bags/page.tsx`.
+- **Staging-only lifecycle verification script** `scripts/verify-bottle-partial-qr-release-e2e.ts` — exercises the real close/deplete floor actions against a Postgres DB to prove kept-partial holds the QR (ASSIGNED, assignment kept) and confirmed-empty releases it (IDLE, assignment cleared). Guarded by `ALLOW_STAGING_QA_DATA=true` + `LUMA_STAGING_ONLY=true`, refuses under `NODE_ENV=production`, and deletes every QA-marked row in a `finally`. Never runs against production.
+
+### Notes
+- No change to the QR-retention contract: held partial QRs stay ASSIGNED, packaging/manual finalize still hold partial/unknown QRs, the QR only returns to IDLE when confirmed empty, operator estimate stays separate from system remaining, and supervisor override stays warned + audited. No schema changes, no production data mutation.
+
 ## [1.10.0] — 2026-06-30
 
 ### Added — bottle partial-bag workflow completion

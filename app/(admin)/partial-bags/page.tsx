@@ -15,9 +15,11 @@ import { requireAdmin } from "@/lib/auth-guards";
 import {
   loadActiveRunsMissingAllocation,
   loadHeldAndDepletedPartialBags,
+  loadHeldFinalizedPartialBottleBags,
   loadPartialBagAdminRows,
   type PartialBagAdminRow,
 } from "@/lib/production/partial-bags";
+import { derivePartialBagAttention } from "@/lib/production/partial-bag-attention";
 import {
   labelPartialBagConfidence,
   labelPartialBagEndingBalanceSource,
@@ -217,11 +219,13 @@ function SectionTable({
 
 export default async function PartialBagWorkbenchPage() {
   await requireAdmin();
-  const [rows, missingAllocationRuns, heldAndDepleted] = await Promise.all([
-    loadPartialBagAdminRows(),
-    loadActiveRunsMissingAllocation(),
-    loadHeldAndDepletedPartialBags(),
-  ]);
+  const [rows, missingAllocationRuns, heldAndDepleted, heldFinalized] =
+    await Promise.all([
+      loadPartialBagAdminRows(),
+      loadActiveRunsMissingAllocation(),
+      loadHeldAndDepletedPartialBags(),
+      loadHeldFinalizedPartialBottleBags(),
+    ]);
   const ready = rows.filter((r) => r.eligibility === "ready");
   const needsCloseout = rows.filter(
     (r) => r.eligibility === "needs_allocation_closeout",
@@ -286,6 +290,84 @@ export default async function PartialBagWorkbenchPage() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 1b · Held finalized partial bottle bags (QR-keyed) — these can be
+          invisible to the allocation-session sections below, so they are
+          surfaced from the QR card itself. */}
+      {heldFinalized.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-amber-800">
+              Held finalized partial bottle bags ({heldFinalized.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-text-muted mb-3">
+              These bottle runs finished but the QR is still kept on the
+              physical bag for reuse. Healthy held partials need no action; rows
+              flagged <span className="font-semibold text-red-700">Needs
+              review</span> have an unknown or disputed remaining count —
+              confirm the bag before the next run.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-text-muted uppercase text-[10px] tracking-wide border-b border-border">
+                  <tr>
+                    <th className="text-left py-2 pr-3">QR card</th>
+                    <th className="text-left py-2 pr-3">Last run product</th>
+                    <th className="text-right py-2 pr-3">System remaining</th>
+                    <th className="text-right py-2 pr-3">Operator est.</th>
+                    <th className="text-left py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {heldFinalized.map((row) => {
+                    const attention = derivePartialBagAttention({
+                      isHeldPartial: true,
+                      systemRemainingQty: row.systemRemainingQty,
+                      operatorRemainingEstimate: row.operatorRemainingEstimate,
+                    });
+                    return (
+                      <tr key={row.cardId}>
+                        <td className="py-2 pr-3 font-mono text-[11px] text-text-strong">
+                          {row.cardLabel}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {row.lastProductName ?? "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {row.systemRemainingQty != null
+                            ? row.systemRemainingQty.toLocaleString()
+                            : "unknown"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {row.operatorRemainingEstimate != null
+                            ? `~${row.operatorRemainingEstimate.toLocaleString()}`
+                            : "—"}
+                        </td>
+                        <td className="py-2">
+                          {attention.needsReview ? (
+                            <span
+                              className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-800 ring-1 ring-red-300"
+                              title={attention.reason ?? undefined}
+                            >
+                              Needs review
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-emerald-200">
+                              Held · reusable
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

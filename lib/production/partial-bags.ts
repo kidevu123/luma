@@ -4,12 +4,13 @@
 // closed/returned allocation session. No new DB status needed — derived
 // from existing rawBagAllocationSessions ledger.
 
-import { asc, desc, eq, inArray, isNotNull, and, notInArray } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNotNull, and, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   batches,
   inventoryBags,
   products,
+  qrCards,
   rawBagAllocationSessions,
   readBagState,
   smallBoxes,
@@ -616,6 +617,73 @@ export async function loadPartialReuseContext(
     closedSessionCount: closed.length,
     lastClosedAt: last?.closedAt ? last.closedAt.toISOString() : null,
   };
+}
+
+// ── P2-PARTIAL-KEEP · finalized held partial bottle bags ─────────────
+//
+// A bottle bag whose run finalized but whose QR is still held (kept partial)
+// can be invisible on the allocation-session-keyed workbench sections — e.g.
+// it has no OPEN session and never produced an AVAILABLE partial row. This
+// loader keys off the QR CARD instead: any ASSIGNED card on a finalized BOTTLE
+// workflow bag. System remaining + operator estimate use scalar subselects (no
+// row fan-out), mirroring the qr-cards admin list.
+
+export type HeldFinalizedPartialBagRow = {
+  cardId: string;
+  cardLabel: string;
+  scanToken: string;
+  workflowBagId: string;
+  lastProductName: string | null;
+  /** System-calculated remaining (latest closed/returned session balance). */
+  systemRemainingQty: number | null;
+  /** Operator-entered estimate (latest BAG_FINALIZED), kept separate. */
+  operatorRemainingEstimate: number | null;
+};
+
+export async function loadHeldFinalizedPartialBottleBags(): Promise<
+  HeldFinalizedPartialBagRow[]
+> {
+  return db
+    .select({
+      cardId: qrCards.id,
+      cardLabel: qrCards.label,
+      scanToken: qrCards.scanToken,
+      workflowBagId: workflowBags.id,
+      lastProductName: products.name,
+      systemRemainingQty: sql<number | null>`(
+        SELECT s.ending_balance_qty
+        FROM raw_bag_allocation_sessions s
+        WHERE s.workflow_bag_id = ${workflowBags.id}
+          AND s.allocation_status IN ('CLOSED', 'RETURNED_TO_STOCK')
+        ORDER BY s.closed_at DESC NULLS LAST
+        LIMIT 1
+      )`,
+      operatorRemainingEstimate: sql<number | null>`(
+        SELECT CASE
+          WHEN e.payload->>'operator_remaining_estimate' ~ '^[0-9]+$'
+          THEN (e.payload->>'operator_remaining_estimate')::int
+          ELSE NULL
+        END
+        FROM workflow_events e
+        WHERE e.workflow_bag_id = ${workflowBags.id}
+          AND e.event_type = 'BAG_FINALIZED'
+          AND e.payload->>'operator_remaining_estimate_source' = 'OPERATOR_ESTIMATE'
+        ORDER BY e.occurred_at DESC
+        LIMIT 1
+      )`,
+    })
+    .from(qrCards)
+    .innerJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
+    .innerJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .leftJoin(products, eq(products.id, workflowBags.productId))
+    .where(
+      and(
+        eq(qrCards.status, "ASSIGNED"),
+        eq(readBagState.isFinalized, true),
+        eq(products.kind, "BOTTLE"),
+      ),
+    )
+    .orderBy(asc(qrCards.label));
 }
 
 // ── P1-PARTIAL · held / void / recently depleted bags ───────────────
