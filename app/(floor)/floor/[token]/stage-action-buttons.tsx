@@ -1072,14 +1072,19 @@ function PackagingCompleteForm({
   const [looseCards, setLooseCards] = React.useState("");
   const [damagedPackaging, setDamagedPackaging] = React.useState("");
   const [rippedCards, setRippedCards] = React.useState("");
+  // P2-PARTIAL-KEEP: bottle runs usually end on a partial bag. The operator
+  // marks "still has product" so the QR stays on the physical bag for reuse.
+  const [keepBagPartial, setKeepBagPartial] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     containerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, []);
 
-  // VARIETY uses "units" instead of "cards" in labels; BOTTLE products
-  // don't reach this station (they use BOTTLE_* station kinds).
+  // VARIETY uses "units" instead of "cards" in labels. As of v1.6.0 BOTTLE
+  // products finalize at this Packaging station too (fill → cap-seal/sticker
+  // → packaging), so the keep-partial control below is shown for bottles.
   const isVariety = productKind === "VARIETY";
+  const isBottle = productKind === "BOTTLE";
   const looseLabel = isVariety ? "Loose units" : "Loose cards";
   const reworkLabel = "Needs rework / return to sealing";
   const rippedLabel = "Ripped / unusable";
@@ -1171,6 +1176,34 @@ function PackagingCompleteForm({
         </div>
       )}
 
+      {/* P2-PARTIAL-KEEP — keep the physical bag as a partial at run end.
+          Shown for bottle runs, where the last bag of a run is usually
+          partial. The QR stays assigned to this bag so the same bag can be
+          scanned into a later run (even a different product). */}
+      {isBottle && (
+        <label
+          className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+            keepBagPartial
+              ? "border-amber-400 bg-amber-50"
+              : "border-border bg-surface"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={keepBagPartial}
+            onChange={(e) => setKeepBagPartial(e.target.checked)}
+            className="mt-0.5 h-5 w-5 shrink-0 accent-amber-600"
+          />
+          <span className="text-xs leading-snug text-text-muted">
+            <span className="block text-sm font-semibold text-amber-900">
+              Bag still has product — keep as partial
+            </span>
+            The QR stays on this bag (not returned to the unused pool). Scan the
+            same bag to start the next run — even a different product.
+          </span>
+        </label>
+      )}
+
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
@@ -1195,6 +1228,7 @@ function PackagingCompleteForm({
               fd.set("looseCards", looseCards || "0");
               fd.set("damagedPackaging", damagedPackaging || "0");
               fd.set("rippedCards", rippedCards || "0");
+              if (keepBagPartial) fd.set("keepBagPartial", "true");
               const badgeCode = operatorBadgeCodeForSubmit(operatorCode);
               if (badgeCode) fd.set("operatorCode", badgeCode);
               fd.set("clientEventId", newClientEventId());

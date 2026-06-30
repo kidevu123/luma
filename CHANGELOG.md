@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0] — 2026-06-30
+
+### Added
+- **P2-PARTIAL-KEEP — keep a bottle bag partial at the end of a run.** Bottle runs routinely end on a partial bag. The Packaging close-out now shows a clear "Bag still has product — keep as partial" control for BOTTLE products; when checked, the QR traveler card stays assigned to that physical bag (it is **not** returned to the unused QR pool), and the same bag can be scanned into a later run — even for a different bottle product (Variety vs Single Flavor 12ct), via the existing finalized-bag resume path (new run = new workflow bag, fresh product choice). `app/(floor)/floor/[token]/stage-action-buttons.tsx`.
+
+### Fixed
+- **Partial bottle bags were dropped to the unused QR pool on run completion.** Root cause: at `BAG_FINALIZED` the QR was released based on the allocation session, but the production-output allocation close (which computes the true remaining tablet balance) runs *after* finalize — so a partial bag's QR was returned to the pool before the system knew it was partial. The packaging finalize path for BOTTLE products now **defers** the QR-release decision until after the output close, then releases the QR only when the bag is confirmed empty (`ending ≤ 0`); a partial bag (`ending > 0`), an unknown remaining, or an explicit keep-partial **holds** the QR on the bag. Card/variety packaging behavior is unchanged.
+  - `lib/production/bag-allocation.ts`: new pure helpers `bagFinalizePayloadKeepsPartial`, `bagFinalizeDefersQrRelease`, `shouldReleaseQrAtFinalizationWithIntent`, `shouldReleaseQrAfterPackagingClose` (28 new unit tests).
+  - `lib/projector/index.ts`: `BAG_FINALIZED` QR release now honors explicit keep-partial / packaging defer-release intent on the event payload before the session rule (defensive guard — an explicitly-kept-partial bag is never dropped).
+  - `app/(floor)/floor/[token]/actions.ts`: `packagingCompleteAction` accepts `keepBagPartial`; the bottle finalize defers and then re-resolves the QR release after the output close, with a `floor.bag_kept_partial` audit entry. Product switching remains safe (each reuse creates a new workflow bag and never inherits the prior product).
+
+### Notes
+- Scoped to the bottle production line; the card line's immediate QR-release-at-packaging behavior is untouched. Follow-up (documented): extend the explicit keep-partial control and an operator-entered remaining count to the card line, and surface a "partial — still active" chip in the admin QR-cards list.
+
 ## [1.6.0] — 2026-06-29
 
 ### Changed

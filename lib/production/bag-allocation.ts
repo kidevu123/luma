@@ -896,3 +896,62 @@ export function isPartialBagResume(
   // never silently reusable. Admin must record the remaining count first.
   return session.endingBalanceQty != null && session.endingBalanceQty > 0;
 }
+
+// ─── P2-PARTIAL-KEEP — keep a bag partial across run completion ───
+//
+// Root cause this addresses: at BAG_FINALIZED the QR is released based on the
+// allocation session, but the packaging production-output close (which
+// computes the true remaining balance) runs *after* finalize. A partial bag
+// (remaining > 0) therefore had its QR returned to the unused pool before the
+// system knew it was partial. These helpers let the packaging path defer the
+// release decision until the real ending balance is known, and let an operator
+// explicitly mark a bag "keep partial" so its QR is never dropped.
+
+/** A BAG_FINALIZED payload flag set when the operator explicitly keeps the
+ *  physical bag as a partial (still has product). The QR traveler must then
+ *  NEVER be returned to the IDLE pool at finalization. */
+export function bagFinalizePayloadKeepsPartial(
+  payload: Record<string, unknown> | null | undefined,
+): boolean {
+  return !!payload && payload.bag_remains_partial === true;
+}
+
+/** A BAG_FINALIZED payload flag set by the packaging finalize path to DEFER
+ *  the QR-release decision until the production-output allocation close has
+ *  computed the true remaining balance. While deferred the projector holds the
+ *  QR; the packaging action releases it only if the bag is confirmed empty
+ *  (see shouldReleaseQrAfterPackagingClose). */
+export function bagFinalizeDefersQrRelease(
+  payload: Record<string, unknown> | null | undefined,
+): boolean {
+  return !!payload && payload.defer_qr_release === true;
+}
+
+/** QR release decision at BAG_FINALIZED that honors operator/packaging intent
+ *  first, then falls back to the allocation-session rule. Explicit keep-partial
+ *  and packaging deferral both HOLD the QR. */
+export function shouldReleaseQrAtFinalizationWithIntent(
+  payload: Record<string, unknown> | null | undefined,
+  session:
+    | { allocationStatus: string; endingBalanceQty: number | null }
+    | null
+    | undefined,
+): boolean {
+  if (bagFinalizePayloadKeepsPartial(payload)) return false;
+  if (bagFinalizeDefersQrRelease(payload)) return false;
+  return shouldReleaseQrAtFinalization(session);
+}
+
+/** After the packaging production-output allocation close has run, decide
+ *  whether the deferred QR should now be released. Release ONLY when the bag
+ *  is confirmed empty (ending known and <= 0) and the operator did not
+ *  explicitly keep it partial. Unknown ending (null) or remaining > 0 → HOLD
+ *  the QR with the bag — never drop a partial bag to the unused pool. */
+export function shouldReleaseQrAfterPackagingClose(args: {
+  keepPartial: boolean;
+  endingBalanceQty: number | null | undefined;
+}): boolean {
+  if (args.keepPartial) return false;
+  if (args.endingBalanceQty == null) return false;
+  return args.endingBalanceQty <= 0;
+}

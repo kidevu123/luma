@@ -31,7 +31,7 @@ import {
   products,
   rawBagAllocationSessions,
 } from "@/lib/db/schema";
-import { shouldReleaseQrAtFinalization } from "@/lib/production/bag-allocation";
+import { shouldReleaseQrAtFinalizationWithIntent } from "@/lib/production/bag-allocation";
 import {
   isPartialSealingClosePayload,
   isPartialPackagingPayload,
@@ -605,7 +605,12 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
       .orderBy(desc(rawBagAllocationSessions.openedAt))
       .limit(1);
 
-    if (shouldReleaseQrAtFinalization(wfSession ?? null)) {
+    // P2-PARTIAL-KEEP: honor explicit keep-partial / packaging defer-release
+    // intent on the event payload first, then the session rule. The packaging
+    // path sets defer_qr_release so this projector HOLDS the QR; the packaging
+    // action re-decides after the production-output close computes the true
+    // remaining balance (a partial bag's QR is never dropped to the pool).
+    if (shouldReleaseQrAtFinalizationWithIntent(ev.payload ?? null, wfSession ?? null)) {
       await tx
         .update(qrCards)
         .set({ status: "IDLE", assignedWorkflowBagId: null })

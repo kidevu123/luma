@@ -48,6 +48,7 @@ import {
   bothBottleFinishingDone,
   missingBottleFinishingSteps,
 } from "@/lib/production/stage-progression";
+import { shouldReleaseQrAfterPackagingClose } from "@/lib/production/bag-allocation";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
 import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
 import { refreshMaterialReadModelsAfterBlister } from "@/lib/projector/material-read-model-refresh";
@@ -2008,6 +2009,12 @@ const packagingCompleteSchema = z.object({
   damagedPackaging: z.coerce.number().int().min(0).max(100000),
   rippedCards: z.coerce.number().int().min(0).max(100000),
   operatorCode: z.string().max(40).optional(),
+  // P2-PARTIAL-KEEP: operator explicitly keeps the physical bag as a partial
+  // (still has product) at run end. Forces the QR to stay assigned to the bag
+  // for reuse in a later run, even if the computed remaining looks empty.
+  keepBagPartial: z
+    .union([z.literal("true"), z.literal("1"), z.literal("on")])
+    .optional(),
   clientEventId: clientEventIdField,
 });
 
@@ -2024,10 +2031,12 @@ export async function packagingCompleteAction(
     damagedPackaging: formData.get("damagedPackaging") || 0,
     rippedCards: formData.get("rippedCards") || 0,
     operatorCode: formData.get("operatorCode") || undefined,
+    keepBagPartial: formData.get("keepBagPartial") || undefined,
     clientEventId: pickClientEventId(formData),
   });
   if (!parsed.success)
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  const keepBagPartial = parsed.data.keepBagPartial != null;
   try {
     const station = await authStation(parsed.data.token, parsed.data.stationId);
     if (station.kind !== "PACKAGING" && station.kind !== "COMBINED") {
@@ -2207,11 +2216,19 @@ export async function packagingCompleteAction(
         });
       }
       if (station.kind === "PACKAGING" && !emitPartialPackaging) {
+        // P2-PARTIAL-KEEP is scoped to BOTTLE products: bottle runs routinely
+        // end on a partial bag, and (unlike the card line) the QR-release
+        // decision must wait for the production-output close to compute the
+        // true remaining tablets. Card/variety packaging keeps its existing
+        // immediate-release behavior untouched.
+        const isBottleBag = productRow?.kind === "BOTTLE";
         const didFinalize = await maybeAutoFinalizeAfterPackagingComplete(tx, {
           workflowBagId: parsed.data.workflowBagId,
           stationId: parsed.data.stationId,
           stationKind: station.kind,
           accountability,
+          deferQrRelease: isBottleBag,
+          keepPartial: keepBagPartial && isBottleBag,
           ...(parsed.data.clientEventId
             ? { clientEventId: parsed.data.clientEventId }
             : {}),
@@ -2249,6 +2266,19 @@ export async function packagingCompleteAction(
               },
               tx,
             );
+          }
+          // P2-PARTIAL-KEEP (bottles only): the BAG_FINALIZED projector
+          // deferred the QR release. Now that the production-output close
+          // (above) has computed the true remaining tablet balance, decide for
+          // real: release the QR only if the bag is confirmed empty; hold it on
+          // the bag (partial / kept-partial / unknown remaining) so it is never
+          // dropped to the unused pool and stays reusable for the next run.
+          if (isBottleBag) {
+            await resolveDeferredQrReleaseAfterPackaging(tx, {
+              workflowBagId: parsed.data.workflowBagId,
+              keepPartial: keepBagPartial,
+              accountability,
+            });
           }
         }
       }
@@ -2627,7 +2657,14 @@ type StationAccountability = Awaited<
   ReturnType<typeof resolveStationAccountability>
 >;
 
-/** Shared BAG_FINALIZED projection — used by finalizeBagAction and packaging auto-finalize. */
+/** Shared BAG_FINALIZED projection — used by finalizeBagAction and packaging auto-finalize.
+ *
+ *  P2-PARTIAL-KEEP: optional payload intent flags control QR-card release.
+ *  - deferQrRelease: the packaging path defers the release decision until the
+ *    production-output allocation close has computed the true remaining balance
+ *    (the projector HOLDS the QR; the packaging action re-decides).
+ *  - keepPartial: the operator explicitly kept the physical bag as a partial;
+ *    the QR is never returned to the unused pool. */
 async function projectBagFinalizedEvent(
   tx: DbTx,
   args: {
@@ -2635,12 +2672,18 @@ async function projectBagFinalizedEvent(
     stationId: string;
     accountability: StationAccountability;
     clientEventId?: string | null | undefined;
+    deferQrRelease?: boolean;
+    keepPartial?: boolean;
   },
 ): Promise<void> {
+  const partialPayload: Record<string, unknown> = {};
+  if (args.deferQrRelease) partialPayload.defer_qr_release = true;
+  if (args.keepPartial) partialPayload.bag_remains_partial = true;
   await projectEvent(tx, {
     workflowBagId: args.workflowBagId,
     stationId: args.stationId,
     eventType: "BAG_FINALIZED",
+    ...(Object.keys(partialPayload).length > 0 ? { payload: partialPayload } : {}),
     ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
     enteredByUserId: args.accountability.enteredByUserId,
     accountableEmployeeId: args.accountability.accountableEmployeeId,
@@ -2804,7 +2847,14 @@ const AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS = new Set([
   "PACKAGING",
 ]);
 
-/** PACKAGING: PACKAGING_COMPLETE also finalizes when still pinned. */
+/** PACKAGING: PACKAGING_COMPLETE also finalizes when still pinned.
+ *
+ *  P2-PARTIAL-KEEP: the QR-release decision is DEFERRED at finalize time
+ *  (defer_qr_release) because the production-output allocation close — which
+ *  computes the true remaining tablet balance — runs *after* this in the
+ *  packaging action. The caller re-decides the release once the real ending
+ *  balance is known so a partial bag never has its QR dropped to the pool.
+ *  keepPartial carries an explicit operator override onto the event. */
 async function maybeAutoFinalizeAfterPackagingComplete(
   tx: DbTx,
   args: {
@@ -2813,6 +2863,8 @@ async function maybeAutoFinalizeAfterPackagingComplete(
     stationKind: string;
     clientEventId?: string | null | undefined;
     accountability: StationAccountability;
+    deferQrRelease?: boolean;
+    keepPartial?: boolean;
   },
 ): Promise<boolean> {
   if (!AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS.has(args.stationKind)) {
@@ -2843,9 +2895,62 @@ async function maybeAutoFinalizeAfterPackagingComplete(
     workflowBagId: args.workflowBagId,
     stationId: args.stationId,
     accountability: args.accountability,
+    ...(args.deferQrRelease ? { deferQrRelease: true } : {}),
+    ...(args.keepPartial ? { keepPartial: true } : {}),
     ...(finalizeClientEventId ? { clientEventId: finalizeClientEventId } : {}),
   });
   return true;
+}
+
+/** P2-PARTIAL-KEEP — after the packaging production-output close has run, the
+ *  deferred QR is released only when the bag is confirmed empty. A partial bag
+ *  (remaining > 0), an unknown remaining, or an explicit keep-partial all HOLD
+ *  the QR on the bag so it stays assigned and reusable in a later run. */
+async function resolveDeferredQrReleaseAfterPackaging(
+  tx: DbTx,
+  args: {
+    workflowBagId: string;
+    keepPartial: boolean;
+    accountability: StationAccountability;
+  },
+): Promise<void> {
+  const [wfSession] = await tx
+    .select({ endingBalanceQty: rawBagAllocationSessions.endingBalanceQty })
+    .from(rawBagAllocationSessions)
+    .where(eq(rawBagAllocationSessions.workflowBagId, args.workflowBagId))
+    .orderBy(desc(rawBagAllocationSessions.openedAt))
+    .limit(1);
+
+  const release = shouldReleaseQrAfterPackagingClose({
+    keepPartial: args.keepPartial,
+    endingBalanceQty: wfSession?.endingBalanceQty ?? null,
+  });
+
+  if (release) {
+    await tx
+      .update(qrCards)
+      .set({ status: "IDLE", assignedWorkflowBagId: null })
+      .where(eq(qrCards.assignedWorkflowBagId, args.workflowBagId));
+    return;
+  }
+
+  // Held — the bag is partial (or kept partial / unknown remaining). Record the
+  // decision so the partial-bag state is auditable and obvious downstream.
+  await writeAudit(
+    {
+      actorId: args.accountability.enteredByUserId ?? null,
+      actorRole: null,
+      action: "floor.bag_kept_partial",
+      targetType: "WorkflowBag",
+      targetId: args.workflowBagId,
+      after: {
+        kept_partial: true,
+        explicit: args.keepPartial,
+        remaining_qty: wfSession?.endingBalanceQty ?? null,
+      },
+    },
+    tx,
+  );
 }
 
 const releaseSchema = z.object({

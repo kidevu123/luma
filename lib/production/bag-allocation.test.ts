@@ -20,6 +20,10 @@ import {
   shouldReleaseQrAtFinalization,
   deriveBagStatusAfterClose,
   isPartialBagResume,
+  bagFinalizePayloadKeepsPartial,
+  bagFinalizeDefersQrRelease,
+  shouldReleaseQrAtFinalizationWithIntent,
+  shouldReleaseQrAfterPackagingClose,
 } from "./bag-allocation";
 import {
   computeExpectedComponentQty,
@@ -866,5 +870,82 @@ describe("isPartialBagResume", () => {
     expect(
       isPartialBagResume({ allocationStatus: "DEPLETED", endingBalanceQty: 0 }),
     ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2-PARTIAL-KEEP — keep a bag partial across run completion
+// ---------------------------------------------------------------------------
+
+describe("bagFinalizePayloadKeepsPartial", () => {
+  it("true only when payload.bag_remains_partial === true", () => {
+    expect(bagFinalizePayloadKeepsPartial({ bag_remains_partial: true })).toBe(true);
+  });
+  it("false for absent / falsey / wrong-typed flag", () => {
+    expect(bagFinalizePayloadKeepsPartial(null)).toBe(false);
+    expect(bagFinalizePayloadKeepsPartial(undefined)).toBe(false);
+    expect(bagFinalizePayloadKeepsPartial({})).toBe(false);
+    expect(bagFinalizePayloadKeepsPartial({ bag_remains_partial: false })).toBe(false);
+    expect(bagFinalizePayloadKeepsPartial({ bag_remains_partial: "true" })).toBe(false);
+  });
+});
+
+describe("bagFinalizeDefersQrRelease", () => {
+  it("true only when payload.defer_qr_release === true", () => {
+    expect(bagFinalizeDefersQrRelease({ defer_qr_release: true })).toBe(true);
+    expect(bagFinalizeDefersQrRelease({})).toBe(false);
+    expect(bagFinalizeDefersQrRelease(null)).toBe(false);
+  });
+});
+
+describe("shouldReleaseQrAtFinalizationWithIntent", () => {
+  it("HOLDS the QR when the operator explicitly kept the bag partial, even if the session says empty", () => {
+    expect(
+      shouldReleaseQrAtFinalizationWithIntent(
+        { bag_remains_partial: true },
+        { allocationStatus: "DEPLETED", endingBalanceQty: 0 },
+      ),
+    ).toBe(false);
+  });
+
+  it("HOLDS the QR when the packaging path defers the release decision (even with no session)", () => {
+    expect(
+      shouldReleaseQrAtFinalizationWithIntent({ defer_qr_release: true }, null),
+    ).toBe(false);
+  });
+
+  it("falls back to the session rule when no intent flag is present (existing behavior preserved)", () => {
+    // No payload → identical to shouldReleaseQrAtFinalization.
+    expect(shouldReleaseQrAtFinalizationWithIntent(null, null)).toBe(true);
+    expect(
+      shouldReleaseQrAtFinalizationWithIntent(
+        {},
+        { allocationStatus: "CLOSED", endingBalanceQty: 5000 },
+      ),
+    ).toBe(false);
+    expect(
+      shouldReleaseQrAtFinalizationWithIntent(
+        {},
+        { allocationStatus: "CLOSED", endingBalanceQty: 0 },
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("shouldReleaseQrAfterPackagingClose", () => {
+  it("releases ONLY when the bag is confirmed empty (ending <= 0) and not kept partial", () => {
+    expect(shouldReleaseQrAfterPackagingClose({ keepPartial: false, endingBalanceQty: 0 })).toBe(true);
+    expect(shouldReleaseQrAfterPackagingClose({ keepPartial: false, endingBalanceQty: -3 })).toBe(true);
+  });
+  it("HOLDS a partial bag (remaining > 0) — never returns it to the unused pool", () => {
+    expect(shouldReleaseQrAfterPackagingClose({ keepPartial: false, endingBalanceQty: 4200 })).toBe(false);
+  });
+  it("HOLDS when the remaining is unknown (null) — safe default, admin confirms later", () => {
+    expect(shouldReleaseQrAfterPackagingClose({ keepPartial: false, endingBalanceQty: null })).toBe(false);
+    expect(shouldReleaseQrAfterPackagingClose({ keepPartial: false, endingBalanceQty: undefined })).toBe(false);
+  });
+  it("HOLDS whenever the operator explicitly kept the bag partial, regardless of computed ending", () => {
+    expect(shouldReleaseQrAfterPackagingClose({ keepPartial: true, endingBalanceQty: 0 })).toBe(false);
+    expect(shouldReleaseQrAfterPackagingClose({ keepPartial: true, endingBalanceQty: -10 })).toBe(false);
   });
 });
