@@ -49,6 +49,7 @@ import {
   missingBottleFinishingSteps,
 } from "@/lib/production/stage-progression";
 import { shouldReleaseQrAfterPackagingClose } from "@/lib/production/bag-allocation";
+import { coercePartialRemainingEstimate } from "@/lib/production/partial-remaining-input";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
 import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
 import { refreshMaterialReadModelsAfterBlister } from "@/lib/projector/material-read-model-refresh";
@@ -2018,12 +2019,12 @@ const packagingCompleteSchema = z.object({
   // Optional operator estimate of tablets remaining when keeping partial.
   // Recorded on the BAG_FINALIZED event as a labelled estimate only — it never
   // overwrites the OUTPUT_DERIVED allocation balance used by reconciliation.
-  partialRemainingEstimate: z.coerce
-    .number()
-    .int()
-    .min(0)
-    .max(100000)
-    .optional(),
+  // Coerced defensively: a malformed/out-of-range value is DROPPED (not a hard
+  // error), so this optional field can never block the packaging close-out.
+  partialRemainingEstimate: z.preprocess(
+    coercePartialRemainingEstimate,
+    z.number().int().min(0).max(100000).optional(),
+  ),
   clientEventId: clientEventIdField,
 });
 

@@ -46,7 +46,11 @@ export async function listQrCards() {
         LIMIT 1
       )`,
       operatorRemainingEstimate: sql<number | null>`(
-        SELECT (e.payload->>'operator_remaining_estimate')::int
+        SELECT CASE
+          WHEN e.payload->>'operator_remaining_estimate' ~ '^[0-9]+$'
+          THEN (e.payload->>'operator_remaining_estimate')::int
+          ELSE NULL
+        END
         FROM workflow_events e
         WHERE e.workflow_bag_id = ${workflowBags.id}
           AND e.event_type = 'BAG_FINALIZED'

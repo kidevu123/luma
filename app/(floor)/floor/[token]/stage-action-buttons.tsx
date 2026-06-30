@@ -31,6 +31,7 @@ import {
   SEALING_PARTIAL_CLOSE_REASON_LABELS,
   type SealingPartialCloseReason,
 } from "@/lib/production/sealing-partial-closeout";
+import { coercePartialRemainingEstimate } from "@/lib/production/partial-remaining-input";
 
 // crypto.randomUUID() is only available in secure contexts (HTTPS or
 // localhost). Floor PWA runs over plain HTTP on the LAN, so we fall
@@ -1224,6 +1225,7 @@ function PackagingCompleteForm({
                 type="number"
                 inputMode="numeric"
                 min={0}
+                step={1}
                 value={partialRemaining}
                 onChange={(e) => setPartialRemaining(e.target.value)}
                 onWheel={(e) => e.currentTarget.blur()}
@@ -1270,8 +1272,12 @@ function PackagingCompleteForm({
               fd.set("rippedCards", rippedCards || "0");
               if (keepBagPartial) {
                 fd.set("keepBagPartial", "true");
-                if (partialRemaining.trim() !== "") {
-                  fd.set("partialRemainingEstimate", partialRemaining.trim());
+                // Only send a clean, in-range integer; a malformed estimate is
+                // optional and must never block the close-out (server drops it
+                // defensively too).
+                const est = coercePartialRemainingEstimate(partialRemaining);
+                if (est != null) {
+                  fd.set("partialRemainingEstimate", String(est));
                 }
               }
               const badgeCode = operatorBadgeCodeForSubmit(operatorCode);

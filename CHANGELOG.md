@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.9.1] — 2026-06-30
+
+### Fixed
+- **Optional "tablets remaining" estimate could block the whole packaging close-out.** The bottle keep-partial estimate field (`partialRemainingEstimate`, v1.8.0) used a strict `z.coerce.number().int().min(0)` schema, so a non-integer value a `type="number"` input still permits (`1.5`, `1e3`, `-2`) failed validation and rejected the **entire** packaging close-out — losing the real packaging counts — even though the estimate is optional and informational. The value is now coerced through a shared helper (`lib/production/partial-remaining-input.ts`): a malformed / out-of-range estimate is silently **dropped** (server `z.preprocess`) and the floor sends only a clean in-range integer (client guard + `step={1}`). The packaging close-out can no longer be blocked by this optional field. `app/(floor)/floor/[token]/{actions.ts,stage-action-buttons.tsx}`.
+
+### Hardened
+- **Admin QR-cards list query made crash-proof against malformed payloads.** The `operator_remaining_estimate` scalar subselect (v1.9.0) now regex-guards the `::int` cast (`~ '^[0-9]+$'` → cast, else NULL) so a non-numeric payload value can never error the entire QR-cards list query. `lib/db/queries/qr-cards.ts`.
+
+### Notes
+- Small, targeted hardening pass. No schema changes, no data mutation, no behavior change to QR retention / manual-finalize / packaging-finalize / supervisor-override / operator-estimate-separation introduced in v1.7–v1.9.
+
 ## [1.9.0] — 2026-06-30
 
 ### Added
