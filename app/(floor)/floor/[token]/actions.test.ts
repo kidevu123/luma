@@ -505,8 +505,13 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
 
   it("resolves tablet type via shared workflow bag resolver for sealing pick", () => {
     const saveIdx = actionsSrc.indexOf("export async function saveSealingProductAction");
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const block = actionsSrc.slice(saveIdx, fireIdx);
+    // Scope to saveSealingProductAction's body only — end at the next exported
+    // action (other floor actions legitimately reference bagQrCode).
+    const nextIdx = actionsSrc.indexOf(
+      "export async function",
+      saveIdx + "export async function saveSealingProductAction".length,
+    );
+    const block = actionsSrc.slice(saveIdx, nextIdx);
     expect(block).toMatch(/resolveWorkflowBagTabletTypeId/);
     expect(block).not.toMatch(/bagQrCode/);
   });

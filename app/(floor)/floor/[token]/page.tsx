@@ -31,6 +31,7 @@ import {
 import { eq, and, or, inArray, isNotNull, isNull, sql, desc, asc } from "drizzle-orm";
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
+import { BottleSealingRecoveryPanel } from "./bottle-sealing-recovery-panel";
 import { STATION_PICKUP_FROM_STAGE, STATION_STARTED_RESUME_FROM_STAGE } from "@/lib/production/stage-progression";
 import {
   resolveSealingCardsPerPress,
@@ -1099,7 +1100,23 @@ export default async function FloorStationPage({
               stationKind={station.station.kind}
               currentStage={currentAtStation.state?.stage ?? null}
               isFinalized={currentAtStation.state?.isFinalized ?? false}
+              productKind={currentAtStation.product?.kind ?? null}
             />
+            {/* BOTTLE-SEALING-RECOVERY-1: a bottle bag stuck at BLISTERED at the
+             *  packaging station (cap-seal/sticker never scanned) gets an
+             *  accurate message + lead recovery instead of the card-line
+             *  "waiting for sealing" dead-end. */}
+            {(station.station.kind === "PACKAGING" ||
+              station.station.kind === "COMBINED") &&
+            currentAtStation.product?.kind === "BOTTLE" &&
+            currentAtStation.state?.stage === "BLISTERED" &&
+            !(currentAtStation.state?.isFinalized ?? false) ? (
+              <BottleSealingRecoveryPanel
+                token={token}
+                stationId={station.station.id}
+                workflowBagId={currentAtStation.bag.id}
+              />
+            ) : null}
             {/* QC-3: quick QC issue panel. Only on packaging /
              *  sealing / combined stations (per qc-panel-helpers).
              *  Pending rework for this bag is fetched server-side
@@ -1225,11 +1242,13 @@ function BagAdvancedBanner({
   stationKind,
   currentStage,
   isFinalized,
+  productKind,
 }: {
   token: string;
   stationKind: string;
   currentStage: string | null;
   isFinalized: boolean;
+  productKind: string | null;
 }) {
   if (!currentStage) return null;
   if (isFinalized) {
@@ -1254,6 +1273,11 @@ function BagAdvancedBanner({
     );
   }
   if (stationKind === "PACKAGING" && currentStage === "BLISTERED") {
+    // BOTTLE-SEALING-RECOVERY-1: bottle bags do not use the card sealing
+    // station — their finishing is cap-seal + sticker. The bottle-specific
+    // message + lead recovery action render in BottleSealingRecoveryPanel, so
+    // this card-line banner is suppressed for bottle products.
+    if (productKind === "BOTTLE") return null;
     return (
       <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 space-y-0.5">
         <p className="font-semibold">Waiting for sealing to complete.</p>

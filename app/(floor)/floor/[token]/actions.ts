@@ -47,6 +47,7 @@ import {
   bottleFinishingAlreadyFired,
   bothBottleFinishingDone,
   missingBottleFinishingSteps,
+  BOTTLE_FINISHING_EVENTS,
 } from "@/lib/production/stage-progression";
 import { shouldReleaseQrAfterPackagingClose } from "@/lib/production/bag-allocation";
 import { coercePartialRemainingEstimate } from "@/lib/production/partial-remaining-input";
@@ -1373,6 +1374,178 @@ export async function resolveScannedBagAllocationAction(
     return {
       ok: false,
       error: err instanceof Error ? err.message : "Could not use calculated remaining.",
+    };
+  }
+}
+
+// ── BOTTLE-SEALING-RECOVERY-1 — clear a stale bottle sealing hold ────
+//
+// A bottle bag can reach the Packaging station still at stage BLISTERED when
+// the cap-seal / sticker completion events were never recorded (bag physically
+// moved on without a scan). Packaging then blocks (needs SEALED + both bottle
+// finishing steps). This lead-gated recovery records the MISSING bottle
+// finishing completion(s) — advancing the bag to SEALED so packaging unlocks —
+// and does NOT touch the raw-bag allocation session or the QR card.
+
+const recoverBottleSealingSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  workflowBagId: z.string().uuid(),
+  leadCode: z.string().min(1).max(40),
+  note: z.string().min(3).max(500),
+});
+
+export async function recoverBottleSealingHoldAction(
+  formData: FormData,
+): Promise<{ ok: true; unlocked: boolean } | { ok: false; error: string }> {
+  const parsed = recoverBottleSealingSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    workflowBagId: formData.get("workflowBagId"),
+    leadCode: formData.get("leadCode"),
+    note: formData.get("note"),
+  });
+  if (!parsed.success) {
+    return { ok: false, error: "Enter the lead badge code and a note to clear the hold." };
+  }
+  try {
+    const station = await authStation(parsed.data.token, parsed.data.stationId);
+    // Only the terminal packaging step offers this recovery.
+    if (!STATIONS_THAT_FINALIZE.has(station.kind)) {
+      return { ok: false, error: "Clearing a bottle sealing hold is only available at the packaging station." };
+    }
+
+    let result: { ok: true; unlocked: boolean } | { ok: false; error: string } = {
+      ok: false,
+      error: "Recovery failed.",
+    };
+    await db.transaction(async (tx) => {
+      // Lead/supervisor gate — a normal operator cannot clear the hold.
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+        overrideEmployeeCode: parsed.data.leadCode,
+        sourceHint: "SUPERVISOR_OVERRIDE",
+      });
+      if (!accountability.accountableEmployeeId) {
+        result = {
+          ok: false,
+          error: "Lead badge code not recognized — a lead is required to clear the sealing hold.",
+        };
+        return;
+      }
+
+      const [row] = await tx
+        .select({
+          productKind: products.kind,
+          stage: readBagState.stage,
+          isFinalized: readBagState.isFinalized,
+          bagQrCode: qrCards.scanToken,
+        })
+        .from(workflowBags)
+        .leftJoin(products, eq(products.id, workflowBags.productId))
+        .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+        .leftJoin(qrCards, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
+        .where(eq(workflowBags.id, parsed.data.workflowBagId))
+        .limit(1);
+      if (!row) {
+        result = { ok: false, error: "Workflow bag not found." };
+        return;
+      }
+      // Product-kind aware: only bottle bags use the cap-seal / sticker route.
+      if (row.productKind !== "BOTTLE") {
+        result = { ok: false, error: "This recovery only applies to bottle products." };
+        return;
+      }
+      if (row.isFinalized) {
+        result = { ok: false, error: "Bag is already finalized." };
+        return;
+      }
+      // Must be at a bottle-finishing-eligible stage (picked up at packaging).
+      if (row.stage !== "BLISTERED" && row.stage !== "SEALED") {
+        result = {
+          ok: false,
+          error: `Bag is at stage ${row.stage ?? "unknown"} — it hasn't reached bottle finishing yet.`,
+        };
+        return;
+      }
+
+      const priorTypes = (
+        await tx
+          .select({ eventType: workflowEvents.eventType })
+          .from(workflowEvents)
+          .where(eq(workflowEvents.workflowBagId, parsed.data.workflowBagId))
+      ).map((r) => r.eventType);
+      if (bothBottleFinishingDone(priorTypes)) {
+        result = {
+          ok: false,
+          error: "Bottle sealing is already marked complete — there is nothing stale to clear.",
+        };
+        return;
+      }
+
+      // Record ONLY the missing finishing completion(s). projectEvent advances
+      // the stage to SEALED and updates read models — the same path a real scan
+      // uses. Allocation session + QR card are deliberately untouched.
+      const missing = BOTTLE_FINISHING_EVENTS.filter((e) => !priorTypes.includes(e));
+      for (const eventType of missing) {
+        await projectEvent(tx, {
+          workflowBagId: parsed.data.workflowBagId,
+          stationId: parsed.data.stationId,
+          eventType,
+          payload: {
+            recovery: true,
+            recovery_source: "PACKAGING_STATION_RECOVERY",
+            recovery_reason: "STALE_BOTTLE_SEALING_HOLD_CLEARED",
+            recovery_note: parsed.data.note.trim(),
+            prior_stage: row.stage ?? null,
+          },
+          accountabilitySource: "SUPERVISOR_OVERRIDE",
+          ...(accountability.accountableEmployeeId
+            ? { accountableEmployeeId: accountability.accountableEmployeeId }
+            : {}),
+          ...(accountability.accountableEmployeeNameSnapshot
+            ? { accountableEmployeeNameSnapshot: accountability.accountableEmployeeNameSnapshot }
+            : {}),
+          ...(accountability.enteredByUserId
+            ? { enteredByUserId: accountability.enteredByUserId }
+            : {}),
+        });
+      }
+
+      await writeAudit(
+        {
+          actorId: accountability.enteredByUserId ?? null,
+          actorRole: null,
+          action: "packaging.recover_bottle_sealing_hold",
+          targetType: "WorkflowBag",
+          targetId: parsed.data.workflowBagId,
+          after: {
+            recovery_source: "PACKAGING_STATION_RECOVERY",
+            reason: "STALE_BOTTLE_SEALING_HOLD_CLEARED",
+            workflow_bag_id: parsed.data.workflowBagId,
+            card_qr: row.bagQrCode ?? null,
+            previous_stage: row.stage ?? null,
+            previous_status: row.isFinalized ? "FINALIZED" : "IN_PROGRESS",
+            cleared_events: missing,
+            lead_employee_id: accountability.accountableEmployeeId,
+            lead_employee_name: accountability.accountableEmployeeNameSnapshot ?? null,
+            note: parsed.data.note.trim(),
+          },
+        },
+        tx,
+      );
+      result = { ok: true, unlocked: true };
+    });
+
+    if (result.ok) {
+      revalidatePath(`/floor/${parsed.data.token}`);
+      revalidatePath(`/floor-board`);
+    }
+    return result;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not clear the sealing hold.",
     };
   }
 }

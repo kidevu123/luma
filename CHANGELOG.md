@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.14.0] — 2026-07-02
+
+### Added — BOTTLE-SEALING-RECOVERY-1: clear a stale bottle sealing hold from the packaging station
+- **Root cause:** a bottle bag can reach the Packaging station still at stage `BLISTERED` when its cap-seal / sticker completion events were never recorded (the bag physically moved on without a scan). Packaging then blocks — it needs stage `SEALED` **and** both bottle finishing steps — but the floor showed the **card-line** message *"Waiting for sealing to complete… still being sealed"*, with no recovery path. Confirmed in production for Card #34 / PO-00206 Bag 5 (bottle, `BLISTERED`, `BOTTLE_HANDPACK_COMPLETE` present, **no** `BOTTLE_CAP_SEAL_COMPLETE` / `BOTTLE_STICKER_COMPLETE`). Both product-kind confusion (card language on a bottle) **and** stale/incomplete station state.
+- **Product-kind-aware gating/messaging.** `BagAdvancedBanner` now takes `productKind`; the card-line "Waiting for sealing" banner is suppressed for `BOTTLE` products (card/blister language never shown for bottles). Card and variety flows are unchanged. `app/(floor)/floor/[token]/page.tsx`.
+- **Lead-gated packaging-screen recovery.** A new `BottleSealingRecoveryPanel` renders only for a bottle bag stuck at `BLISTERED` at the packaging (or combined) station. It explains the accurate bottle state (cap-seal / sticker not marked complete) and offers **"Clear stale sealing hold & unlock packaging"** — gated by a supervisor badge (`resolveStationAccountability` `SUPERVISOR_OVERRIDE`, same pattern as the other floor recoveries; a normal operator cannot clear it) and a required note. `bottle-sealing-recovery-panel.tsx` + `recoverBottleSealingHoldAction` in `actions.ts`.
+- **What the recovery does (minimal + safe):** records only the *missing* bottle finishing completion event(s) via the normal `projectEvent` path, advancing the bag to `SEALED` so packaging unlocks. It writes a `packaging.recover_bottle_sealing_hold` audit (recovery source, reason, workflow bag id, card QR, previous stage/status, cleared events, lead employee id + name, note). It does **not** release/unassign the QR card, **not** touch the raw-bag allocation balance, **not** close/deplete/finalize the bag, and **not** mutate partial-bag inventory. Guards: bottle-only, not-finalized, stage `BLISTERED`/`SEALED`, and a no-op guard when both finishing steps are already recorded.
+
+### Notes
+- No schema changes; no production data modified by this deploy (the code makes the UI/action available — Card #34 was **not** manually cleared during investigation). All v1.7–v1.13 bottle partial-bag / system-derived / QR / IDLE invariants preserved. Tests: pure stage-progression gate + structural coverage of the action (lead gate, product-kind gate, records only missing events, audit, and explicit non-mutation of QR/allocation/finalize) and the banner/panel; DB-backed E2E of the recovery remains a documented gap (no Postgres harness in the default test run).
+
 ## [1.13.2] — 2026-07-02
 
 ### Fixed — Traceability lookup (/recall) server-render crash (digest 3511293824)
