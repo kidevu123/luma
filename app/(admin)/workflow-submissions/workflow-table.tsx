@@ -39,6 +39,8 @@ export type WorkflowBagRow = {
   productName: string | null;
   productSku: string | null;
   productKind: string | null;
+  /** True when a QR card is still ASSIGNED to this bag (traveler held). */
+  heldQrAssigned?: boolean;
   stage: string | null;
   isFinalized: boolean | null;
   isPaused: boolean | null;
@@ -210,17 +212,16 @@ function ExpandedContent({
   const hasFinishedLot = genealogy.events.some(
     (e) => e.eventType === "FINISHED_GOODS_RELEASED",
   );
-  // P2-PARTIAL-KEEP — a finalized BOTTLE bag whose BAG_FINALIZED explicitly
-  // kept the bag partial holds its QR for reuse. Warn supervisors before a
-  // recovery removes that QR from the physical bag.
+  // P2-PARTIAL-KEEP — a finalized BOTTLE bag whose QR is still ASSIGNED is a
+  // held partial (kept for reuse), whether it was kept explicitly OR held by the
+  // safe deferred-release path (computed remaining > 0 / unknown). Warn
+  // supervisors before a recovery removes that QR — this matches the server's
+  // held-partial-override audit predicate (actions.ts), so the warning can no
+  // longer be silently missing while the override is still logged.
   const heldPartialBottle =
     bag.productKind === "BOTTLE" &&
     Boolean(bag.isFinalized) &&
-    genealogy.events.some(
-      (e) =>
-        e.eventType === "BAG_FINALIZED" &&
-        getPayloadRecord(e.payload)["bag_remains_partial"] === true,
-    );
+    Boolean(bag.heldQrAssigned);
   const canShowMissingBlisterRepair =
     canAdminRepair &&
     bag.stage === "STARTED" &&

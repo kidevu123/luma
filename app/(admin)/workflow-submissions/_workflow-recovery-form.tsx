@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useActionState } from "react";
-import { RouteOff } from "lucide-react";
+import { RouteOff, AlertTriangle } from "lucide-react";
 import { workflowRecoveryAction } from "./actions";
 
 type RecoveryKind = "WRONG_ROUTE" | "WRONG_PRODUCT" | "WRONG_QR_ASSIGNMENT";
@@ -54,8 +54,9 @@ export function WorkflowRecoveryForm({
       <p className="text-[11px] font-semibold text-red-900">Wrong route / assignment recovery</p>
       {heldPartialBottle ? (
         <div className="rounded border border-red-400 bg-red-100 px-2 py-1.5 text-[10px] leading-snug text-red-950">
-          <p className="font-bold uppercase tracking-wide">
-            ⚠ QR held for a partial bottle bag
+          <p className="flex items-center gap-1 font-bold uppercase tracking-wide">
+            <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+            QR held for a partial bottle bag
           </p>
           <p className="mt-0.5">
             This QR is currently kept with a <strong>partial bottle bag</strong>{" "}

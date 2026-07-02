@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.11.2] — 2026-07-02
+
+### Fixed
+- **Supervisor held-partial warning now matches the actual held population.** The wrong-route recovery form only showed the "QR held for a partial bottle bag" warning when the `BAG_FINALIZED` payload carried the explicit `bag_remains_partial` flag (operator picked "partial"). But a bottle QR is also *held* by the safe deferred-release path when the computed remaining is > 0 / unknown — those had no flag, so a supervisor could recover the bag with no on-screen warning even though the server still logged a `held_partial_bottle_override` audit. The warning now keys off whether a QR is still `ASSIGNED` to the finalized BOTTLE bag (`heldQrAssigned`, a correlated `EXISTS` subselect added to the workflow-submissions loader — no fan-out, GROUP-BY safe), matching the server's override predicate. Warning and audit can no longer disagree. `app/(admin)/workflow-submissions/{page.tsx,workflow-table.tsx}`.
+- **Removed an emoji from the supervisor warning** (`⚠`) — replaced with a Lucide `AlertTriangle` icon, per the repo's "no emoji in UI" guardrail. `app/(admin)/workflow-submissions/_workflow-recovery-form.tsx`.
+
+### Notes
+- Final production-readiness QA pass over the whole bottle partial-bag workflow (close-out → scan/resume → admin visibility → empty release → supervisor override). Flows 1 (close-out) and 4 (empty/release) verified correct with no changes needed; separation of system vs operator estimate, the needs-review thresholds, held-partial visibility, and the "no product_id inherited" resume all confirmed. Only the two supervisor-flow items above were fixed. No schema changes, no production data mutation. Remaining low-severity cosmetic nits (bottle-specific resume header falls back to generic copy when the last session product is null; "unknown" vs "Unknown — closeout required" phrasing differs across surfaces) documented as non-blocking follow-ups.
+
 ## [1.11.1] — 2026-06-30
 
 ### Fixed

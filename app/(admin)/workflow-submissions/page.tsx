@@ -100,6 +100,12 @@ export default async function WorkflowSubmissionsPage({
       productName: products.name,
       productSku: products.sku,
       productKind: products.kind,
+      // P2-PARTIAL-KEEP: true when a QR card is still ASSIGNED to this bag —
+      // i.e. the traveler is HELD (a partial bottle bag kept for reuse), not yet
+      // released. Correlated EXISTS (no fan-out, safe under the GROUP BY). Drives
+      // the supervisor held-partial warning so it matches the actual held
+      // population (any held QR), not only the explicit keep-partial flag.
+      heldQrAssigned: sql<boolean>`EXISTS (SELECT 1 FROM qr_cards qc WHERE qc.assigned_workflow_bag_id = ${workflowBags.id} AND qc.status = 'ASSIGNED')`,
       stage: readBagState.stage,
       isFinalized: readBagState.isFinalized,
       isPaused: readBagState.isPaused,
@@ -214,6 +220,7 @@ export default async function WorkflowSubmissionsPage({
     productName: r.productName ?? null,
     productSku: r.productSku ?? null,
     productKind: r.productKind ?? null,
+    heldQrAssigned: r.heldQrAssigned ?? false,
     stage: r.stage ?? null,
     isFinalized: r.isFinalized ?? null,
     isPaused: r.isPaused ?? null,

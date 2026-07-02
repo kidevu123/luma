@@ -58,17 +58,34 @@ describe("Partial-bags workbench — operator estimate", () => {
 });
 
 describe("Supervisor guardrail — held partial bottle reset", () => {
-  it("table computes a heldPartialBottle flag from product kind + finalized + bag_remains_partial", () => {
+  const recoveryPageSrc = repo("app/(admin)/workflow-submissions/page.tsx");
+
+  it("table warning matches the ACTUAL held population (finalized BOTTLE + QR still assigned)", () => {
+    // v1.11.2 — the warning must not require the explicit bag_remains_partial
+    // flag (that would miss bottles held via the safe deferred-release path).
+    // It keys off a QR still ASSIGNED to the finalized bottle bag, matching the
+    // server's held-partial-override audit predicate.
     expect(recoveryTableSrc).toMatch(/heldPartialBottle/);
     expect(recoveryTableSrc).toMatch(/productKind === "BOTTLE"/);
-    expect(recoveryTableSrc).toMatch(/bag_remains_partial/);
+    expect(recoveryTableSrc).toMatch(/Boolean\(bag\.heldQrAssigned\)/);
+    expect(recoveryTableSrc).not.toMatch(/bag_remains_partial/);
     expect(recoveryTableSrc).toMatch(/heldPartialBottle=\{heldPartialBottle\}/);
   });
 
-  it("recovery form shows a strong warning before releasing a held partial bottle QR", () => {
+  it("loader supplies heldQrAssigned via a correlated EXISTS (no fan-out, GROUP-BY safe)", () => {
+    expect(recoveryPageSrc).toMatch(/heldQrAssigned: sql</);
+    expect(recoveryPageSrc).toMatch(/EXISTS \(SELECT 1 FROM qr_cards qc WHERE qc\.assigned_workflow_bag_id/);
+    expect(recoveryPageSrc).toMatch(/qc\.status = 'ASSIGNED'/);
+    expect(recoveryPageSrc).toMatch(/heldQrAssigned: r\.heldQrAssigned \?\? false/);
+  });
+
+  it("recovery form shows a strong warning (Lucide icon, no emoji) before releasing a held partial bottle QR", () => {
     expect(recoveryFormSrc).toMatch(/heldPartialBottle/);
     expect(recoveryFormSrc).toMatch(/QR held for a partial bottle bag/i);
     expect(recoveryFormSrc).toMatch(/abandoned, relabeled, or corrected/i);
+    // No-emoji guardrail: a Lucide icon, not the ⚠ pictograph.
+    expect(recoveryFormSrc).toMatch(/AlertTriangle/);
+    expect(recoveryFormSrc).not.toMatch(/⚠/);
     // Override is still possible — the confirm checkbox still gates submit.
     expect(recoveryFormSrc).toMatch(/disabled=\{pending \|\| !confirmed\}/);
   });
