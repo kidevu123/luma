@@ -34,6 +34,16 @@ describe("formatRemainingEstimate — operator-estimate honesty", () => {
       }),
     ).toBe("Unknown — closeout required");
   });
+
+  it("SPLIT-BAG-1: OUTPUT_DERIVED is labelled system-derived even at HIGH confidence (never a bare count)", () => {
+    expect(
+      formatRemainingEstimate({
+        remainingEstimate: 8000,
+        confidence: "HIGH",
+        source: "OUTPUT_DERIVED",
+      }),
+    ).toBe("~8,000 (system-derived from production)");
+  });
 });
 
 describe("formatOperatorRemainingEstimate", () => {

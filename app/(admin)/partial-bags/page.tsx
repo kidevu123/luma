@@ -21,6 +21,12 @@ import {
 } from "@/lib/production/partial-bags";
 import { derivePartialBagAttention } from "@/lib/production/partial-bag-attention";
 import {
+  computeSystemDerivedResolutionForBag,
+  type SystemDerivedResolution,
+} from "@/lib/production/system-derived-allocation-resolution";
+import { labelSystemDerivedStage } from "@/lib/production/system-derived-allocation";
+import { UseCalculatedRemainingButton } from "./use-calculated-remaining-button";
+import {
   labelPartialBagConfidence,
   labelPartialBagEndingBalanceSource,
 } from "@/lib/production/partial-bag-resolution-constants";
@@ -35,9 +41,12 @@ export const dynamic = "force-dynamic";
 function SectionTable({
   rows,
   variant,
+  systemDerived,
 }: {
   rows: PartialBagAdminRow[];
   variant: "ready" | "needs_closeout" | "missing_linkage";
+  /** Per-bag system-derived resolution (from production output), keyed by bagId. */
+  systemDerived?: Map<string, SystemDerivedResolution>;
 }) {
   if (rows.length === 0) {
     return (
@@ -182,6 +191,32 @@ function SectionTable({
                   <p className="text-[10.5px] text-text-muted leading-snug">
                     {row.eligibilityNote}
                   </p>
+                  {(() => {
+                    const sd = systemDerived?.get(row.bagId);
+                    if (!sd) return null;
+                    if (sd.available) {
+                      return (
+                        <div className="mt-1 rounded border border-emerald-200 bg-emerald-50/60 px-1.5 py-1 text-[10px] leading-snug text-emerald-900">
+                          <p className="font-semibold">Calculated remaining available</p>
+                          <p className="tabular-nums">
+                            {sd.startingTabletCount.toLocaleString()} start −{" "}
+                            {sd.derivedConsumedTablets.toLocaleString()} consumed ={" "}
+                            <span className="font-semibold">
+                              {sd.derivedRemainingTablets.toLocaleString()} remaining
+                            </span>
+                          </p>
+                          <p className="text-emerald-700/80">
+                            System-derived from {labelSystemDerivedStage(sd.outputStage)} — not a physical count.
+                          </p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <p className="mt-1 text-[10px] leading-snug text-amber-700">
+                        Calculated remaining unavailable: {sd.message}
+                      </p>
+                    );
+                  })()}
                 </td>
                 <td className="py-2 align-top">
                   <div className="flex flex-col gap-1.5">
@@ -193,14 +228,25 @@ function SectionTable({
                         Start run
                       </Link>
                     ) : (
-                      <Link
-                        href={`/partial-bags/${row.bagId}/resolve`}
-                        className="inline-flex w-fit items-center px-2 py-1 rounded border border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-medium hover:bg-amber-100 transition-colors"
-                      >
-                        {variant === "missing_linkage"
-                          ? "Resolve inventory"
-                          : "Record closeout"}
-                      </Link>
+                      <>
+                        {(() => {
+                          const sd = systemDerived?.get(row.bagId);
+                          return sd?.available ? (
+                            <UseCalculatedRemainingButton
+                              inventoryBagId={row.bagId}
+                              remaining={sd.derivedRemainingTablets}
+                            />
+                          ) : null;
+                        })()}
+                        <Link
+                          href={`/partial-bags/${row.bagId}/resolve`}
+                          className="inline-flex w-fit items-center px-2 py-1 rounded border border-amber-300 bg-amber-50 text-amber-800 text-[11px] font-medium hover:bg-amber-100 transition-colors"
+                        >
+                          {variant === "missing_linkage"
+                            ? "Resolve inventory"
+                            : "Record closeout"}
+                        </Link>
+                      </>
                     )}
                     <PartialBagCorrectionMenu
                       inventoryBagId={row.bagId}
@@ -232,6 +278,16 @@ export default async function PartialBagWorkbenchPage() {
   );
   const missingLinkage = rows.filter((r) => r.eligibility === "missing_linkage");
   const { held, depleted } = heldAndDepleted;
+
+  // SPLIT-BAG-1 — for bags that need closeout/linkage, check whether their OPEN
+  // allocation can be resolved from production output (one-click instead of a
+  // manual count). Bounded to the (small) blocked set, one query each.
+  const systemDerived = new Map<string, SystemDerivedResolution>();
+  await Promise.all(
+    [...needsCloseout, ...missingLinkage].map(async (r) => {
+      systemDerived.set(r.bagId, await computeSystemDerivedResolutionForBag(r.bagId));
+    }),
+  );
 
   return (
     <div className="space-y-5">
@@ -399,7 +455,7 @@ export default async function PartialBagWorkbenchPage() {
             Partial use indicated but no reliable ending balance. These are NOT
             reusable inventory until the remaining count is recorded.
           </p>
-          <SectionTable rows={needsCloseout} variant="needs_closeout" />
+          <SectionTable rows={needsCloseout} variant="needs_closeout" systemDerived={systemDerived} />
         </CardContent>
       </Card>
 
@@ -413,7 +469,7 @@ export default async function PartialBagWorkbenchPage() {
             Packaging evidence exists but no allocation ledger links the bag to
             its run. Resolve to reconstruct the ledger before reuse.
           </p>
-          <SectionTable rows={missingLinkage} variant="missing_linkage" />
+          <SectionTable rows={missingLinkage} variant="missing_linkage" systemDerived={systemDerived} />
         </CardContent>
       </Card>
 

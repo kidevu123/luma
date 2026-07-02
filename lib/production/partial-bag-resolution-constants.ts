@@ -51,6 +51,10 @@ export function formatRemainingEstimate(args: {
   const { remainingEstimate, confidence, source } = args;
   if (remainingEstimate == null) return "Unknown — closeout required";
   const n = remainingEstimate.toLocaleString();
+  // SPLIT-BAG-1: a system-derived (from production output) remaining is NOT a
+  // physical count — always label it as such, even at HIGH confidence, so it is
+  // never displayed as a bare authoritative number.
+  if (source === "OUTPUT_DERIVED") return `~${n} (system-derived from production)`;
   if (confidence === "HIGH") return n;
   const sourceLabel =
     source === "SUPERVISOR_ESTIMATE"
@@ -82,6 +86,7 @@ export function labelPartialBagEndingBalanceSource(
   source: string | null | undefined,
 ): string | null {
   if (!source) return null;
+  if (source === "OUTPUT_DERIVED") return "system-derived from production";
   if (source in PARTIAL_BAG_RESOLUTION_METHOD_LABELS) {
     return PARTIAL_BAG_RESOLUTION_METHOD_LABELS[
       source as PartialBagResolutionMethod

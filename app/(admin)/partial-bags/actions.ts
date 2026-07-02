@@ -22,6 +22,7 @@ import {
   loadActiveWorkflowBagBackfillReport,
   summarizeBackfillReport,
 } from "@/lib/production/backfill-missing-active-allocation";
+import { resolveAllocationFromProductionOutput } from "@/lib/production/system-derived-allocation-resolution";
 
 const resolveSchema = z.object({
   inventoryBagId: z.string().uuid(),
@@ -70,6 +71,49 @@ export async function resolvePartialBagInventoryAction(
   revalidatePath(`/partial-bags/${parsed.data.inventoryBagId}/resolve`);
   revalidatePath("/production/start");
   return { ok: true };
+}
+
+// ── SPLIT-BAG-1 — system-derived closeout from production output ─────
+
+const systemDerivedSchema = z.object({
+  inventoryBagId: z.string().uuid(),
+  // Optional supporting evidence — recorded, never overrides the derived value.
+  operatorRemainingEstimate: z.coerce.number().int().min(0).optional().nullable(),
+  weighBackGrams: z.coerce.number().int().min(0).optional().nullable(),
+  note: z.string().max(500).optional().nullable(),
+});
+
+/** One-click "Use calculated remaining" — resolves the OPEN allocation session
+ *  from previous production output so the bag becomes ready to reuse, without a
+ *  manual count/weigh-back. Fails closed with an explicit reason otherwise. */
+export async function useCalculatedRemainingAction(
+  formData: FormData,
+): Promise<{ ok: true; remaining: number; depleted: boolean } | { ok: false; error: string }> {
+  const actor = await requireLead();
+  const parsed = systemDerivedSchema.safeParse({
+    inventoryBagId: formData.get("inventoryBagId"),
+    operatorRemainingEstimate:
+      formData.get("operatorRemainingEstimate") || undefined,
+    weighBackGrams: formData.get("weighBackGrams") || undefined,
+    note: formData.get("note") || undefined,
+  });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const result = await resolveAllocationFromProductionOutput({
+    inventoryBagId: parsed.data.inventoryBagId,
+    actor: { id: actor.id, role: actor.role },
+    operatorRemainingEstimate: parsed.data.operatorRemainingEstimate ?? null,
+    weighBackGrams: parsed.data.weighBackGrams ?? null,
+    note: parsed.data.note ?? null,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath("/partial-bags");
+  revalidatePath("/production/start");
+  revalidatePath(`/partial-bags/${parsed.data.inventoryBagId}/resolve`);
+  return { ok: true, remaining: result.derivedRemainingTablets, depleted: result.depleted };
 }
 
 // ── P1-PARTIAL-CORRECTIONS ──────────────────────────────────────────

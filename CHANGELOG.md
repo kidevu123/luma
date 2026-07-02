@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.12.0] — 2026-07-02
+
+### Added — SPLIT-BAG-1: system-derived closeout from production output
+- **A split raw bag (Product 1 → Product 2 on the same physical bag) can now be made ready for reuse without a manual count/weigh-back**, when Luma already has enough production output to derive the remainder. Root cause: Product 1's OPEN allocation session blocks a second start on the same bag; previously the only fix was a manual closeout in the admin workbench.
+- **Honest, conservative calculator** (`lib/production/system-derived-allocation.ts`): `system_consumed = deepest-recorded output units × tablets_per_unit`; `system_remaining = starting − consumed`. It fails **closed** with an explicit reason and only resolves when the session is OPEN, exactly one open session exists on the bag, the starting count is known, output counts exist, tablets-per-unit is configured (so variety packs are excluded), and remaining ≥ 0. Derived value is labelled `SYSTEM_DERIVED_FROM_PRODUCTION_OUTPUT` — **never** presented as a physical count.
+- **Partial Bag Workbench**: needs-closeout / missing-linkage rows now show a **"Calculated remaining available"** state with the formula (`start − consumed = remaining`) and a one-click **"Use calculated remaining"** button; when unavailable, the precise reason is shown (missing output, starting unknown, ambiguous conversion, negative remaining, multiple open sessions). Manual **Record closeout / Resolve inventory / correction menu (physical count, weigh-back, supervisor estimate, notes)** paths are all preserved. `app/(admin)/partial-bags/*`.
+- **Floor blocker is now actionable** — the open-session start error names the "Use calculated remaining" resolution instead of a dead-end "close it first". `lib/production/raw-bag-allocation-lifecycle.ts`.
+- **Reuse & audit**: the closeout runs through the proven `closeAllocationSessionInTx` (same QR handling — bag CLOSED/AVAILABLE with the QR held when remaining > 0; DEPLETED with the QR returned to IDLE and `assignedWorkflowBagId` cleared when 0), so a resolved bag becomes reusable for a **different** product and all v1.7–v1.11.2 QR-retention + IDLE invariants are preserved. A `raw_bag_allocation.system_derived_resolution` audit records the full provenance (starting, derived consumed/remaining, output stage/units, tablets-per-unit, source workflow bag, any operator estimate / weigh-back grams supplied, and a note that it was calculated — not counted). `closeAllocationSessionInTx.finishedLotId` is now optional (a mid-run resolution has no finished lot).
+
+### Notes
+- No schema changes (reuses existing session/event/audit structures + the `OUTPUT_DERIVED` source, now labelled "system-derived from production" everywhere). No production data mutated by this deploy. Weigh-back grams remain optional supporting evidence only (no reliable grams→tablets conversion exists, so it never drives the balance). Follow-up: an in-place floor one-click button (this pass ships the workbench one-click + an actionable floor message; auto-resolving inside the critical scan/start transaction was intentionally avoided so it cannot silently close a run another operator is actively using).
+
 ## [1.11.2] — 2026-07-02
 
 ### Fixed

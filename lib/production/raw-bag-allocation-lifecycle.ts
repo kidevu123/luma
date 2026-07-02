@@ -82,10 +82,13 @@ export async function openAllocationSessionInTx(
   if (existingOpen) {
     return {
       ok: false,
+      // SPLIT-BAG-1: actionable message — a lead can one-click "Use calculated
+      // remaining" in the Partial Bag Workbench to close the prior run from its
+      // production counts (no manual count/weigh-back needed), then start again.
       error:
         existingOpen.workflowBagId && existingOpen.workflowBagId !== input.workflowBagId
-          ? "This source bag has an open allocation session on another production run. Close it before starting again."
-          : "Bag already has an open allocation session. Close it first.",
+          ? "This bag still has an open allocation from a prior run. In the Partial Bag Workbench, use “Use calculated remaining” (when production counts exist) or record a closeout, then start again."
+          : "This bag already has an open allocation. In the Partial Bag Workbench, use “Use calculated remaining” or record a closeout first.",
     };
   }
 
@@ -378,7 +381,9 @@ export async function closeAllocationForProductionOutputInTx(
 
 export type CloseAllocationSessionInput = {
   sessionId: string;
-  finishedLotId: string;
+  /** Optional — set when the close is tied to a finished lot. A mid-run
+   *  system-derived split-bag closeout has no finished lot yet. */
+  finishedLotId?: string | null;
   consumedQty: number;
   endingBalanceQty: number;
   consumedQtySource?: string | null;
@@ -440,7 +445,7 @@ export async function closeAllocationSessionInTx(
     ...(session.poId ? { poId: session.poId } : {}),
     ...(session.productId ? { productId: session.productId } : {}),
     ...(session.workflowBagId ? { workflowBagId: session.workflowBagId } : {}),
-    finishedLotId: input.finishedLotId,
+    ...(input.finishedLotId ? { finishedLotId: input.finishedLotId } : {}),
     eventType: "RAW_BAG_PARTIAL_CONSUMED",
     quantity: String(input.consumedQty),
     unitOfMeasure: "tablets",
@@ -465,7 +470,7 @@ export async function closeAllocationSessionInTx(
       consumedQtySource: input.consumedQtySource ?? "MANUAL_ENTRY",
       endingBalanceQty: input.endingBalanceQty,
       endingBalanceSource: input.endingBalanceSource ?? "WEIGH_BACK",
-      finishedLotId: input.finishedLotId,
+      ...(input.finishedLotId ? { finishedLotId: input.finishedLotId } : {}),
       confidence: "HIGH",
       ...(input.notes ? { notes: input.notes } : {}),
     })
@@ -502,9 +507,10 @@ export async function closeAllocationSessionInTx(
       targetType: "RawBagAllocationSession",
       targetId: session.id,
       after: {
-        finishedLotId: input.finishedLotId,
+        finishedLotId: input.finishedLotId ?? null,
         consumedQty: input.consumedQty,
         endingBalanceQty: input.endingBalanceQty,
+        endingBalanceSource: input.endingBalanceSource ?? "WEIGH_BACK",
       },
     },
     tx,
