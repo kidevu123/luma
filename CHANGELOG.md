@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.16.0] — 2026-07-02
+
+### Fixed — REUSE-STARTING-BALANCE-1: reused partial bag opened at full declared count
+- **Root cause:** when a partial raw bag is reused for another run, the new allocation session's starting balance was derived by looking up the bag's latest **CLOSED** session only. A bag whose remainder was put back via **`RETURNED_TO_STOCK`** (or a **`DEPLETED`** close) had no CLOSED session, so the lookup found nothing and the new session restarted from the original **declared count** instead of the prior returned balance. For bag-card-104 (declared 7,197; first run returned 3,598 via a RETURNED_TO_STOCK session) the second run's OPEN session opened at **7,197** instead of **3,598**.
+- **Fix:** a shared **terminal-session lookup** (`loadLatestTerminalAllocationSession`) + pure resolver (`resolveNewSessionStartingBalance`) now drive every path that opens a new raw-bag allocation session. Priority: explicit manual override → **latest prior TERMINAL session** (CLOSED / RETURNED_TO_STOCK / DEPLETED, newest by `closedAt`) ending balance → declared/on-hand count for a brand-new bag. A DEPLETED prior yields a 0 starting balance (fails closed on any consumption via the over-allocation guard rather than silently reopening at full). Wired into `openAllocationSessionInTx` (`raw-bag-allocation-lifecycle.ts`, the scan/start + repair path — the source of the bag-card-104 bug), the floor manual `openAllocationAction` (`bag-allocation-actions.ts`), and the auto-open path (`bag-allocation-auto-open.ts`, which already handled RETURNED_TO_STOCK — now also DEPLETED + provenance). **Brand-new full bags are unchanged** (declared/on-hand count, `VENDOR_DECLARED`).
+- **Provenance/audit:** the `RAW_BAG_OPENED` event payload now records `starting_balance_source` (`PRIOR_RETURNED_BALANCE` / `PRIOR_DEPLETED_BALANCE` / `LEDGER_DERIVED` / `VENDOR_DECLARED` / `MANUAL_ENTRY`), `original_declared_count`, and — when reused — `prior_session_id`, `prior_ending_balance`, `prior_ending_balance_source`, `prior_status`. The session's `startingBalanceSource` reflects the same. No schema change.
+- **Read-only detector:** `npm run detect:reused-session-balance` (`scripts/detect-reused-session-starting-balance.ts`) lists sessions whose starting balance differs from the latest prior terminal ending balance (OPEN flagged HIGH), with a **DO-NOT-run-without-approval** remediation note. It excludes self-matches (a session's `closed_at` can slightly precede its `created_at`).
+
+### Notes
+- No existing production data was remediated. Production read-only scan found exactly **1** genuinely suspicious session — `64eedae5` (bag-card-104's OPEN second-run session, opened at 7,197 vs prior returned 3,598) — left untouched pending explicit approval (recommended remediation in the report / detector output). No silent auto-resolution; every ledger change still requires an explicit, authorized action. All v1.7–v1.15 bottle partial-bag / system-derived / floor blocker / workbench closeout / QR / IDLE invariants preserved (this changes only the starting-balance derivation for *new* sessions; close/QR-release logic is untouched).
+
 ## [1.15.1] — 2026-07-02
 
 ### Fixed — RESOLVE-CLOSEOUT-ACTIONS-1: "Record closeout" detail page dead-end

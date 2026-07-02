@@ -17,7 +17,7 @@ import {
   rawBagAllocationEvents,
   rawBagAllocationSessions,
 } from "@/lib/db/schema";
-import { resolveReopenStartingBalance } from "@/lib/production/bag-allocation";
+import { resolveNewSessionStartingBalance } from "@/lib/production/bag-allocation";
 import {
   withAccountabilityPayload,
   type AccountabilityForEvent,
@@ -180,11 +180,16 @@ export async function openAllocationSessionForBagStart(
   // Fresh session: derive the starting balance from the last closed
   // session's ending balance (partial reuse) or fall back to the
   // declared pill count (fresh bag).
-  const [lastClosed] = await tx
+  // REUSE-STARTING-BALANCE-1 — latest TERMINAL session (adds DEPLETED +
+  // provenance; RETURNED_TO_STOCK was already handled here).
+  const [priorTerminal] = await tx
     .select({
+      id: rawBagAllocationSessions.id,
+      allocationStatus: rawBagAllocationSessions.allocationStatus,
       endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
       startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
       consumedQty: rawBagAllocationSessions.consumedQty,
+      endingBalanceSource: rawBagAllocationSessions.endingBalanceSource,
     })
     .from(rawBagAllocationSessions)
     .where(
@@ -193,18 +198,20 @@ export async function openAllocationSessionForBagStart(
         inArray(rawBagAllocationSessions.allocationStatus, [
           "CLOSED",
           "RETURNED_TO_STOCK",
+          "DEPLETED",
         ]),
       ),
     )
     .orderBy(desc(rawBagAllocationSessions.closedAt))
     .limit(1);
 
-  const hadPriorSession = lastClosed != null;
-  const startingBalance = resolveReopenStartingBalance(
-    lastClosed ?? null,
-    bag.pillCount,
-  );
-  const startingSource = hadPriorSession ? "LEDGER_DERIVED" : "VENDOR_DECLARED";
+  const balance = resolveNewSessionStartingBalance({
+    priorTerminal: priorTerminal ?? null,
+    pillCount: bag.pillCount,
+    declaredPillCount: null,
+  });
+  const startingBalance = balance.startingBalance;
+  const startingSource = balance.source;
 
   let sessionId: string;
   try {
@@ -255,6 +262,15 @@ export async function openAllocationSessionForBagStart(
         auto_opened: true,
         source: args.source,
         notes: args.notes ?? null,
+        starting_balance_source: startingSource,
+        ...(balance.priorSessionId
+          ? {
+              prior_session_id: balance.priorSessionId,
+              prior_ending_balance: balance.priorEndingBalance,
+              prior_ending_balance_source: balance.priorEndingBalanceSource,
+              prior_status: balance.priorStatus,
+            }
+          : {}),
       },
       args.accountability,
     ),

@@ -1,6 +1,6 @@
 {
   "name": "luma",
-  "version": "1.15.1",
+  "version": "1.16.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -23,7 +23,8 @@
     "repair:qr-inventory": "tsx scripts/repair-qr-inventory.ts",
     "repair:station-handpack-kind": "tsx scripts/fix-station-handpack-kind.ts",
     "verify:deploy": "tsx scripts/verify-deploy.ts",
-    "audit:product-zoho-readiness": "tsx scripts/audit-product-zoho-readiness.ts"
+    "audit:product-zoho-readiness": "tsx scripts/audit-product-zoho-readiness.ts",
+    "detect:reused-session-balance": "tsx scripts/detect-reused-session-starting-balance.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",

@@ -1,6 +1,6 @@
 // Shared raw-bag allocation open/close helpers (floor + admin coordinated closeout).
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { CurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { writeAudit } from "@/lib/db/audit";
@@ -16,7 +16,8 @@ import {
 import {
   checkOverAllocation,
   deriveBagStatusAfterClose,
-  resolveReopenStartingBalance,
+  resolveNewSessionStartingBalance,
+  type PriorTerminalAllocationSession,
 } from "@/lib/production/bag-allocation";
 import {
   computeEndingBalanceFromConsumption,
@@ -39,6 +40,40 @@ export type OpenAllocationSessionInput = {
   notes?: string | null;
   actor?: AllocationActor | null;
 };
+
+/** REUSE-STARTING-BALANCE-1 — the latest TERMINAL allocation session for a
+ *  physical inventory bag (CLOSED / RETURNED_TO_STOCK / DEPLETED), newest by
+ *  closedAt. Shared by every path that opens a new session so a reused partial
+ *  bag always starts from the prior ending balance. Returns null for a bag with
+ *  no prior terminal session (brand-new full bag). */
+export async function loadLatestTerminalAllocationSession(
+  tx: DbTx,
+  inventoryBagId: string,
+): Promise<PriorTerminalAllocationSession | null> {
+  const [row] = await tx
+    .select({
+      id: rawBagAllocationSessions.id,
+      allocationStatus: rawBagAllocationSessions.allocationStatus,
+      endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
+      startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
+      consumedQty: rawBagAllocationSessions.consumedQty,
+      endingBalanceSource: rawBagAllocationSessions.endingBalanceSource,
+    })
+    .from(rawBagAllocationSessions)
+    .where(
+      and(
+        eq(rawBagAllocationSessions.inventoryBagId, inventoryBagId),
+        inArray(rawBagAllocationSessions.allocationStatus, [
+          "CLOSED",
+          "RETURNED_TO_STOCK",
+          "DEPLETED",
+        ]),
+      ),
+    )
+    .orderBy(desc(rawBagAllocationSessions.closedAt))
+    .limit(1);
+  return row ?? null;
+}
 
 export async function openAllocationSessionInTx(
   tx: DbTx,
@@ -108,39 +143,23 @@ export async function openAllocationSessionInTx(
     .limit(1);
   if (!bag) return { ok: false, error: "Inventory bag not found." };
 
-  const [lastClosed] = await tx
-    .select({
-      endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
-      startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
-      consumedQty: rawBagAllocationSessions.consumedQty,
-    })
-    .from(rawBagAllocationSessions)
-    .where(
-      and(
-        eq(rawBagAllocationSessions.inventoryBagId, input.inventoryBagId),
-        eq(rawBagAllocationSessions.allocationStatus, "CLOSED"),
-      ),
-    )
-    .orderBy(desc(rawBagAllocationSessions.closedAt))
-    .limit(1);
-
-  const startingBalance =
-    input.startingBalanceQty ??
-    resolveReopenStartingBalance(lastClosed ?? null, bag.pillCount) ??
-    (bag.declaredPillCount != null && bag.declaredPillCount >= 0
-      ? bag.declaredPillCount
-      : null);
-  const startingSource =
-    input.startingBalanceSource ??
-    (input.startingBalanceQty != null
-      ? "MANUAL_ENTRY"
-      : lastClosed != null
-        ? "LEDGER_DERIVED"
-        : bag.pillCount != null
-          ? "VENDOR_DECLARED"
-          : bag.declaredPillCount != null
-            ? "VENDOR_DECLARED"
-            : "MANUAL_ENTRY");
+  // REUSE-STARTING-BALANCE-1 — a reused partial bag must open from the latest
+  // TERMINAL session's ending balance (RETURNED_TO_STOCK / DEPLETED / CLOSED),
+  // never the original declared count. (Previously this only looked at CLOSED
+  // sessions, so a RETURNED_TO_STOCK remainder was ignored and the new session
+  // restarted at the full declared quantity.)
+  const priorTerminal = await loadLatestTerminalAllocationSession(
+    tx,
+    input.inventoryBagId,
+  );
+  const balance = resolveNewSessionStartingBalance({
+    manualStartingBalance: input.startingBalanceQty ?? null,
+    priorTerminal,
+    pillCount: bag.pillCount,
+    declaredPillCount: bag.declaredPillCount,
+  });
+  const startingBalance = balance.startingBalance;
+  const startingSource = input.startingBalanceSource ?? balance.source;
 
   const inserted = await tx
     .insert(rawBagAllocationSessions)
@@ -169,7 +188,19 @@ export async function openAllocationSessionInTx(
     ...(startingBalance != null ? { quantity: String(startingBalance) } : {}),
     unitOfMeasure: "tablets",
     ...(startingSource ? { quantitySource: startingSource } : {}),
-    payload: { source: "openAllocationSessionInTx" },
+    payload: {
+      source: "openAllocationSessionInTx",
+      starting_balance_source: startingSource,
+      original_declared_count: balance.originalDeclaredCount,
+      ...(balance.priorSessionId
+        ? {
+            prior_session_id: balance.priorSessionId,
+            prior_ending_balance: balance.priorEndingBalance,
+            prior_ending_balance_source: balance.priorEndingBalanceSource,
+            prior_status: balance.priorStatus,
+          }
+        : {}),
+    },
     confidence: "MEDIUM",
   });
 

@@ -509,6 +509,81 @@ export function resolveReopenStartingBalance(
   return pillCount ?? null;
 }
 
+// REUSE-STARTING-BALANCE-1 — the latest TERMINAL allocation session on a
+// physical bag. Terminal = a session that has released the bag with a recorded
+// ending balance: CLOSED (partial remaining), RETURNED_TO_STOCK (remainder put
+// back), or DEPLETED (emptied → 0). A reused partial bag must open its next
+// session from THIS session's ending balance, not the original declared count.
+export type PriorTerminalAllocationSession = {
+  id: string;
+  allocationStatus: string;
+  endingBalanceQty: number | null;
+  startingBalanceQty: number | null;
+  consumedQty: number | null;
+  endingBalanceSource: string | null;
+};
+
+/** Provenance-carrying starting-balance decision for a NEW allocation session. */
+export type NewSessionStartingBalance = {
+  startingBalance: number | null;
+  /** MANUAL_ENTRY | PRIOR_RETURNED_BALANCE | PRIOR_DEPLETED_BALANCE |
+   *  LEDGER_DERIVED | VENDOR_DECLARED */
+  source: string;
+  priorSessionId: string | null;
+  priorEndingBalance: number | null;
+  priorEndingBalanceSource: string | null;
+  priorStatus: string | null;
+  originalDeclaredCount: number | null;
+};
+
+/** Decide the starting balance + provenance for a NEW raw-bag allocation
+ *  session. Priority:
+ *    1. explicit manual override (caller-supplied)
+ *    2. latest prior TERMINAL session's ending balance (reused partial bag) —
+ *       RETURNED_TO_STOCK / DEPLETED / CLOSED, newest by closedAt
+ *    3. the bag's declared / on-hand count (brand-new full bag)
+ *  A DEPLETED prior yields a 0 starting balance, which fails closed on any
+ *  consumption (over-allocation guard) rather than silently reopening at full. */
+export function resolveNewSessionStartingBalance(args: {
+  manualStartingBalance?: number | null;
+  priorTerminal: PriorTerminalAllocationSession | null | undefined;
+  pillCount: number | null | undefined;
+  declaredPillCount: number | null | undefined;
+}): NewSessionStartingBalance {
+  const declared = args.declaredPillCount ?? null;
+  const prior = args.priorTerminal ?? null;
+  const base = {
+    priorSessionId: prior?.id ?? null,
+    priorEndingBalance: prior?.endingBalanceQty ?? null,
+    priorEndingBalanceSource: prior?.endingBalanceSource ?? null,
+    priorStatus: prior?.allocationStatus ?? null,
+    originalDeclaredCount: declared,
+  };
+  if (args.manualStartingBalance != null) {
+    return { startingBalance: args.manualStartingBalance, source: "MANUAL_ENTRY", ...base };
+  }
+  if (prior) {
+    return {
+      startingBalance: resolveReopenStartingBalance(prior, args.pillCount ?? null),
+      source:
+        prior.allocationStatus === "RETURNED_TO_STOCK"
+          ? "PRIOR_RETURNED_BALANCE"
+          : prior.allocationStatus === "DEPLETED"
+            ? "PRIOR_DEPLETED_BALANCE"
+            : "LEDGER_DERIVED",
+      ...base,
+    };
+  }
+  // Brand-new full bag: current on-hand count, else declared. Unchanged behavior.
+  const declaredStart =
+    args.pillCount != null
+      ? args.pillCount
+      : declared != null && declared >= 0
+        ? declared
+        : null;
+  return { startingBalance: declaredStart, source: "VENDOR_DECLARED", ...base };
+}
+
 /**
  * Pure helper — exported for testing.
  * Returns an error string if consumedQty would exceed the session's
