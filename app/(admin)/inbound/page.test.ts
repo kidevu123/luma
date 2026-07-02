@@ -38,3 +38,29 @@ describe("RECEIVE-NAV-1 · inbound/page.tsx CTA routing", () => {
     expect(matches.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("RECEIVES-BY-PO-1 · inbound/page.tsx grouping", () => {
+  it("groups receives by PO via the shared pure helper", () => {
+    expect(src).toMatch(/groupReceivesByPo\(rows\)/);
+    expect(src).toMatch(/PoReceiveGroupCard/);
+    expect(src).toMatch(/formatReceiveGroupSummary/);
+  });
+
+  it("each group header shows PO number, vendor, count badge, and status", () => {
+    expect(src).toMatch(/group\.poNumber \?\? "Unknown PO"/);
+    expect(src).toMatch(/group\.vendor \?\? "Unknown vendor"/);
+    expect(src).toMatch(/group\.totalReceives/);
+    expect(src).toMatch(/group\.status\.label/);
+  });
+
+  it("individual receives remain listed and clickable", () => {
+    expect(src).toMatch(/group\.receives\.map/);
+    expect(src).toMatch(/href=\{`\/inbound\/\$\{receive\.id\}`\}/);
+    expect(src).toMatch(/receive\.receiveName \?\? "Unknown receive"/);
+  });
+
+  it("uses safe fallbacks for missing bag count and tablet/flavor", () => {
+    expect(src).toMatch(/bagCount \?\? 0/);
+    expect(src).toMatch(/Unknown tablet \/ flavor/);
+  });
+});

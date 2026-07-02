@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.15.0] — 2026-07-02
+
+### Changed — RECEIVES-BY-PO-1: group the Receives list by PO number
+- **The Receives page (`/inbound`) now groups receives by PO** instead of one flat, noisy table. Because Luma creates a receive per tablet/flavor, a single PO (e.g. PO-00206 with 5 flavor receives) previously scattered across many rows. Now each PO is one card with a header — **PO number · vendor · count badge · "N receives · M bags · Status" · latest received** — and the individual receives listed underneath (receive name, tablet/flavor, received, bags, status), each still linking to `/inbound/{id}` exactly as before.
+- **Sorting preserved:** PO groups are ordered by their latest received timestamp (desc) and receives within a group are newest-first — matching the page's prior `receivedAt DESC` feel.
+- **Status summary:** a PO group shows `Open` / `Closed` when all its receives agree, or `Mixed` (with an open/closed count tooltip) when they differ. No receive statuses are changed.
+- **Null-safe:** missing PO → "Unknown PO" (PO-less receives collapse into one group), missing vendor → "Unknown vendor", missing tablet/flavor → "Unknown tablet / flavor", null received → "—", null/zero bags → 0, unparseable timestamps sort last — one bad row can't crash the page.
+
+### Notes
+- UI/readability only. **No change to the receive data model, receive creation, or receiving logic**; no DB migration; no production data touched. The grouping is a pure, unit-tested helper (`lib/production/receives-grouping.ts`) over the existing `listReceives()` rows — the loader/query is unchanged. All QR / partial-bag / allocation invariants are unaffected (this page does not touch them).
+
 ## [1.14.1] — 2026-07-02
 
 ### Fixed — Partial Bag Workbench server-render crash (digest 3975426362)
