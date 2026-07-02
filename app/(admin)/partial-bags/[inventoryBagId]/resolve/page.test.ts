@@ -8,6 +8,53 @@ function read(rel: string): string {
   return readFileSync(resolve(root, rel), "utf8");
 }
 
+describe("RESOLVE-CLOSEOUT-ACTIONS-1 · resolve page exposes real closeout actions", () => {
+  const page = read("app/(admin)/partial-bags/[inventoryBagId]/resolve/page.tsx");
+
+  it("renders actionable controls for an OPEN session (not a dead-end)", () => {
+    // The open-session branch reuses the SAME workbench components/actions.
+    expect(page).toMatch(/hasOpenSession \? \(/);
+    expect(page).toMatch(/Close the open allocation session/);
+    // Manual closeout is ALWAYS available for an open session.
+    expect(page).toMatch(/PartialBagCorrectionMenu/);
+    expect(page).toMatch(/Manual closeout/);
+  });
+
+  it("shows Use calculated remaining only when eligible, else a precise reason + manual fallback", () => {
+    expect(page).toMatch(/systemDerived\?\.available \?/);
+    expect(page).toMatch(/UseCalculatedRemainingButton/);
+    expect(page).toMatch(/Calculated remaining unavailable/);
+    expect(page).toMatch(/systemDerived\?\.message/);
+    expect(page).toMatch(/Record a manual count \/ weigh-back \/ supervisor estimate/);
+  });
+
+  it("computes system-derived eligibility defensively (one failure can't crash the page)", () => {
+    expect(page).toMatch(/computeSystemDerivedResolutionForBag\(inventoryBagId\)/);
+    expect(page).toMatch(/catch \{[\s\S]*reason: "COMPUTE_FAILED"/);
+  });
+
+  it("no longer shows a floor/workbench dead-end; explains close-it-here", () => {
+    expect(page).not.toMatch(/close it at the floor/i);
+    expect(page).not.toMatch(/close it from the workbench/i);
+    expect(page).toMatch(/open allocation session from the previous run/i);
+    expect(page).toMatch(/Mark depleted only if the\s+physical bag is empty/);
+  });
+
+  it("keeps the missing-linkage new-session form for the non-open-session path", () => {
+    expect(page).toMatch(/gate\.ok \? \(/);
+    expect(page).toMatch(/ResolvePartialBagForm/);
+  });
+});
+
+describe("eligibility copy — actionable, no 'at the floor' dead-end", () => {
+  it("needs-closeout / missing-linkage notes point to the workbench, not the floor", () => {
+    const src = read("lib/production/partial-bags.ts");
+    expect(src).not.toMatch(/close or return remaining quantity at the floor/i);
+    expect(src).not.toMatch(/Close allocation at the floor/i);
+    expect(src).toMatch(/Open allocation session from the previous run/);
+  });
+});
+
 describe("partial-bags resolve page", () => {
   it("passes only serializable fields to the client resolve form", () => {
     const page = read("app/(admin)/partial-bags/[inventoryBagId]/resolve/page.tsx");

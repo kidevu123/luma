@@ -161,14 +161,14 @@ export function classifyPartialBagInventoryEligibility(args: {
     return {
       eligibility: "missing_linkage",
       note:
-        "Partial production recorded, but no raw-bag allocation session exists. Close allocation at the floor when tablet use is known.",
+        "Partial production recorded, but no raw-bag allocation session exists. Record the remaining tablets here (manual count / weigh-back / supervisor estimate) to make the bag reusable.",
     };
   }
   if (hasOpenAllocationSession(args.sessions)) {
     return {
       eligibility: "needs_allocation_closeout",
       note:
-        "Allocation session still open. Record tablet consumption or weigh-back, then close or return remaining quantity at the floor.",
+        "Open allocation session from the previous run. Close it — use calculated remaining (when available), a manual count / weigh-back / supervisor estimate, or mark depleted — before reusing the bag.",
     };
   }
   if (

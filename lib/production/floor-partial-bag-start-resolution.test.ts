@@ -89,7 +89,7 @@ describe("classifyRawBagStartFromInventoryContext", () => {
     });
     expect(r.status).toBe("PARTIAL_NEEDS_ALLOCATION_CLOSEOUT");
     expect(r.canStart).toBe(false);
-    expect(r.operatorMessage).toMatch(/allocation session still open/i);
+    expect(r.operatorMessage).toMatch(/open allocation session from the previous run/i);
   });
 
   it("returns UNLINKED receive-first only when inventory is truly missing", () => {

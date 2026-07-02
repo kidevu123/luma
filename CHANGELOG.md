@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.15.1] — 2026-07-02
+
+### Fixed — RESOLVE-CLOSEOUT-ACTIONS-1: "Record closeout" detail page dead-end
+- **Root cause:** the Resolve partial bag inventory page (`/partial-bags/[id]/resolve`, opened by the workbench "Record closeout" button) gated its only form behind `canAdminResolvePartialBagInventory`, which returns `ok:false` when an OPEN allocation session exists (correctly — that form creates a *new* session and must not run against an open one). The `ok:false` branch rendered only reason text + "Back to partial bags" — no actions. So a bag with an open session (the common split-bag case) was a dead-end even though the workbench row said "close it here".
+- **Fix:** for the open-session case the detail page now exposes the **same** closeout actions as the workbench row, reusing the exact components/actions (no duplicate ledger logic): the v1.12 **Use calculated remaining** button (shown only when system-derived resolution is eligible, with the `start − consumed = remaining` formula) and the v1.13.1 **correction menu** (Correct remaining — manual physical count / weigh-back / supervisor estimate — Mark depleted, Put on hold, Void). When calculated remaining is unavailable, the precise reason is shown and the manual controls remain. The missing-linkage new-session form is unchanged for the no-open-session path. Computation is defensive (a failure degrades to "unavailable", never crashes the page — cf. v1.14.1). `app/(admin)/partial-bags/[inventoryBagId]/resolve/page.tsx`.
+- **Copy fixed for consistency:** the shared eligibility notes no longer say "close it at the floor" / "close it from the workbench" (stale since v1.13.1) — they now say the open session can be closed via calculated remaining / manual count / weigh-back / supervisor estimate / mark depleted. `lib/production/partial-bags.ts`. The detail page's "Blocked reason" is relabelled "Next step", and the sealing-evidence note clarifies the sealed-card count may belong to an earlier run and is not the open session's tablet consumption.
+
+### Investigation note (bag-card-104 / receipt 352171)
+- The physical bag was split across two runs: run `3d026c01` (Hyroxi MIT B - Sun Drip, CARD) sealed 1,656 cards and its session (`721cfe58`) is **already closed** (RETURNED_TO_STOCK, ending 3,598, supervisor estimate); the **OPEN** session (`64eedae5`) belongs to a **second run (`4cb0ed2f`) that has no product mapped and no output events**. So the "1,656 cards sealed" evidence belongs to the *other, closed* run — the system-derived calculator is **correct** to report no usable output for the open session (`MISSING_OUTPUT_COUNTS`); the sealed cards are not this session's consumption, and forcing a card→tablet conversion would contradict the supervisor estimate. No calculator change was made; the misleading juxtaposition is addressed by the clarified evidence copy, and the user can now close the open session manually (the supervisor estimate is already known) from the detail page.
+
+### Notes
+- Reuses existing authorization: calculated closeout is lead-gated (`useCalculatedRemainingAction`), manual corrections/mark-depleted are admin-gated (`correctPartialBagRemainingAction` / `markPartialBagDepletedAction`) — actions self-guard, so a user lacking permission gets the role error rather than hidden actions. No silent auto-resolution. No schema changes, no production data modified (bag-card-104 not touched). All v1.7–v1.15 bottle partial-bag / system-derived / floor blocker / QR / IDLE invariants preserved.
+
 ## [1.15.0] — 2026-07-02
 
 ### Changed — RECEIVES-BY-PO-1: group the Receives list by PO number
