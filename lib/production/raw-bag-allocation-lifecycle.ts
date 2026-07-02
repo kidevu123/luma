@@ -47,7 +47,7 @@ export type OpenAllocationSessionInput = {
  *  bag always starts from the prior ending balance. Returns null for a bag with
  *  no prior terminal session (brand-new full bag). */
 export async function loadLatestTerminalAllocationSession(
-  tx: DbTx,
+  tx: DbTx | typeof db,
   inventoryBagId: string,
 ): Promise<PriorTerminalAllocationSession | null> {
   const [row] = await tx

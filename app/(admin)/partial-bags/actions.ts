@@ -23,6 +23,7 @@ import {
   summarizeBackfillReport,
 } from "@/lib/production/backfill-missing-active-allocation";
 import { resolveAllocationFromProductionOutput } from "@/lib/production/system-derived-allocation-resolution";
+import { rebaseOpenSessionStartingBalance } from "@/lib/production/open-session-rebase";
 
 const resolveSchema = z.object({
   inventoryBagId: z.string().uuid(),
@@ -127,6 +128,36 @@ function revalidatePartialBagSurfaces(): void {
   revalidatePath("/partial-bags");
   revalidatePath("/production/start");
   revalidatePath("/packaging-output");
+}
+
+// REBASE-OPEN-SESSION-1 — correct an OPEN session's wrong starting balance
+// (pre-v1.16.0 bug) to the prior returned balance, IN PLACE. Leaves the session
+// OPEN + QR assigned + run able to accept production later. Admin-gated, audited.
+export async function rebaseOpenSessionStartingBalanceAction(
+  formData: FormData,
+): Promise<{ ok: true; newStartingBalance: number } | { ok: false; error: string }> {
+  const actor = await requireAdmin();
+  const parsed = z
+    .object({
+      inventoryBagId: z.string().uuid(),
+      note: z.string().max(1000).optional().nullable(),
+    })
+    .safeParse({
+      inventoryBagId: formData.get("inventoryBagId"),
+      note: formData.get("note") || undefined,
+    });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const result = await rebaseOpenSessionStartingBalance({
+    inventoryBagId: parsed.data.inventoryBagId,
+    note: parsed.data.note ?? null,
+    actor: { id: actor.id, role: actor.role },
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  revalidatePartialBagSurfaces();
+  revalidatePath(`/partial-bags/${parsed.data.inventoryBagId}/resolve`);
+  return { ok: true, newStartingBalance: result.newStartingBalance };
 }
 
 export async function correctPartialBagRemainingAction(

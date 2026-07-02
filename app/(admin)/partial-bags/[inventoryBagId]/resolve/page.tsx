@@ -15,11 +15,16 @@ import {
   type SystemDerivedResolution,
 } from "@/lib/production/system-derived-allocation-resolution";
 import { labelSystemDerivedStage } from "@/lib/production/system-derived-allocation";
+import {
+  computeOpenSessionRebaseEligibility,
+  type OpenSessionRebaseEligibility,
+} from "@/lib/production/open-session-rebase";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ResolvePartialBagForm } from "./resolve-form";
 import { UseCalculatedRemainingButton } from "../../use-calculated-remaining-button";
 import { PartialBagCorrectionMenu } from "../../correction-menu";
+import { RebaseOpenSessionButton } from "../../rebase-open-session-button";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +75,22 @@ export default async function ResolvePartialBagPage({
         previousProductName: null,
         reason: "COMPUTE_FAILED",
         message: "Calculation unavailable for this bag.",
+      };
+    }
+  }
+
+  // REBASE-OPEN-SESSION-1 — if the OPEN session was opened from the wrong
+  // starting balance (pre-v1.16.0 bug) and has no production output yet, offer
+  // an in-place correction that KEEPS the session open. Defensive compute.
+  let rebase: OpenSessionRebaseEligibility | null = null;
+  if (hasOpenSession) {
+    try {
+      rebase = await computeOpenSessionRebaseEligibility(inventoryBagId);
+    } catch {
+      rebase = {
+        available: false,
+        reason: "COMPUTE_FAILED",
+        message: "Rebase check unavailable for this bag.",
       };
     }
   }
@@ -173,16 +194,51 @@ export default async function ResolvePartialBagPage({
       {hasOpenSession ? (
         <Card>
           <CardHeader>
-            <CardTitle>Close the open allocation session</CardTitle>
+            <CardTitle>Resolve the open allocation session</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
             <p className="text-xs text-text-muted leading-snug">
-              This bag has an open allocation session from the previous run.
-              Close that session here before reusing the bag. Choose calculated
-              remaining if Luma can derive it, or record a manual remaining count
-              / weigh-back / supervisor estimate. Mark depleted only if the
-              physical bag is empty — that releases the QR.
+              This bag has an open allocation session. If the run is still in
+              progress and just opened from the wrong count, correct its starting
+              balance and leave it open. Otherwise close it out — calculated
+              remaining, a manual count / weigh-back / supervisor estimate, or
+              mark depleted (only if the physical bag is empty — that releases the
+              QR).
             </p>
+
+            {/* REBASE-OPEN-SESSION-1 — correct the open session's starting
+             *  balance IN PLACE (keeps the run open for later production). Shown
+             *  only when it opened from the wrong count and has no output yet. */}
+            {rebase?.available ? (
+              <div className="rounded-lg border border-brand-300 bg-brand-50/60 px-3 py-2.5 space-y-1.5">
+                <p className="text-xs font-semibold text-brand-800">
+                  Correct open session starting balance (keeps the run open)
+                </p>
+                <p className="text-[12px] text-text-strong tabular-nums">
+                  Opened at{" "}
+                  {rebase.currentStartingBalance != null
+                    ? rebase.currentStartingBalance.toLocaleString()
+                    : "unknown"}{" "}
+                  →{" "}
+                  <span className="font-semibold">
+                    {rebase.newStartingBalance.toLocaleString()}
+                  </span>{" "}
+                  (prior {rebase.priorStatus.replace(/_/g, " ").toLowerCase()}{" "}
+                  returned balance)
+                </p>
+                <p className="text-[11px] text-text-muted leading-snug">
+                  Use this when the run is still active and just started from the
+                  wrong count. The session stays OPEN, the QR stays assigned, no
+                  production numbers change, and you can add production output
+                  later.
+                </p>
+                <RebaseOpenSessionButton
+                  inventoryBagId={context.inventoryBagId}
+                  currentStarting={rebase.currentStartingBalance}
+                  newStarting={rebase.newStartingBalance}
+                />
+              </div>
+            ) : null}
 
             {/* Calculated remaining (system-derived) — reuses the workbench
              *  button + shared resolution service; shown only when eligible. */}
@@ -211,9 +267,11 @@ export default async function ResolvePartialBagPage({
             ) : (
               <p className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11px] leading-snug text-amber-800">
                 <span className="font-medium">Calculated remaining unavailable:</span>{" "}
-                {systemDerived?.message ??
-                  "No usable production output for the open session."}{" "}
-                Record a manual count / weigh-back / supervisor estimate below.
+                This open session has no production output counts yet. Any sealed-card
+                evidence shown above belongs to an earlier run and is for traceability
+                only — it is not consumption for this open session. Correct the open
+                session starting balance (above, if offered), or record a manual count
+                / weigh-back / supervisor estimate below.
               </p>
             )}
 

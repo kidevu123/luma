@@ -14,18 +14,19 @@ describe("RESOLVE-CLOSEOUT-ACTIONS-1 · resolve page exposes real closeout actio
   it("renders actionable controls for an OPEN session (not a dead-end)", () => {
     // The open-session branch reuses the SAME workbench components/actions.
     expect(page).toMatch(/hasOpenSession \? \(/);
-    expect(page).toMatch(/Close the open allocation session/);
+    expect(page).toMatch(/Resolve the open allocation session/);
     // Manual closeout is ALWAYS available for an open session.
     expect(page).toMatch(/PartialBagCorrectionMenu/);
     expect(page).toMatch(/Manual closeout/);
   });
 
-  it("shows Use calculated remaining only when eligible, else a precise reason + manual fallback", () => {
+  it("shows Use calculated remaining only when eligible, else a precise honest reason + manual fallback", () => {
     expect(page).toMatch(/systemDerived\?\.available \?/);
     expect(page).toMatch(/UseCalculatedRemainingButton/);
     expect(page).toMatch(/Calculated remaining unavailable/);
-    expect(page).toMatch(/systemDerived\?\.message/);
-    expect(page).toMatch(/Record a manual count \/ weigh-back \/ supervisor estimate/);
+    // Honest reason (no misleading generic "no output" when evidence is from another run).
+    expect(page).toMatch(/This open session has no production output counts yet/);
+    expect(page).toMatch(/record a manual count\s*\n?\s*\/ weigh-back \/ supervisor estimate/);
   });
 
   it("computes system-derived eligibility defensively (one failure can't crash the page)", () => {
@@ -33,11 +34,11 @@ describe("RESOLVE-CLOSEOUT-ACTIONS-1 · resolve page exposes real closeout actio
     expect(page).toMatch(/catch \{[\s\S]*reason: "COMPUTE_FAILED"/);
   });
 
-  it("no longer shows a floor/workbench dead-end; explains close-it-here", () => {
+  it("no longer shows a floor/workbench dead-end; explains resolve-it-here", () => {
     expect(page).not.toMatch(/close it at the floor/i);
     expect(page).not.toMatch(/close it from the workbench/i);
-    expect(page).toMatch(/open allocation session from the previous run/i);
-    expect(page).toMatch(/Mark depleted only if the\s+physical bag is empty/);
+    expect(page).toMatch(/This bag has an open allocation session/i);
+    expect(page).toMatch(/only if the physical\s+bag is empty — that releases the\s+QR/i);
   });
 
   it("keeps the missing-linkage new-session form for the non-open-session path", () => {

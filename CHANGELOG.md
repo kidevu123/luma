@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.17.0] — 2026-07-02
+
+### Added — REBASE-OPEN-SESSION-1: correct an open session's wrong starting balance without closing it
+- **Problem:** for a reused partial bag whose OPEN session opened from the wrong count (pre-v1.16.0 bug — e.g. bag-card-104's second run opened at declared 7,197 instead of the prior returned 3,598), the Resolve page's only manual option — "Correct remaining" — **closes** the session. That ends the run, but the second run has no production numbers yet and must stay open. So there was no usable way to fix the balance while keeping the run open.
+- **Fix:** a new admin-gated, audited action **"Correct open session starting balance"** rebases the OPEN session's `starting_balance_qty` to the latest prior TERMINAL session's ending balance (source `PRIOR_RETURNED_BALANCE`) **in place** — the session stays OPEN, the QR stays ASSIGNED, no production counts change, and the run can still receive production output later. It only appears when: exactly one OPEN session, a prior terminal session with ending balance > 0, the current starting balance differs from it, and **no production output has been recorded on the run** (guarded via `deriveStageOutputForBag`). `lib/production/open-session-rebase.ts`, action in `app/(admin)/partial-bags/actions.ts`, UI on the Resolve page + `rebase-open-session-button.tsx`.
+- **Model decision:** rebase-in-place (not close-and-reopen). An OPEN session is the bag actively allocated to a run; correcting its starting balance before any consumption is equivalent to it having opened correctly, and it preserves the ability to add production numbers to the existing run. Closing would have ended the run and required a re-scan/restart.
+- **Copy fix:** the Resolve page's "Calculated remaining unavailable" message no longer shows the misleading generic "no production output counts recorded" alongside another run's sealing evidence — it now says the open session has no output yet and that any sealed-card evidence shown belongs to an earlier run (traceability only), and points to the rebase / manual options.
+
+### Audit/event
+- Rebase writes a `RAW_BAG_ADJUSTED` allocation event (`admin_correction: "rebase_open_session_starting_balance"`, `old_starting_balance`, `new_starting_balance`, `prior_session_id`, `prior_ending_balance`, `prior_ending_balance_source`, `prior_status`, `session_left_open: true`, note) and a `raw_bag_allocation.starting_balance_rebased` audit with before/after. It re-checks the session is still OPEN inside the transaction. No QR release, no deplete/close/finalize, no production counts.
+
+### Notes
+- No schema change. Admin-gated (`requireAdmin`); no silent auto-resolution — every rebase is an explicit action. All v1.7–v1.16 bottle partial-bag / system-derived / floor blocker / workbench closeout / reuse-starting-balance / QR / IDLE invariants preserved. bag-card-104 remediation is performed post-deploy via this audited action (reported separately), not raw SQL.
+
 ## [1.16.0] — 2026-07-02
 
 ### Fixed — REUSE-STARTING-BALANCE-1: reused partial bag opened at full declared count
