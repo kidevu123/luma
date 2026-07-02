@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.13.0] — 2026-07-02
+
+### Added — SPLIT-BAG-1 fast-follow: actionable floor blocker
+- **A lead can now use the system-derived calculated remaining directly from the station flow** instead of leaving to Admin → Partial Bag Workbench. When a start/scan (fresh start, partial restart, resume, or sealing product save) is blocked because the same physical raw bag still has an OPEN allocation from a prior product, and Luma can derive the remainder from production output, the station shows a **"Use calculated remaining"** panel right there.
+  - **Structured blocker (no string parsing).** The open-session guard (`openAllocationSessionInTx`) now carries a `code: "OPEN_SESSION_ON_BAG"`. The floor start actions detect it, roll back the start (no writes), and return a typed `openAllocationBlock` payload (`OPEN_ALLOCATION_CAN_USE_CALCULATED_REMAINING` with starting/consumed/remaining/output-stage/units/tablets-per-unit/previous-product, or `OPEN_ALLOCATION_NEEDS_MANUAL` with the precise reason). `app/(floor)/floor/[token]/actions.ts`, `lib/production/system-derived-allocation-resolution.ts`.
+  - **Floor panel** shows the formula (`start − consumed = remaining`), labels it **"System-derived from production output — not a physical count. Using it writes a ledger closeout"**, shows the previous product + output stage, and offers a **lead-badge-gated** "Use calculated remaining" button plus a **"Use manual count / weigh-back"** escape hatch to the workbench. On success: *"Calculated remaining saved. Re-scan this bag or continue starting the next product."* — it never auto-continues or auto-retries the start. `app/(floor)/floor/[token]/open-allocation-calc-panel.tsx`, wired into `scan-card-form.tsx` + `stage-action-buttons.tsx`.
+  - **Lead-gated floor action** (`resolveScannedBagAllocationAction`) reuses the **same shared `resolveAllocationFromProductionOutput` service** as the v1.12.0 workbench button (no duplicated logic, same `SYSTEM_DERIVED_FROM_PRODUCTION_OUTPUT` audit). Floor auth is a station scan-token, so the lead gate is a supervisor badge resolved via `resolveStationAccountability` (`SUPERVISOR_OVERRIDE`) — a normal operator without a lead badge cannot close the ledger.
+
+### Notes
+- No silent auto-resolution: the block is only converted to a panel in the catch after the start transaction rolled back; closing the prior session is an explicit lead action. The v1.12.0 workbench "Use calculated remaining" flow is unchanged and still works. No schema changes, no production data mutated by this deploy (25 of 31 OPEN sessions look eligible; none resolved). All v1.7–v1.12 bottle-partial / QR / IDLE invariants preserved (the resolution runs through `closeAllocationSessionInTx`: QR held when remaining > 0, released + `assignedWorkflowBagId` cleared when depleted).
+
 ## [1.12.0] — 2026-07-02
 
 ### Added — SPLIT-BAG-1: system-derived closeout from production output

@@ -35,11 +35,13 @@ export type SystemDerivedResolution =
       sessionId: string;
       workflowBagId: string;
       inventoryBagId: string;
+      previousProductName: string | null;
     } & Extract<SystemDerivedResult, { eligible: true }>)
   | {
       available: false;
       sessionId: string | null;
       workflowBagId: string | null;
+      previousProductName: string | null;
       reason: string;
       message: string;
     };
@@ -69,6 +71,7 @@ export async function computeSystemDerivedResolutionForBag(
       available: false,
       sessionId: null,
       workflowBagId: null,
+      previousProductName: null,
       reason: "SESSION_NOT_OPEN",
       message: "This bag has no open allocation session to resolve.",
     };
@@ -89,17 +92,22 @@ export async function computeSystemDerivedResolutionForBag(
     startingBalanceQty = bag?.pillCount ?? bag?.declaredPillCount ?? null;
   }
 
-  // Product tablets-per-unit + deepest production output for the prior run.
+  // Product tablets-per-unit + name + deepest production output for the prior run.
   let tabletsPerUnit: number | null = null;
+  let previousProductName: string | null = null;
   let output: ReturnType<typeof pickDeepestOutput> = null;
   if (session.workflowBagId) {
     const [wf] = await db
-      .select({ tabletsPerUnit: products.tabletsPerUnit })
+      .select({
+        tabletsPerUnit: products.tabletsPerUnit,
+        productName: products.name,
+      })
       .from(workflowBags)
       .leftJoin(products, eq(products.id, workflowBags.productId))
       .where(eq(workflowBags.id, session.workflowBagId))
       .limit(1);
     tabletsPerUnit = wf?.tabletsPerUnit ?? null;
+    previousProductName = wf?.productName ?? null;
     const stageOut = await deriveStageOutputForBag(session.workflowBagId);
     output = pickDeepestOutput(stageOut);
   }
@@ -118,6 +126,7 @@ export async function computeSystemDerivedResolutionForBag(
       available: false,
       sessionId: session.id,
       workflowBagId: session.workflowBagId ?? null,
+      previousProductName,
       reason: result.reason,
       message: result.message,
     };
@@ -128,7 +137,74 @@ export async function computeSystemDerivedResolutionForBag(
     sessionId: session.id,
     workflowBagId: session.workflowBagId!,
     inventoryBagId,
+    previousProductName,
     ...result,
+  };
+}
+
+// ── Floor blocker payload (structured, no string parsing) ────────────
+
+export type FloorOpenAllocationBlock = {
+  /** Structural blocker type for the floor UI. */
+  blocker:
+    | "OPEN_ALLOCATION_CAN_USE_CALCULATED_REMAINING"
+    | "OPEN_ALLOCATION_NEEDS_MANUAL";
+  inventoryBagId: string;
+  cardId: string | null;
+  sessionId: string | null;
+  workflowBagId: string | null;
+  previousProductName: string | null;
+  eligible: boolean;
+  message: string;
+  // Present only when eligible:
+  startingTabletCount?: number;
+  derivedConsumedTablets?: number;
+  derivedRemainingTablets?: number;
+  outputStage?: string;
+  outputStageLabel?: string;
+  outputUnits?: number;
+  tabletsPerUnit?: number;
+  // Present only when ineligible:
+  reason?: string;
+};
+
+/** Map a resolution into the floor blocker payload. Pure — no DB. */
+export function buildFloorOpenAllocationBlock(args: {
+  inventoryBagId: string;
+  cardId: string | null;
+  resolution: SystemDerivedResolution;
+}): FloorOpenAllocationBlock {
+  const { inventoryBagId, cardId, resolution } = args;
+  if (resolution.available) {
+    return {
+      blocker: "OPEN_ALLOCATION_CAN_USE_CALCULATED_REMAINING",
+      inventoryBagId,
+      cardId,
+      sessionId: resolution.sessionId,
+      workflowBagId: resolution.workflowBagId,
+      previousProductName: resolution.previousProductName,
+      eligible: true,
+      message:
+        "Luma can calculate the remaining balance from the previous production counts.",
+      startingTabletCount: resolution.startingTabletCount,
+      derivedConsumedTablets: resolution.derivedConsumedTablets,
+      derivedRemainingTablets: resolution.derivedRemainingTablets,
+      outputStage: resolution.outputStage,
+      outputStageLabel: labelSystemDerivedStage(resolution.outputStage),
+      outputUnits: resolution.outputUnits,
+      tabletsPerUnit: resolution.tabletsPerUnit,
+    };
+  }
+  return {
+    blocker: "OPEN_ALLOCATION_NEEDS_MANUAL",
+    inventoryBagId,
+    cardId,
+    sessionId: resolution.sessionId,
+    workflowBagId: resolution.workflowBagId,
+    previousProductName: resolution.previousProductName,
+    eligible: false,
+    reason: resolution.reason,
+    message: resolution.message,
   };
 }
 

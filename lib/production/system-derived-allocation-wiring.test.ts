@@ -14,6 +14,9 @@ const actionSrc = repo("app/(admin)/partial-bags/actions.ts");
 const pageSrc = repo("app/(admin)/partial-bags/page.tsx");
 const buttonSrc = repo("app/(admin)/partial-bags/use-calculated-remaining-button.tsx");
 const lifecycleSrc = repo("lib/production/raw-bag-allocation-lifecycle.ts");
+const floorActionsSrc = repo("app/(floor)/floor/[token]/actions.ts");
+const floorPanelSrc = repo("app/(floor)/floor/[token]/open-allocation-calc-panel.tsx");
+const scanFormSrc = repo("app/(floor)/floor/[token]/scan-card-form.tsx");
 
 describe("service — resolves via the proven close path, honest + audited", () => {
   it("closes through closeAllocationSessionInTx with no finished lot and OUTPUT_DERIVED source", () => {
@@ -88,5 +91,52 @@ describe("floor blocker — actionable, not a dead-end", () => {
   it("names the calculated-remaining resolution instead of a bare 'session open' error", () => {
     expect(lifecycleSrc).toMatch(/Use calculated remaining/);
     expect(lifecycleSrc).not.toMatch(/Close it before starting again\./);
+  });
+  it("open-session guard carries a structural code (no brittle string parsing)", () => {
+    expect(lifecycleSrc).toMatch(/code: "OPEN_SESSION_ON_BAG"/);
+  });
+});
+
+describe("SPLIT-BAG-1 floor panel — structured blocker, explicit lead-gated action", () => {
+  it("scan/sealing actions return a structured openAllocationBlock (no silent close)", () => {
+    // The block is only converted to a structured result in the CATCH after the
+    // start transaction rolled back — the start never silently resolves.
+    expect(floorActionsSrc).toMatch(/class OpenAllocationBlockError extends Error/);
+    expect(floorActionsSrc).toMatch(/raiseAllocationOpenFailure/);
+    expect(floorActionsSrc).toMatch(/openAllocationBlock: buildFloorOpenAllocationBlock/);
+    expect(floorActionsSrc).toMatch(/openAllocationBlock\?: FloorOpenAllocationBlock/);
+    // No auto-continue / auto-retry of the start after a block.
+    expect(floorActionsSrc).not.toMatch(/OPEN_SESSION_ON_BAG[\s\S]{0,200}resolveAllocationFromProductionOutput/);
+  });
+
+  it("floor resolve action is lead-gated and reuses the shared service", () => {
+    expect(floorActionsSrc).toMatch(/export async function resolveScannedBagAllocationAction/);
+    // Lead/supervisor badge required — a normal operator cannot close the ledger.
+    expect(floorActionsSrc).toMatch(/sourceHint: "SUPERVISOR_OVERRIDE"/);
+    expect(floorActionsSrc).toMatch(/Lead badge code not recognized/);
+    // Same shared resolution service as the workbench (no duplicated logic).
+    expect(floorActionsSrc).toMatch(/resolveAllocationFromProductionOutput\(\{/);
+  });
+
+  it("panel shows the formula, honest source label, lead gate, and a manual escape hatch", () => {
+    expect(floorPanelSrc).toMatch(/This bag is still open from a previous product/);
+    expect(floorPanelSrc).toMatch(/calculate the remaining balance from the previous\s*\n?\s*production counts/i);
+    expect(floorPanelSrc).toMatch(/start −/); // starting − consumed = remaining
+    expect(floorPanelSrc).toMatch(/not a physical count/i);
+    expect(floorPanelSrc).toMatch(/writes a ledger closeout/i);
+    expect(floorPanelSrc).toMatch(/Lead badge code \(required\)/);
+    expect(floorPanelSrc).toMatch(/Use calculated remaining/);
+    expect(floorPanelSrc).toMatch(/manual count \/ weigh-back/i);
+    // Success copy directs re-scan / continue, not an auto-continue.
+    expect(floorPanelSrc).toMatch(/Re-scan this bag or continue/i);
+    // Ineligible path shows the precise reason + manual link.
+    expect(floorPanelSrc).toMatch(/can.t safely calculate/i);
+    expect(floorPanelSrc).toMatch(/resolveScannedBagAllocationAction/);
+  });
+
+  it("scan-card-form renders the panel from the structured result", () => {
+    expect(scanFormSrc).toMatch(/openAllocationBlock/);
+    expect(scanFormSrc).toMatch(/setOpenAllocBlock\(r\.openAllocationBlock\)/);
+    expect(scanFormSrc).toMatch(/<OpenAllocationCalcPanel/);
   });
 });

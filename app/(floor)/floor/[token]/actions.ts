@@ -50,6 +50,12 @@ import {
 } from "@/lib/production/stage-progression";
 import { shouldReleaseQrAfterPackagingClose } from "@/lib/production/bag-allocation";
 import { coercePartialRemainingEstimate } from "@/lib/production/partial-remaining-input";
+import {
+  computeSystemDerivedResolutionForBag,
+  buildFloorOpenAllocationBlock,
+  resolveAllocationFromProductionOutput,
+  type FloorOpenAllocationBlock,
+} from "@/lib/production/system-derived-allocation-resolution";
 import { emitCountBasedPackagingConsumption } from "@/lib/projector/packaging-consumption-hook";
 import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
 import { refreshMaterialReadModelsAfterBlister } from "@/lib/projector/material-read-model-refresh";
@@ -237,6 +243,34 @@ class PartialReuseConfirmationRequiredError extends Error {
   }
 }
 
+/** SPLIT-BAG-1 — thrown (inside the start transaction, so it rolls back with no
+ *  writes) when the raw bag is blocked by an OPEN allocation from a prior run.
+ *  The outer catch converts it to a STRUCTURED floor-blocker result so the
+ *  station shows a "Use calculated remaining" panel instead of a dead-end
+ *  error. Carries only the ids needed to compute eligibility after rollback. */
+class OpenAllocationBlockError extends Error {
+  readonly inventoryBagId: string;
+  readonly cardId: string | null;
+  constructor(inventoryBagId: string, cardId: string | null) {
+    super("This bag has an open allocation from a prior run.");
+    this.name = "OpenAllocationBlockError";
+    this.inventoryBagId = inventoryBagId;
+    this.cardId = cardId;
+  }
+}
+
+/** Raise the right error for a failed allocation open: the structured
+ *  split-bag block for the "open session on this bag" case, else a plain error. */
+function raiseAllocationOpenFailure(
+  alloc: { error: string; code?: string },
+  ctx: { inventoryBagId: string; cardId: string | null },
+): never {
+  if (alloc.code === "OPEN_SESSION_ON_BAG") {
+    throw new OpenAllocationBlockError(ctx.inventoryBagId, ctx.cardId);
+  }
+  throw new Error(alloc.error);
+}
+
 /** P1-PARTIAL — gate for every partial-bag start path. Throws the
  *  confirmation error on the first (unconfirmed) attempt, and enforces
  *  the confidence model: LOW remaining requires a supervisor badge.
@@ -282,6 +316,7 @@ export async function scanCardAction(
       ok?: true;
       partialReuseConfirmationRequired?: true;
       partialContext?: PartialReuseContext;
+      openAllocationBlock?: FloorOpenAllocationBlock;
     }
   | void
 > {
@@ -478,7 +513,11 @@ export async function scanCardAction(
             workflowBagId: bag.id,
             ...(productIdToSet ? { productId: productIdToSet } : {}),
           });
-          if (!alloc.ok) throw new Error(alloc.error);
+          if (!alloc.ok)
+            raiseAllocationOpenFailure(alloc, {
+              inventoryBagId: inventoryLink.inventoryBagId,
+              cardId,
+            });
         }
         return;
       }
@@ -643,7 +682,11 @@ export async function scanCardAction(
               workflowBagId: restartBag.id,
               ...(productIdToSet ? { productId: productIdToSet } : {}),
             });
-            if (!alloc.ok) throw new Error(alloc.error);
+            if (!alloc.ok)
+              raiseAllocationOpenFailure(alloc, {
+                inventoryBagId: inventoryLink.inventoryBagId,
+                cardId,
+              });
           }
           return;
         }
@@ -814,7 +857,11 @@ export async function scanCardAction(
               workflowBagId: resumeBag.id,
               ...(productIdToSet ? { productId: productIdToSet } : {}),
             });
-            if (!alloc.ok) throw new Error(alloc.error);
+            if (!alloc.ok)
+              raiseAllocationOpenFailure(alloc, {
+                inventoryBagId: inventoryLink.inventoryBagId,
+                cardId,
+              });
           }
           return;
         }
@@ -999,6 +1046,20 @@ export async function scanCardAction(
         partialContext: err.context,
       };
     }
+    if (err instanceof OpenAllocationBlockError) {
+      // SPLIT-BAG-1 — the start rolled back; surface a structured "Use
+      // calculated remaining" panel (or a precise manual reason) to the floor.
+      const resolution = await computeSystemDerivedResolutionForBag(
+        err.inventoryBagId,
+      );
+      return {
+        openAllocationBlock: buildFloorOpenAllocationBlock({
+          inventoryBagId: err.inventoryBagId,
+          cardId: err.cardId,
+          resolution,
+        }),
+      };
+    }
     return { error: err instanceof Error ? err.message : "Scan failed." };
   }
 
@@ -1076,7 +1137,9 @@ const saveSealingProductSchema = z.object({
 /** Persist finished product at sealing before segment/close-out work. */
 export async function saveSealingProductAction(
   formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
+): Promise<
+  { error?: string; ok?: true; openAllocationBlock?: FloorOpenAllocationBlock } | void
+> {
   const parsed = saveSealingProductSchema.safeParse({
     token: formData.get("token"),
     workflowBagId: formData.get("workflowBagId"),
@@ -1201,15 +1264,36 @@ export async function saveSealingProductAction(
         .where(eq(workflowBags.id, parsed.data.workflowBagId))
         .limit(1);
       if (wfBagRow?.inventoryBagId) {
+        const sealingInventoryBagId = wfBagRow.inventoryBagId;
         const alloc = await ensureOpenRawBagAllocationSessionForWorkflowBag(tx, {
           inventoryBagId: wfBagRow.inventoryBagId,
           workflowBagId: parsed.data.workflowBagId,
           productId: sealingPick.productId,
         });
-        if (!alloc.ok) throw new Error(alloc.error);
+        if (!alloc.ok) {
+          if (sealingInventoryBagId) {
+            raiseAllocationOpenFailure(alloc, {
+              inventoryBagId: sealingInventoryBagId,
+              cardId: null,
+            });
+          }
+          throw new Error(alloc.error);
+        }
       }
     });
   } catch (err) {
+    if (err instanceof OpenAllocationBlockError) {
+      const resolution = await computeSystemDerivedResolutionForBag(
+        err.inventoryBagId,
+      );
+      return {
+        openAllocationBlock: buildFloorOpenAllocationBlock({
+          inventoryBagId: err.inventoryBagId,
+          cardId: err.cardId,
+          resolution,
+        }),
+      };
+    }
     return {
       error: err instanceof Error ? err.message : "Could not save product.",
     };
@@ -1218,6 +1302,79 @@ export async function saveSealingProductAction(
   revalidatePath(`/floor/${parsed.data.token}`);
   revalidatePath(`/floor-board`);
   return { ok: true };
+}
+
+// ── SPLIT-BAG-1 — floor "Use calculated remaining" (lead-gated) ──────
+
+const resolveScannedBagSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  inventoryBagId: z.string().uuid(),
+  leadCode: z.string().min(1).max(40),
+});
+
+/** Lead-gated: close the prior run's OPEN allocation on this physical bag using
+ *  system-derived remaining (from production output), so the bag is ready to
+ *  reuse — invoked from the floor open-allocation panel. Explicit action, never
+ *  silent. Reuses the SAME shared resolution service as the admin workbench.
+ *
+ *  Floor auth is a station scan-token (no user session), so the lead gate is a
+ *  supervisor badge code resolved via resolveStationAccountability — a normal
+ *  operator (no lead badge) cannot close the ledger. */
+export async function resolveScannedBagAllocationAction(
+  formData: FormData,
+): Promise<
+  | { ok: true; remaining: number; depleted: boolean }
+  | { ok: false; error: string }
+> {
+  const parsed = resolveScannedBagSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    inventoryBagId: formData.get("inventoryBagId"),
+    leadCode: formData.get("leadCode"),
+  });
+  if (!parsed.success) {
+    return { ok: false, error: "Enter the lead badge code to use the calculated remaining." };
+  }
+  try {
+    await authStation(parsed.data.token, parsed.data.stationId);
+
+    // Lead/supervisor gate — resolve the badge to a real employee.
+    let leadEmployeeId: string | null = null;
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: parsed.data.stationId,
+        overrideEmployeeCode: parsed.data.leadCode,
+        sourceHint: "SUPERVISOR_OVERRIDE",
+      });
+      if (!accountability.accountableEmployeeId) {
+        throw new Error(
+          "Lead badge code not recognized — a lead is required to use the calculated remaining.",
+        );
+      }
+      leadEmployeeId = accountability.accountableEmployeeId;
+    });
+
+    const result = await resolveAllocationFromProductionOutput({
+      inventoryBagId: parsed.data.inventoryBagId,
+      actor: { id: leadEmployeeId, role: null },
+    });
+    if (!result.ok) return { ok: false, error: result.error };
+
+    revalidatePath(`/floor/${parsed.data.token}`);
+    revalidatePath(`/floor-board`);
+    revalidatePath("/partial-bags");
+    return {
+      ok: true,
+      remaining: result.derivedRemainingTablets,
+      depleted: result.depleted,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not use calculated remaining.",
+    };
+  }
 }
 
 export async function fireStageEventAction(

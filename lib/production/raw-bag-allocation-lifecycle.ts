@@ -43,7 +43,10 @@ export type OpenAllocationSessionInput = {
 export async function openAllocationSessionInTx(
   tx: DbTx,
   input: OpenAllocationSessionInput,
-): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; sessionId: string }
+  | { ok: false; error: string; code?: string }
+> {
   if (input.inventoryBagId === input.workflowBagId) {
     return {
       ok: false,
@@ -83,12 +86,15 @@ export async function openAllocationSessionInTx(
     return {
       ok: false,
       // SPLIT-BAG-1: actionable message — a lead can one-click "Use calculated
-      // remaining" in the Partial Bag Workbench to close the prior run from its
-      // production counts (no manual count/weigh-back needed), then start again.
+      // remaining" in the station panel (or the Partial Bag Workbench) to close
+      // the prior run from its production counts (no manual count/weigh-back
+      // needed), then start again. The `code` lets the floor detect this case
+      // structurally (no brittle string parsing) and render that panel.
+      code: "OPEN_SESSION_ON_BAG",
       error:
         existingOpen.workflowBagId && existingOpen.workflowBagId !== input.workflowBagId
-          ? "This bag still has an open allocation from a prior run. In the Partial Bag Workbench, use “Use calculated remaining” (when production counts exist) or record a closeout, then start again."
-          : "This bag already has an open allocation. In the Partial Bag Workbench, use “Use calculated remaining” or record a closeout first.",
+          ? "This bag still has an open allocation from a prior run. Use “Use calculated remaining” (when production counts exist) or record a closeout, then start again."
+          : "This bag already has an open allocation. Use “Use calculated remaining” or record a closeout first.",
     };
   }
 
@@ -196,7 +202,7 @@ export async function ensureOpenRawBagAllocationSessionForWorkflowBag(
   input: OpenAllocationSessionInput,
 ): Promise<
   | { ok: true; sessionId: string; opened: boolean }
-  | { ok: false; error: string }
+  | { ok: false; error: string; code?: string }
 > {
   const [existingForWorkflow] = await tx
     .select({ id: rawBagAllocationSessions.id })

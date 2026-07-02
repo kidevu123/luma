@@ -32,6 +32,8 @@ import {
   type SealingPartialCloseReason,
 } from "@/lib/production/sealing-partial-closeout";
 import { coercePartialRemainingEstimate } from "@/lib/production/partial-remaining-input";
+import type { FloorOpenAllocationBlock } from "@/lib/production/system-derived-allocation-resolution";
+import { OpenAllocationCalcPanel } from "./open-allocation-calc-panel";
 
 // crypto.randomUUID() is only available in secure contexts (HTTPS or
 // localhost). Floor PWA runs over plain HTTP on the LAN, so we fall
@@ -184,6 +186,9 @@ export function StageActionButtons({
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  // SPLIT-BAG-1 — sealing product save blocked by a prior run's open allocation.
+  const [openAllocBlock, setOpenAllocBlock] =
+    React.useState<FloorOpenAllocationBlock | null>(null);
   const [count, setCount] = React.useState("");
   const [operatorCode, setOperatorCode] = React.useState("");
   const pauseReasonOptions = getPauseReasonsForStation(stationKind);
@@ -320,10 +325,14 @@ export function StageActionButtons({
         fd.set("clientEventId", newClientEventId());
         const r = await saveSealingProductAction(fd);
         if (cancelled) return;
-        if (r?.error) {
+        if (r && "openAllocationBlock" in r && r.openAllocationBlock) {
+          setOpenAllocBlock(r.openAllocationBlock);
+          sealingAutoSaveStarted.current = false;
+        } else if (r?.error) {
           setError(r.error);
           sealingAutoSaveStarted.current = false;
         } else {
+          setOpenAllocBlock(null);
           router.refresh();
         }
       } finally {
@@ -619,9 +628,12 @@ export function StageActionButtons({
                     if (badgeCode) fd.set("overrideEmployeeCode", badgeCode);
                     fd.set("clientEventId", newClientEventId());
                     const r = await saveSealingProductAction(fd);
-                    if (r?.error) {
+                    if (r && "openAllocationBlock" in r && r.openAllocationBlock) {
+                      setOpenAllocBlock(r.openAllocationBlock);
+                    } else if (r?.error) {
                       setError(r.error);
                     } else {
+                      setOpenAllocBlock(null);
                       router.refresh();
                     }
                   } finally {
@@ -875,6 +887,15 @@ export function StageActionButtons({
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
           {error}
         </p>
+      )}
+
+      {/* SPLIT-BAG-1 — sealing blocked by a prior run's open allocation */}
+      {openAllocBlock && (
+        <OpenAllocationCalcPanel
+          block={openAllocBlock}
+          token={token}
+          stationId={stationId}
+        />
       )}
 
       {/* Pause reason picker */}

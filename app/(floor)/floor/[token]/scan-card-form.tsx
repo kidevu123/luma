@@ -7,6 +7,8 @@ import { scanCardAction, lookupCardByTokenAction } from "./actions";
 import { CameraScanner } from "./camera-scanner";
 import { formatRemainingEstimate } from "@/lib/production/partial-bag-resolution-constants";
 import type { PartialReuseContext } from "@/lib/production/partial-bags";
+import type { FloorOpenAllocationBlock } from "@/lib/production/system-derived-allocation-resolution";
+import { OpenAllocationCalcPanel } from "./open-allocation-calc-panel";
 
 export type EligibleCard = {
   id: string;
@@ -81,6 +83,9 @@ export function ScanCardForm({
     context: PartialReuseContext;
   } | null>(null);
   const [partialSupervisorCode, setPartialSupervisorCode] = React.useState("");
+  // SPLIT-BAG-1 — bag blocked by a prior run's open allocation.
+  const [openAllocBlock, setOpenAllocBlock] =
+    React.useState<FloorOpenAllocationBlock | null>(null);
 
   // Text scanner state
   const [scanInput, setScanInput] = React.useState("");
@@ -179,11 +184,16 @@ export function ScanCardForm({
             productId: pid || null,
             context: r.partialContext,
           });
+        } else if (r && "openAllocationBlock" in r && r.openAllocationBlock) {
+          // SPLIT-BAG-1 — bag still open from a prior run; show the
+          // calculated-remaining panel (or a precise manual reason).
+          setOpenAllocBlock(r.openAllocationBlock);
         } else if (r?.error) {
           setError(r.error);
         } else {
           setPartialConfirm(null);
           setPartialSupervisorCode("");
+          setOpenAllocBlock(null);
           router.refresh();
         }
       } catch {
@@ -334,10 +344,13 @@ export function ScanCardForm({
                 productId: productId || null,
                 context: r.partialContext,
               });
+            } else if (r && "openAllocationBlock" in r && r.openAllocationBlock) {
+              setOpenAllocBlock(r.openAllocationBlock);
             } else if (r?.error) {
               setError(r.error);
             } else {
               setPartialConfirm(null);
+              setOpenAllocBlock(null);
               router.refresh();
             }
           } catch {
@@ -403,6 +416,15 @@ export function ScanCardForm({
               {scannedContext.detail}
             </p>
           </div>
+        )}
+
+        {/* SPLIT-BAG-1 — bag blocked by a prior run's open allocation */}
+        {openAllocBlock && (
+          <OpenAllocationCalcPanel
+            block={openAllocBlock}
+            token={token}
+            stationId={stationId}
+          />
         )}
 
         {/* P1-PARTIAL — explicit partial reuse confirmation */}
