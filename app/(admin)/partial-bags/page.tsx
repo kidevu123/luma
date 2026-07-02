@@ -289,10 +289,24 @@ export default async function PartialBagWorkbenchPage() {
   // SPLIT-BAG-1 — for bags that need closeout/linkage, check whether their OPEN
   // allocation can be resolved from production output (one-click instead of a
   // manual count). Bounded to the (small) blocked set, one query each.
+  // Defensive: a single bag's resolution failing (legacy/malformed data, a bad
+  // query) must NOT crash the whole workbench — it degrades to "Calculation
+  // unavailable" for that row while every other row still renders.
   const systemDerived = new Map<string, SystemDerivedResolution>();
   await Promise.all(
     [...needsCloseout, ...missingLinkage].map(async (r) => {
-      systemDerived.set(r.bagId, await computeSystemDerivedResolutionForBag(r.bagId));
+      try {
+        systemDerived.set(r.bagId, await computeSystemDerivedResolutionForBag(r.bagId));
+      } catch {
+        systemDerived.set(r.bagId, {
+          available: false,
+          sessionId: null,
+          workflowBagId: null,
+          previousProductName: null,
+          reason: "COMPUTE_FAILED",
+          message: "Calculation unavailable for this bag.",
+        });
+      }
     }),
   );
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.14.1] — 2026-07-02
+
+### Fixed — Partial Bag Workbench server-render crash (digest 3975426362)
+- **Root cause:** `deriveStageOutputForBag` (`lib/production/output-reconciliation.ts`) — reached from the workbench's system-derived resolution (`computeSystemDerivedResolutionForBag`) for every needs-closeout / missing-linkage row with an OPEN session — ran a "finished units" subselect against **two columns that do not exist**: `finished_lots.units_finished` (real column is `units_produced`) and a JOIN on `finished_lot_inputs.workflow_bag_id` (that table is batch-scoped and has no such column; the link is `finished_lots.workflow_bag_id`). Postgres rejected the query at parse time (`42703 column … does not exist`), so the whole Server-Components render crashed. Verified read-only against production: the old columns error; the corrected query runs cleanly.
+- **Fix:** the finished-units subselect now sums `finished_lots.units_produced` linked directly by `finished_lots.workflow_bag_id` (no `finished_lot_inputs` join). This restores the Partial Bag Workbench **and** the floor calculated-remaining panel / recovery (which share the same loader). `lib/production/output-reconciliation.ts`.
+- **Defense in depth:** the workbench now wraps each row's system-derived resolution in try/catch — a single bag's failure (legacy/malformed data, or any future query issue) degrades to "Calculation unavailable for this bag." for that row instead of crashing the whole page; every other row still renders with its calculated-remaining / manual-closeout / mark-depleted options intact. `app/(admin)/partial-bags/page.tsx`.
+
+### Notes
+- Pre-existing bug in `output-reconciliation.ts` (the buggy subselect predates v1.12); it surfaced on the workbench because v1.12.0 wired the workbench to call this loader and production now has needs-closeout rows with OPEN sessions. Not caused by the v1.13.1 open-allocation changes or the unrelated v1.14.0 bottle recovery. No schema changes; no production data modified. All v1.7–v1.14 bottle partial-bag / system-derived / QR / IDLE invariants preserved.
+
 ## [1.14.0] — 2026-07-02
 
 ### Added — BOTTLE-SEALING-RECOVERY-1: clear a stale bottle sealing hold from the packaging station

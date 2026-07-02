@@ -142,12 +142,15 @@ export async function deriveStageOutputForBag(bagId: string): Promise<StageOutpu
          FROM events
          WHERE event_type = 'BAG_PAUSED'
            AND (payload->>'reason') = 'REWORK') AS known_rework,
-      -- Finished from finished_lots tied to this bag via
-      -- finished_lot_inputs.
-      (SELECT SUM(fl.units_finished)::int
+      -- Finished units for this workflow bag come straight from
+      -- finished_lots.workflow_bag_id. (The prior query used
+      -- finished_lots.units_finished — no such column — JOINed on
+      -- finished_lot_inputs.workflow_bag_id — also no such column, that
+      -- table is batch-scoped. Both hard-crashed every caller, e.g. the
+      -- Partial Bag Workbench system-derived resolution: digest 3975426362.)
+      (SELECT SUM(fl.units_produced)::int
          FROM finished_lots fl
-         JOIN finished_lot_inputs fli ON fli.finished_lot_id = fl.id
-         WHERE fli.workflow_bag_id = ${bagId}) AS finished
+         WHERE fl.workflow_bag_id = ${bagId}) AS finished
   `);
   const r = (rows as unknown as Row[])[0] ?? {
     gross_blisters: null,
