@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.13.1] — 2026-07-02
+
+### Fixed — SPLIT-BAG-2: Partial Bag Workbench dead-end on an open allocation session
+- **The workbench no longer traps admins with "open allocation exists — close it at the floor" when no clear floor action exists.** Root cause: `correctPartialBagRemaining` refused any manual closeout while an OPEN allocation session existed (and the resolve-page gate said the same), even though the floor had no obvious close path for that bag — a genuine dead-end.
+- **Manual "Correct remaining" now closes the OPEN session in place** with the entered remaining + method (PHYSICAL_COUNT / WEIGH_BACK / SUPERVISOR_ESTIMATE), mirroring the in-place close pattern the sibling **Mark depleted** / **Void** corrections already use — instead of dead-ending. CLOSED when remaining > 0 (bag AVAILABLE, reusable), DEPLETED when 0 (QR returned to IDLE with `assignedWorkflowBagId` cleared via `releaseQrIfEmptied` — IDLE invariant preserved). The open session is closed, never a disconnected new session left dangling. `lib/production/partial-bag-admin-corrections.ts`.
+- **All three closeout options are now available from the workbench for an open-allocation bag**, with a clear "Open allocation session — close it here to reuse this bag" panel: **A. Use calculated remaining** (v1.12.0 system-derived, `SYSTEM_DERIVED_FROM_PRODUCTION_OUTPUT`, shared service — unchanged), **B. Correct remaining** (manual physical count / weigh-back / supervisor estimate — now closes the open session), **C. Mark depleted** (existing). `app/(admin)/partial-bags/page.tsx`.
+- **Actionable messaging:** the resolve-page gate reason now points to the workbench closeout options instead of "close it at the floor before admin resolution". The v1.12.0 workbench already surfaces the precise *why-unavailable* reason for calculated resolution (missing output, unknown starting, no tablets-per-unit, ambiguous, negative, multiple open sessions). `lib/production/partial-bag-review-closeout.ts`.
+
+### Notes
+- Ledger-append preserved: the original opening event is never edited; the manual closeout appends the ending balance + a `manual_closeout_open_session` event and a `partial_bag.correct_remaining` audit carrying `closed_open_session` + `open_session_id` + starting/prior/new remaining + method + reason. Actions stay admin/lead-gated (`requireAdmin` for manual corrections, `requireLead` for calculated). No system-derived label on manual closeouts. No schema changes; no production data mutated by this deploy (25 of 31 OPEN sessions look eligible for calculated resolution; none resolved). All v1.7–v1.13 bottle-partial / QR / IDLE invariants preserved.
+
 ## [1.13.0] — 2026-07-02
 
 ### Added — SPLIT-BAG-1 fast-follow: actionable floor blocker

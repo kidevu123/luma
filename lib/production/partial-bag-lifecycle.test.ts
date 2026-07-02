@@ -166,9 +166,13 @@ describe("admin corrections never edit the original ledger", () => {
 
   it("no correction updates an existing closed session's quantities", () => {
     // The only session UPDATEs are status transitions of OPEN sessions
-    // (deplete/void) — never rewriting a CLOSED session's balances.
+    // (deplete / void / SPLIT-BAG-2 manual closeout of an open session) —
+    // never rewriting a CLOSED session's balances.
     const updates = correctionsSrc.match(/\.update\(rawBagAllocationSessions\)/g) ?? [];
-    expect(updates.length).toBeLessThanOrEqual(2);
+    expect(updates.length).toBeLessThanOrEqual(3);
+    // Each session update closes an OPEN session (guarded by an `if (open)`),
+    // it never targets a CLOSED/DEPLETED row.
+    expect(correctionsSrc).not.toMatch(/allocationStatus.*(IN|=).*CLOSED[\s\S]{0,80}\.update/);
   });
 });
 

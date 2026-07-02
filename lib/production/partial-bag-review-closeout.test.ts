@@ -105,15 +105,22 @@ describe("canAdminResolvePartialBagInventory", () => {
     ).toBe(false);
   });
 
-  it("blocks open allocation session", () => {
-    expect(
-      canAdminResolvePartialBagInventory({
-        eligibility: "missing_linkage",
-        inventoryStatus: "AVAILABLE",
-        hasOpenSession: true,
-        hasPartialPackagingWorkflow: true,
-      }).ok,
-    ).toBe(false);
+  it("blocks the resolve-page flow on an open session but gives an actionable, non-floor reason", () => {
+    const result = canAdminResolvePartialBagInventory({
+      eligibility: "missing_linkage",
+      inventoryStatus: "AVAILABLE",
+      hasOpenSession: true,
+      hasPartialPackagingWorkflow: true,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // SPLIT-BAG-2 — no dead-end "close it at the floor"; points to the
+      // workbench closeout options instead.
+      expect(result.reason).not.toMatch(/at the floor/i);
+      expect(result.reason).toMatch(/Use calculated remaining/);
+      expect(result.reason).toMatch(/Correct remaining/);
+      expect(result.reason).toMatch(/Mark depleted/);
+    }
   });
 
   it("allows missing_linkage with partial workflow evidence", () => {

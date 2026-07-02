@@ -112,8 +112,12 @@ export function canAdminResolvePartialBagInventory(args: {
   if (args.hasOpenSession) {
     return {
       ok: false,
+      // SPLIT-BAG-2 — actionable, not a dead-end. The open session can be
+      // closed right in the workbench: "Use calculated remaining" (system-
+      // derived), "Correct remaining" (manual physical count / weigh-back /
+      // supervisor estimate), or "Mark depleted" — no floor step required.
       reason:
-        "An allocation session is still open. Close it at the floor before admin resolution.",
+        "This bag has an open allocation session. Close it from the workbench — Use calculated remaining, Correct remaining (manual count), or Mark depleted — then it can be reused.",
     };
   }
   if (!args.hasPartialPackagingWorkflow) {

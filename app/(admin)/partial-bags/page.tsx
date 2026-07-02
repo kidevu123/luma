@@ -191,6 +191,13 @@ function SectionTable({
                   <p className="text-[10.5px] text-text-muted leading-snug">
                     {row.eligibilityNote}
                   </p>
+                  {variant === "needs_closeout" ? (
+                    <p className="mt-1 rounded border border-amber-200 bg-amber-50/70 px-1.5 py-1 text-[10px] font-medium leading-snug text-amber-800">
+                      Open allocation session — close it here to reuse this bag:
+                      Use calculated remaining, Correct remaining (manual count),
+                      or Mark depleted. No floor step needed.
+                    </p>
+                  ) : null}
                   {(() => {
                     const sd = systemDerived?.get(row.bagId);
                     if (!sd) return null;

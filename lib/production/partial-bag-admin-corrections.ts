@@ -143,50 +143,70 @@ export async function correctPartialBagRemaining(args: {
   if (bag.status === "VOID") {
     return { ok: false, error: "Bag is void — un-void is not supported; create a new record." };
   }
+  // SPLIT-BAG-2 — an OPEN allocation session is no longer a dead-end. When one
+  // exists, this manual closeout CLOSES it in place with the entered remaining +
+  // method (the same in-place pattern mark-depleted / void already use), instead
+  // of dead-ending and sending the admin to the floor. When none exists, a new
+  // closed correction session is appended as before.
   const open = await loadOpenSession(args.inventoryBagId);
-  if (open) {
-    return {
-      ok: false,
-      error:
-        "Bag has an open allocation session — close it at the floor (or mark depleted) before correcting the remaining count.",
-    };
-  }
   const last = await loadLastClosedSession(args.inventoryBagId);
   const priorRemaining = last?.endingBalanceQty ?? null;
+  const startingForOpen = open?.startingBalanceQty ?? null;
   const confidence = confidenceForResolutionMethod(args.method);
   const now = new Date();
   const newStatus = args.newRemaining > 0 ? "AVAILABLE" : "EMPTIED";
+  const closedAllocationStatus = args.newRemaining > 0 ? "CLOSED" : "DEPLETED";
 
   await db.transaction(async (tx) => {
-    const [session] = await tx
-      .insert(rawBagAllocationSessions)
-      .values({
-        inventoryBagId: args.inventoryBagId,
-        ...(last?.poId ? { poId: last.poId } : {}),
-        ...(last?.productId ? { productId: last.productId } : {}),
-        allocationStatus: args.newRemaining > 0 ? "CLOSED" : "DEPLETED",
-        openedAt: now,
-        closedAt: now,
-        ...(args.actor.id
-          ? { openedByUserId: args.actor.id, closedByUserId: args.actor.id }
-          : {}),
-        ...(priorRemaining != null
-          ? {
-              startingBalanceQty: priorRemaining,
-              startingBalanceSource: "LEDGER_DERIVED",
-            }
-          : {}),
-        endingBalanceQty: args.newRemaining,
-        endingBalanceSource: args.method,
-        unitOfMeasure: "tablets",
-        confidence,
-        notes: `admin_correction | ${args.reason.trim()}`,
-      })
-      .returning({ id: rawBagAllocationSessions.id });
-    if (!session) throw new Error("Correction session insert failed.");
+    let sessionId: string;
+    if (open) {
+      // Close the floor's OPEN session in place — the opening event is
+      // untouched; this appends the ending balance + method.
+      await tx
+        .update(rawBagAllocationSessions)
+        .set({
+          allocationStatus: closedAllocationStatus,
+          closedAt: now,
+          ...(args.actor.id ? { closedByUserId: args.actor.id } : {}),
+          endingBalanceQty: args.newRemaining,
+          endingBalanceSource: args.method,
+          confidence,
+          notes: `admin_manual_closeout | ${args.reason.trim()}`,
+        })
+        .where(eq(rawBagAllocationSessions.id, open.id));
+      sessionId = open.id;
+    } else {
+      const [session] = await tx
+        .insert(rawBagAllocationSessions)
+        .values({
+          inventoryBagId: args.inventoryBagId,
+          ...(last?.poId ? { poId: last.poId } : {}),
+          ...(last?.productId ? { productId: last.productId } : {}),
+          allocationStatus: closedAllocationStatus,
+          openedAt: now,
+          closedAt: now,
+          ...(args.actor.id
+            ? { openedByUserId: args.actor.id, closedByUserId: args.actor.id }
+            : {}),
+          ...(priorRemaining != null
+            ? {
+                startingBalanceQty: priorRemaining,
+                startingBalanceSource: "LEDGER_DERIVED",
+              }
+            : {}),
+          endingBalanceQty: args.newRemaining,
+          endingBalanceSource: args.method,
+          unitOfMeasure: "tablets",
+          confidence,
+          notes: `admin_correction | ${args.reason.trim()}`,
+        })
+        .returning({ id: rawBagAllocationSessions.id });
+      if (!session) throw new Error("Correction session insert failed.");
+      sessionId = session.id;
+    }
 
     await tx.insert(rawBagAllocationEvents).values({
-      allocationSessionId: session.id,
+      allocationSessionId: sessionId,
       inventoryBagId: args.inventoryBagId,
       ...(last?.poId ? { poId: last.poId } : {}),
       eventType: args.method === "WEIGH_BACK" ? "RAW_BAG_REWEIGHED" : "RAW_BAG_ADJUSTED",
@@ -195,7 +215,10 @@ export async function correctPartialBagRemaining(args: {
       quantitySource: args.method,
       ...(args.actor.id ? { actorUserId: args.actor.id } : {}),
       payload: {
-        admin_correction: "correct_remaining",
+        admin_correction: open ? "manual_closeout_open_session" : "correct_remaining",
+        closed_open_session: Boolean(open),
+        open_session_id: open?.id ?? null,
+        starting_balance: open ? startingForOpen : priorRemaining,
         prior_remaining: priorRemaining,
         new_remaining: args.newRemaining,
         reason: args.reason.trim(),
@@ -224,7 +247,9 @@ export async function correctPartialBagRemaining(args: {
           remaining: args.newRemaining,
           method: args.method,
           reason: args.reason.trim(),
-          correction_session_id: session.id,
+          correction_session_id: sessionId,
+          closed_open_session: Boolean(open),
+          open_session_id: open?.id ?? null,
         },
       },
       tx,
