@@ -29,6 +29,7 @@ import {
   type RecallSearchInput,
   type RecallSearchKind,
 } from "@/lib/production/recall-passport-loaders";
+import { firstFinishedLotId } from "@/lib/production/recall-passport";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 
@@ -288,11 +289,13 @@ export default async function RecallPage({
         </div>
       </div>
 
-      {/* Export / print bar */}
+      {/* Export / print bar. firstLotId is null when the search matched raw
+          bags but no finished lot (in-progress / partial bag) — the labels
+          action is hidden rather than crashing the whole page render. */}
       {input && hasResults && (
         <ExportBar
           searchParams={sp}
-          firstLotId={passport!.finishedLots[0]!.id}
+          firstLotId={passport ? firstFinishedLotId(passport) : null}
         />
       )}
 
@@ -329,14 +332,14 @@ function ExportBar({
   firstLotId,
 }: {
   searchParams: Record<string, string | undefined>;
-  firstLotId: string;
+  /** Null when the match is raw-bag-only (no finished lot to print labels for). */
+  firstLotId: string | null;
 }) {
   const exportParams = new URLSearchParams();
   for (const [k, v] of Object.entries(searchParams)) {
     if (v && v.trim().length > 0) exportParams.set(k, v);
   }
   const exportHref = `/recall/export.csv?${exportParams.toString()}`;
-  const labelHref = `/finished-lots/${firstLotId}/labels`;
   return (
     <div className="flex flex-wrap gap-2">
       <Link
@@ -353,13 +356,15 @@ function ExportBar({
         <Download className="h-3.5 w-3.5" />
         Export CSV (internal — supplier lot included)
       </Link>
-      <Link
-        href={labelHref}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition-colors"
-      >
-        <Printer className="h-3.5 w-3.5" />
-        Print labels (first matched lot)
-      </Link>
+      {firstLotId ? (
+        <Link
+          href={`/finished-lots/${firstLotId}/labels`}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition-colors"
+        >
+          <Printer className="h-3.5 w-3.5" />
+          Print labels (first matched lot)
+        </Link>
+      ) : null}
     </div>
   );
 }

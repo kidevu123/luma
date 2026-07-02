@@ -46,6 +46,17 @@ export function rollupRecallConfidence(
   return min;
 }
 
+/** First finished-lot id in a recall passport, or null when the search matched
+ *  raw bags but no finished lot (e.g. an in-progress / partial bag not yet
+ *  finalised). The recall page uses this to guard the "Print labels (first
+ *  matched lot)" action — accessing finishedLots[0].id unguarded crashed the
+ *  whole server render when only raw bags matched (digest 3511293824). */
+export function firstFinishedLotId(
+  passport: { finishedLots: ReadonlyArray<{ id: string }> },
+): string | null {
+  return passport.finishedLots[0]?.id ?? null;
+}
+
 // ─── Internal receipt numbers ─────────────────────────────────────────
 
 /** Build the canonical internal-receipt-number string from the

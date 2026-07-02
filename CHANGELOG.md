@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.13.2] — 2026-07-02
+
+### Fixed — Traceability lookup (/recall) server-render crash (digest 3511293824)
+- **Root cause:** on the Traceability lookup page, the export/print bar rendered `firstLotId={passport.finishedLots[0]!.id}` whenever `hasResults` was true — but `hasResults` is true when **either** raw bags **or** finished lots matched. A search that resolved raw bags with **no finished lot** (a supplier-lot / internal-receipt / raw-bag-QR search for an in-progress or partial bag not yet finalised) hit `finishedLots[0]` = `undefined` → `.id` threw → the whole Server Components render crashed. Confirmed against production: **56 raw bags** are matchable by supplier lot with no finished-lot linkage (e.g. lot `173-26-2308`), any of which triggered the crash. Pre-existing bug in the original recall page — not introduced by the recent partial-bag / system-derived work.
+- **Fix (narrow + defensive):** new pure `firstFinishedLotId(passport)` helper returns the first finished-lot id or **null** when none matched. The page passes that nullable id to `ExportBar`, which now renders the "Print labels (first matched lot)" link **only when a finished lot exists**. The customer-safe and internal CSV exports (which key off the search params, not a lot id) still render for raw-bag-only matches, so a raw-bag search shows its full passport instead of a blank error page. `lib/production/recall-passport.ts`, `app/(admin)/recall/page.tsx`.
+
+### Notes
+- No schema changes; no production data touched. No partial-bag / QR / system-derived behaviour changed. Regression coverage: `firstFinishedLotId` unit tests (raw-bags-only → null; lots present → first id) reproducing the exact crash condition, plus a structural guard asserting the page never dereferences `finishedLots[0]!.id` again.
+
 ## [1.13.1] — 2026-07-02
 
 ### Fixed — SPLIT-BAG-2: Partial Bag Workbench dead-end on an open allocation session

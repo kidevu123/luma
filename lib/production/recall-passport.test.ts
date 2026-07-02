@@ -6,6 +6,7 @@ import {
   buildInternalReceiptNumber,
   buildRawBagQrPayload,
   buildRawBagQrPayloadJson,
+  firstFinishedLotId,
   getRawBagReceiptIdentity,
   normalizeSupplierLotNumber,
   rollupRecallConfidence,
@@ -13,6 +14,19 @@ import {
   validateInternalReceiptNumber,
   validateTraceCode,
 } from "./recall-passport";
+
+describe("firstFinishedLotId — recall page crash guard (digest 3511293824)", () => {
+  it("returns the first lot id when finished lots exist", () => {
+    expect(firstFinishedLotId({ finishedLots: [{ id: "fl-1" }, { id: "fl-2" }] })).toBe("fl-1");
+  });
+
+  it("returns null (no crash) when the search matched raw bags but no finished lot", () => {
+    // The exact production condition: a supplier-lot / receipt / bag-QR search
+    // resolves raw bags for an in-progress or partial bag that has no finished
+    // lot yet. Previously `finishedLots[0]!.id` threw and crashed the render.
+    expect(firstFinishedLotId({ finishedLots: [] })).toBeNull();
+  });
+});
 
 describe("buildInternalReceiptNumber", () => {
   it("builds receive + box + bag", () => {
