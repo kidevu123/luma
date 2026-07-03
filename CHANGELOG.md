@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.19.2] — 2026-07-03
+
+### Fixed — QR-RESERVE-REPAIR-1: misleading "Not ready for floor" + lost-reservation repair
+- **Root cause (data + copy, not a floor-ready logic bug):** floor readiness joins `qr_cards.scan_token = inventory_bags.bag_qr_code` and requires the card `status = ASSIGNED` (reserved) — the same source of truth the floor scan uses. For the reported bag (PO-00238-R2 Bag 5, receipt 352188, `bag-card-199`), the bag correctly points at `bag-card-199`, but that card is **IDLE** (its intake reservation was lost/desynced), so floor-ready *correctly* reports "not ready". The problem was the **message**: `BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED` → "Receive and reserve this QR on the Receive Pills page", which wrongly implies the bag wasn't received/assigned when in fact its QR token is set but the card is idle.
+- **Precise reason:** new `BLOCKED_QR_RESERVATION_LOST` code — when a bag's `bag_qr_code` points at a RAW_BAG card that is **IDLE** (bag claims it, but the card is unreserved), the receive page now says *"This QR is on the bag but its card is idle (reservation lost) — re-reserve it here."* instead of the generic receive-pills copy. The floor-scan path (evaluating a bare idle card) keeps the original `BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED` message. `lib/production/floor-readiness.ts`.
+- **Guarded admin repair:** new lead-gated **"Re-reserve QR"** button on the receive detail page (shown only for `RESERVATION_LOST` rows) → `repairQrReservationAction` → `repairQrReservation`, which flips the bag's own IDLE card back to ASSIGNED via a **conditional update** (`WHERE status='IDLE' AND assigned_workflow_bag_id IS NULL` — idempotent + race-safe) and writes a `qr_card.reservation_repaired` audit. It **fails closed** (`canRepairQrReservation`): never touches a card that is active in a production run, retired, the wrong type, claimed by another bag, or on a voided/held bag; it does not touch workflow allocations. `lib/db/queries/bag-edits.ts`, `app/(admin)/inbound/[id]/*`.
+
+### Notes
+- Floor-ready source of truth is unchanged and consistent with the floor scan (`bag_qr_code` → card `status ASSIGNED`). No QR data model change; no schema change; no silent QR reassignment on deploy. The IDLE-QR invariant is preserved (repair sets ASSIGNED with `assignedWorkflowBagId` still null; IDLE cards still never retain an assignment). Bag 5 needs the one-click repair (reported; **not** executed — no production data mutated). Existing receiving / grouped-receives / QR / partial-bag / allocation / auto-issue / auto-release behavior unaffected.
+
 ## [1.19.1] — 2026-07-03
 
 ### Fixed — RETURNED_TO_STOCK consistency for manual finished-lot issue prefill (v1.19.0 follow-up)

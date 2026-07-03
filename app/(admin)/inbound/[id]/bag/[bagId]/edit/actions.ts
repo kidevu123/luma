@@ -1,7 +1,7 @@
 "use server";
 
 import { requireLead } from "@/lib/auth-guards";
-import { editInventoryBag, type BagEditInput } from "@/lib/db/queries/bag-edits";
+import { editInventoryBag, repairQrReservation, type BagEditInput } from "@/lib/db/queries/bag-edits";
 import { revalidatePath } from "next/cache";
 
 export type EditBagFormData = {
@@ -62,5 +62,20 @@ export async function editBagAction(
     revalidatePath("/qr-cards");
   }
 
+  return result;
+}
+
+// QR-RESERVE-REPAIR-1 — re-reserve a bag's own IDLE QR (lost intake
+// reservation). Guarded + audited; never touches a card active in production.
+export async function repairQrReservationAction(
+  receiveId: string,
+  bagId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await requireLead();
+  const result = await repairQrReservation(bagId, actor);
+  if (result.ok) {
+    revalidatePath(`/inbound/${receiveId}`);
+    revalidatePath("/qr-cards");
+  }
   return result;
 }

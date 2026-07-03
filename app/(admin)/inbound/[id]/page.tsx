@@ -18,6 +18,7 @@ import { eq, inArray } from "drizzle-orm";
 import { BagEditHistoryPanel } from "./bag-edit-history-panel";
 import { BagNotesCell } from "./bag-notes-cell";
 import { FloorReadinessBadge } from "@/components/admin/floor-readiness-badge";
+import { RepairQrReservationButton } from "./repair-qr-reservation-button";
 import { loadReceiveBagReadinessEvaluations } from "@/lib/production/floor-readiness-loaders";
 import { formatBagQrForDisplay } from "@/lib/ui/format-bag-qr-display";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
@@ -271,10 +272,20 @@ export default async function ReceiveDetailPage({
                           </TD>
                           <TD>
                             {readinessByBag.get(bag.id) ? (
-                              <FloorReadinessBadge
-                                evaluation={readinessByBag.get(bag.id)!}
-                                showAction
-                              />
+                              <>
+                                <FloorReadinessBadge
+                                  evaluation={readinessByBag.get(bag.id)!}
+                                  showAction
+                                />
+                                {readinessByBag
+                                  .get(bag.id)!
+                                  .codes.includes("BLOCKED_QR_RESERVATION_LOST") ? (
+                                  <RepairQrReservationButton
+                                    receiveId={r.receive.id}
+                                    bagId={bag.id}
+                                  />
+                                ) : null}
+                              </>
                             ) : (
                               <span className="text-xs text-text-muted">—</span>
                             )}

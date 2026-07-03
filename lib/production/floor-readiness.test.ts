@@ -40,6 +40,57 @@ describe("evaluateInventoryBagReadiness", () => {
     expect(r.codes).toEqual([]);
   });
 
+  it("QR-RESERVE-REPAIR-1: bag has a QR token but the card is IDLE → RESERVATION_LOST (not the generic 'receive and reserve')", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      qrCard: {
+        cardType: "RAW_BAG",
+        status: "IDLE", // bag-card-199 scenario: reservation lost
+        assignedWorkflowBagId: null,
+        scanToken: "bag-card-199",
+      },
+    });
+    expect(r.level).toBe("BLOCKED");
+    expect(r.codes).toContain("BLOCKED_QR_RESERVATION_LOST");
+    expect(r.codes).not.toContain("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED");
+    // Precise, actionable admin copy — NOT "Receive and reserve … on the Receive Pills page".
+    expect(r.adminAction).toMatch(/idle .*reservation lost.*re-reserve/i);
+    expect(r.adminAction).not.toMatch(/Receive Pills/i);
+    // The reason line is specific.
+    const lines = floorReadinessDetailLines(r);
+    expect(lines.blocked.join(" ")).toMatch(/idle .*reservation lost/i);
+  });
+
+  it("a correctly reserved (ASSIGNED) QR on the same bag is READY", () => {
+    const r = evaluateInventoryBagReadiness(readyBag());
+    expect(r.level).toBe("READY_FOR_FLOOR");
+  });
+
+  it("a QR active in another workflow warns (review before floor), not a generic block", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      qrCard: {
+        cardType: "RAW_BAG",
+        status: "ASSIGNED",
+        assignedWorkflowBagId: "wf-other",
+        scanToken: "bag-card-100",
+      },
+    });
+    expect(r.codes).toContain("WARNING_ALREADY_ASSIGNED_OR_ACTIVE");
+  });
+
+  it("the floor-scan path (evaluateQrCardReadiness of an IDLE card) keeps the generic NOT_ASSIGNED code", () => {
+    const r = evaluateQrCardReadiness({
+      cardType: "RAW_BAG",
+      status: "IDLE",
+      assignedWorkflowBagId: null,
+      scanToken: "bag-card-199",
+      inventoryBag: null,
+    });
+    expect(r.codes).toContain("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED");
+    expect(r.codes).not.toContain("BLOCKED_QR_RESERVATION_LOST");
+  });
+
   it("blocks missing receipt", () => {
     const r = evaluateInventoryBagReadiness({
       ...readyBag(),

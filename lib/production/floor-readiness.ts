@@ -17,6 +17,7 @@ export type FloorReadinessCode =
   | "BLOCKED_MISSING_PO_OR_RECEIVE_CONTEXT"
   | "BLOCKED_QR_NOT_RAW_BAG"
   | "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED"
+  | "BLOCKED_QR_RESERVATION_LOST"
   | "BLOCKED_QR_ALREADY_ACTIVE"
   | "WARNING_LEGACY_BAG"
   | "WARNING_PRODUCT_DEFERRED_TO_SEALING"
@@ -249,11 +250,18 @@ function appendQrCardCodes(
   }
 
   if (card.status === "IDLE") {
-    if (
-      !opts.allowPartialBagRestart &&
-      !codes.includes("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED")
-    ) {
-      codes.push("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED");
+    if (!opts.allowPartialBagRestart) {
+      // The bag's bag_qr_code points at THIS RAW_BAG card, but the card is IDLE
+      // — the intake reservation was lost (e.g. desynced by an edit). That is a
+      // precise, repairable state, distinct from "no QR received yet". The
+      // floor-scan path (forInventoryBag=false) keeps the generic code.
+      if (opts.forInventoryBag) {
+        if (!codes.includes("BLOCKED_QR_RESERVATION_LOST")) {
+          codes.push("BLOCKED_QR_RESERVATION_LOST");
+        }
+      } else if (!codes.includes("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED")) {
+        codes.push("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED");
+      }
     }
     return;
   }
@@ -286,6 +294,7 @@ function adminActionForCodes(codes: FloorReadinessCode[]): string | null {
   const priority: FloorReadinessCode[] = [
     "BLOCKED_MISSING_INVENTORY_BAG_LINK",
     "BLOCKED_MISSING_QR_LINK",
+    "BLOCKED_QR_RESERVATION_LOST",
     "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED",
     "BLOCKED_QR_NOT_RAW_BAG",
     "BLOCKED_QR_ALREADY_ACTIVE",
@@ -313,6 +322,8 @@ function adminActionForCodes(codes: FloorReadinessCode[]): string | null {
       return "Complete receive/PO linkage for this bag in inbound receiving.";
     case "BLOCKED_QR_NOT_RAW_BAG":
       return "Use a RAW_BAG floor card, not a variety or other card type.";
+    case "BLOCKED_QR_RESERVATION_LOST":
+      return "This QR is on the bag but its card is idle (reservation lost) — re-reserve it here.";
     case "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED":
       return "Receive and reserve this QR on the Receive Pills page before scanning at the floor.";
     case "BLOCKED_QR_ALREADY_ACTIVE":
@@ -357,6 +368,9 @@ function operatorDetailForCodes(codes: FloorReadinessCode[]): string {
   }
   if (codes.includes("BLOCKED_MISSING_INVENTORY_BAG_LINK")) {
     return "This QR is not linked to a received bag.";
+  }
+  if (codes.includes("BLOCKED_QR_RESERVATION_LOST")) {
+    return "This QR is on the bag but idle (reservation lost) — ask admin to re-reserve it.";
   }
   if (codes.includes("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED")) {
     return "This QR has not been received and reserved yet.";
@@ -444,6 +458,8 @@ function readinessReasonLineForCode(code: FloorReadinessCode): string | null {
       return "QR not linked to a received bag";
     case "BLOCKED_QR_NOT_RAW_BAG":
       return "Not a raw-bag floor card";
+    case "BLOCKED_QR_RESERVATION_LOST":
+      return "QR set on this bag but idle (reservation lost) — re-reserve";
     case "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED":
       return "QR not reserved for this receive yet";
     case "BLOCKED_QR_ALREADY_ACTIVE":
