@@ -66,6 +66,42 @@ describe("evaluateInventoryBagReadiness", () => {
     expect(r.level).toBe("READY_FOR_FLOOR");
   });
 
+  it("v1.21.0: IN_USE bag + idle QR is a production-state review, NOT a re-reservable lost reservation", () => {
+    const r = evaluateInventoryBagReadiness({
+      ...readyBag(),
+      bagStatus: "IN_USE",
+      qrCard: { cardType: "RAW_BAG", status: "IDLE", assignedWorkflowBagId: null, scanToken: "bag-card-121" },
+    });
+    expect(r.codes).toContain("WARNING_QR_IDLE_IN_PRODUCTION");
+    // Must NOT offer intake re-reservation for a production bag.
+    expect(r.codes).not.toContain("BLOCKED_QR_RESERVATION_LOST");
+    expect(r.adminAction).toMatch(/production QR state needs review/i);
+    expect(r.adminAction).not.toMatch(/re-reserve it here/i);
+  });
+
+  it("v1.21.0: EMPTIED/DEPLETED bag + idle QR is 'no reservation needed', not a lost reservation", () => {
+    for (const s of ["EMPTIED", "DEPLETED"]) {
+      const r = evaluateInventoryBagReadiness({
+        ...readyBag(),
+        bagStatus: s,
+        qrCard: { cardType: "RAW_BAG", status: "IDLE", assignedWorkflowBagId: null, scanToken: "bag-card-107" },
+      });
+      expect(r.codes).toContain("WARNING_QR_IDLE_BAG_DEPLETED");
+      expect(r.codes).not.toContain("BLOCKED_QR_RESERVATION_LOST");
+    }
+  });
+
+  it("v1.21.0: AVAILABLE (and unspecified) bag + idle QR keeps the re-reservable RESERVATION_LOST code", () => {
+    const idleCard = { cardType: "RAW_BAG", status: "IDLE", assignedWorkflowBagId: null, scanToken: "bag-card-199" } as const;
+    expect(
+      evaluateInventoryBagReadiness({ ...readyBag(), bagStatus: "AVAILABLE", qrCard: { ...idleCard } }).codes,
+    ).toContain("BLOCKED_QR_RESERVATION_LOST");
+    // Back-compat: no bagStatus supplied → treated as floor-eligible.
+    expect(
+      evaluateInventoryBagReadiness({ ...readyBag(), qrCard: { ...idleCard } }).codes,
+    ).toContain("BLOCKED_QR_RESERVATION_LOST");
+  });
+
   it("a QR active in another workflow warns (review before floor), not a generic block", () => {
     const r = evaluateInventoryBagReadiness({
       ...readyBag(),

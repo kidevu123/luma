@@ -19,6 +19,8 @@ export type FloorReadinessCode =
   | "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED"
   | "BLOCKED_QR_RESERVATION_LOST"
   | "BLOCKED_QR_ALREADY_ACTIVE"
+  | "WARNING_QR_IDLE_IN_PRODUCTION"
+  | "WARNING_QR_IDLE_BAG_DEPLETED"
   | "WARNING_LEGACY_BAG"
   | "WARNING_PRODUCT_DEFERRED_TO_SEALING"
   | "WARNING_ALREADY_ASSIGNED_OR_ACTIVE"
@@ -47,6 +49,12 @@ export type InventoryBagReadinessInput = {
   hasReceiveContext: boolean;
   receivePoId: string | null;
   qrCard: QrCardReadinessInput | null;
+  /** inventory_bags.status. Distinguishes a genuine lost intake reservation
+   *  (AVAILABLE bag + idle QR = re-reservable) from expected post-production
+   *  history (IN_USE/EMPTIED bag whose QR was correctly released at
+   *  finalize/deplete). Optional: when absent, treated as floor-eligible so
+   *  existing callers keep the v1.19.2 "reservation lost" behavior. */
+  bagStatus?: string | null;
 };
 
 export type WorkflowBagReadinessInput = {
@@ -120,12 +128,26 @@ export function evaluateInventoryBagReadiness(
   }
 
   if (input.qrCard) {
-    appendQrCardCodes(codes, input.qrCard, { forInventoryBag: true });
+    appendQrCardCodes(codes, input.qrCard, {
+      forInventoryBag: true,
+      bagStatus: input.bagStatus,
+    });
   } else if (qr.length > 0 && !isBagQrPlaceholder(qr)) {
     codes.push("BLOCKED_MISSING_QR_LINK");
   }
 
   return buildResult(codes, adminActionForCodes(codes));
+}
+
+/** True when the bag is (or is treated as) floor-eligible — an idle QR here is a
+ *  genuine lost intake reservation. Non-AVAILABLE bags (IN_USE/EMPTIED/…) whose
+ *  QR is idle are expected post-production history, not a lost reservation. */
+function isFloorEligibleBagStatus(bagStatus: string | null | undefined): boolean {
+  return bagStatus == null || bagStatus === "AVAILABLE";
+}
+
+function isDepletedBagStatus(bagStatus: string | null | undefined): boolean {
+  return bagStatus === "EMPTIED" || bagStatus === "DEPLETED";
 }
 
 /** Preview readiness for a not-yet-saved intake row (Receive pills form). */
@@ -240,7 +262,11 @@ export function evaluateWorkflowBagReadiness(
 function appendQrCardCodes(
   codes: FloorReadinessCode[],
   card: QrCardReadinessInput,
-  opts: { forInventoryBag: boolean; allowPartialBagRestart?: boolean },
+  opts: {
+    forInventoryBag: boolean;
+    allowPartialBagRestart?: boolean;
+    bagStatus?: string | null | undefined;
+  },
 ): void {
   if (card.cardType !== "RAW_BAG") {
     if (!codes.includes("BLOCKED_QR_NOT_RAW_BAG")) {
@@ -251,13 +277,26 @@ function appendQrCardCodes(
 
   if (card.status === "IDLE") {
     if (!opts.allowPartialBagRestart) {
-      // The bag's bag_qr_code points at THIS RAW_BAG card, but the card is IDLE
-      // — the intake reservation was lost (e.g. desynced by an edit). That is a
-      // precise, repairable state, distinct from "no QR received yet". The
-      // floor-scan path (forInventoryBag=false) keeps the generic code.
       if (opts.forInventoryBag) {
-        if (!codes.includes("BLOCKED_QR_RESERVATION_LOST")) {
-          codes.push("BLOCKED_QR_RESERVATION_LOST");
+        // The bag's bag_qr_code points at THIS RAW_BAG card, but the card is
+        // IDLE. What that means depends on the bag's own status:
+        //   - AVAILABLE (floor-eligible): a genuine LOST intake reservation —
+        //     re-reservable (v1.19.2).
+        //   - EMPTIED/DEPLETED: the bag is spent; its QR was correctly released
+        //     — no floor reservation is needed. Informational only.
+        //   - IN_USE (or other): the bag already went through production and its
+        //     QR was correctly released at finalize; re-reserving as intake is
+        //     WRONG. Flag for production-side review, not re-reservation.
+        if (isFloorEligibleBagStatus(opts.bagStatus)) {
+          if (!codes.includes("BLOCKED_QR_RESERVATION_LOST")) {
+            codes.push("BLOCKED_QR_RESERVATION_LOST");
+          }
+        } else if (isDepletedBagStatus(opts.bagStatus)) {
+          if (!codes.includes("WARNING_QR_IDLE_BAG_DEPLETED")) {
+            codes.push("WARNING_QR_IDLE_BAG_DEPLETED");
+          }
+        } else if (!codes.includes("WARNING_QR_IDLE_IN_PRODUCTION")) {
+          codes.push("WARNING_QR_IDLE_IN_PRODUCTION");
         }
       } else if (!codes.includes("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED")) {
         codes.push("BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED");
@@ -324,6 +363,10 @@ function adminActionForCodes(codes: FloorReadinessCode[]): string | null {
       return "Use a RAW_BAG floor card, not a variety or other card type.";
     case "BLOCKED_QR_RESERVATION_LOST":
       return "This QR is on the bag but its card is idle (reservation lost) — re-reserve it here.";
+    case "WARNING_QR_IDLE_IN_PRODUCTION":
+      return "Bag is in production and its QR is idle — production QR state needs review (do not re-reserve as intake).";
+    case "WARNING_QR_IDLE_BAG_DEPLETED":
+      return "Bag is depleted/emptied — its QR was released and no floor reservation is needed.";
     case "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED":
       return "Receive and reserve this QR on the Receive Pills page before scanning at the floor.";
     case "BLOCKED_QR_ALREADY_ACTIVE":
@@ -460,6 +503,10 @@ function readinessReasonLineForCode(code: FloorReadinessCode): string | null {
       return "Not a raw-bag floor card";
     case "BLOCKED_QR_RESERVATION_LOST":
       return "QR set on this bag but idle (reservation lost) — re-reserve";
+    case "WARNING_QR_IDLE_IN_PRODUCTION":
+      return "In production, QR idle — production QR state needs review";
+    case "WARNING_QR_IDLE_BAG_DEPLETED":
+      return "Depleted/emptied — no floor reservation needed";
     case "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED":
       return "QR not reserved for this receive yet";
     case "BLOCKED_QR_ALREADY_ACTIVE":

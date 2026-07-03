@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.21.0] — 2026-07-03
+
+### Added — QR production-desync classifier (v1.20.0 follow-up; read-only)
+- **Investigation result:** after v1.20.0 repaired the 34 safe intake lost reservations, the detector's 24 "unsafe" rows are all **expected history, not bugs**. The **16 IN_USE** rows are finalized production bags (workflow ran → `BAG_FINALIZED` → `BAG_RELEASED`, so the RAW_BAG QR was **correctly released to IDLE**); their allocation sessions are OPEN only because 15/16 are the normal finalized-awaiting-lot auto-issue backlog. **None** are on an active/non-finalized workflow. The **8 EMPTIED** rows are depleted (QR released). No re-reservation is warranted for any of them, and the v1.20.0 guard already blocks them (non-AVAILABLE).
+- **New pure classifier** `classifyQrIdlePointedBag` + read-only report `listQrProductionDesyncReport` + `npm run detect:qr-production-desync`: separates every bag pointing at an IDLE RAW_BAG card into `SAFE_INTAKE_LOST_RESERVATION` (the only actionable category), `IN_USE_FINALIZED_QR_RELEASED` / `DEPLETED_QR_RELEASED` (expected history), `IN_USE_ACTIVE_QR_IDLE` / `IN_USE_NO_WORKFLOW` / `AVAILABLE_NEEDS_REVIEW` / `OTHER_NEEDS_REVIEW` (manual review). Fails closed to a review category. `lib/db/queries/lost-qr-reservations.ts`.
+
+### Fixed — floor-ready copy no longer mislabels production/depleted bags as "reservation lost"
+- Floor readiness is now **bag-status-aware**. An idle QR on the bag it claims is only a re-reservable lost reservation when the bag is **AVAILABLE**. New codes: `WARNING_QR_IDLE_IN_PRODUCTION` ("Bag is in production and its QR is idle — production QR state needs review; do not re-reserve as intake") for IN_USE bags, and `WARNING_QR_IDLE_BAG_DEPLETED` ("depleted/emptied — no floor reservation needed") for EMPTIED/DEPLETED bags. `BLOCKED_QR_RESERVATION_LOST` (and the single-row **Re-reserve QR** button) is now shown **only for AVAILABLE bags** — the button no longer appears for IN_USE/EMPTIED rows. Back-compat: callers that don't pass `bagStatus` (floor scan) keep the prior behavior. `lib/production/floor-readiness.ts`, `floor-readiness-loaders.ts`, receive detail page.
+
+### Notes
+- **Read-only investigation — no production data mutated.** No IN_USE row was re-reserved. No allocation session, workflow bag, finished lot, or Zoho state touched. v1.20.0 intake repair (AVAILABLE-only, guarded) is unchanged; the single-row and batch repairs still cover exactly the safe intake category. IDLE-QR invariant and partial-bag QR retention intact. No schema change.
+
 ## [1.20.0] — 2026-07-03
 
 ### Added — BATCH-LOST-QR-RESERVATION-REPAIR-1: detector + batch repair + edit-flow prevention

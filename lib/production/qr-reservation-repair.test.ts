@@ -10,6 +10,7 @@ import { join } from "path";
 vi.mock("@/lib/db", () => ({ db: {} }));
 
 import { canRepairQrReservation } from "@/lib/db/queries/bag-edits";
+import { classifyQrIdlePointedBag } from "@/lib/db/queries/lost-qr-reservations";
 
 const RAW_IDLE = { cardType: "RAW_BAG", status: "IDLE", assignedWorkflowBagId: null };
 
@@ -119,8 +120,14 @@ describe("batch detector + repair — reuses the single-row guard, audited, no a
   it("writes a batch audit (BATCH_LOST_QR_RESERVATION_REPAIR) and never touches workflow/allocation/finished-lot/Zoho", () => {
     expect(lostSrc).toMatch(/action: "qr_card\.reservation_repair_batch"/);
     expect(lostSrc).toMatch(/source: "BATCH_LOST_QR_RESERVATION_REPAIR"/);
-    // No mutation of workflow/allocation/finished-lot/Zoho tables (code identifiers).
-    expect(lostSrc).not.toMatch(/rawBagAllocationSessions|workflowBags|finishedLots|zohoProductionOutput/);
+    // The batch repair body touches no workflow/allocation/finished-lot/Zoho
+    // tables (the read-only report may JOIN workflowBags, so scope to the fn).
+    const start = lostSrc.indexOf("export async function repairLostQrReservationsBatch");
+    const body = lostSrc.slice(start, start + 1600);
+    expect(body).not.toMatch(/rawBagAllocationSessions|workflowBags|finishedLots|zohoProductionOutput/);
+    // No table mutation anywhere in the module (detector + batch are read-only
+    // except the per-card qr_cards flip inside repairQrReservation, in bag-edits).
+    expect(lostSrc).not.toMatch(/\.update\(|\.insert\(|\.delete\(/);
   });
 
   it("bearer route is auth-gated; GET is read-only dry-run, POST executes with a system actor", () => {
@@ -136,6 +143,59 @@ describe("batch detector + repair — reuses the single-row guard, audited, no a
     expect(actionsSrc).toMatch(/repairLostQrReservationsAction[\s\S]{0,320}requireAdmin\(\)/);
     expect(batchButtonSrc).toMatch(/repairLostQrReservationsAction/);
     expect(batchButtonSrc).toMatch(/Repair lost QR reservations/);
+  });
+});
+
+describe("classifyQrIdlePointedBag — intake vs production-side (fail closed)", () => {
+  it("AVAILABLE + guard-ok = SAFE_INTAKE_LOST_RESERVATION (the only actionable category)", () => {
+    const r = classifyQrIdlePointedBag({ bagStatus: "AVAILABLE", hasWorkflow: false, workflowFinalized: false, intakeGuardOk: true });
+    expect(r.category).toBe("SAFE_INTAKE_LOST_RESERVATION");
+    expect(r.actionable).toBe(true);
+  });
+  it("AVAILABLE + guard-fail (e.g. conflict) = AVAILABLE_NEEDS_REVIEW (not actionable)", () => {
+    const r = classifyQrIdlePointedBag({ bagStatus: "AVAILABLE", hasWorkflow: false, workflowFinalized: false, intakeGuardOk: false });
+    expect(r.category).toBe("AVAILABLE_NEEDS_REVIEW");
+    expect(r.actionable).toBe(false);
+  });
+  it("IN_USE + finalized workflow = IN_USE_FINALIZED_QR_RELEASED (expected history, not actionable)", () => {
+    const r = classifyQrIdlePointedBag({ bagStatus: "IN_USE", hasWorkflow: true, workflowFinalized: true, intakeGuardOk: false });
+    expect(r.category).toBe("IN_USE_FINALIZED_QR_RELEASED");
+    expect(r.actionable).toBe(false);
+  });
+  it("IN_USE + ACTIVE workflow = IN_USE_ACTIVE_QR_IDLE (real desync — manual review, not actionable)", () => {
+    const r = classifyQrIdlePointedBag({ bagStatus: "IN_USE", hasWorkflow: true, workflowFinalized: false, intakeGuardOk: false });
+    expect(r.category).toBe("IN_USE_ACTIVE_QR_IDLE");
+    expect(r.actionable).toBe(false);
+  });
+  it("IN_USE + no workflow = IN_USE_NO_WORKFLOW; EMPTIED/DEPLETED = DEPLETED_QR_RELEASED; other = OTHER_NEEDS_REVIEW", () => {
+    expect(classifyQrIdlePointedBag({ bagStatus: "IN_USE", hasWorkflow: false, workflowFinalized: false, intakeGuardOk: false }).category).toBe("IN_USE_NO_WORKFLOW");
+    expect(classifyQrIdlePointedBag({ bagStatus: "EMPTIED", hasWorkflow: true, workflowFinalized: true, intakeGuardOk: false }).category).toBe("DEPLETED_QR_RELEASED");
+    expect(classifyQrIdlePointedBag({ bagStatus: "DEPLETED", hasWorkflow: true, workflowFinalized: true, intakeGuardOk: false }).category).toBe("DEPLETED_QR_RELEASED");
+    expect(classifyQrIdlePointedBag({ bagStatus: "QUARANTINED", hasWorkflow: false, workflowFinalized: false, intakeGuardOk: false }).category).toBe("OTHER_NEEDS_REVIEW");
+  });
+  it("ONLY SAFE_INTAKE_LOST_RESERVATION is actionable — every other category is review/expected", () => {
+    const nonActionable = [
+      classifyQrIdlePointedBag({ bagStatus: "IN_USE", hasWorkflow: true, workflowFinalized: true, intakeGuardOk: false }),
+      classifyQrIdlePointedBag({ bagStatus: "IN_USE", hasWorkflow: true, workflowFinalized: false, intakeGuardOk: false }),
+      classifyQrIdlePointedBag({ bagStatus: "EMPTIED", hasWorkflow: true, workflowFinalized: true, intakeGuardOk: false }),
+      classifyQrIdlePointedBag({ bagStatus: "AVAILABLE", hasWorkflow: false, workflowFinalized: false, intakeGuardOk: false }),
+    ];
+    expect(nonActionable.every((r) => !r.actionable)).toBe(true);
+  });
+});
+
+describe("production-desync detector + script — read-only, separate buckets", () => {
+  it("report classifies with the pure classifier + intake guard, and never mutates", () => {
+    expect(lostSrc).toMatch(/export async function listQrProductionDesyncReport/);
+    expect(lostSrc).toMatch(/classifyQrIdlePointedBag\(/);
+    expect(lostSrc).not.toMatch(/\.update\(|\.insert\(|\.delete\(/);
+  });
+  it("npm script + detector script exist and are read-only", () => {
+    const pkg = repo("package.json");
+    expect(pkg).toMatch(/"detect:qr-production-desync": "tsx scripts\/detect-qr-production-desync\.ts"/);
+    const scriptSrc = repo("scripts/detect-qr-production-desync.ts");
+    expect(scriptSrc).toMatch(/classifyQrIdlePointedBag/);
+    expect(scriptSrc).not.toMatch(/\.update\(|\.insert\(|\.delete\(|UPDATE |INSERT |DELETE /);
   });
 });
 

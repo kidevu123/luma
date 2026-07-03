@@ -7,7 +7,13 @@
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { inventoryBags, qrCards, smallBoxes, receives } from "@/lib/db/schema";
+import {
+  inventoryBags,
+  qrCards,
+  smallBoxes,
+  receives,
+  workflowBags,
+} from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import {
   canRepairQrReservation,
@@ -122,6 +128,161 @@ export async function listLostQrReservationCandidates(): Promise<LostQrReservati
     candidates,
     reasonCounts,
   };
+}
+
+// ── QR production-desync classifier ─────────────────────────────────────────
+// Separates the "bag points at an IDLE RAW_BAG card" population into actionable
+// categories, so the IN_USE production-side rows are never confused with a safe
+// intake lost reservation. Pure — fail closed to a review category.
+
+export type QrIdlePointedCategory =
+  /** AVAILABLE bag, safe to re-reserve as intake (v1.20.0 batch handles these). */
+  | "SAFE_INTAKE_LOST_RESERVATION"
+  /** AVAILABLE bag but a token conflict / other guard failure — manual review. */
+  | "AVAILABLE_NEEDS_REVIEW"
+  /** IN_USE bag whose workflow finalized: QR correctly released at finalize.
+   *  Expected post-production history — NOT re-reservable. */
+  | "IN_USE_FINALIZED_QR_RELEASED"
+  /** IN_USE bag whose workflow is still ACTIVE but QR is idle — a real
+   *  production-side desync. Manual review; do NOT intake-repair. */
+  | "IN_USE_ACTIVE_QR_IDLE"
+  /** IN_USE bag with no workflow at all — ambiguous, manual review. */
+  | "IN_USE_NO_WORKFLOW"
+  /** EMPTIED/DEPLETED bag: spent, QR released. No floor reservation needed. */
+  | "DEPLETED_QR_RELEASED"
+  /** Any other bag status — manual review. */
+  | "OTHER_NEEDS_REVIEW";
+
+export type QrIdlePointedClassifyInput = {
+  bagStatus: string;
+  hasWorkflow: boolean;
+  workflowFinalized: boolean;
+  intakeGuardOk: boolean;
+};
+
+export function classifyQrIdlePointedBag(
+  input: QrIdlePointedClassifyInput,
+): { category: QrIdlePointedCategory; actionable: boolean; note: string } {
+  if (input.bagStatus === "AVAILABLE") {
+    return input.intakeGuardOk
+      ? { category: "SAFE_INTAKE_LOST_RESERVATION", actionable: true, note: "Re-reservable intake lost reservation." }
+      : { category: "AVAILABLE_NEEDS_REVIEW", actionable: false, note: "Available but failed the intake guard (e.g. token conflict) — review." };
+  }
+  if (input.bagStatus === "EMPTIED" || input.bagStatus === "DEPLETED") {
+    return { category: "DEPLETED_QR_RELEASED", actionable: false, note: "Bag spent; QR released. No floor reservation needed." };
+  }
+  if (input.bagStatus === "IN_USE") {
+    if (!input.hasWorkflow) {
+      return { category: "IN_USE_NO_WORKFLOW", actionable: false, note: "IN_USE with no workflow — ambiguous; manual review." };
+    }
+    return input.workflowFinalized
+      ? { category: "IN_USE_FINALIZED_QR_RELEASED", actionable: false, note: "Workflow finalized; QR correctly released. Expected history — not re-reservable." }
+      : { category: "IN_USE_ACTIVE_QR_IDLE", actionable: false, note: "Active workflow but QR is idle — production-side desync; manual review, do NOT intake-repair." };
+  }
+  return { category: "OTHER_NEEDS_REVIEW", actionable: false, note: `Bag status ${input.bagStatus} — manual review.` };
+}
+
+export type QrProductionDesyncRow = {
+  inventoryBagId: string;
+  bagNumber: number | null;
+  bagQrCode: string;
+  bagStatus: string;
+  receipt: string | null;
+  receiveName: string | null;
+  workflowBagId: string | null;
+  workflowFinalized: boolean;
+  category: QrIdlePointedCategory;
+  actionable: boolean;
+  note: string;
+};
+
+export type QrProductionDesyncReport = {
+  total: number;
+  byCategory: Array<{ category: QrIdlePointedCategory; count: number; actionable: boolean }>;
+  rows: QrProductionDesyncRow[];
+};
+
+/** READ-ONLY. Classify every bag that points at an IDLE RAW_BAG card into
+ *  intake vs production-side categories. */
+export async function listQrProductionDesyncReport(): Promise<QrProductionDesyncReport> {
+  const rows = await db
+    .select({
+      inventoryBagId: inventoryBags.id,
+      bagNumber: inventoryBags.bagNumber,
+      bagQrCode: inventoryBags.bagQrCode,
+      bagStatus: inventoryBags.status,
+      receipt: inventoryBags.internalReceiptNumber,
+      receiveName: receives.receiveName,
+      cardType: qrCards.cardType,
+      cardStatus: qrCards.status,
+      cardWorkflowId: qrCards.assignedWorkflowBagId,
+      workflowBagId: workflowBags.id,
+      finalizedAt: workflowBags.finalizedAt,
+    })
+    .from(inventoryBags)
+    .innerJoin(qrCards, eq(qrCards.scanToken, inventoryBags.bagQrCode))
+    .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+    .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+    .leftJoin(workflowBags, eq(workflowBags.inventoryBagId, inventoryBags.id))
+    .where(
+      and(
+        eq(qrCards.cardType, "RAW_BAG"),
+        eq(qrCards.status, "IDLE"),
+        isNull(qrCards.assignedWorkflowBagId),
+      ),
+    );
+
+  // Token-claim counts to feed the intake guard's conflict flag.
+  const tokens = [...new Set(rows.map((r) => r.bagQrCode).filter((t): t is string => t != null))];
+  const claimRows = tokens.length
+    ? await db
+        .select({ token: inventoryBags.bagQrCode, count: sql<number>`count(*)::int` })
+        .from(inventoryBags)
+        .where(inArray(inventoryBags.bagQrCode, tokens))
+        .groupBy(inventoryBags.bagQrCode)
+    : [];
+  const claimsByToken = new Map<string, number>();
+  for (const c of claimRows) if (c.token) claimsByToken.set(c.token, c.count);
+
+  const classified: QrProductionDesyncRow[] = rows.map((r) => {
+    const intakeGuard = canRepairQrReservation({
+      bagStatus: r.bagStatus,
+      bagQrCode: r.bagQrCode,
+      card: { cardType: r.cardType, status: r.cardStatus, assignedWorkflowBagId: r.cardWorkflowId },
+      otherBagClaimsToken: (claimsByToken.get(r.bagQrCode ?? "") ?? 0) > 1,
+    });
+    const c = classifyQrIdlePointedBag({
+      bagStatus: r.bagStatus,
+      hasWorkflow: r.workflowBagId != null,
+      workflowFinalized: r.finalizedAt != null,
+      intakeGuardOk: intakeGuard.ok,
+    });
+    return {
+      inventoryBagId: r.inventoryBagId,
+      bagNumber: r.bagNumber ?? null,
+      bagQrCode: r.bagQrCode ?? "",
+      bagStatus: r.bagStatus,
+      receipt: r.receipt ?? null,
+      receiveName: r.receiveName ?? null,
+      workflowBagId: r.workflowBagId ?? null,
+      workflowFinalized: r.finalizedAt != null,
+      category: c.category,
+      actionable: c.actionable,
+      note: c.note,
+    };
+  });
+
+  const byCategoryMap = new Map<QrIdlePointedCategory, { count: number; actionable: boolean }>();
+  for (const row of classified) {
+    const e = byCategoryMap.get(row.category) ?? { count: 0, actionable: row.actionable };
+    e.count++;
+    byCategoryMap.set(row.category, e);
+  }
+  const byCategory = [...byCategoryMap.entries()]
+    .map(([category, v]) => ({ category, count: v.count, actionable: v.actionable }))
+    .sort((a, b) => b.count - a.count);
+
+  return { total: classified.length, byCategory, rows: classified };
 }
 
 export const BATCH_LOST_QR_RESERVATION_CAP = 100;
