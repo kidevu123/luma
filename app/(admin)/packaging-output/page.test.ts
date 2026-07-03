@@ -29,7 +29,19 @@ describe("packaging-output page receipt wiring", () => {
   });
 
   it("labels finalized bags without lots as actionable backlog", () => {
-    expect(pageSrc).toContain("Finalized — awaiting lot");
-    expect(pageSrc).toContain("exact blocker");
+    expect(pageSrc).toContain("Finalized — needs finished lot");
+  });
+
+  it("AUTO-ISSUE-BATCH-1: shows summary cards, batch button, and clarifying copy", () => {
+    expect(pageSrc).toContain("summarizeProductionOutputBacklog");
+    expect(pageSrc).toContain("AutoIssueAllButton");
+    expect(pageSrc).toContain("Auto-issue ready");
+    expect(pageSrc).toContain("Needs review");
+    expect(pageSrc).toContain("Blocked");
+    // Explains finalized vs finished-lot issuance + Zoho is separate.
+    expect(pageSrc).toMatch(/Finalized<\/span> means floor work is/);
+    expect(pageSrc).toMatch(/auto-issue never commits to Zoho/);
+    // Manual per-row review path remains.
+    expect(pageSrc).toContain("BacklogRowActions");
   });
 });

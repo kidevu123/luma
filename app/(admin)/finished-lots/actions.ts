@@ -12,6 +12,8 @@ import {
 } from "@/lib/db/queries/finished-lots";
 import { compact } from "@/lib/db/compact";
 import { issueFinishedLotWithAllocationCloseout } from "@/lib/production/issue-lot-with-allocation-closeout";
+import { listProductionOutputBacklogWithEligibility } from "@/lib/db/queries/production-output-backlog";
+import { writeAudit } from "@/lib/db/audit";
 
 const lotSchema = z.object({
   productId: z.string().uuid(),
@@ -125,6 +127,90 @@ export async function repairAutoIssueFinishedLotAction(workflowBagId: string) {
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Repair auto-issue failed." };
+  }
+}
+
+// AUTO-ISSUE-BATCH-1 — issue finished lots for ALL currently-safe backlog rows
+// in one explicit click. Reuses the per-row auto-issue service (which re-checks
+// eligibility inside its own transaction — idempotent + race-safe), so only
+// AUTO_ISSUE_READY rows are ever created. Does NOT commit to Zoho (that stays a
+// separate admin-controlled step). Bounded per invocation.
+const AUTO_ISSUE_BATCH_CAP = 100;
+
+export type AutoIssueBatchResult =
+  | {
+      ok: true;
+      issued: number;
+      skipped: number;
+      capped: boolean;
+      issuedLots: Array<{ workflowBagId: string; finishedLotNumber: string | null }>;
+      skippedRows: Array<{ workflowBagId: string; reason: string; message: string }>;
+    }
+  | { ok: false; error: string };
+
+export async function autoIssueAllSafeLotsAction(): Promise<AutoIssueBatchResult> {
+  const actor = await requireLead();
+  try {
+    const rows = await listProductionOutputBacklogWithEligibility(AUTO_ISSUE_BATCH_CAP);
+    const ready = rows.filter((r) => r.evaluation.autoIssuable);
+
+    const issuedLots: Array<{ workflowBagId: string; finishedLotNumber: string | null }> = [];
+    const skippedRows: Array<{ workflowBagId: string; reason: string; message: string }> = [];
+
+    for (const row of ready) {
+      // Per-row: re-checks eligibility in-tx, creates the lot idempotently.
+      const result = await repairAutoIssueFinishedLotForWorkflowBag(row.workflowBagId, actor);
+      if (result.ok) {
+        issuedLots.push({
+          workflowBagId: row.workflowBagId,
+          finishedLotNumber: result.finishedLotNumber,
+        });
+      } else {
+        // A row that was ready at scan time but no longer safe (raced/changed)
+        // is SKIPPED with its reason — never force-created.
+        skippedRows.push({
+          workflowBagId: row.workflowBagId,
+          reason: result.reason,
+          message: result.message,
+        });
+      }
+    }
+
+    // Batch-level audit — the explicit AUTO_FINISHED_LOT_ISSUE provenance, with
+    // a note that Zoho output was NOT committed by this action.
+    await writeAudit({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action: "finished_lot.auto_issue_batch",
+      targetType: "ProductionOutputBacklog",
+      targetId: "batch",
+      after: {
+        source: "AUTO_FINISHED_LOT_ISSUE",
+        candidates_scanned: rows.length,
+        ready_at_scan: ready.length,
+        issued: issuedLots.length,
+        skipped: skippedRows.length,
+        issued_lot_numbers: issuedLots.map((l) => l.finishedLotNumber),
+        zoho_output_committed: false,
+        note: "Auto-issued finished lots only; Zoho output remains a separate admin-controlled step.",
+      },
+    });
+
+    if (issuedLots.length > 0) {
+      revalidatePath("/packaging-output");
+      revalidatePath("/finished-lots");
+    }
+
+    return {
+      ok: true,
+      issued: issuedLots.length,
+      skipped: skippedRows.length,
+      capped: rows.length >= AUTO_ISSUE_BATCH_CAP,
+      issuedLots,
+      skippedRows,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Auto-issue batch failed." };
   }
 }
 

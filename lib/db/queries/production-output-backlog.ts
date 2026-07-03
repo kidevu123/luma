@@ -13,6 +13,7 @@ import {
 import {
   evaluateAutoLotBacklogRow,
   type AutoLotBacklogEvaluation,
+  type AutoLotBacklogBlockerCode,
 } from "@/lib/production/auto-lot-backlog-eligibility";
 import {
   evaluateProductSetupReadiness,
@@ -279,4 +280,88 @@ export async function getProductionOutputBacklogRow(
 ): Promise<ProductionOutputBacklogRow | null> {
   const rows = await listProductionOutputBacklogWithEligibility(200);
   return rows.find((r) => r.workflowBagId === workflowBagId) ?? null;
+}
+
+// AUTO-ISSUE-BATCH-1 — three-bucket categorization for the Production Output
+// summary + batch auto-issue. Pure.
+export type ProductionOutputBacklogCategory =
+  | "AUTO_ISSUE_READY"
+  | "NEEDS_REVIEW"
+  | "BLOCKED";
+
+/** Ready = safe to auto-issue. Needs review = a fixable data issue
+ *  (repair allocation / fix product setup). Blocked = manual judgment. */
+export function categorizeBacklogEvaluation(
+  evaluation: AutoLotBacklogEvaluation,
+): ProductionOutputBacklogCategory {
+  if (evaluation.autoIssuable) return "AUTO_ISSUE_READY";
+  if (
+    evaluation.action === "REPAIR_ALLOCATION" ||
+    evaluation.action === "FIX_PRODUCT_SETUP"
+  ) {
+    return "NEEDS_REVIEW";
+  }
+  return "BLOCKED";
+}
+
+export type ProductionOutputBacklogSummary = {
+  total: number;
+  autoIssueReady: number;
+  needsReview: number;
+  blocked: number;
+  /** workflow bag ids the batch action would attempt (ready only). */
+  readyWorkflowBagIds: string[];
+  /** whether more rows exist beyond the scan cap. */
+  capped: boolean;
+  /** most common blocker reasons across needs-review + blocked. */
+  topReasons: Array<{ code: AutoLotBacklogBlockerCode; label: string; count: number }>;
+};
+
+/** READ-ONLY dry-run: categorize the current backlog for the summary cards +
+ *  the "Auto-issue all safe lots" preview. Bounded by `cap`. */
+export async function summarizeProductionOutputBacklog(
+  cap = 300,
+): Promise<ProductionOutputBacklogSummary> {
+  const rows = await listProductionOutputBacklogWithEligibility(cap);
+  let autoIssueReady = 0;
+  let needsReview = 0;
+  let blocked = 0;
+  const readyWorkflowBagIds: string[] = [];
+  const reasonCounts = new Map<string, { label: string; count: number }>();
+
+  for (const r of rows) {
+    const category = categorizeBacklogEvaluation(r.evaluation);
+    if (category === "AUTO_ISSUE_READY") {
+      autoIssueReady++;
+      readyWorkflowBagIds.push(r.workflowBagId);
+      continue;
+    }
+    if (category === "NEEDS_REVIEW") needsReview++;
+    else blocked++;
+    const entry = reasonCounts.get(r.evaluation.code) ?? {
+      label: r.evaluation.label,
+      count: 0,
+    };
+    entry.count++;
+    reasonCounts.set(r.evaluation.code, entry);
+  }
+
+  const topReasons = Array.from(reasonCounts.entries())
+    .map(([code, v]) => ({
+      code: code as AutoLotBacklogBlockerCode,
+      label: v.label,
+      count: v.count,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  return {
+    total: rows.length,
+    autoIssueReady,
+    needsReview,
+    blocked,
+    readyWorkflowBagIds,
+    capped: rows.length >= cap,
+    topReasons,
+  };
 }

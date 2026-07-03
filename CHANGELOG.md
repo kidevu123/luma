@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.18.0] — 2026-07-03
+
+### Added — AUTO-ISSUE-BATCH-1: one-click auto-issue of safe finished lots
+- **Problem:** a finalized workflow bag shows "finalized" on the floor but "Awaiting lot" on Production Output until an admin manually reviews and issues a finished lot one-by-one. For clean rows this is busywork.
+- **What already existed (reused, not rebuilt):** the pure eligibility engine `evaluateAutoLotBacklogRow` (fails closed — `READY_TO_AUTO_ISSUE` only when finalized + product known + counts valid + source bag/receipt present + no existing lot + no lot-number conflict + product setup complete + non-negative ending balance + not excluded + Zoho not committed), the per-row `repairAutoIssueFinishedLotForWorkflowBag` service (re-checks eligibility inside its own transaction, idempotent, writes audit), and the per-row "Auto-issue now" button.
+- **New batch action** `autoIssueAllSafeLotsAction` (lead/admin-gated): scans the backlog, issues finished lots for **only** the `AUTO_ISSUE_READY` rows via the existing per-row service (so each is re-checked in-transaction → idempotent + race-safe; a row that changed since the scan is **skipped** with its reason, never force-created), bounded to 100 per click, and reports issued / skipped / per-row reasons. It writes a batch audit (`finished_lot.auto_issue_batch`, source `AUTO_FINISHED_LOT_ISSUE`, `zoho_output_committed: false`) and **does not** commit to Zoho — that stays a separate admin-controlled step (the existing cron). `app/(admin)/finished-lots/actions.ts`.
+- **Trigger design:** the safe, admin-controlled **batch button** (not always-on background automation, and no finalization hook) — the user stays in control while the one-by-one clicking is removed.
+- **Production Output UI:** summary cards (**Auto-issue ready / Needs review / Blocked**), an **"Auto-issue all safe lots (N)"** button, top-blocker reasons, and clarifying copy: *"Finalized means floor work is complete. Finished-lot issuance turns that finalized output into an official inventory lot. Clean rows can be auto-issued; rows with missing or risky data stay here for review. Zoho output is a separate, later admin step — auto-issue never commits to Zoho."* The section is retitled **"Finalized — needs finished lot"**. The per-row **Review manually** / **Auto-issue now** actions remain. `app/(admin)/packaging-output/*`.
+- **Dry-run:** `summarizeProductionOutputBacklog(cap)` categorizes the whole backlog (read-only) for the summary cards; the rendered counts are the live dry-run.
+
+### Notes
+- Auto-issued lots are identical to manually-issued lots downstream (Finished Lots, Production Output, PO reconciliation, Zoho output, traceability/recall, genealogy) — only the audit source differs. No schema change. No duplicate finished lots (idempotent, `FINISHED_LOT_EXISTS` blocks re-issue). No Zoho commit. All v1.7–v1.17 partial-bag / allocation / system-derived / QR / IDLE invariants preserved (this only reads the backlog and creates finished lots for clean rows). No production lots were auto-issued by this deploy — issuance requires an explicit admin click.
+
 ## [1.17.1] — 2026-07-03
 
 ### Fixed — REBASE-OPEN-SESSION: rebase panel never appeared (sealed-output=0 false positive)

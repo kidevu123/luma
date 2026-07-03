@@ -25,7 +25,9 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import {
   countProductionOutputBacklog,
   listProductionOutputBacklogWithEligibility,
+  summarizeProductionOutputBacklog,
 } from "@/lib/db/queries/production-output-backlog";
+import { AutoIssueAllButton } from "./auto-issue-all-button";
 import { MetricCard } from "@/components/production/metric-card";
 import { ConfidenceBadge } from "@/components/production/confidence-badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -93,7 +95,7 @@ export default async function PackagingOutputPage({
     : Promise.resolve(null);
 
   // Run all queries in parallel — pack-out queue alongside existing metrics.
-  const [packaging, finished, flavorRollup, awaitingLot, awaitingLotTotal, awaitingFinalize, materialBurnRaw, workbenchResults] = await Promise.all([
+  const [packaging, finished, flavorRollup, awaitingLot, awaitingLotTotal, backlogSummary, awaitingFinalize, materialBurnRaw, workbenchResults] = await Promise.all([
     derivePackagingMetrics(range),
     deriveFinishedGoodsMetrics(range),
 
@@ -121,6 +123,9 @@ export default async function PackagingOutputPage({
 
     listProductionOutputBacklogWithEligibility(20),
     countProductionOutputBacklog(),
+    // AUTO-ISSUE-BATCH-1 — categorized summary (auto-issue ready / needs review
+    // / blocked) across the whole backlog, for the summary cards + batch button.
+    summarizeProductionOutputBacklog(300),
 
     // PACKAGED (not finalized) bags.
     db
@@ -540,15 +545,53 @@ export default async function PackagingOutputPage({
           </h2>
           <p className="text-[11px] text-text-muted mt-0.5">
             {awaitingLotTotal > awaitingLot.length
-              ? `Showing ${awaitingLot.length} of ${awaitingLotTotal} bags needing lot review — most recently finalized first. `
+              ? `Showing ${awaitingLot.length} of ${awaitingLotTotal} bags needing a finished lot — most recently finalized first. `
               : awaitingLotTotal > 0
-                ? `Showing all ${awaitingLotTotal} bag${awaitingLotTotal === 1 ? "" : "s"} needing lot review. `
+                ? `Showing all ${awaitingLotTotal} bag${awaitingLotTotal === 1 ? "" : "s"} needing a finished lot. `
                 : ""}
-            Full-bag packaging normally creates and releases the finished lot automatically.
-            Each row shows the exact blocker and the next safe action. PACKAGED bags are still
-            on the floor awaiting finalization.
+            <span className="font-medium text-text-strong">Finalized</span> means floor work is
+            complete and counts are submitted. <span className="font-medium text-text-strong">Finished-lot
+            issuance</span> turns that finalized output into an official inventory lot. Clean rows can be
+            auto-issued; rows with missing or risky data stay here for review. Zoho output is a separate,
+            later admin step — auto-issue never commits to Zoho.
           </p>
         </div>
+
+        {/* AUTO-ISSUE-BATCH-1 — summary cards + batch action */}
+        {awaitingLotTotal > 0 ? (
+          <div className="px-4 pt-3 pb-1 border-b border-border/60">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+              <div className="rounded-lg border border-green-300/50 bg-green-50/60 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-green-700 font-medium">Auto-issue ready</p>
+                <p className="text-xl font-mono tabular-nums text-green-800">{backlogSummary.autoIssueReady}</p>
+              </div>
+              <div className="rounded-lg border border-amber-300/50 bg-amber-50/60 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-amber-700 font-medium">Needs review</p>
+                <p className="text-xl font-mono tabular-nums text-amber-800">{backlogSummary.needsReview}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-text-subtle font-medium">Blocked</p>
+                <p className="text-xl font-mono tabular-nums text-text-strong">{backlogSummary.blocked}</p>
+              </div>
+            </div>
+            {canMutate ? (
+              <AutoIssueAllButton readyCount={backlogSummary.autoIssueReady} />
+            ) : (
+              <p className="text-[11px] text-text-subtle">
+                Lead/admin can auto-issue safe lots in one click.
+              </p>
+            )}
+            {backlogSummary.topReasons.length > 0 ? (
+              <p className="mt-2 text-[10.5px] text-text-subtle">
+                Top blockers:{" "}
+                {backlogSummary.topReasons
+                  .map((r) => `${r.label} (${r.count})`)
+                  .join(" · ")}
+                {backlogSummary.capped ? " · showing first 300" : ""}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <div className="px-4 py-4">
           {!hasQueue ? (
             <div className="px-4 py-8 text-center">
@@ -562,7 +605,7 @@ export default async function PackagingOutputPage({
               <div>
                 <div className="flex items-baseline gap-2 mb-2">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
-                    Finalized — awaiting lot
+                    Finalized — needs finished lot
                   </div>
                 </div>
                 {awaitingLot.length === 0 ? (
