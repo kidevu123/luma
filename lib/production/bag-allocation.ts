@@ -509,6 +509,18 @@ export function resolveReopenStartingBalance(
   return pillCount ?? null;
 }
 
+// REUSE-STARTING-BALANCE-1 — the terminal allocation statuses: a session that
+// has released the bag with a recorded ending balance. CLOSED (partial
+// remaining), RETURNED_TO_STOCK (remainder put back), DEPLETED (emptied → 0).
+// Any "latest terminal session by closedAt" balance/consumed inference must use
+// this full set — omitting RETURNED_TO_STOCK undercounts a returned bag's
+// remaining (see v1.16.0 / v1.18.1).
+export const TERMINAL_ALLOCATION_STATUSES = [
+  "CLOSED",
+  "RETURNED_TO_STOCK",
+  "DEPLETED",
+] as const;
+
 // REUSE-STARTING-BALANCE-1 — the latest TERMINAL allocation session on a
 // physical bag. Terminal = a session that has released the bag with a recorded
 // ending balance: CLOSED (partial remaining), RETURNED_TO_STOCK (remainder put

@@ -14,6 +14,10 @@ import { compact } from "@/lib/db/compact";
 import { issueFinishedLotWithAllocationCloseout } from "@/lib/production/issue-lot-with-allocation-closeout";
 import { listProductionOutputBacklogWithEligibility } from "@/lib/db/queries/production-output-backlog";
 import { writeAudit } from "@/lib/db/audit";
+import {
+  listFinishedLotReleaseCandidates,
+  evaluateFinishedLotReleaseEligibility,
+} from "@/lib/production/finished-lot-release-eligibility";
 
 const lotSchema = z.object({
   productId: z.string().uuid(),
@@ -211,6 +215,92 @@ export async function autoIssueAllSafeLotsAction(): Promise<AutoIssueBatchResult
     };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Auto-issue batch failed." };
+  }
+}
+
+// AUTO-QC-RELEASE-1 — release every currently-safe PENDING_QC lot in one click.
+// Re-checks eligibility per lot immediately before releasing (idempotent +
+// race-safe: a lot that changed is skipped). Reuses the SAME setFinishedLotStatus
+// path as manual "Approve & release" (so audit/event/side-effects are identical).
+// Does NOT commit to Zoho — release only flips the internal QC status; the Zoho
+// output cron handles RELEASED lots separately, exactly as it does for manual
+// releases.
+const AUTO_RELEASE_BATCH_CAP = 100;
+
+export type AutoReleaseBatchResult =
+  | {
+      ok: true;
+      released: number;
+      skipped: number;
+      capped: boolean;
+      releasedLots: Array<{ finishedLotId: string; finishedLotNumber: string | null }>;
+      skippedLots: Array<{ finishedLotId: string; code: string; message: string }>;
+    }
+  | { ok: false; error: string };
+
+export async function autoReleaseAllSafeLotsAction(): Promise<AutoReleaseBatchResult> {
+  const actor = await requireLead();
+  try {
+    const candidates = await listFinishedLotReleaseCandidates(AUTO_RELEASE_BATCH_CAP);
+    const ready = candidates.filter((c) => c.evaluation.status === "AUTO_RELEASE_READY");
+
+    const releasedLots: Array<{ finishedLotId: string; finishedLotNumber: string | null }> = [];
+    const skippedLots: Array<{ finishedLotId: string; code: string; message: string }> = [];
+
+    for (const c of ready) {
+      // Re-check right before releasing — anything that changed since the scan
+      // (released concurrently, put on hold, QC event added) is skipped.
+      const recheck = await evaluateFinishedLotReleaseEligibility(c.finishedLotId);
+      if (recheck.status !== "AUTO_RELEASE_READY") {
+        skippedLots.push({ finishedLotId: c.finishedLotId, code: recheck.code, message: recheck.message });
+        continue;
+      }
+      const row = await setFinishedLotStatus(
+        c.finishedLotId,
+        "RELEASED",
+        actor,
+        "Auto-released — passed QC auto-release eligibility. Zoho output NOT committed by this step.",
+      );
+      releasedLots.push({
+        finishedLotId: c.finishedLotId,
+        finishedLotNumber: row.finishedLotNumber,
+      });
+    }
+
+    await writeAudit({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action: "finished_lot.auto_release_batch",
+      targetType: "FinishedLotReleaseBacklog",
+      targetId: "batch",
+      after: {
+        source: "AUTO_QC_RELEASE",
+        candidates_scanned: candidates.length,
+        ready_at_scan: ready.length,
+        released: releasedLots.length,
+        skipped: skippedLots.length,
+        released_lot_numbers: releasedLots.map((l) => l.finishedLotNumber),
+        skipped_reasons: skippedLots.map((l) => l.code),
+        zoho_output_committed: false,
+        note: "Internal QC release only; Zoho output remains a separate admin/cron-controlled step.",
+      },
+    });
+
+    if (releasedLots.length > 0) {
+      revalidatePath("/finished-lots");
+      revalidatePath("/packaging-output");
+    }
+
+    return {
+      ok: true,
+      released: releasedLots.length,
+      skipped: skippedLots.length,
+      capped: candidates.length >= AUTO_RELEASE_BATCH_CAP,
+      releasedLots,
+      skippedLots,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Auto-release batch failed." };
   }
 }
 

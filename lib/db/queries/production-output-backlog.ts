@@ -19,6 +19,7 @@ import {
   evaluateProductSetupReadiness,
   type ProductSetupReadiness,
 } from "@/lib/production/product-setup-readiness";
+import { TERMINAL_ALLOCATION_STATUSES } from "@/lib/production/bag-allocation";
 
 // Single source of truth for the "needs lot review" filter. Used by
 // both the dashboard Action Center tile and the packaging-output queue
@@ -145,7 +146,12 @@ export async function listProductionOutputBacklogWithEligibility(
       .where(
         and(
           inArray(rawBagAllocationSessions.inventoryBagId, inventoryBagIds),
-          inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+          // v1.18.1 — include RETURNED_TO_STOCK terminal sessions so a returned
+          // partial bag's ending balance is inferred accurately (was CLOSED /
+          // DEPLETED only). Fails closed either way; this improves accuracy.
+          inArray(rawBagAllocationSessions.allocationStatus, [
+            ...TERMINAL_ALLOCATION_STATUSES,
+          ]),
         ),
       )
       .orderBy(desc(rawBagAllocationSessions.closedAt)),

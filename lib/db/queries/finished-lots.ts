@@ -22,6 +22,7 @@ import { projectEvent } from "@/lib/projector";
 import { projectFinishedLotPassportForLot } from "@/lib/projector/finished-lot-passport";
 import { closeAllocationForProductionOutputInTx } from "@/lib/production/raw-bag-allocation-lifecycle";
 import { computeExpectedTabletConsumptionFromProduct } from "@/lib/production/expected-tablet-consumption";
+import { TERMINAL_ALLOCATION_STATUSES } from "@/lib/production/bag-allocation";
 import {
   assertAutoLotRepairAllowed,
   evaluateAutoLotBacklogRow,
@@ -392,7 +393,7 @@ export async function createFinishedLotInTx(
           .where(
             and(
               eq(rawBagAllocationSessions.inventoryBagId, bagRow.inventoryBagId),
-              inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+              inArray(rawBagAllocationSessions.allocationStatus, [...TERMINAL_ALLOCATION_STATUSES]),
             ),
           )
           .orderBy(desc(rawBagAllocationSessions.closedAt))
@@ -501,6 +502,9 @@ export async function createFinishedLotInTx(
       .where(
         and(
           eq(rawBagAllocationSessions.workflowBagId, input.workflowBagId),
+          // Consumed-session linking (Zoho assembly PO resolution) — a
+          // RETURNED_TO_STOCK session put its remainder BACK, so it is not a
+          // consumed input to this lot. Intentionally CLOSED/DEPLETED only.
           inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
           isNull(rawBagAllocationSessions.finishedLotId),
         ),
@@ -825,7 +829,7 @@ export async function evaluateRepairAutoIssueEligibility(
       .where(
         and(
           eq(rawBagAllocationSessions.inventoryBagId, bag.inventoryBagId),
-          inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+          inArray(rawBagAllocationSessions.allocationStatus, [...TERMINAL_ALLOCATION_STATUSES]),
         ),
       )
       .orderBy(desc(rawBagAllocationSessions.closedAt))
