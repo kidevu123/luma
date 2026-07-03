@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.22.0] — 2026-07-03
+
+### Added — PO Closeout Command Center (`/po-closeout`)
+- **One page to answer "is this PO done?"** Admins no longer stitch together Receiving, Workflows, Partial Bag Workbench, Production Output, Finished Lots, Zoho output, and PO reconciliation. For a selected PO, `/po-closeout/[poId]` shows every bag/receipt with a single verdict — **DONE / READY FOR ACTION / NEEDS REVIEW / BLOCKED** — the precise reason, the safest next step, a per-bag checklist (received → finalized → lot issued → released/held → Zoho), and a link to the exact page to act. `/po-closeout` is an admin-gated PO picker.
+- **Read-only evaluator that composes existing logic (no duplication):** `lib/production/po-closeout.ts` (pure `classifyPoCloseoutRow`, fail-closed) + `lib/db/queries/po-closeout.ts` (`loadPoCloseout`). It reuses `evaluateInventoryBagReadiness` (floor readiness), `canRepairQrReservation` (QR intake guard), `getProductionOutputBacklogRow`/`evaluateAutoLotBacklogRow` (auto-issue eligibility), `evaluateFinishedLotReleaseEligibility` (QC release), and `computeOpenSessionRebaseEligibility` (partial-bag starting balance). Heavy per-bag services run only for the small subset of bags that reach that journey step; every row fails closed to NEEDS_REVIEW rather than throwing.
+- **PO-scoped safe batch actions (thin wrappers, no new business logic):** `autoIssueSafeLotsForPoAction` / `autoReleaseSafeLotsForPoAction` (lead-gated) derive the eligible set for ONE PO from the evaluator and call the SAME per-row services the global v1.18/v1.19 batches use (`repairAutoIssueFinishedLotForWorkflowBag`; `evaluateFinishedLotReleaseEligibility` + `setFinishedLotStatus`) — each re-checks eligibility per row (idempotent + race-safe), caps at 100, writes a PO-scoped batch audit (`scope: "PO"`, `po_id`, `po_number`, `zoho_output_committed: false`), and touches nothing outside the PO. Nothing runs on page load; every mutation is an explicit admin click.
+- **Zoho stays separate and read-only here:** per-lot Zoho status (Committed / Queued / Failed / Ready to queue / Not ready / Not applicable) is shown, normalized from the active `zoho_production_output_ops` op; the page **never** queues or commits to Zoho — it links to Zoho operations. Failed ops surface as BLOCKED.
+- **Plain-language copy** (no "open allocation session" jargon): "Finalized means floor work is complete", "Finished lot issued means output was converted into inventory", "Released means QC approved internally", "Zoho is separate", "Done means there are no unresolved Luma actions for this bag." Filter tabs: All / Ready actions / Needs review / Blocked / Done.
+
+### Notes
+- **No data model change, no deploy-time mutation, no Zoho automation.** All existing lifecycle semantics (v1.18 auto-issue, v1.19 auto-release, v1.20 QR repair, v1.21 lifecycle labels, partial-bag/rebase, IDLE-QR invariant) are reused as-is, not modified. QR-repair batching is intentionally deferred to the existing per-bag "Re-reserve QR" / global admin route (linked from the row).
+
 ## [1.21.2] — 2026-07-03
 
 ### Fixed — OPEN-ALLOCATION-GUARD-1: finished-lot creation no longer bypasses the open-allocation guard on the explicit-inputs path

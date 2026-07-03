@@ -69,6 +69,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSectionDef[] = [
     heading: "Reconciliation & output",
     items: [
       { href: "/packaging-output", label: "Production output", minRole: "SESSION" },
+      { href: "/po-closeout", label: "PO closeout", minRole: "ADMIN" },
       { href: "/po-reconciliation", label: "PO reconciliation", minRole: "ADMIN" },
       { href: "/finished-lots", label: "Finished lots", minRole: "SESSION" },
       {
