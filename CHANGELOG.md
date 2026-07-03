@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.20.0] — 2026-07-03
+
+### Added — BATCH-LOST-QR-RESERVATION-REPAIR-1: detector + batch repair + edit-flow prevention
+- **Scale of the problem:** the v1.19.2 lost-reservation desync (bag's `bag_qr_code` points at a RAW_BAG card that drifted to IDLE) affected **many** receive bags, not just Bag 5 — single-row repair was too slow.
+- **Read-only detector** (`lib/db/queries/lost-qr-reservations.ts` + `npm run detect:lost-qr-reservations`): finds every inventory bag whose `bag_qr_code` points at an IDLE, unassigned RAW_BAG card, and classifies each **safe/unsafe using the exact same `canRepairQrReservation` guard** as the single-row repair (no duplicated logic). Returns total / safe-to-repair / unsafe counts, per-row reason codes, and examples (receipt, receive, bag number, token, bag id).
+- **Guarded batch repair** `repairLostQrReservationsBatch` (cap 100, idempotent, race-safe): repairs only rows that pass the guard, **re-checking each row inside its own single-row `repairQrReservation` transaction** (conditional `IDLE→ASSIGNED` update). Writes a per-card `qr_card.reservation_repaired` audit **and** a batch audit (`qr_card.reservation_repair_batch`, source `BATCH_LOST_QR_RESERVATION_REPAIR`, candidates_scanned / repaired / skipped / skipped_reasons / repaired_qr_tokens). **Never** sets `assignedWorkflowBagId`; never touches allocation sessions, workflow bags, finished lots, or Zoho.
+- **Stricter guard:** `canRepairQrReservation` now requires the bag be **AVAILABLE** (was: only VOID/QUARANTINED blocked). IN_USE (active workflow), EMPTIED/DEPLETED, VOID, QUARANTINED are all skipped — a re-reserve there would misrepresent the true state.
+- **Two entry points:** (1) admin-only **"Repair lost QR reservations (N)"** button on the Receive detail page (`repairLostQrReservationsAction`, `requireAdmin`); (2) a bearer-authed ops route `POST /api/admin/repair-lost-qr-reservations` (GET = read-only dry-run) using the same `LUMA_CRON_SECRET` as the cron routes, so the audited batch can be run on the LXC (which has no node/tsx).
+
+### Fixed — edit-flow prevention (root cause)
+- `editInventoryBag` now **self-heals the invariant** on every save: when an **AVAILABLE** bag ends the edit pointing at an IDLE RAW_BAG card it uniquely claims, the card is re-reserved to ASSIGNED (conditional update + `qr_card.reservation_repaired` audit). This closes the desync at the source — a QR swap already reserves the new card, and a same-token save (or any path that dropped the reservation) now restores it immediately instead of silently leaving the bag not-floor-ready. No double audit (the swap path's card is already ASSIGNED, so the conditional update is a no-op).
+
+### Notes
+- Floor-ready source of truth unchanged and still consistent with the floor scan (`bag_qr_code` → card `status ASSIGNED`). IDLE-QR invariant preserved (repair sets ASSIGNED with `assignedWorkflowBagId` still null; IDLE cards never retain an assignment). The single-row v1.19.2 "Re-reserve QR" action is unchanged. No schema change. No workflow/allocation/finished-lot/Zoho mutation. Production batch repair was run through the audited service after deploy (see report).
+
 ## [1.19.2] — 2026-07-03
 
 ### Fixed — QR-RESERVE-REPAIR-1: misleading "Not ready for floor" + lost-reservation repair

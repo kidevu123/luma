@@ -123,8 +123,11 @@ export function canRepairQrReservation(args: {
   if (!args.bagQrCode || args.bagQrCode.trim() === "") {
     return { ok: false, reason: "Bag has no QR token to re-reserve." };
   }
-  if (args.bagStatus === "VOID" || args.bagStatus === "QUARANTINED") {
-    return { ok: false, reason: `Bag is ${args.bagStatus.toLowerCase()} — cannot re-reserve.` };
+  // Only a floor-eligible AVAILABLE bag may have its intake reservation
+  // restored. IN_USE (active workflow), EMPTIED/DEPLETED, VOID, QUARANTINED are
+  // all excluded — a re-reserve there would misrepresent the true state.
+  if (args.bagStatus !== "AVAILABLE") {
+    return { ok: false, reason: `Bag is ${args.bagStatus.toLowerCase()} — only AVAILABLE bags can be re-reserved.` };
   }
   if (!args.card) return { ok: false, reason: "QR card not found." };
   if (args.card.cardType !== "RAW_BAG") {
@@ -148,12 +151,16 @@ export function canRepairQrReservation(args: {
   return { ok: true };
 }
 
+/** Actor for QR reservation repair — a real user (single-row UI) or a system
+ *  actor (id null) for the audited batch/bearer path. */
+export type QrRepairActor = { id: string | null; role: CurrentUser["role"] | null };
+
 /** Re-reserve a bag's own IDLE QR card (restore the lost intake reservation).
  *  Sets the card ASSIGNED (assignedWorkflowBagId stays null). Audited. Does not
  *  touch workflow allocations. Guarded so it can never grab an active card. */
 export async function repairQrReservation(
   inventoryBagId: string,
-  actor: CurrentUser,
+  actor: QrRepairActor,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const [bag] = await db
     .select({ id: inventoryBags.id, bagQrCode: inventoryBags.bagQrCode, status: inventoryBags.status })
@@ -444,6 +451,72 @@ export async function editInventoryBag(
           .update(inventoryBags)
           .set(patch)
           .where(eq(inventoryBags.id, bagId));
+      }
+
+      // ── Invariant: AVAILABLE bag claiming a RAW_BAG token ⇒ card ASSIGNED ──
+      // Prevent (and self-heal) the lost-reservation desync: if this save leaves
+      // the bag pointing at an IDLE RAW_BAG card (e.g. token unchanged after a
+      // prior desync, or any path that dropped the reservation), re-reserve it
+      // here. The QR-swap block above already sets a NEW card ASSIGNED, so this
+      // conditional update is a no-op there (no double audit).
+      const finalToken =
+        input.bagQrCode !== undefined
+          ? (input.bagQrCode?.trim() ?? null)
+          : bag.bagQrCode;
+      if (finalToken && bag.status === "AVAILABLE") {
+        const [finalCard] = await tx
+          .select({
+            id: qrCards.id,
+            cardType: qrCards.cardType,
+            status: qrCards.status,
+            assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
+          })
+          .from(qrCards)
+          .where(eq(qrCards.scanToken, finalToken))
+          .limit(1);
+        if (
+          finalCard &&
+          finalCard.cardType === "RAW_BAG" &&
+          finalCard.status === "IDLE" &&
+          finalCard.assignedWorkflowBagId === null
+        ) {
+          const [conflict] = await tx
+            .select({ id: inventoryBags.id })
+            .from(inventoryBags)
+            .where(and(eq(inventoryBags.bagQrCode, finalToken), ne(inventoryBags.id, bagId)))
+            .limit(1);
+          if (!conflict) {
+            const reserved = await tx
+              .update(qrCards)
+              .set({ status: "ASSIGNED" as const, assignedWorkflowBagId: null })
+              .where(
+                and(
+                  eq(qrCards.id, finalCard.id),
+                  eq(qrCards.status, "IDLE"),
+                  isNull(qrCards.assignedWorkflowBagId),
+                ),
+              )
+              .returning({ id: qrCards.id });
+            if (reserved.length > 0) {
+              await writeAudit(
+                {
+                  actorId: actor.id,
+                  actorRole: actor.role,
+                  action: "qr_card.reservation_repaired",
+                  targetType: "QrCard",
+                  targetId: finalCard.id,
+                  before: { status: "IDLE", scanToken: finalToken },
+                  after: {
+                    status: "ASSIGNED",
+                    inventoryBagId: bagId,
+                    reason: "Restored lost intake reservation during bag edit",
+                  },
+                },
+                tx,
+              );
+            }
+          }
+        }
       }
 
       await writeAudit(

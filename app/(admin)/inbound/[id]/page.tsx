@@ -19,6 +19,8 @@ import { BagEditHistoryPanel } from "./bag-edit-history-panel";
 import { BagNotesCell } from "./bag-notes-cell";
 import { FloorReadinessBadge } from "@/components/admin/floor-readiness-badge";
 import { RepairQrReservationButton } from "./repair-qr-reservation-button";
+import { RepairLostQrReservationsButton } from "./repair-lost-qr-reservations-button";
+import { listLostQrReservationCandidates } from "@/lib/db/queries/lost-qr-reservations";
 import { loadReceiveBagReadinessEvaluations } from "@/lib/production/floor-readiness-loaders";
 import { formatBagQrForDisplay } from "@/lib/ui/format-bag-qr-display";
 import { PageHeader, StatusPill } from "@/components/ui/page-header";
@@ -33,10 +35,17 @@ export default async function ReceiveDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireSession();
+  const user = await requireSession();
+  const isAdmin = user.role === "OWNER" || user.role === "ADMIN";
   const { id } = await params;
   const r = await getReceive(id);
   if (!r) notFound();
+
+  // BATCH-LOST-QR-RESERVATION-REPAIR-1 — global count of bags whose own IDLE
+  // RAW_BAG card lost its intake reservation (safe to re-reserve in one click).
+  const lostQrScan = isAdmin
+    ? await listLostQrReservationCandidates()
+    : { safeToRepair: 0, total: 0 };
 
   // Pull batches referenced by this receive's boxes so we can show
   // batch number + status next to each box without an N+1.
@@ -113,6 +122,12 @@ export default async function ReceiveDetailPage({
           }
           actions={
             <div className="flex items-center gap-2">
+              {isAdmin && lostQrScan.safeToRepair > 0 ? (
+                <RepairLostQrReservationsButton
+                  receiveId={id}
+                  safeCount={lostQrScan.safeToRepair}
+                />
+              ) : null}
               <Button variant="secondary" size="sm" asChild>
                 <Link href={`/inbound/${id}/edit`}>Edit receive</Link>
               </Button>

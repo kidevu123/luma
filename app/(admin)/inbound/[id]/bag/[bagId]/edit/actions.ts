@@ -1,7 +1,8 @@
 "use server";
 
-import { requireLead } from "@/lib/auth-guards";
+import { requireLead, requireAdmin } from "@/lib/auth-guards";
 import { editInventoryBag, repairQrReservation, type BagEditInput } from "@/lib/db/queries/bag-edits";
+import { repairLostQrReservationsBatch } from "@/lib/db/queries/lost-qr-reservations";
 import { revalidatePath } from "next/cache";
 
 export type EditBagFormData = {
@@ -78,4 +79,26 @@ export async function repairQrReservationAction(
     revalidatePath("/qr-cards");
   }
   return result;
+}
+
+// BATCH-LOST-QR-RESERVATION-REPAIR-1 — admin one-click repair of ALL safe lost
+// intake reservations (bags pointing at their own IDLE RAW_BAG card). Guarded +
+// audited; skips unsafe/conflicting rows; never touches workflow/allocation.
+export async function repairLostQrReservationsAction(
+  receiveId: string,
+): Promise<
+  | { ok: true; repaired: number; skipped: number; capped: boolean }
+  | { ok: false; error: string }
+> {
+  const actor = await requireAdmin();
+  try {
+    const r = await repairLostQrReservationsBatch(actor);
+    if (r.repaired > 0) {
+      revalidatePath(`/inbound/${receiveId}`);
+      revalidatePath("/qr-cards");
+    }
+    return { ok: true, repaired: r.repaired, skipped: r.skipped, capped: r.capped };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Batch repair failed." };
+  }
 }
