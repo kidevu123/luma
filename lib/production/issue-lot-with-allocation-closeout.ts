@@ -19,7 +19,10 @@ import {
   closeAllocationSessionInTx,
   openAllocationSessionInTx,
 } from "@/lib/production/raw-bag-allocation-lifecycle";
-import { resolveReopenStartingBalance } from "@/lib/production/bag-allocation";
+import {
+  resolveReopenStartingBalance,
+  TERMINAL_ALLOCATION_STATUSES,
+} from "@/lib/production/bag-allocation";
 import {
   computeEndingBalanceFromConsumption,
   computeExpectedTabletConsumptionFromProduct,
@@ -340,7 +343,15 @@ export async function loadRepairStartingBalanceHints(
     ),
   ];
 
-  const lastClosedByBag = new Map<
+  // v1.19.1 — the manual-issue repair prefill infers the NEXT session's
+  // starting balance from the LATEST TERMINAL session's ending (remaining)
+  // balance via resolveReopenStartingBalance, which reads endingBalanceQty
+  // (remaining), never consumedQty. So a RETURNED_TO_STOCK session contributes
+  // its RETURNED remainder as the starting balance — not consumed input. This
+  // was CLOSED-only, which missed a returned partial bag's remainder and fell
+  // back to the declared count. Use the shared terminal set (CLOSED /
+  // RETURNED_TO_STOCK / DEPLETED); still fails closed (no terminal → declared).
+  const lastTerminalByBag = new Map<
     string,
     {
       endingBalanceQty: number | null;
@@ -350,7 +361,7 @@ export async function loadRepairStartingBalanceHints(
   >();
 
   if (inventoryBagIds.length > 0) {
-    const closedRows = await db
+    const terminalRows = await db
       .select({
         inventoryBagId: rawBagAllocationSessions.inventoryBagId,
         endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
@@ -362,14 +373,16 @@ export async function loadRepairStartingBalanceHints(
       .where(
         and(
           inArray(rawBagAllocationSessions.inventoryBagId, inventoryBagIds),
-          eq(rawBagAllocationSessions.allocationStatus, "CLOSED"),
+          inArray(rawBagAllocationSessions.allocationStatus, [
+            ...TERMINAL_ALLOCATION_STATUSES,
+          ]),
         ),
       )
       .orderBy(desc(rawBagAllocationSessions.closedAt));
 
-    for (const row of closedRows) {
-      if (!lastClosedByBag.has(row.inventoryBagId)) {
-        lastClosedByBag.set(row.inventoryBagId, {
+    for (const row of terminalRows) {
+      if (!lastTerminalByBag.has(row.inventoryBagId)) {
+        lastTerminalByBag.set(row.inventoryBagId, {
           endingBalanceQty: row.endingBalanceQty,
           startingBalanceQty: row.startingBalanceQty,
           consumedQty: row.consumedQty,
@@ -384,7 +397,7 @@ export async function loadRepairStartingBalanceHints(
     const starting = resolveRepairStartingBalanceQty({
       pillCount: row.pillCount,
       declaredPillCount: row.declaredPillCount,
-      lastClosedSession: lastClosedByBag.get(row.inventoryBagId) ?? null,
+      lastClosedSession: lastTerminalByBag.get(row.inventoryBagId) ?? null,
     });
     if (starting != null) {
       hints[row.workflowBagId] = starting;

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.19.1] — 2026-07-03
+
+### Fixed — RETURNED_TO_STOCK consistency for manual finished-lot issue prefill (v1.19.0 follow-up)
+- **The last remaining CLOSED-only terminal lookup** — `loadRepairStartingBalanceHints` in `issue-lot-with-allocation-closeout.ts` (the manual `finished-lots/new` repair-path starting-balance prefill) — now uses the shared `TERMINAL_ALLOCATION_STATUSES` (`CLOSED / RETURNED_TO_STOCK / DEPLETED`) instead of `CLOSED` only. It was previously the only balance/consumed inference not fixed in v1.16.0/v1.19.0.
+- **Why it's safe:** this hint infers the NEXT session's *starting* balance from the latest terminal session's `endingBalanceQty` (the remaining/returned amount) via `resolveReopenStartingBalance` — it reads **remaining, never `consumedQty`**. So a `RETURNED_TO_STOCK` session correctly contributes its **returned remainder** as the starting balance, not consumed input. A `DEPLETED` terminal (ending 0) prefills 0 (empty — not over-issuable). Fails closed unchanged (no terminal session → declared / pill count). Read-only prefill only — no mutation, no Zoho, no lot creation.
+- **Left intentionally CLOSED/DEPLETED:** the two `OPEN`-session detection queries in the same file (existing-session checks) and the Zoho consumed-session **link** in `finished-lots.ts` (a returned remainder is not a consumed input to the lot) — unchanged.
+
+### Notes
+- Read-only production impact: exactly **0** current manual-issue repair-path bags have a `RETURNED_TO_STOCK` latest terminal session, so no current prefill value changes; the fix corrects the semantics for when the case arises (1 bag total has a returned-to-stock latest terminal, but it has an open session so it is not on the repair path). No schema change. v1.18.0 auto-issue and v1.19.0 auto-release unchanged; no duplicate lots/events; no Zoho commit. All partial-bag / allocation / open-session-rebase / QR / IDLE invariants preserved. No lots issued/released by this deploy.
+
 ## [1.19.0] — 2026-07-03
 
 ### Added — AUTO-QC-RELEASE-1: one-click auto-release of clean Pending QC lots

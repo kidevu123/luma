@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   deriveIssueLotPrefill,
   resolveRepairStartingBalanceQty,
@@ -88,6 +90,53 @@ describe("resolveRepairStartingBalanceQty", () => {
         },
       }),
     ).toBe(4200);
+  });
+
+  it("v1.19.1: a RETURNED_TO_STOCK remainder becomes the starting balance — NOT consumed", () => {
+    // bag-card-104 shape: started 7,197, consumed 3,599, returned 3,598 to stock.
+    // The prefill must suggest the RETURNED remainder (3,598), never the consumed.
+    expect(
+      resolveRepairStartingBalanceQty({
+        pillCount: 7197,
+        declaredPillCount: 7197,
+        lastClosedSession: {
+          endingBalanceQty: 3598, // returned remainder
+          startingBalanceQty: 7197,
+          consumedQty: 3599, // must NOT be used as the starting balance
+        },
+      }),
+    ).toBe(3598);
+  });
+
+  it("v1.19.1: a DEPLETED terminal (ending 0) prefills 0 (empty — not over-issuable)", () => {
+    expect(
+      resolveRepairStartingBalanceQty({
+        pillCount: 7197,
+        declaredPillCount: 7197,
+        lastClosedSession: {
+          endingBalanceQty: 0,
+          startingBalanceQty: 7197,
+          consumedQty: 7197,
+        },
+      }),
+    ).toBe(0);
+  });
+});
+
+describe("v1.19.1 — manual-issue prefill uses the full terminal set", () => {
+  const src = readFileSync(
+    join(process.cwd(), "lib/production/issue-lot-with-allocation-closeout.ts"),
+    "utf8",
+  );
+
+  it("the repair starting-balance lookup includes RETURNED_TO_STOCK / DEPLETED (not CLOSED-only)", () => {
+    // The starting-balance hint query uses the shared terminal set.
+    expect(src).toMatch(/inArray\(\s*rawBagAllocationSessions\.allocationStatus,\s*\[\s*\.\.\.TERMINAL_ALLOCATION_STATUSES/);
+    // No stale CLOSED-only status equality feeding the balance hint.
+    expect(src).not.toMatch(/eq\(rawBagAllocationSessions\.allocationStatus, "CLOSED"\)/);
+    // The two OPEN checks (existing-session detection) are unaffected.
+    const openChecks = src.match(/eq\(rawBagAllocationSessions\.allocationStatus, "OPEN"\)/g) ?? [];
+    expect(openChecks.length).toBe(2);
   });
 });
 
