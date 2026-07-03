@@ -6,8 +6,40 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { hasRealProductionOutput } from "./open-session-rebase";
 
 const repo = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+
+describe("hasRealProductionOutput — the sealed=0 rebase-blocker bug (v1.17.1)", () => {
+  it("bag-card-104: a fresh run (no sealing) reports NO output even though sealedOutput is 0, not null", () => {
+    // deriveStageOutputForBag returns sealedOutput 0 (COALESCE(...,0)+COALESCE(...,0))
+    // for a run with no sealing events — the exact shape of run 4cb0ed2f.
+    expect(
+      hasRealProductionOutput({
+        grossBlisters: null,
+        sealedOutput: 0,
+        packagedOutput: null,
+        finishedOutput: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("all-null / all-zero output → no output (eligible for rebase)", () => {
+    expect(
+      hasRealProductionOutput({ grossBlisters: null, sealedOutput: null, packagedOutput: null, finishedOutput: null }),
+    ).toBe(false);
+    expect(
+      hasRealProductionOutput({ grossBlisters: 0, sealedOutput: 0, packagedOutput: 0, finishedOutput: 0 }),
+    ).toBe(false);
+  });
+
+  it("any POSITIVE stage output → has output (rebase blocked)", () => {
+    expect(hasRealProductionOutput({ grossBlisters: 5, sealedOutput: 0, packagedOutput: null, finishedOutput: null })).toBe(true);
+    expect(hasRealProductionOutput({ grossBlisters: null, sealedOutput: 1656, packagedOutput: null, finishedOutput: null })).toBe(true);
+    expect(hasRealProductionOutput({ grossBlisters: null, sealedOutput: 0, packagedOutput: 12, finishedOutput: null })).toBe(true);
+    expect(hasRealProductionOutput({ grossBlisters: null, sealedOutput: 0, packagedOutput: null, finishedOutput: 3 })).toBe(true);
+  });
+});
 const service = repo("lib/production/open-session-rebase.ts");
 const actions = repo("app/(admin)/partial-bags/actions.ts");
 const page = repo("app/(admin)/partial-bags/[inventoryBagId]/resolve/page.tsx");
@@ -26,11 +58,13 @@ describe("rebase service — eligibility gates (fails closed)", () => {
     expect(service).toMatch(/session\.startingBalanceQty === priorTerminal\.endingBalanceQty/);
   });
 
-  it("refuses to rebase a session that already has production output", () => {
+  it("refuses to rebase a session that already has POSITIVE production output (0/null is not output)", () => {
     expect(service).toMatch(/deriveStageOutputForBag/);
     expect(service).toMatch(/reason: "HAS_PRODUCTION_OUTPUT"/);
-    expect(service).toMatch(/grossBlisters != null/);
-    expect(service).toMatch(/packagedOutput != null/);
+    // Uses the shared > 0 helper, NOT a `!= null` check (sealedOutput is 0 for
+    // a no-sealing run, which must not block the rebase).
+    expect(service).toMatch(/hasRealProductionOutput\(output\)/);
+    expect(service).not.toMatch(/sealedOutput != null/);
   });
 });
 
@@ -73,17 +107,28 @@ describe("rebase action — admin-gated", () => {
 });
 
 describe("resolve page + button — usable, keeps run open", () => {
-  it("computes rebase eligibility defensively and renders the button when available", () => {
+  it("computes rebase eligibility defensively and renders the button + spec copy when available", () => {
     expect(page).toMatch(/computeOpenSessionRebaseEligibility\(inventoryBagId\)/);
     expect(page).toMatch(/reason: "COMPUTE_FAILED"/);
     expect(page).toMatch(/rebase\?\.available \?/);
     expect(page).toMatch(/RebaseOpenSessionButton/);
-    expect(page).toMatch(/Correct open session starting balance \(keeps the run open\)/);
+    expect(page).toMatch(/Correct open session starting balance/);
+    expect(page).toMatch(/opened from the original declared\s*\n?\s*count instead of the prior/);
+    expect(page).toMatch(/Current start:[\s\S]*Corrected start:/);
   });
 
-  it("fixes the misleading 'no production output' copy for a reused open session", () => {
-    expect(page).toMatch(/This open session has no production output counts yet/);
-    expect(page).toMatch(/belongs to an earlier run and is for traceability/);
+  it("NEVER shows a vague 'if offered' without an action or reason — shows the exact reason when ineligible", () => {
+    expect(page).toMatch(/rebase && !rebase\.available \?/);
+    expect(page).toMatch(/Starting-balance correction unavailable:/);
+    expect(page).toMatch(/\{rebase\.message\}/);
+    // The old dead-end wording (offering nothing) is gone.
+    expect(page).not.toMatch(/Correct the open\s*\n?\s*session starting balance \(above, if offered\)/);
+  });
+
+  it("manual closeout warns that 'Correct remaining' closes the session", () => {
+    expect(page).toMatch(/“Correct\s*\n?\s*remaining”\s*<span[^>]*>closes<\/span>/);
+    expect(page).toMatch(/keep this run open for later/);
+    expect(page).toMatch(/Each opens an inline form when\s*\n?\s*clicked/);
   });
 
   it("button confirms the session stays open and QR stays assigned; admin action", () => {

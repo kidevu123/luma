@@ -17,6 +17,25 @@ type RebaseActor =
   | Pick<CurrentUser, "id" | "role">
   | { id: string | null; role: CurrentUser["role"] | null };
 
+/** True only when a run has POSITIVE recorded production output. Critical:
+ *  deriveStageOutputForBag returns `sealedOutput` as 0 (not null) when there are
+ *  no sealing events (that column is COALESCE(...,0)+COALESCE(...,0)), so a
+ *  `!= null` check would treat a fresh, un-consumed run as "has output" and
+ *  wrongly block the rebase. Zero / null = no output. */
+export function hasRealProductionOutput(output: {
+  grossBlisters: number | null;
+  sealedOutput: number | null;
+  packagedOutput: number | null;
+  finishedOutput: number | null;
+}): boolean {
+  return (
+    (output.grossBlisters ?? 0) > 0 ||
+    (output.sealedOutput ?? 0) > 0 ||
+    (output.packagedOutput ?? 0) > 0 ||
+    (output.finishedOutput ?? 0) > 0
+  );
+}
+
 export type OpenSessionRebaseEligibility =
   | {
       available: true;
@@ -95,14 +114,15 @@ export async function computeOpenSessionRebaseEligibility(
 
   // Guard: never rebase a session that already has production output — the
   // starting balance would then be entangled with recorded consumption.
+  // deriveStageOutputForBag returns sealedOutput as 0 (not null) when there are
+  // NO sealing events (that column is COALESCE(...,0)+COALESCE(...,0)), so a
+  // strict `!= null` check would treat a fresh run with zero output as "has
+  // output" and wrongly block the rebase. Treat only POSITIVE output as real
+  // consumption (same as pickDeepestOutput). Handpack/release/pickup events are
+  // not output; prior-run sealing evidence lives on a DIFFERENT workflow bag.
   if (session.workflowBagId) {
     const output = await deriveStageOutputForBag(session.workflowBagId);
-    const hasOutput =
-      output.grossBlisters != null ||
-      output.sealedOutput != null ||
-      output.packagedOutput != null ||
-      output.finishedOutput != null;
-    if (hasOutput) {
+    if (hasRealProductionOutput(output)) {
       return {
         available: false,
         reason: "HAS_PRODUCTION_OUTPUT",

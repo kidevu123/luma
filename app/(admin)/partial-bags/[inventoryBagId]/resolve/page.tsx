@@ -210,27 +210,30 @@ export default async function ResolvePartialBagPage({
              *  balance IN PLACE (keeps the run open for later production). Shown
              *  only when it opened from the wrong count and has no output yet. */}
             {rebase?.available ? (
-              <div className="rounded-lg border border-brand-300 bg-brand-50/60 px-3 py-2.5 space-y-1.5">
-                <p className="text-xs font-semibold text-brand-800">
-                  Correct open session starting balance (keeps the run open)
+              <div className="rounded-lg border-2 border-brand-400 bg-brand-50/70 px-3 py-3 space-y-2">
+                <p className="text-sm font-semibold text-brand-800">
+                  Correct open session starting balance
                 </p>
-                <p className="text-[12px] text-text-strong tabular-nums">
-                  Opened at{" "}
+                <p className="text-[12px] text-text-strong leading-snug">
+                  This session appears to have opened from the original declared
+                  count instead of the prior{" "}
+                  {rebase.priorStatus.replace(/_/g, " ").toLowerCase()} returned
+                  balance.
+                </p>
+                <p className="text-[13px] text-text-strong tabular-nums">
+                  Current start:{" "}
                   {rebase.currentStartingBalance != null
                     ? rebase.currentStartingBalance.toLocaleString()
                     : "unknown"}{" "}
-                  →{" "}
+                  → Corrected start:{" "}
                   <span className="font-semibold">
                     {rebase.newStartingBalance.toLocaleString()}
-                  </span>{" "}
-                  (prior {rebase.priorStatus.replace(/_/g, " ").toLowerCase()}{" "}
-                  returned balance)
+                  </span>
                 </p>
                 <p className="text-[11px] text-text-muted leading-snug">
-                  Use this when the run is still active and just started from the
-                  wrong count. The session stays OPEN, the QR stays assigned, no
-                  production numbers change, and you can add production output
-                  later.
+                  Keeps the session OPEN so production numbers can be entered
+                  later. The QR stays assigned. No production output or finished
+                  lot will be created.
                 </p>
                 <RebaseOpenSessionButton
                   inventoryBagId={context.inventoryBagId}
@@ -238,6 +241,13 @@ export default async function ResolvePartialBagPage({
                   newStarting={rebase.newStartingBalance}
                 />
               </div>
+            ) : rebase && !rebase.available ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11px] leading-snug text-amber-800">
+                <span className="font-medium">
+                  Starting-balance correction unavailable:
+                </span>{" "}
+                {rebase.message}
+              </p>
             ) : null}
 
             {/* Calculated remaining (system-derived) — reuses the workbench
@@ -269,8 +279,8 @@ export default async function ResolvePartialBagPage({
                 <span className="font-medium">Calculated remaining unavailable:</span>{" "}
                 This open session has no production output counts yet. Any sealed-card
                 evidence shown above belongs to an earlier run and is for traceability
-                only — it is not consumption for this open session. Correct the open
-                session starting balance (above, if offered), or record a manual count
+                only — it is not consumption for this open session. Use the
+                starting-balance correction above if offered, or record a manual count
                 / weigh-back / supervisor estimate below.
               </p>
             )}
@@ -280,6 +290,15 @@ export default async function ResolvePartialBagPage({
             <div className="border-t border-border pt-3">
               <p className="text-xs font-medium text-text-strong mb-1.5">
                 Manual closeout
+              </p>
+              <p className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-900">
+                <span className="font-semibold">Heads up:</span> “Correct
+                remaining” <span className="font-semibold">closes</span> this open
+                session — don’t use it if you need to keep this run open for later
+                production (use the starting-balance correction above instead).
+                “Mark depleted” releases the QR and is only for a physically empty
+                bag; “Void record” discards the bag. Each opens an inline form when
+                clicked.
               </p>
               <PartialBagCorrectionMenu
                 inventoryBagId={context.inventoryBagId}

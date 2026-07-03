@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.17.1] — 2026-07-03
+
+### Fixed — REBASE-OPEN-SESSION: rebase panel never appeared (sealed-output=0 false positive)
+- **Root cause:** `computeOpenSessionRebaseEligibility`'s "no production output" guard checked `output.sealedOutput != null`. But `deriveStageOutputForBag` computes the sealed column as `COALESCE(SEALING…,0) + COALESCE(BOTTLE_CAP_SEAL…,0)`, so it returns **0 (not null)** for a run with **no** sealing events. `0 != null` is `true`, so a fresh, un-consumed run (e.g. bag-card-104's run `4cb0ed2f` — only fill/handpack/release) was wrongly classified `HAS_PRODUCTION_OUTPUT` and the **"Correct open session starting balance"** panel was hidden. Confirmed against production: `deriveStageOutputForBag(4cb0ed2f)` → `{grossBlisters: null, sealed: 0, packaged: null, finished: null}`.
+- **Fix:** a shared `hasRealProductionOutput(output)` helper treats only **positive** stage output as real consumption (`(x ?? 0) > 0`), matching `pickDeepestOutput`. Handpack/release/pickup are not output; prior-run sealing evidence lives on a different workflow bag. bag-card-104's OPEN session is now **eligible** and the rebase panel shows **Current start: 7,197 → Corrected start: 3,598**. `lib/production/open-session-rebase.ts`.
+- **No more vague dead-end copy.** The Resolve page now shows **either** the rebase action **or** an explicit "Starting-balance correction unavailable: <exact reason>" — the "(above, if offered)" wording that offered nothing is gone. The rebase panel copy follows the spec (explains it opened from the declared count, shows the `Current start → Corrected start` formula, states the session stays OPEN + QR stays assigned + no output/finished lot created). `app/(admin)/partial-bags/[inventoryBagId]/resolve/page.tsx`.
+- **Manual closeout clarified.** Added a warning above the correction menu: **"Correct remaining" CLOSES this open session** — don't use it if you need to keep the run open for later production (use the starting-balance correction above); "Mark depleted" releases the QR (empty bags only); "Void record" discards the bag; each opens an inline form when clicked.
+
+### Notes
+- No schema change; admin-gated; no silent auto-resolution. bag-card-104 was **not** modified — remediation remains the admin's audited 2-click action (now correctly offered). All v1.7–v1.17 bottle partial-bag / system-derived / floor blocker / workbench / reuse-starting-balance / QR / IDLE invariants preserved.
+
 ## [1.17.0] — 2026-07-02
 
 ### Added — REBASE-OPEN-SESSION-1: correct an open session's wrong starting balance without closing it
