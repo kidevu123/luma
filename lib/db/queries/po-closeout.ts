@@ -24,6 +24,7 @@ import { canRepairQrReservation } from "@/lib/db/queries/bag-edits";
 import { getProductionOutputBacklogRow } from "@/lib/db/queries/production-output-backlog";
 import { evaluateFinishedLotReleaseEligibility } from "@/lib/production/finished-lot-release-eligibility";
 import { computeOpenSessionRebaseEligibility } from "@/lib/production/open-session-rebase";
+import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
 import {
   classifyPoCloseoutRow,
   derivePoOverallStatus,
@@ -66,23 +67,34 @@ export type PoCloseoutSummary = {
     released: number;
     zohoCommitted: number;
     zohoQueued: number;
+    zohoReadyToQueue: number;
     zohoFailed: number;
   };
+  /** True when production-output persistence is on (Zoho output is required). */
+  zohoRequired: boolean;
   topBlockers: Array<{ reason: string; count: number }>;
   rows: PoCloseoutRow[];
 };
 
-function normalizeZohoStatus(op: {
-  status: string | null;
-  committedAt: Date | null;
-} | undefined): PoCloseoutZohoStatus {
-  if (!op) return "NOT_APPLICABLE"; // Zoho output is separate/optional; no op yet.
+// PO-CLOSEOUT-ZOHO-DONE-1 — normalize a released lot's Zoho status. Exported for
+// unit testing. `zohoRequired` is true when production-output persistence is
+// enabled: then EVERY released lot is expected to have an op, so a MISSING op is
+// "required but not queued yet" (READY_TO_QUEUE), NOT "not applicable". Only when
+// persistence is disabled is a missing op genuinely NOT_APPLICABLE — with the
+// explicit reason that the Zoho output feature is off.
+export function normalizeZohoStatus(
+  op: { status: string | null; committedAt: Date | null } | undefined,
+  zohoRequired: boolean,
+): PoCloseoutZohoStatus {
+  if (!op) return zohoRequired ? "READY_TO_QUEUE" : "NOT_APPLICABLE";
   const s = (op.status ?? "").toUpperCase();
   if (op.committedAt != null || s === "COMMITTED") return "COMMITTED";
   if (s === "FAILED") return "FAILED";
   if (s === "QUEUED" || s === "COMMITTING") return "QUEUED";
-  if (s === "READY") return "READY_TO_QUEUE";
-  if (s === "DRAFT" || s === "PREVIEWED" || s === "APPROVED" || s === "NEEDS_MAPPING" || s === "HELD") {
+  if (s === "READY" || s === "APPROVED") return "READY_TO_QUEUE";
+  if (s === "DRAFT" || s === "PREVIEWED" || s === "NEEDS_MAPPING" || s === "HELD") {
+    // Op exists but is not queue-ready (mid-preview, mapping-blocked, or held) —
+    // the admin must resolve it in Zoho ops before it can be queued.
     return "NOT_READY";
   }
   return "UNCLEAR";
@@ -96,6 +108,11 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
     .where(eq(purchaseOrders.id, poId))
     .limit(1);
   if (!po) return null;
+
+  // When production-output persistence is enabled, every released lot is expected
+  // to have a Zoho op — so a missing op is "required but not queued", not
+  // "not applicable". When disabled, Zoho output is genuinely not required.
+  const zohoRequired = isProductionOutputPersistEnabled();
 
   // All inventory bags for this PO (chain: inventory_bags → small_boxes → receives).
   const bagRows = await db
@@ -129,8 +146,9 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       counts: {
         total: 0, done: 0, readyForAction: 0, needsReview: 0, blocked: 0,
         finalized: 0, awaitingLot: 0, lotsIssued: 0, released: 0,
-        zohoCommitted: 0, zohoQueued: 0, zohoFailed: 0,
+        zohoCommitted: 0, zohoQueued: 0, zohoReadyToQueue: 0, zohoFailed: 0,
       },
+      zohoRequired,
       topBlockers: [],
       rows: [],
     };
@@ -232,7 +250,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
   for (const b of bagRows) {
     const wf = wfByInventory.get(b.inventoryBagId);
     const lot = wf ? lotByWorkflow.get(wf.id) : undefined;
-    const zohoStatus = normalizeZohoStatus(lot ? zohoByLot.get(lot.id) : undefined);
+    const zohoStatus = normalizeZohoStatus(lot ? zohoByLot.get(lot.id) : undefined, zohoRequired);
     const excludedFromOutput = wf ? (excludedByWorkflow.get(wf.id) ?? false) : false;
 
     // Floor-readiness codes (pure — reuse the classifier with loaded data).
@@ -382,8 +400,10 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       released: rows.filter((r) => r.lotStatus === "RELEASED").length,
       zohoCommitted: rows.filter((r) => r.zoho === "COMMITTED").length,
       zohoQueued: rows.filter((r) => r.zoho === "QUEUED").length,
+      zohoReadyToQueue: rows.filter((r) => r.zoho === "READY_TO_QUEUE").length,
       zohoFailed: rows.filter((r) => r.zoho === "FAILED").length,
     },
+    zohoRequired,
     topBlockers: [...blockerTally.entries()]
       .map(([reason, count]) => ({ reason, count }))
       .sort((a, b) => b.count - a.count)

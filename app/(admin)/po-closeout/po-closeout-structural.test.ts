@@ -72,7 +72,7 @@ describe("PO closeout pages", () => {
     expect(detailPageSrc).toMatch(/Needs review/);
     expect(detailPageSrc).toMatch(/PoBatchButtons/);
     expect(detailPageSrc).toMatch(/Finalized.{0,40}floor work is complete/);
-    expect(detailPageSrc).toMatch(/Done.{0,60}no unresolved Luma actions/);
+    expect(detailPageSrc).toMatch(/Done.{0,60}no manual Luma action remains/);
     // Links to existing pages (no new lifecycle surfaces).
     expect(detailPageSrc).toMatch(/\/inbound\/\$\{row\.receiveId\}/);
     expect(detailPageSrc).toMatch(/\/finished-lots\/\$\{row\.finishedLotId\}/);

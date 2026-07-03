@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.22.1] — 2026-07-03
+
+### Fixed — PO-CLOSEOUT-ZOHO-DONE-1: released lots with required-but-missing Zoho output no longer count as DONE
+- **Bug (confirmed):** v1.22.0's PO Closeout normalized a released lot with **no active Zoho op** to `NOT_APPLICABLE`, which lets it count as DONE. But production runs with `ZOHO_PRODUCTION_OUTPUT_PERSIST_ENABLED=true` — every released lot is *expected* to have a Zoho op — so a missing op means "required but not queued", not "not applicable". Production dry-run: exactly **1** released lot (in PO-00238) had no op and was falsely DONE.
+- **Fix (narrow):** `normalizeZohoStatus(op, zohoRequired)` now takes a `zohoRequired` flag derived from `isProductionOutputPersistEnabled()`. A **missing op → `READY_TO_QUEUE`** when Zoho is required (→ row is READY_FOR_ACTION "Queue in Zoho operations", not DONE), and only `NOT_APPLICABLE` (with the explicit reason "Zoho output is disabled") when persistence is off. Ops that exist but aren't queue-ready (`DRAFT`/`PREVIEWED`/`NEEDS_MAPPING`/`HELD`) map to `NOT_READY` → NEEDS_REVIEW; `READY`/`APPROVED` → `READY_TO_QUEUE`; `QUEUED`/`COMMITTING` → `QUEUED`; committed → `COMMITTED`; `FAILED` → BLOCKED. `lib/db/queries/po-closeout.ts`.
+- **Explicit done policy** (matches the admin's "pushed to Zoho or in the queue"): a released lot is DONE only when its Zoho output is **QUEUED or COMMITTED**, or Zoho is explicitly not required; **READY_TO_QUEUE is not done** (admin must queue); **FAILED is BLOCKED**. Encoded in the pure `classifyPoCloseoutRow` (which was already correct for the statuses — only the loader's missing-op mapping was wrong). Pending-QC/On-Hold lots resolve at the QC step and never surface a Zoho ready-to-queue verdict.
+- **UI:** the closeout page now shows a per-row Zoho status (Committed / Queued / Ready to queue / Not ready / Failed / Not required), a "ready to queue" rollup count, and copy: "Done means no manual Luma action remains", "Ready to queue means an admin still needs to queue the Zoho output", "Zoho queued means it's ready for the worker", "Zoho committed means it was sent to Zoho". The page still **never queues or commits** to Zoho — READY_TO_QUEUE / FAILED rows link to Zoho operations.
+
+### Notes
+- **Read-only change to classification + copy; no data mutation, no Zoho queue/commit.** A PO-scoped Zoho queue batch action was **deferred** (the existing queue is per-op and OWNER/ADMIN-gated; rows link to it). Zoho commit remains separate/gated. v1.18 auto-issue, v1.19 auto-release, and the rest of v1.22 PO Closeout are unchanged. Dry-run impact: 1 released lot flips DONE→READY_TO_QUEUE; 2 committed stay DONE; 5 with non-terminal ops were already correctly not-done.
+
 ## [1.22.0] — 2026-07-03
 
 ### Added — PO Closeout Command Center (`/po-closeout`)

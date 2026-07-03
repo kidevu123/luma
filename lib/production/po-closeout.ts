@@ -289,21 +289,24 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
   checklist.finishedLotReleasedOrHeld = true;
 
   // ── Step 5 — Zoho output ────────────────────────────────────────────────
+  // Done policy: a released lot is DONE only when its Zoho output is QUEUED (the
+  // worker will commit it) or COMMITTED, or Zoho output is explicitly not
+  // required. READY_TO_QUEUE is NOT done — an admin still has to queue it.
   switch (input.zoho) {
     case "COMMITTED":
       return done("Released and committed to Zoho");
     case "QUEUED":
-      return done("Released — Zoho output queued");
+      return done("Released — Zoho output queued (worker will commit)");
     case "NOT_APPLICABLE":
-      return done("Released — Zoho output not required");
+      return done("Released — Zoho output not required (Zoho output is disabled)");
     case "FAILED":
-      return verdict("BLOCKED", "Failed Zoho output op", "QUEUE_OR_RETRY_ZOHO", "Retry in Zoho operations");
+      return verdict("BLOCKED", "Failed Zoho output op — retry", "QUEUE_OR_RETRY_ZOHO", "Retry in Zoho operations");
     case "READY_TO_QUEUE":
-      return verdict("READY_FOR_ACTION", "Released — ready to queue for Zoho", "QUEUE_OR_RETRY_ZOHO", "Queue in Zoho operations");
+      return verdict("READY_FOR_ACTION", "Released — Zoho output not queued yet", "QUEUE_OR_RETRY_ZOHO", "Queue in Zoho operations");
     case "NOT_READY":
-      return verdict("NEEDS_REVIEW", "Released — Zoho output not ready", "QUEUE_OR_RETRY_ZOHO", "Review Zoho readiness");
+      return verdict("NEEDS_REVIEW", "Released — Zoho op needs setup/review before queueing", "QUEUE_OR_RETRY_ZOHO", "Review Zoho readiness");
     default:
-      return verdict("NEEDS_REVIEW", "Zoho status unclear", "REVIEW_MANUALLY", "Review Zoho status");
+      return verdict("NEEDS_REVIEW", "Zoho status unclear — review", "REVIEW_MANUALLY", "Review Zoho status");
   }
 }
 

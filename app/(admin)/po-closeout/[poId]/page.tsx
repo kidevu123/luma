@@ -53,6 +53,16 @@ function rowLink(row: PoCloseoutRow): { href: string; label: string } | null {
   }
 }
 
+const ZOHO_LABEL: Record<string, string> = {
+  COMMITTED: "Committed",
+  QUEUED: "Queued",
+  READY_TO_QUEUE: "Ready to queue",
+  NOT_READY: "Not ready",
+  FAILED: "Failed",
+  NOT_APPLICABLE: "Not required",
+  UNCLEAR: "Unclear",
+};
+
 function Tick({ ok, label }: { ok: boolean | null; label: string }) {
   const Icon = ok === null ? Minus : ok ? Check : X;
   const cls = ok === null ? "text-text-subtle" : ok ? "text-green-600" : "text-amber-600";
@@ -120,14 +130,23 @@ export default async function PoCloseoutDetailPage({
           <span className="font-medium text-text-strong">Finalized</span> means floor work is complete.{" "}
           <span className="font-medium text-text-strong">Finished lot issued</span> means output was converted into inventory.{" "}
           <span className="font-medium text-text-strong">Released</span> means QC approved internally.{" "}
-          Zoho is separate; queued/committed status is shown per row.{" "}
-          <span className="font-medium text-text-strong">Done</span> means there are no unresolved Luma actions for this bag.
+          <span className="font-medium text-text-strong">Done</span> means no manual Luma action remains for this bag.
+        </p>
+        <p>
+          <span className="font-medium text-text-strong">Ready to queue</span> means an admin still needs to queue the Zoho
+          output. <span className="font-medium text-text-strong">Zoho queued</span> means it&apos;s ready for the worker.{" "}
+          <span className="font-medium text-text-strong">Zoho committed</span> means it was sent to Zoho.{" "}
+          {summary.zohoRequired
+            ? "Zoho output is required for released lots here, so a released lot without a queued/committed op is not done."
+            : "Zoho output is currently disabled, so it is not required for done."}{" "}
+          Zoho output is never queued or committed from this page.
         </p>
         <p>
           Released lots: <span className="font-medium text-text-strong">{c.released}</span> · Zoho committed:{" "}
           <span className="font-medium text-green-700">{c.zohoCommitted}</span> · queued:{" "}
-          <span className="font-medium">{c.zohoQueued}</span> · failed:{" "}
-          <span className="font-medium text-red-700">{c.zohoFailed}</span>. Zoho output is never committed from this page.
+          <span className="font-medium">{c.zohoQueued}</span> · ready to queue:{" "}
+          <span className="font-medium text-brand-700">{c.zohoReadyToQueue}</span> · failed:{" "}
+          <span className="font-medium text-red-700">{c.zohoFailed}</span>.
         </p>
       </div>
 
@@ -212,7 +231,10 @@ export default async function PoCloseoutDetailPage({
                       <Tick ok={row.checklist.floorFinalizedOrExcluded} label="Finalized" />
                       <Tick ok={row.checklist.finishedLotIssued} label="Lot issued" />
                       <Tick ok={row.checklist.finishedLotReleasedOrHeld} label="Released/held" />
-                      <Tick ok={row.checklist.zohoQueuedOrCommittedOrNa} label="Zoho" />
+                      <Tick
+                        ok={row.checklist.zohoQueuedOrCommittedOrNa}
+                        label={`Zoho: ${ZOHO_LABEL[row.zoho] ?? row.zoho}`}
+                      />
                     </div>
                   </TD>
                   <TD className="text-right">

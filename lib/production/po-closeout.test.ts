@@ -57,10 +57,39 @@ describe("classifyPoCloseoutRow — journey", () => {
     expect(r.action).toBe("QUEUE_OR_RETRY_ZOHO");
   });
 
-  it("released + Zoho ready-to-queue = READY_FOR_ACTION", () => {
+  it("released + Zoho ready-to-queue = READY_FOR_ACTION (NOT done — admin must queue)", () => {
     const r = classifyPoCloseoutRow({ ...doneRow, zoho: "READY_TO_QUEUE" });
     expect(r.status).toBe("READY_FOR_ACTION");
+    expect(r.status).not.toBe("DONE");
     expect(r.action).toBe("QUEUE_OR_RETRY_ZOHO");
+    expect(r.checklist.zohoQueuedOrCommittedOrNa).toBe(false);
+    expect(r.reason).toMatch(/not queued/i);
+  });
+
+  it("PO-CLOSEOUT-ZOHO-DONE-1: released + Zoho required + NO op (READY_TO_QUEUE) is NOT done", () => {
+    // The loader maps a missing op to READY_TO_QUEUE when Zoho is required.
+    const r = classifyPoCloseoutRow({ ...doneRow, zoho: "READY_TO_QUEUE" });
+    expect(r.status).toBe("READY_FOR_ACTION");
+    expect(r.checklist.zohoQueuedOrCommittedOrNa).toBe(false);
+  });
+
+  it("released + NOT_APPLICABLE = DONE with an explicit 'disabled' reason (not just 'no op')", () => {
+    const r = classifyPoCloseoutRow({ ...doneRow, zoho: "NOT_APPLICABLE" });
+    expect(r.status).toBe("DONE");
+    expect(r.reason).toMatch(/disabled|not required/i);
+    expect(r.reason).not.toMatch(/no op found/i);
+  });
+
+  it("released + NOT_READY (op mid-preview/mapping) = NEEDS_REVIEW, not done", () => {
+    const r = classifyPoCloseoutRow({ ...doneRow, zoho: "NOT_READY" });
+    expect(r.status).toBe("NEEDS_REVIEW");
+    expect(r.checklist.zohoQueuedOrCommittedOrNa).toBe(false);
+  });
+
+  it("PENDING_QC / ON_HOLD lots never surface a Zoho ready-to-queue verdict", () => {
+    // They resolve at the QC step, before the Zoho step.
+    expect(classifyPoCloseoutRow({ ...doneRow, lotStatus: "PENDING_QC", releaseStatus: "NEEDS_QC_REVIEW", zoho: "READY_TO_QUEUE" }).action).not.toBe("QUEUE_OR_RETRY_ZOHO");
+    expect(classifyPoCloseoutRow({ ...doneRow, lotStatus: "ON_HOLD", zoho: "READY_TO_QUEUE" }).action).toBe("REVIEW_QC_HOLD");
   });
 
   it("finalized without lot + autoIssuable = READY_FOR_ACTION auto-issue", () => {
@@ -175,5 +204,16 @@ describe("PO rollup", () => {
   it("summarizeRowStatuses counts each bucket", () => {
     const s = summarizeRowStatuses(["DONE", "DONE", "READY_FOR_ACTION", "NEEDS_REVIEW", "BLOCKED"]);
     expect(s).toEqual({ total: 5, done: 2, readyForAction: 1, needsReview: 1, blocked: 1 });
+  });
+
+  it("PO overall is NOT DONE when a released lot is READY_TO_QUEUE (or FAILED)", () => {
+    const readyToQueue = classifyPoCloseoutRow({ ...doneRow, zoho: "READY_TO_QUEUE" }).status;
+    const committed = classifyPoCloseoutRow(doneRow).status;
+    expect(derivePoOverallStatus([committed, readyToQueue])).toBe("ACTION_READY");
+    const failed = classifyPoCloseoutRow({ ...doneRow, zoho: "FAILED" }).status;
+    expect(derivePoOverallStatus([committed, failed])).toBe("BLOCKED");
+    // All committed/queued → DONE.
+    const queued = classifyPoCloseoutRow({ ...doneRow, zoho: "QUEUED" }).status;
+    expect(derivePoOverallStatus([committed, queued])).toBe("DONE");
   });
 });
