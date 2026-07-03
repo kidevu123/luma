@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.21.2] — 2026-07-03
+
+### Fixed — OPEN-ALLOCATION-GUARD-1: finished-lot creation no longer bypasses the open-allocation guard on the explicit-inputs path
+- **Investigation (lot 352267):** the ON_HOLD lot with an OPEN allocation is **not** an ON_HOLD feature — ON_HOLD is applied *after* creation (a `SUBMISSION_CORRECTED` correction flips PENDING_QC/RELEASED → ON_HOLD). The root cause is an open-allocation-guard gap: `createFinishedLotInTx` only enforced "a lot must not be created while the source bag's allocation is OPEN" (documented invariant) on the **derived-inputs** path (via `resolveFinishedLotTabletQty`). When **explicit `inputs`** were supplied (as the plain `createFinishedLot` / `createFinishedLotAction` accepts), that branch — and its guard — was skipped, so a lot could be created for a workflow bag whose allocation stayed OPEN forever (bag stuck IN_USE, consumed qty never recorded). 352267 (created 2026-06-19 as PENDING_QC via this path, corrected to ON_HOLD 27 min later) is the sole case; **all 9 PENDING_QC and 5 RELEASED lots have their allocations correctly closed.**
+- **Model confirmed:** the allocation must be closed at/before lot issue, regardless of eventual status. The coordinated (`issueFinishedLotWithAllocationCloseout`) and auto-issue paths already close it and set `skipOpenAllocationSessionCheck: true`; the current issue form routes any workflow-bag lot through the coordinated (closeout) path. ON_HOLD does **not** and should **not** keep an allocation open.
+- **Fix:** `createFinishedLotInTx` now checks for an OPEN allocation session on the source bag **before the insert, for all input modes** (explicit + derived), gated on `workflowBagId && !skipOpenAllocationSessionCheck` — so it throws the same "close or deplete the allocation session first" error instead of creating a dangling lot. The coordinated/auto paths (skip=true, they close the session in-tx) and non-bag lots (no workflowBagId) are unaffected. `lib/db/queries/finished-lots.ts`.
+- **New read-only detector** `listFinishedLotsWithOpenAllocation` — surfaces any finished lot whose source bag still has an OPEN allocation (should be empty going forward; flags pre-existing anomalies like 352267 for manual resolution).
+
+### Notes
+- **No production data mutated.** Lot 352267 is intentionally left as-is (ON_HOLD, allocation OPEN) — resolving it (close the allocation / re-issue via closeout) is a **manual, approval-gated** step; the fix only prevents *new* such lots. ON_HOLD behavior, auto-issue/auto-release fail-closed gating, and Zoho-output separation are unchanged (ON_HOLD lots are never auto-released or committed). Partial-bag, allocation-closeout, and QR/IDLE invariants intact. No schema change.
+
 ## [1.21.1] — 2026-07-03
 
 ### Changed — clearer inventory-bag lifecycle labels (no data/model change)

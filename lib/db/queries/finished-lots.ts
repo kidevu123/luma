@@ -234,6 +234,32 @@ export async function getFinishedLot(id: string) {
   return { ...row, inputs };
 }
 
+/** OPEN-ALLOCATION-GUARD-1 — READ-ONLY. Finished lots whose source workflow
+ *  bag still has an OPEN raw-bag allocation session (an unclosed ledger). Should
+ *  be empty going forward now that createFinishedLot refuses to create such lots;
+ *  surfaces any pre-existing anomaly (e.g. lot 352267) for manual resolution. */
+export async function listFinishedLotsWithOpenAllocation() {
+  return db
+    .select({
+      finishedLotId: finishedLots.id,
+      finishedLotNumber: finishedLots.finishedLotNumber,
+      status: finishedLots.status,
+      workflowBagId: finishedLots.workflowBagId,
+      allocationSessionId: rawBagAllocationSessions.id,
+      inventoryBagId: rawBagAllocationSessions.inventoryBagId,
+    })
+    .from(finishedLots)
+    .innerJoin(workflowBags, eq(workflowBags.id, finishedLots.workflowBagId))
+    .innerJoin(
+      rawBagAllocationSessions,
+      and(
+        eq(rawBagAllocationSessions.inventoryBagId, workflowBags.inventoryBagId),
+        eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+      ),
+    )
+    .orderBy(desc(finishedLots.createdAt));
+}
+
 /** Bags that are FINALIZED but not yet attached to a finished lot.
  *  These are what an operator picks from when issuing a new lot. */
 export async function listFinalizedBagsWithoutLot() {
@@ -317,6 +343,39 @@ export async function createFinishedLotInTx(
     skipAllocationSessionLink?: boolean;
   },
 ) {
+  // OPEN-ALLOCATION-GUARD-1 — a finished lot must not be created while the
+  // source raw bag's allocation session is still OPEN: its consumed quantity is
+  // unknown and the session would be orphaned open forever (bag stuck IN_USE).
+  // The derived-inputs path enforces this via resolveFinishedLotTabletQty, but
+  // the EXPLICIT-inputs path skipped it entirely (the gap behind lot 352267).
+  // Enforce it here for ALL input modes. The coordinated/auto paths set
+  // skipOpenAllocationSessionCheck because they close the session in the same tx.
+  if (input.workflowBagId && !options?.skipOpenAllocationSessionCheck) {
+    const [bagRow] = await tx
+      .select({ inventoryBagId: workflowBags.inventoryBagId })
+      .from(workflowBags)
+      .where(eq(workflowBags.id, input.workflowBagId))
+      .limit(1);
+    if (bagRow?.inventoryBagId) {
+      const [openSession] = await tx
+        .select({ id: rawBagAllocationSessions.id })
+        .from(rawBagAllocationSessions)
+        .where(
+          and(
+            eq(rawBagAllocationSessions.inventoryBagId, bagRow.inventoryBagId),
+            eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+          ),
+        )
+        .limit(1);
+      if (openSession) {
+        throw new Error(
+          "Cannot create finished lot: the source raw bag has an open allocation session. " +
+            "Close or deplete the allocation session before creating the lot so the consumed quantity is known.",
+        );
+      }
+    }
+  }
+
   const [lot] = await tx
     .insert(finishedLots)
     .values({
