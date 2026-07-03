@@ -162,24 +162,24 @@ export type QrIdlePointedClassifyInput = {
 
 export function classifyQrIdlePointedBag(
   input: QrIdlePointedClassifyInput,
-): { category: QrIdlePointedCategory; actionable: boolean; note: string } {
+): { category: QrIdlePointedCategory; label: string; actionable: boolean; note: string } {
   if (input.bagStatus === "AVAILABLE") {
     return input.intakeGuardOk
-      ? { category: "SAFE_INTAKE_LOST_RESERVATION", actionable: true, note: "Re-reservable intake lost reservation." }
-      : { category: "AVAILABLE_NEEDS_REVIEW", actionable: false, note: "Available but failed the intake guard (e.g. token conflict) — review." };
+      ? { category: "SAFE_INTAKE_LOST_RESERVATION", label: "Lost intake reservation — re-reserve", actionable: true, note: "Re-reservable intake lost reservation." }
+      : { category: "AVAILABLE_NEEDS_REVIEW", label: "Available — needs review", actionable: false, note: "Available but failed the intake guard (e.g. token conflict) — review." };
   }
   if (input.bagStatus === "EMPTIED" || input.bagStatus === "DEPLETED") {
-    return { category: "DEPLETED_QR_RELEASED", actionable: false, note: "Bag spent; QR released. No floor reservation needed." };
+    return { category: "DEPLETED_QR_RELEASED", label: "Depleted/emptied — finished history", actionable: false, note: "Bag spent; QR released. No floor reservation needed." };
   }
   if (input.bagStatus === "IN_USE") {
     if (!input.hasWorkflow) {
-      return { category: "IN_USE_NO_WORKFLOW", actionable: false, note: "IN_USE with no workflow — ambiguous; manual review." };
+      return { category: "IN_USE_NO_WORKFLOW", label: "In use, no workflow — review", actionable: false, note: "IN_USE with no workflow — ambiguous; manual review." };
     }
     return input.workflowFinalized
-      ? { category: "IN_USE_FINALIZED_QR_RELEASED", actionable: false, note: "Workflow finalized; QR correctly released. Expected history — not re-reservable." }
-      : { category: "IN_USE_ACTIVE_QR_IDLE", actionable: false, note: "Active workflow but QR is idle — production-side desync; manual review, do NOT intake-repair." };
+      ? { category: "IN_USE_FINALIZED_QR_RELEASED", label: "Finalized — awaiting finished lot", actionable: false, note: "Workflow finalized; QR correctly released. Expected history — not re-reservable." }
+      : { category: "IN_USE_ACTIVE_QR_IDLE", label: "Active production — QR desync (review)", actionable: false, note: "Active workflow but QR is idle — production-side desync; manual review, do NOT intake-repair." };
   }
-  return { category: "OTHER_NEEDS_REVIEW", actionable: false, note: `Bag status ${input.bagStatus} — manual review.` };
+  return { category: "OTHER_NEEDS_REVIEW", label: "Needs review", actionable: false, note: `Bag status ${input.bagStatus} — manual review.` };
 }
 
 export type QrProductionDesyncRow = {
@@ -192,6 +192,7 @@ export type QrProductionDesyncRow = {
   workflowBagId: string | null;
   workflowFinalized: boolean;
   category: QrIdlePointedCategory;
+  label: string;
   actionable: boolean;
   note: string;
 };
@@ -267,6 +268,7 @@ export async function listQrProductionDesyncReport(): Promise<QrProductionDesync
       workflowBagId: r.workflowBagId ?? null,
       workflowFinalized: r.finalizedAt != null,
       category: c.category,
+      label: c.label,
       actionable: c.actionable,
       note: c.note,
     };

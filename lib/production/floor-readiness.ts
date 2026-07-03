@@ -364,7 +364,7 @@ function adminActionForCodes(codes: FloorReadinessCode[]): string | null {
     case "BLOCKED_QR_RESERVATION_LOST":
       return "This QR is on the bag but its card is idle (reservation lost) — re-reserve it here.";
     case "WARNING_QR_IDLE_IN_PRODUCTION":
-      return "Bag is in production and its QR is idle — production QR state needs review (do not re-reserve as intake).";
+      return "Bag is past intake (finalized or in production) and its QR was released — this is production/finished history, not a re-reservable intake reservation.";
     case "WARNING_QR_IDLE_BAG_DEPLETED":
       return "Bag is depleted/emptied — its QR was released and no floor reservation is needed.";
     case "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED":
@@ -504,7 +504,7 @@ function readinessReasonLineForCode(code: FloorReadinessCode): string | null {
     case "BLOCKED_QR_RESERVATION_LOST":
       return "QR set on this bag but idle (reservation lost) — re-reserve";
     case "WARNING_QR_IDLE_IN_PRODUCTION":
-      return "In production, QR idle — production QR state needs review";
+      return "Past intake (finalized/in production) — QR released, finished history";
     case "WARNING_QR_IDLE_BAG_DEPLETED":
       return "Depleted/emptied — no floor reservation needed";
     case "BLOCKED_QR_NOT_ASSIGNED_OR_RESERVED":

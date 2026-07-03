@@ -13,8 +13,12 @@ import {
   groupBagEditHistories,
 } from "@/lib/receive/bag-edit-history";
 import { db } from "@/lib/db";
-import { batches, tabletTypes } from "@/lib/db/schema";
+import { batches, tabletTypes, workflowBags, finishedLots } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
+import {
+  describeInventoryBagLifecycle,
+  type InventoryBagLifecycleDescriptor,
+} from "@/lib/production/inventory-bag-lifecycle";
 import { BagEditHistoryPanel } from "./bag-edit-history-panel";
 import { BagNotesCell } from "./bag-notes-cell";
 import { FloorReadinessBadge } from "@/components/admin/floor-readiness-badge";
@@ -91,6 +95,34 @@ export default async function ReceiveDetailPage({
     batchRows.map((b) => [b.id, b.batchNumber ?? b.id.slice(0, 8)]),
   );
   const readinessByBag = await loadReceiveBagReadinessEvaluations(db, bagIds);
+
+  // INVENTORY-BAG-LIFECYCLE-LABEL-1 — per-bag workflow/lot context so an IN_USE
+  // bag whose production is finalized reads as "Finalized · awaiting lot", not
+  // "active on floor". Display-only; never changes stored status.
+  const lifecycleRows = bagIds.length
+    ? await db
+        .select({
+          inventoryBagId: workflowBags.inventoryBagId,
+          finalizedAt: workflowBags.finalizedAt,
+          finishedLotId: finishedLots.id,
+        })
+        .from(workflowBags)
+        .leftJoin(finishedLots, eq(finishedLots.workflowBagId, workflowBags.id))
+        .where(inArray(workflowBags.inventoryBagId, bagIds))
+    : [];
+  const lifecycleByBag = new Map<
+    string,
+    { hasWorkflow: boolean; workflowFinalized: boolean; hasFinishedLot: boolean }
+  >();
+  for (const row of lifecycleRows) {
+    if (!row.inventoryBagId) continue;
+    const prev = lifecycleByBag.get(row.inventoryBagId);
+    lifecycleByBag.set(row.inventoryBagId, {
+      hasWorkflow: true,
+      workflowFinalized: (prev?.workflowFinalized ?? false) || row.finalizedAt != null,
+      hasFinishedLot: (prev?.hasFinishedLot ?? false) || row.finishedLotId != null,
+    });
+  }
 
   const bagEditHistories = groupBagEditHistories({
     bags: r.bags.map((b) => ({
@@ -283,7 +315,16 @@ export default async function ReceiveDetailPage({
                             <BagNotesCell notes={bag.notes ?? null} />
                           </TD>
                           <TD>
-                            <BagStatus status={bag.status} />
+                            <BagStatus
+                              descriptor={describeInventoryBagLifecycle({
+                                bagStatus: bag.status,
+                                hasWorkflow: lifecycleByBag.get(bag.id)?.hasWorkflow ?? false,
+                                workflowFinalized:
+                                  lifecycleByBag.get(bag.id)?.workflowFinalized ?? false,
+                                hasFinishedLot:
+                                  lifecycleByBag.get(bag.id)?.hasFinishedLot ?? false,
+                              })}
+                            />
                           </TD>
                           <TD>
                             {readinessByBag.get(bag.id) ? (
@@ -440,13 +481,10 @@ function BatchStatus({ status }: { status: string }) {
   );
 }
 
-function BagStatus({ status }: { status: string }) {
-  const map: Record<string, "ok" | "warn" | "danger" | "neutral" | "info"> = {
-    AVAILABLE: "ok",
-    IN_USE: "info",
-    EMPTIED: "neutral",
-    QUARANTINED: "warn",
-    VOID: "danger",
-  };
-  return <StatusPill kind={map[status] ?? "neutral"}>{status}</StatusPill>;
+function BagStatus({ descriptor }: { descriptor: InventoryBagLifecycleDescriptor }) {
+  return (
+    <StatusPill kind={descriptor.tone}>
+      <span title={descriptor.hint}>{descriptor.label}</span>
+    </StatusPill>
+  );
 }

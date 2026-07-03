@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.21.1] — 2026-07-03
+
+### Changed — clearer inventory-bag lifecycle labels (no data/model change)
+- **Investigation result:** `inventory_bags.status = IN_USE` is **intentional and correct**, not a lifecycle bug. The status tracks the **allocation lifecycle**: a bag becomes IN_USE when its allocation session opens (floor start) and only leaves IN_USE when that session is **closed at finished-lot issue** — `deriveBagStatusAfterClose` then sets it to `AVAILABLE` (a partial remains, reusable) or `EMPTIED` (depleted). So a finalized-but-no-lot bag legitimately stays IN_USE (open allocation) until its lot is issued; the enum has **no** intermediate state and adding/migrating one would break the allocation ⟺ IN_USE invariant, partial-bag reuse, and the open-session floor-start guards. All 16 finalized IN_USE rows have an OPEN allocation session; 15 are the normal auto-issue backlog, 1 is an ON_HOLD lot whose allocation wasn't closed (separate ON_HOLD edge). Recommendation: **do not change stored status** — improve labels only.
+- **New display helper** `describeInventoryBagLifecycle` (`lib/production/inventory-bag-lifecycle.ts`, pure): maps the raw status + per-bag workflow/lot context to a human phase/label/tone/hint and an `activeOnFloor` flag. The Receive detail page's bag-status chip now shows **"Finalized · awaiting lot"** (IN_USE + finalized workflow + no lot), **"Finalized"** (finalized + lot), **"On floor"** (active run), **"Available" / "Depleted" / "On hold" / "Void"** — so a finalized bag no longer reads as active floor work. Display-only; the stored enum value is unchanged.
+- **Detector/report labels:** `classifyQrIdlePointedBag` now returns a human `label` per category — IN_USE-finalized is **"Finalized — awaiting finished lot"** (not "active"). Floor-ready copy for `WARNING_QR_IDLE_IN_PRODUCTION` reworded to "Bag is past intake (finalized or in production) … production/finished history, not a re-reservable intake reservation." The single-row Re-reserve button remains hidden for these rows (v1.21.0).
+
+### Notes
+- Read-only investigation + copy/label change. **No inventory-bag status, QR, allocation, workflow, finished-lot, or Zoho data mutated.** No status migration performed (a future one is documented in the task report with its risk analysis, pending approval). Auto-issue backlog still finds these bags (it keys on workflow finalized + no lot, not bag status). QR detectors, partial-bag, allocation, and IDLE-QR invariants unchanged.
+
 ## [1.21.0] — 2026-07-03
 
 ### Added — QR production-desync classifier (v1.20.0 follow-up; read-only)

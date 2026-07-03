@@ -73,9 +73,10 @@ describe("evaluateInventoryBagReadiness", () => {
       qrCard: { cardType: "RAW_BAG", status: "IDLE", assignedWorkflowBagId: null, scanToken: "bag-card-121" },
     });
     expect(r.codes).toContain("WARNING_QR_IDLE_IN_PRODUCTION");
-    // Must NOT offer intake re-reservation for a production bag.
+    // Must NOT offer intake re-reservation for a production bag, and must NOT
+    // imply it is a re-reservable lost reservation.
     expect(r.codes).not.toContain("BLOCKED_QR_RESERVATION_LOST");
-    expect(r.adminAction).toMatch(/production QR state needs review/i);
+    expect(r.adminAction).toMatch(/past intake|finished history|not a re-reservable/i);
     expect(r.adminAction).not.toMatch(/re-reserve it here/i);
   });
 

@@ -93,6 +93,14 @@ describe("repair — audited, race-safe, no workflow allocation touch", () => {
     expect(buttonSrc).toMatch(/repairQrReservationAction/);
     expect(buttonSrc).toMatch(/Re-reserve QR/);
   });
+
+  it("receive page labels bag status via the lifecycle descriptor (finalized ≠ active on floor)", () => {
+    expect(pageSrc).toMatch(/describeInventoryBagLifecycle\(/);
+    expect(pageSrc).toMatch(/workflowFinalized:/);
+    expect(pageSrc).toMatch(/hasFinishedLot:/);
+    // The raw status is no longer rendered directly in the chip.
+    expect(pageSrc).not.toMatch(/<BagStatus status=/);
+  });
 });
 
 // ── BATCH-LOST-QR-RESERVATION-REPAIR-1 — detector + batch + edit reconcile ──
@@ -157,10 +165,12 @@ describe("classifyQrIdlePointedBag — intake vs production-side (fail closed)",
     expect(r.category).toBe("AVAILABLE_NEEDS_REVIEW");
     expect(r.actionable).toBe(false);
   });
-  it("IN_USE + finalized workflow = IN_USE_FINALIZED_QR_RELEASED (expected history, not actionable)", () => {
+  it("IN_USE + finalized workflow = IN_USE_FINALIZED_QR_RELEASED (expected history, not actionable), labeled 'Finalized — awaiting finished lot'", () => {
     const r = classifyQrIdlePointedBag({ bagStatus: "IN_USE", hasWorkflow: true, workflowFinalized: true, intakeGuardOk: false });
     expect(r.category).toBe("IN_USE_FINALIZED_QR_RELEASED");
     expect(r.actionable).toBe(false);
+    expect(r.label).toBe("Finalized — awaiting finished lot");
+    expect(r.label).not.toMatch(/active/i);
   });
   it("IN_USE + ACTIVE workflow = IN_USE_ACTIVE_QR_IDLE (real desync — manual review, not actionable)", () => {
     const r = classifyQrIdlePointedBag({ bagStatus: "IN_USE", hasWorkflow: true, workflowFinalized: false, intakeGuardOk: false });
