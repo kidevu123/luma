@@ -23,6 +23,15 @@ export type WorkflowRecoveryStatus =
 
 const uuidSchema = z.string().uuid();
 
+/** How the admin intends to resolve the mistake. QUARANTINE_AND_RESTART
+ *  quarantines this run and guides starting the correct workflow;
+ *  QUARANTINE_ONLY is the legacy flag-for-review behavior. Additive —
+ *  older events without this field are QUARANTINE_ONLY semantics. */
+export const WORKFLOW_RECOVERY_CORRECTION_MODES = [
+  "QUARANTINE_AND_RESTART",
+  "QUARANTINE_ONLY",
+] as const;
+
 export const workflowRecoveryPayloadSchema = z.object({
   client_event_id: uuidSchema,
   recovery_kind: z.enum(WORKFLOW_RECOVERY_KINDS),
@@ -30,7 +39,12 @@ export const workflowRecoveryPayloadSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   entered_by_user_id: uuidSchema,
   original_product_id: uuidSchema.nullable().optional(),
+  /** ADMIN-CORRECTION-WIZARD-1: the product staff SHOULD have used —
+   *  recorded intent that drives the "start correct workflow" guidance. */
   intended_product_id: uuidSchema.nullable().optional(),
+  /** Route/kind of the intended product (CARD | BOTTLE | VARIETY). */
+  intended_route: z.string().max(50).nullable().optional(),
+  correction_mode: z.enum(WORKFLOW_RECOVERY_CORRECTION_MODES).optional(),
   original_route_summary: z.string().min(1).max(500),
   source_inventory_released: z.boolean(),
   finished_lot_existed: z.boolean(),

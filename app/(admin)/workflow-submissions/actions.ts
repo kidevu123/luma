@@ -31,6 +31,15 @@ import {
   type WorkflowRecoveryKind,
 } from "@/lib/production/workflow-recovery";
 import { loadZohoOutputCommittedForWorkflowBag } from "@/lib/production/correction-downstream-effects";
+import {
+  applyWrongProductCorrectionInTx,
+  listWrongProductCorrectionCandidates,
+  loadWrongProductCorrectionContext,
+} from "@/lib/production/wrong-product-correction-service";
+import type {
+  WrongProductCorrectionPreview,
+  WrongProductCorrectionVerdict,
+} from "@/lib/production/wrong-product-correction";
 
 const missingBlisterCloseoutSchema = z.object({
   workflowBagId: z.string().uuid(),
@@ -51,6 +60,17 @@ const recoverySchema = z.object({
   recoveryKind: z.enum(["WRONG_ROUTE", "WRONG_PRODUCT", "WRONG_QR_ASSIGNMENT"]),
   reason: z.string().trim().min(10).max(500),
   notes: z.string().trim().max(2000).optional().nullable(),
+  /** ADMIN-CORRECTION-WIZARD-1 — the product staff SHOULD have used.
+   *  Optional recorded intent; drives "start correct workflow" guidance. */
+  intendedProductId: z
+    .string()
+    .uuid()
+    .optional()
+    .nullable()
+    .or(z.literal("").transform(() => null)),
+  correctionMode: z
+    .enum(["QUARANTINE_AND_RESTART", "QUARANTINE_ONLY"])
+    .optional(),
   confirm: z.literal("true"),
 });
 
@@ -275,6 +295,8 @@ export async function workflowRecoveryAction(
     recoveryKind: formData.get("recoveryKind"),
     reason: formData.get("reason"),
     notes: formData.get("notes") || null,
+    intendedProductId: formData.get("intendedProductId") || null,
+    correctionMode: formData.get("correctionMode") || undefined,
     confirm: formData.get("confirm"),
   });
   if (!parsed.success) {
@@ -375,6 +397,19 @@ export async function workflowRecoveryAction(
         zohoOutputAction = "VOID_UNCOMMITTED";
       }
 
+      // ADMIN-CORRECTION-WIZARD-1 — record the intended product (if the
+      // admin selected one) so downstream guidance can say exactly which
+      // workflow to start. Recorded intent only; no conversion happens.
+      let intendedProduct: { id: string; kind: string } | null = null;
+      if (parsed.data.intendedProductId) {
+        const [ip] = await tx
+          .select({ id: products.id, kind: products.kind })
+          .from(products)
+          .where(eq(products.id, parsed.data.intendedProductId));
+        if (!ip) throw new Error("Intended product not found.");
+        intendedProduct = ip;
+      }
+
       const payloadInput = {
         client_event_id: randomUUID(),
         recovery_kind: parsed.data.recoveryKind as WorkflowRecoveryKind,
@@ -382,7 +417,11 @@ export async function workflowRecoveryAction(
         notes: parsed.data.notes ?? null,
         entered_by_user_id: actor.id,
         original_product_id: bag.productId,
-        intended_product_id: null,
+        intended_product_id: intendedProduct?.id ?? null,
+        intended_route: intendedProduct?.kind ?? null,
+        correction_mode:
+          parsed.data.correctionMode ??
+          ("QUARANTINE_ONLY" as const),
         original_route_summary: routeSummary,
         source_inventory_released: resetAllowed,
         finished_lot_existed: Boolean(lot),
@@ -492,6 +531,8 @@ export async function workflowRecoveryAction(
             reset_allowed: resetAllowed,
             zoho_committed: zohoCommitted,
             finished_lot_id: lot?.id ?? null,
+            intended_product_id: intendedProduct?.id ?? null,
+            correction_mode: parsed.data.correctionMode ?? "QUARANTINE_ONLY",
           },
         },
         tx,
@@ -506,5 +547,166 @@ export async function workflowRecoveryAction(
   revalidateSubmissionCorrectionPaths();
   revalidatePath("/packaging-output");
   revalidatePath("/zoho-production-operations");
+  return { ok: true };
+}
+
+// ── ADMIN-CORRECTION-WIZARD-1 · wrong-product correction ─────────────────────
+
+export type WrongProductCorrectionOptions = {
+  currentProduct: { id: string; name: string; sku: string; kind: string } | null;
+  /** Safe direct-remap candidates: active, same route, allowed tablet type. */
+  candidates: Array<{ id: string; sku: string; name: string; kind: string }>;
+  /** All active products — used by the wrong-route flow to record which
+   *  product SHOULD have been run (intent only, never a conversion). */
+  allActiveProducts: Array<{ id: string; sku: string; name: string; kind: string }>;
+  hasFinishedLot: boolean;
+  lotStatus: string | null;
+  zohoOutputCommitted: boolean;
+  error?: string;
+};
+
+export async function loadWrongProductCorrectionOptionsAction(
+  workflowBagId: string,
+): Promise<WrongProductCorrectionOptions> {
+  await requireAdmin();
+  const empty: WrongProductCorrectionOptions = {
+    currentProduct: null,
+    candidates: [],
+    allActiveProducts: [],
+    hasFinishedLot: false,
+    lotStatus: null,
+    zohoOutputCommitted: false,
+  };
+  const parsedId = z.string().uuid().safeParse(workflowBagId);
+  if (!parsedId.success) return { ...empty, error: "Invalid workflow id." };
+
+  try {
+    return await db.transaction(async (tx) => {
+      const ctx = await loadWrongProductCorrectionContext(tx, {
+        workflowBagId: parsedId.data,
+        newProductId: null,
+      });
+      const candidates = ctx.oldProduct
+        ? await listWrongProductCorrectionCandidates(tx, {
+            currentProductId: ctx.oldProduct.id,
+            currentProductKind: ctx.oldProduct.kind,
+            tabletTypeId: ctx.tabletTypeId,
+          })
+        : [];
+      const allActiveProducts = await tx
+        .select({
+          id: products.id,
+          sku: products.sku,
+          name: products.name,
+          kind: products.kind,
+        })
+        .from(products)
+        .where(eq(products.isActive, true))
+        .orderBy(products.name);
+      return {
+        currentProduct: ctx.oldProduct
+          ? {
+              id: ctx.oldProduct.id,
+              name: ctx.oldProduct.name,
+              sku: ctx.oldProduct.sku,
+              kind: ctx.oldProduct.kind,
+            }
+          : null,
+        candidates,
+        allActiveProducts,
+        hasFinishedLot: Boolean(ctx.lot),
+        lotStatus: ctx.lot?.status ?? null,
+        zohoOutputCommitted: ctx.zohoOutputCommitted,
+      };
+    });
+  } catch (err) {
+    return {
+      ...empty,
+      error: err instanceof Error ? err.message : "Failed to load correction options.",
+    };
+  }
+}
+
+export type WrongProductCorrectionPreviewResult = {
+  verdict: WrongProductCorrectionVerdict | null;
+  preview: WrongProductCorrectionPreview | null;
+  error?: string;
+};
+
+export async function previewWrongProductCorrectionAction(
+  workflowBagId: string,
+  newProductId: string,
+): Promise<WrongProductCorrectionPreviewResult> {
+  await requireAdmin();
+  const parsed = z
+    .object({ workflowBagId: z.string().uuid(), newProductId: z.string().uuid() })
+    .safeParse({ workflowBagId, newProductId });
+  if (!parsed.success) {
+    return { verdict: null, preview: null, error: "Invalid preview request." };
+  }
+  try {
+    return await db.transaction(async (tx) => {
+      const ctx = await loadWrongProductCorrectionContext(tx, {
+        workflowBagId: parsed.data.workflowBagId,
+        newProductId: parsed.data.newProductId,
+      });
+      return { verdict: ctx.verdict, preview: ctx.preview };
+    });
+  } catch (err) {
+    return {
+      verdict: null,
+      preview: null,
+      error: err instanceof Error ? err.message : "Preview failed.",
+    };
+  }
+}
+
+const wrongProductCorrectionApplySchema = z.object({
+  workflowBagId: z.string().uuid(),
+  newProductId: z.string().uuid(),
+  reason: z.string().trim().min(10, "Enter a detailed reason (min 10 chars).").max(500),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  confirm: z.literal("true"),
+});
+
+export async function applyWrongProductCorrectionAction(
+  _prev: CorrectionActionResult | null,
+  formData: FormData,
+): Promise<CorrectionActionResult> {
+  const actor = await requireAdmin();
+  const parsed = wrongProductCorrectionApplySchema.safeParse({
+    workflowBagId: formData.get("workflowBagId"),
+    newProductId: formData.get("newProductId"),
+    reason: formData.get("reason"),
+    notes: formData.get("notes") || null,
+    confirm: formData.get("confirm"),
+  });
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "Invalid correction request.",
+    };
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      await applyWrongProductCorrectionInTx(tx, {
+        workflowBagId: parsed.data.workflowBagId,
+        newProductId: parsed.data.newProductId,
+        reason: parsed.data.reason,
+        notes: parsed.data.notes ?? null,
+        actor,
+      });
+    });
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "Wrong-product correction failed.",
+    };
+  }
+
+  revalidateSubmissionCorrectionPaths();
+  revalidatePath("/packaging-output");
+  revalidatePath("/zoho-production-operations");
+  revalidatePath("/finished-lots");
+  revalidatePath("/po-closeout");
   return { ok: true };
 }
