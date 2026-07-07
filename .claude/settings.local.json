@@ -154,7 +154,16 @@
       "Bash(npm version *)",
       "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/repair-receipt-352171-run2-seal-pack-backfill.ts root@192.168.1.190:/tmp/repair-352171.ts)",
       "Bash(echo \"eslint exit: $?\")",
-      "Bash(perl -pi -e 's/<SectionTable rows=\\\\{ready\\\\} variant=\"ready\" \\\\/>/<SectionTable rows={ready} variant=\"ready\" productionSummaries={productionSummaries} \\\\/>/; s/<SectionTable rows=\\\\{needsCloseout\\\\} variant=\"needs_closeout\" systemDerived=\\\\{systemDerived\\\\} \\\\/>/<SectionTable rows={needsCloseout} variant=\"needs_closeout\" systemDerived={systemDerived} productionSummaries={productionSummaries} \\\\/>/; s/<SectionTable rows=\\\\{missingLinkage\\\\} variant=\"missing_linkage\" systemDerived=\\\\{systemDerived\\\\} \\\\/>/<SectionTable rows={missingLinkage} variant=\"missing_linkage\" systemDerived={systemDerived} productionSummaries={productionSummaries} \\\\/>/' \"app/\\(admin\\)/partial-bags/page.tsx\")"
+      "Bash(perl -pi -e 's/<SectionTable rows=\\\\{ready\\\\} variant=\"ready\" \\\\/>/<SectionTable rows={ready} variant=\"ready\" productionSummaries={productionSummaries} \\\\/>/; s/<SectionTable rows=\\\\{needsCloseout\\\\} variant=\"needs_closeout\" systemDerived=\\\\{systemDerived\\\\} \\\\/>/<SectionTable rows={needsCloseout} variant=\"needs_closeout\" systemDerived={systemDerived} productionSummaries={productionSummaries} \\\\/>/; s/<SectionTable rows=\\\\{missingLinkage\\\\} variant=\"missing_linkage\" systemDerived=\\\\{systemDerived\\\\} \\\\/>/<SectionTable rows={missingLinkage} variant=\"missing_linkage\" systemDerived={systemDerived} productionSummaries={productionSummaries} \\\\/>/' \"app/\\(admin\\)/partial-bags/page.tsx\")",
+      "Bash(echo \"lint exit: $?\")",
+      "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/backfill-352173-352177-352180-352188-production.ts root@192.168.1.190:/tmp/bulk-backfill.ts)",
+      "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/convert-352183-card-to-bottle.ts root@192.168.1.190:/tmp/convert-352183.ts)",
+      "Bash(echo \"lint: $?\")",
+      "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/fix-352183-metrics-snapshot.ts root@192.168.1.190:/tmp/fix-metrics.ts)",
+      "Bash(perl -0pi -e 's/\\(  revalidatePath\\\\\\(\"\\\\/finished-lots\"\\\\\\);\\\\n\\)\\(?!.*po-closeout\\)/$1  revalidatePath\\(\"\\\\/po-closeout\"\\);\\\\n/g' \"app/\\(admin\\)/finished-lots/actions.ts\")",
+      "Bash(perl -0pi -e 's/\\(    revalidatePath\\\\\\(\"\\\\/finished-lots\"\\\\\\);\\\\n\\)  revalidatePath\\\\\\(\"\\\\/po-closeout\"\\\\\\);/$1    revalidatePath\\(\"\\\\/po-closeout\"\\);/g; s/\\(      revalidatePath\\\\\\(\"\\\\/finished-lots\"\\\\\\);\\\\n\\)  revalidatePath\\\\\\(\"\\\\/po-closeout\"\\\\\\);/$1      revalidatePath\\(\"\\\\/po-closeout\"\\);/g' \"app/\\(admin\\)/finished-lots/actions.ts\")",
+      "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/correct-352176-second-packaging-session.ts root@192.168.1.190:/tmp/correct-352176.ts)",
+      "Bash(perl -0pi -e 's/\\(      revalidatePath\\\\\\(`\\\\/po-closeout\\\\/\\\\$\\\\{poId\\\\}`\\\\\\);\\\\n\\)/$1      revalidatePath\\(\"\\\\/po-closeout\"\\);\\\\n/g' \"app/\\(admin\\)/po-closeout/actions.ts\")"
     ]
   }
 }

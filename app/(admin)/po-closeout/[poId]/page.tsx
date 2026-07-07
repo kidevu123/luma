@@ -13,8 +13,12 @@ import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { RowStatusBadge, OverallStatusBadge } from "../status-badge";
 import { PoBatchButtons } from "../batch-buttons";
+import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 
 export const dynamic = "force-dynamic";
+// CLOSEOUT-FRESHNESS-1 — operational page: never statically cached.
+export const revalidate = 0;
 
 export async function generateMetadata({
   params,
@@ -165,6 +169,7 @@ export default async function PoCloseoutDetailPage({
 
   return (
     <div className="space-y-5">
+      <AutoRefreshOnFocus />
       <div>
         <Link href="/po-closeout" className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text mb-2">
           <ArrowLeft className="h-3 w-3" /> All POs
@@ -174,6 +179,10 @@ export default async function PoCloseoutDetailPage({
           description={summary.vendorName ?? "Closeout command center"}
           actions={<OverallStatusBadge status={summary.overallStatus} />}
         />
+        <p className="mt-1 text-[10px] text-text-subtle">
+          Data as of {formatDateTimeEst(summary.evaluatedAt.toISOString())} —
+          reloads automatically when you return to this tab.
+        </p>
       </div>
 
       {/* Summary cards */}

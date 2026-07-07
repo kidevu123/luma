@@ -6,6 +6,7 @@
 // finished lots, and non-voided Zoho production output ops. Never mutates.
 
 import { desc, eq, inArray, isNull, and } from "drizzle-orm";
+import { unstable_noStore as noStore } from "next/cache";
 import { db } from "@/lib/db";
 import {
   batches,
@@ -81,6 +82,9 @@ async function resolveInventoryBagIds(
 export async function loadBagProductionSummaries(
   args: LoadBagProductionSummariesArgs,
 ): Promise<Map<string, BagProductionSummary>> {
+  // CLOSEOUT-FRESHNESS-1 — per-bag production numbers must always come
+  // from the live DB, never a framework cache.
+  noStore();
   const bagIds = await resolveInventoryBagIds(args);
   const out = new Map<string, BagProductionSummary>();
   if (bagIds.length === 0) return out;

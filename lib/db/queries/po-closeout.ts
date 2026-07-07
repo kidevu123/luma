@@ -5,6 +5,7 @@
 // those journey steps; most bags short-circuit earlier in classifyPoCloseoutRow.
 
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { unstable_noStore as noStore } from "next/cache";
 import { db } from "@/lib/db";
 import {
   purchaseOrders,
@@ -76,6 +77,9 @@ export type PoCloseoutSummary = {
   zohoRequired: boolean;
   topBlockers: Array<{ reason: string; count: number }>;
   rows: PoCloseoutRow[];
+  /** CLOSEOUT-FRESHNESS-1 — when this snapshot was computed from the live
+   *  DB. Rendered as "Data as of …" so admins can see a refresh reloaded. */
+  evaluatedAt: Date;
 };
 
 // PO-CLOSEOUT-ZOHO-DONE-1 — normalize a released lot's Zoho status. Exported for
@@ -104,6 +108,9 @@ export function normalizeZohoStatus(
 
 /** READ-ONLY. Build the full closeout view for one PO. */
 export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | null> {
+  // CLOSEOUT-FRESHNESS-1 — operational closeout data must never be served
+  // from any framework cache; every request recomputes from the live DB.
+  noStore();
   const [po] = await db
     .select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber, vendorName: purchaseOrders.vendorName })
     .from(purchaseOrders)
@@ -153,6 +160,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       zohoRequired,
       topBlockers: [],
       rows: [],
+      evaluatedAt: new Date(),
     };
   }
 
@@ -423,6 +431,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       .sort((a, b) => b.count - a.count)
       .slice(0, 6),
     rows,
+    evaluatedAt: new Date(),
   };
 }
 
@@ -467,6 +476,8 @@ export type CloseoutPoIndexRow = {
  *  it has no open allocation session. Anything else keeps the PO ACTIVE, so
  *  this can hide nothing that the detail page would surface. */
 export async function listCloseoutPoIndexRollups(): Promise<CloseoutPoIndexRow[]> {
+  // CLOSEOUT-FRESHNESS-1 — never cache the Active/Closed rollup.
+  noStore();
   const zohoRequired = isProductionOutputPersistEnabled();
   type Row = {
     id: string;

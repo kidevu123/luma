@@ -5,8 +5,12 @@ import { listCloseoutPoIndexRollups } from "@/lib/db/queries/po-closeout";
 import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
+import { formatDateTimeEst } from "@/lib/ui/luma-display";
 
 export const dynamic = "force-dynamic";
+// CLOSEOUT-FRESHNESS-1 — operational page: never statically cached.
+export const revalidate = 0;
 
 export const metadata = { title: "PO Closeout" };
 
@@ -53,12 +57,19 @@ export default async function PoCloseoutListPage({
   const tabCount = (key: TabKey) =>
     key === "all" ? pos.length : key === "active" ? activeCount : closedCount;
 
+  const evaluatedAt = new Date();
+
   return (
     <div className="space-y-5">
+      <AutoRefreshOnFocus />
       <PageHeader
         title="PO closeout"
         description="One place to see, per PO, which bags are done and which still need a Luma action. Active means at least one bag or Zoho output still needs attention; Closed means no manual Luma action remains."
       />
+      <p className="text-[10px] text-text-subtle -mt-3">
+        Data as of {formatDateTimeEst(evaluatedAt.toISOString())} — reloads
+        automatically when you return to this tab.
+      </p>
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1">

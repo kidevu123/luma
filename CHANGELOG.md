@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.24.1] — 2026-07-07
+
+### Fixed — CLOSEOUT-FRESHNESS-1: PO Closeout can no longer show a stale snapshot
+- **Diagnosis (read-only, PO-00238):** server rendering was already fresh — both closeout pages are `force-dynamic`, responses carry `Cache-Control: private, no-cache, no-store`, no `cache()`/`unstable_cache` exists anywhere, and a full read-model-vs-live-table divergence scan of PO-00238 found **zero** stale rows (including receipt 352183, whose 18:57 card→bottle live-ops route conversion updated `workflow_bags`, `read_bag_state`, `read_bag_metrics`, the new finished lot, and the allocation session consistently). The stale layer was the **client**: an already-open tab keeps its old snapshot indefinitely, and changes made by other users, the floor PWA, or direct-SQL ops repairs can never reach it via `revalidatePath`. Several admin mutation actions (finished lots, partial bags) also didn't revalidate the closeout paths as belt-and-braces.
+- **Fix (narrow):**
+  - `AutoRefreshOnFocus` (new client component) mounted on `/po-closeout` and `/po-closeout/[poId]`: calls `router.refresh()` (data-only RSC refetch, read-only) when the tab regains focus/visibility and on a 60s visible-tab interval, throttled to ≥15s. An open command center now re-pulls live DB state by itself.
+  - **"Data as of <time>" freshness marker** on both pages (`evaluatedAt` added to `PoCloseoutSummary`), so admins can see that a refresh actually reloaded.
+  - **Explicit no-store:** `unstable_noStore()` in `loadPoCloseout`, `listCloseoutPoIndexRollups`, and `loadBagProductionSummaries`, plus `export const revalidate = 0` on both pages — inert today (already dynamic) but locked in by tests so future changes can't reintroduce caching.
+  - **Complete revalidation coverage:** finished-lot actions (create, coordinated issue, repair auto-issue, batch auto-issue, auto-release, status change), partial-bag closeout actions, and PO-scoped batch actions now also `revalidatePath("/po-closeout")` (+ index for PO-scoped); correction-wizard actions already did.
+- **Tests (12 new, `closeout-freshness.test.ts`):** pages dynamic + revalidate 0; loaders call `noStore()` and are not `cache()`-wrapped; loaders read-only (no mutation on load); both pages mount AutoRefreshOnFocus and render the freshness marker; refresh component is refetch-only; finished-lot/partial-bag/batch/correction actions revalidate closeout paths.
+
+### Notes
+- **No data mutation, no Zoho queue/commit, no repairs run.** All diagnosis was read-only SELECTs. v1.24 per-bag summary stays read-only; v1.23 correction wizard and v1.22.1 Zoho done semantics untouched.
+
 ## [1.24.0] — 2026-07-07
 
 ### Added — BAG-PRODUCTION-SUMMARY-1: per-bag production breakdown, PO Closeout Active/Closed filtering, page-specific titles

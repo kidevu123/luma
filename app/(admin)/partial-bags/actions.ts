@@ -69,6 +69,7 @@ export async function resolvePartialBagInventoryAction(
   }
 
   revalidatePath("/partial-bags");
+  revalidatePath("/po-closeout");
   revalidatePath(`/partial-bags/${parsed.data.inventoryBagId}/resolve`);
   revalidatePath("/production/start");
   return { ok: true };
@@ -112,6 +113,7 @@ export async function useCalculatedRemainingAction(
   if (!result.ok) return { ok: false, error: result.error };
 
   revalidatePath("/partial-bags");
+  revalidatePath("/po-closeout");
   revalidatePath("/production/start");
   revalidatePath(`/partial-bags/${parsed.data.inventoryBagId}/resolve`);
   return { ok: true, remaining: result.derivedRemainingTablets, depleted: result.depleted };
@@ -126,6 +128,7 @@ const correctionBaseSchema = z.object({
 
 function revalidatePartialBagSurfaces(): void {
   revalidatePath("/partial-bags");
+  revalidatePath("/po-closeout");
   revalidatePath("/production/start");
   revalidatePath("/packaging-output");
 }
@@ -277,6 +280,7 @@ export async function backfillSafeMissingAllocationsAction(): Promise<BackfillSa
   });
 
   revalidatePath("/partial-bags");
+  revalidatePath("/po-closeout");
   revalidatePath("/admin/partial-bags");
 
   return {

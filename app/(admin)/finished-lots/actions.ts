@@ -46,6 +46,7 @@ export async function createFinishedLotAction(payload: unknown) {
   try {
     const { lot } = await createFinishedLot(compact(parsed.data), actor);
     revalidatePath("/finished-lots");
+    revalidatePath("/po-closeout");
     revalidatePath("/floor-board");
     revalidatePath("/packaging-output");
     revalidatePath("/zoho-operations");
@@ -105,6 +106,7 @@ export async function issueFinishedLotWithAllocationAndRedirect(payload: unknown
     return { error: err instanceof Error ? err.message : "Issue lot failed." };
   }
   revalidatePath("/finished-lots");
+  revalidatePath("/po-closeout");
   revalidatePath("/floor-board");
   revalidatePath("/packaging-output");
   revalidatePath("/zoho-production-operations");
@@ -124,6 +126,7 @@ export async function repairAutoIssueFinishedLotAction(workflowBagId: string) {
     if (!result.ok) return { error: result.message, reason: result.reason };
     revalidatePath("/packaging-output");
     revalidatePath("/finished-lots");
+    revalidatePath("/po-closeout");
     return {
       ok: true as const,
       finishedLotId: result.finishedLotId,
@@ -203,6 +206,7 @@ export async function autoIssueAllSafeLotsAction(): Promise<AutoIssueBatchResult
     if (issuedLots.length > 0) {
       revalidatePath("/packaging-output");
       revalidatePath("/finished-lots");
+    revalidatePath("/po-closeout");
     }
 
     return {
@@ -288,6 +292,7 @@ export async function autoReleaseAllSafeLotsAction(): Promise<AutoReleaseBatchRe
 
     if (releasedLots.length > 0) {
       revalidatePath("/finished-lots");
+    revalidatePath("/po-closeout");
       revalidatePath("/packaging-output");
     }
 
@@ -317,6 +322,7 @@ export async function setFinishedLotStatusAction(payload: unknown) {
     );
     revalidatePath(`/finished-lots/${parsed.data.id}`);
     revalidatePath("/finished-lots");
+    revalidatePath("/po-closeout");
     return { ok: true as const };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Status change failed." };

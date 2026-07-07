@@ -65,6 +65,7 @@ export async function autoIssueSafeLotsForPoAction(poId: string): Promise<PoBatc
 
     if (issued.length > 0) {
       revalidatePath(`/po-closeout/${poId}`);
+      revalidatePath("/po-closeout");
       revalidatePath("/packaging-output");
       revalidatePath("/finished-lots");
     }
@@ -133,6 +134,7 @@ export async function autoReleaseSafeLotsForPoAction(poId: string): Promise<PoBa
 
     if (released.length > 0) {
       revalidatePath(`/po-closeout/${poId}`);
+      revalidatePath("/po-closeout");
       revalidatePath("/finished-lots");
     }
     return {
