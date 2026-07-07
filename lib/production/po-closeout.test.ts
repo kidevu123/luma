@@ -217,3 +217,62 @@ describe("PO rollup", () => {
     expect(derivePoOverallStatus([committed, queued])).toBe("DONE");
   });
 });
+
+// ADMIN-CORRECTION-WIZARD-1 — recovered/quarantined rows carry an explicit
+// next action instead of collapsing into DONE.
+describe("classifyPoCloseoutRow — recovery statuses", () => {
+  const recoveredBase: PoCloseoutRowInput = {
+    ...doneRow,
+    bagStatus: "IN_USE",
+    excludedFromOutput: true,
+    hasFinishedLot: false,
+    finishedLotId: null,
+    lotStatus: null,
+    zoho: "NOT_APPLICABLE",
+  };
+
+  it("wrong-route recovered = NEEDS_REVIEW with start-correct-workflow action", () => {
+    const r = classifyPoCloseoutRow({
+      ...recoveredBase,
+      recoveryStatus: "WRONG_ROUTE_RECOVERED",
+    });
+    expect(r.status).toBe("NEEDS_REVIEW");
+    expect(r.action).toBe("START_OR_FINALIZE_WORKFLOW");
+    expect(r.reason).toMatch(/wrong route recovered/i);
+    expect(r.actionLabel).toMatch(/start correct workflow/i);
+  });
+
+  it("voided from output = NEEDS_REVIEW with manual review action", () => {
+    const r = classifyPoCloseoutRow({
+      ...recoveredBase,
+      recoveryStatus: "VOIDED_FROM_OUTPUT",
+    });
+    expect(r.status).toBe("NEEDS_REVIEW");
+    expect(r.action).toBe("REVIEW_MANUALLY");
+    expect(r.reason).toMatch(/manual review/i);
+  });
+
+  it("external recovery required (Zoho committed) = BLOCKED", () => {
+    const r = classifyPoCloseoutRow({
+      ...recoveredBase,
+      recoveryStatus: "EXTERNAL_RECOVERY_REQUIRED",
+    });
+    expect(r.status).toBe("BLOCKED");
+    expect(r.action).toBe("REVIEW_MANUALLY");
+    expect(r.reason).toMatch(/committed/i);
+  });
+
+  it("excluded WITHOUT a recovery status stays DONE (legacy exclusions)", () => {
+    const r = classifyPoCloseoutRow({ ...recoveredBase, recoveryStatus: null });
+    expect(r.status).toBe("DONE");
+  });
+
+  it("unknown recovery status fails closed to NEEDS_REVIEW", () => {
+    const r = classifyPoCloseoutRow({
+      ...recoveredBase,
+      recoveryStatus: "SOMETHING_NEW",
+    });
+    expect(r.status).toBe("NEEDS_REVIEW");
+    expect(r.action).toBe("REVIEW_MANUALLY");
+  });
+});

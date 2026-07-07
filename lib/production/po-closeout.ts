@@ -73,6 +73,10 @@ export type PoCloseoutRowInput = {
   hasWorkflow: boolean;
   workflowFinalized: boolean;
   excludedFromOutput: boolean;
+  /** ADMIN-CORRECTION-WIZARD-1 — read_bag_state.recovery_status. Recovered
+   *  rows carry an explicit next action instead of collapsing into DONE.
+   *  Optional so legacy callers/tests (no recovery) are unchanged. */
+  recoveryStatus?: string | null;
   hasFinishedLot: boolean;
   lotStatus: string | null; // finished_lots.status
 
@@ -220,6 +224,40 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
   // ── Step 2 — floor workflow ─────────────────────────────────────────────
   if (input.excludedFromOutput) {
     checklist.floorFinalizedOrExcluded = true;
+    const recovery = input.recoveryStatus ?? null;
+    if (recovery === "EXTERNAL_RECOVERY_REQUIRED") {
+      return verdict(
+        "BLOCKED",
+        "Recovered, but Zoho output was already committed — manual intervention required",
+        "REVIEW_MANUALLY",
+        "Resolve committed Zoho output",
+      );
+    }
+    if (recovery === "WRONG_ROUTE_RECOVERED") {
+      return verdict(
+        "NEEDS_REVIEW",
+        "Wrong route recovered — start correct workflow",
+        "START_OR_FINALIZE_WORKFLOW",
+        "Start correct workflow",
+      );
+    }
+    if (recovery === "VOIDED_FROM_OUTPUT") {
+      return verdict(
+        "NEEDS_REVIEW",
+        "Wrong route recovered — output voided; manual review needed",
+        "REVIEW_MANUALLY",
+        "Review recovery",
+      );
+    }
+    if (recovery != null) {
+      // Unknown recovery status — fail closed.
+      return verdict(
+        "NEEDS_REVIEW",
+        `Recovered (${recovery}) — review manually`,
+        "REVIEW_MANUALLY",
+        "Review recovery",
+      );
+    }
     return done("Excluded from output — no finished lot expected");
   }
   if (!input.hasWorkflow) {

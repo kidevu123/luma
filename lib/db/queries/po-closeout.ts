@@ -210,10 +210,17 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
           .select({
             workflowBagId: readBagState.workflowBagId,
             excludedFromOutput: readBagState.excludedFromOutput,
+            recoveryStatus: readBagState.recoveryStatus,
           })
           .from(readBagState)
           .where(inArray(readBagState.workflowBagId, workflowBagIds))
-      : Promise.resolve([] as Array<{ workflowBagId: string; excludedFromOutput: boolean | null }>),
+      : Promise.resolve(
+          [] as Array<{
+            workflowBagId: string;
+            excludedFromOutput: boolean | null;
+            recoveryStatus: string | null;
+          }>,
+        ),
     db
       .select({ inventoryBagId: rawBagAllocationSessions.inventoryBagId })
       .from(rawBagAllocationSessions)
@@ -228,7 +235,11 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
   const lotByWorkflow = new Map<string, (typeof lotRows)[number]>();
   for (const l of lotRows) if (l.workflowBagId) lotByWorkflow.set(l.workflowBagId, l);
   const excludedByWorkflow = new Map<string, boolean>();
-  for (const s of stateRows) excludedByWorkflow.set(s.workflowBagId, s.excludedFromOutput ?? false);
+  const recoveryByWorkflow = new Map<string, string | null>();
+  for (const s of stateRows) {
+    excludedByWorkflow.set(s.workflowBagId, s.excludedFromOutput ?? false);
+    recoveryByWorkflow.set(s.workflowBagId, s.recoveryStatus ?? null);
+  }
   const hasOpenAlloc = new Set(openAllocRows.map((r) => r.inventoryBagId));
 
   const lotIds = lotRows.map((l) => l.id);
@@ -349,6 +360,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       hasWorkflow,
       workflowFinalized,
       excludedFromOutput,
+      recoveryStatus: wf ? (recoveryByWorkflow.get(wf.id) ?? null) : null,
       hasFinishedLot,
       lotStatus,
       floorReadinessCodes,

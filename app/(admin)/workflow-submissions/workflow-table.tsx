@@ -94,6 +94,7 @@ const EVENT_BADGES: Record<string, { label: string; cls: string }> = {
   REWORK_RECEIVED:           { label: "Rework rec",   cls: "bg-sky-50 text-sky-700 border-sky-200" },
   SCRAP_RECORDED:            { label: "Scrap",        cls: "bg-red-50 text-red-700 border-red-200" },
   SUBMISSION_CORRECTED:      { label: "Corrected",    cls: "bg-warn-50/80 text-warn-700 border-warn-200" },
+  PRODUCT_MAPPED:            { label: "Product set",  cls: "bg-sky-50 text-sky-700 border-sky-200" },
   WORKFLOW_RECOVERY:         { label: "Recovered",    cls: "bg-red-50 text-red-800 border-red-200" },
   FINISHED_GOODS_RELEASED:   { label: "Released",     cls: "bg-good-50/80 text-good-700 border-good-200" },
   BOTTLE_HANDPACK_COMPLETE:  { label: "Handpack",     cls: "bg-cyan-50 text-cyan-700 border-cyan-200" },
@@ -212,6 +213,18 @@ function ExpandedContent({
   const hasFinishedLot = genealogy.events.some(
     (e) => e.eventType === "FINISHED_GOODS_RELEASED",
   );
+  // ADMIN-CORRECTION-WIZARD-1 — surface an applied wrong-product correction:
+  // original mistaken product stays visible next to the corrected one.
+  const productCorrection = [...genealogy.events]
+    .reverse()
+    .map((e) => {
+      if (e.eventType !== "PRODUCT_MAPPED") return null;
+      const p = getPayloadRecord(e.payload);
+      if (p["source"] !== "ADMIN_WRONG_PRODUCT_CORRECTION") return null;
+      const c = p["correction"];
+      return c && typeof c === "object" ? (c as Record<string, unknown>) : {};
+    })
+    .find((c) => c != null);
   // P2-PARTIAL-KEEP — a finalized BOTTLE bag whose QR is still ASSIGNED is a
   // held partial (kept for reuse), whether it was kept explicitly OR held by the
   // safe deferred-release path (computed remaining > 0 / unknown). Warn
@@ -247,6 +260,16 @@ function ExpandedContent({
         <div className="lg:col-span-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-900">
           {recoveryStatusLabel(bag.recoveryStatus) ?? "Excluded from production output"}
           {bag.excludedFromOutput ? " — not counted for pack-out or Zoho sync." : null}
+        </div>
+      ) : null}
+      {productCorrection ? (
+        <div className="lg:col-span-2 rounded border border-warn-200 bg-warn-50/80 px-3 py-2 text-[11px] text-warn-800">
+          <span className="font-semibold">Product corrected by admin.</span>{" "}
+          Original: {String(productCorrection["old_product_name"] ?? "unknown")}{" "}
+          — corrected to: {String(productCorrection["new_product_name"] ?? bag.productName ?? "unknown")}.
+          {typeof productCorrection["reason"] === "string" ? (
+            <span className="text-warn-700"> Reason: {productCorrection["reason"]}</span>
+          ) : null}
         </div>
       ) : null}
       {canAdminRepair ? (
