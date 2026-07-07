@@ -348,6 +348,38 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
   }
 }
 
+// ── PO Closeout index Active/Closed bucketing ───────────────────────────────
+// BAG-PRODUCTION-SUMMARY-1 — pure, conservative bucketing for the index page.
+// A PO is CLOSED only when every received bag is conservatively resolved
+// (per the cheap SQL rollup) and nothing is blocked on Zoho. Any ambiguity —
+// zero bags on a "received" PO, unknown status, unresolved bags — is ACTIVE.
+
+export type PoCloseoutIndexBucket = "ACTIVE" | "CLOSED";
+
+export type PoCloseoutIndexRollup = {
+  poStatus: string;
+  receivedBagCount: number;
+  /** Bags where EVERY signal is resolved (lot released/shipped with Zoho
+   *  queued/committed or not required, or excluded without a recovery
+   *  status). Computed conservatively by the loader. */
+  doneBagCount: number;
+  /** Active (non-voided) Zoho ops that still need admin attention. */
+  zohoBlockerCount: number;
+};
+
+const CLOSED_ELIGIBLE_PO_STATUSES = new Set(["RECEIVED", "CLOSED"]);
+
+export function classifyPoCloseoutIndexBucket(
+  input: PoCloseoutIndexRollup,
+): PoCloseoutIndexBucket {
+  if (input.poStatus === "CANCELLED") return "CLOSED";
+  if (!CLOSED_ELIGIBLE_PO_STATUSES.has(input.poStatus)) return "ACTIVE";
+  if (input.receivedBagCount === 0) return "ACTIVE";
+  if (input.doneBagCount < input.receivedBagCount) return "ACTIVE";
+  if (input.zohoBlockerCount > 0) return "ACTIVE";
+  return "CLOSED";
+}
+
 // ── PO-level rollup ─────────────────────────────────────────────────────────
 
 export type PoCloseoutOverallStatus = "DONE" | "ACTION_READY" | "NEEDS_REVIEW" | "BLOCKED";

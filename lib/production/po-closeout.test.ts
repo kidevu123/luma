@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  classifyPoCloseoutIndexBucket,
   classifyPoCloseoutRow,
   derivePoOverallStatus,
   summarizeRowStatuses,
@@ -274,5 +275,79 @@ describe("classifyPoCloseoutRow — recovery statuses", () => {
     });
     expect(r.status).toBe("NEEDS_REVIEW");
     expect(r.action).toBe("REVIEW_MANUALLY");
+  });
+});
+
+// BAG-PRODUCTION-SUMMARY-1 — Active/Closed bucketing for the PO Closeout
+// index. Conservative: any ambiguity or unresolved work → ACTIVE.
+describe("classifyPoCloseoutIndexBucket", () => {
+  const closedRollup = {
+    poStatus: "RECEIVED",
+    receivedBagCount: 10,
+    doneBagCount: 10,
+    zohoBlockerCount: 0,
+  };
+
+  it("all bags done + no zoho blockers on a RECEIVED PO = CLOSED", () => {
+    expect(classifyPoCloseoutIndexBucket(closedRollup)).toBe("CLOSED");
+    expect(
+      classifyPoCloseoutIndexBucket({ ...closedRollup, poStatus: "CLOSED" }),
+    ).toBe("CLOSED");
+  });
+
+  it("cancelled POs are history (CLOSED bucket)", () => {
+    expect(
+      classifyPoCloseoutIndexBucket({
+        poStatus: "CANCELLED",
+        receivedBagCount: 0,
+        doneBagCount: 0,
+        zohoBlockerCount: 0,
+      }),
+    ).toBe("CLOSED");
+  });
+
+  it("any unresolved bag keeps the PO ACTIVE", () => {
+    expect(
+      classifyPoCloseoutIndexBucket({ ...closedRollup, doneBagCount: 9 }),
+    ).toBe("ACTIVE");
+  });
+
+  it("zoho blockers keep the PO ACTIVE", () => {
+    expect(
+      classifyPoCloseoutIndexBucket({ ...closedRollup, zohoBlockerCount: 1 }),
+    ).toBe("ACTIVE");
+  });
+
+  it("a PO still open/receiving is ACTIVE even with zero bags", () => {
+    for (const poStatus of ["DRAFT", "OPEN", "RECEIVING"]) {
+      expect(
+        classifyPoCloseoutIndexBucket({
+          poStatus,
+          receivedBagCount: 0,
+          doneBagCount: 0,
+          zohoBlockerCount: 0,
+        }),
+      ).toBe("ACTIVE");
+    }
+  });
+
+  it("a RECEIVED PO with zero bags fails closed to ACTIVE (data ambiguity)", () => {
+    expect(
+      classifyPoCloseoutIndexBucket({
+        poStatus: "RECEIVED",
+        receivedBagCount: 0,
+        doneBagCount: 0,
+        zohoBlockerCount: 0,
+      }),
+    ).toBe("ACTIVE");
+  });
+
+  it("unknown PO status fails closed to ACTIVE", () => {
+    expect(
+      classifyPoCloseoutIndexBucket({
+        ...closedRollup,
+        poStatus: "SOMETHING_NEW",
+      }),
+    ).toBe("ACTIVE");
   });
 });

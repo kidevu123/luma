@@ -4,7 +4,7 @@
 // release eligibility) are called only for the small subset of bags that reach
 // those journey steps; most bags short-circuit earlier in classifyPoCloseoutRow.
 
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   purchaseOrders,
@@ -27,12 +27,14 @@ import { computeOpenSessionRebaseEligibility } from "@/lib/production/open-sessi
 import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
 import {
   classifyPoCloseoutRow,
+  classifyPoCloseoutIndexBucket,
   derivePoOverallStatus,
   summarizeRowStatuses,
   type PoCloseoutRowInput,
   type PoCloseoutRowVerdict,
   type PoCloseoutZohoStatus,
   type PoCloseoutOverallStatus,
+  type PoCloseoutIndexBucket,
 } from "@/lib/production/po-closeout";
 
 export type PoCloseoutRow = PoCloseoutRowVerdict & {
@@ -438,4 +440,122 @@ export async function listCloseoutPoOptions(): Promise<
     .from(purchaseOrders)
     .where(eq(purchaseOrders.isTabletPo, true))
     .orderBy(desc(purchaseOrders.openedAt));
+}
+
+// ── BAG-PRODUCTION-SUMMARY-1 · index rollups (READ-ONLY, cheap SQL) ─────────
+
+export type CloseoutPoIndexRow = {
+  id: string;
+  poNumber: string;
+  vendorName: string | null;
+  status: string;
+  receiveCount: number;
+  bagCount: number;
+  doneBagCount: number;
+  openBagCount: number;
+  zohoBlockerCount: number;
+  bucket: PoCloseoutIndexBucket;
+};
+
+/** READ-ONLY. One cheap aggregate per tablet PO for the Active/Closed index.
+ *
+ *  "Done bag" here is a CONSERVATIVE approximation of the full per-row
+ *  command-center verdict (which is too heavy to run for every PO on the
+ *  index): a bag counts as done only when every workflow/lot row attached to
+ *  it is resolved — excluded-without-recovery, or a RELEASED/SHIPPED lot
+ *  whose Zoho output is queued/committed (or Zoho output is disabled) — and
+ *  it has no open allocation session. Anything else keeps the PO ACTIVE, so
+ *  this can hide nothing that the detail page would surface. */
+export async function listCloseoutPoIndexRollups(): Promise<CloseoutPoIndexRow[]> {
+  const zohoRequired = isProductionOutputPersistEnabled();
+  type Row = {
+    id: string;
+    po_number: string;
+    vendor_name: string | null;
+    status: string;
+    receive_count: number;
+    bag_count: number;
+    done_bag_count: number;
+    zoho_blocker_count: number;
+  };
+  const rows = (await db.execute<Row>(sql`
+    WITH bag_state AS (
+      SELECT
+        po.id AS po_id,
+        ib.id AS bag_id,
+        BOOL_AND(
+          -- Every row for this bag must be resolved for the bag to be done.
+          (rbs.excluded_from_output = true AND rbs.recovery_status IS NULL)
+          OR (
+            fl.status IN ('RELEASED', 'SHIPPED')
+            AND (
+              ${!zohoRequired}
+              OR op.status IN ('QUEUED', 'COMMITTING', 'COMMITTED')
+              OR op.committed_at IS NOT NULL
+            )
+          )
+        ) AS bag_done,
+        BOOL_OR(ras.allocation_status = 'OPEN') AS has_open_allocation
+      FROM purchase_orders po
+      JOIN receives r ON r.po_id = po.id
+      JOIN small_boxes sb ON sb.receive_id = r.id
+      JOIN inventory_bags ib ON ib.small_box_id = sb.id
+      LEFT JOIN workflow_bags wb ON wb.inventory_bag_id = ib.id
+      LEFT JOIN read_bag_state rbs ON rbs.workflow_bag_id = wb.id
+      LEFT JOIN finished_lots fl ON fl.workflow_bag_id = wb.id
+      LEFT JOIN zoho_production_output_ops op
+        ON op.finished_lot_id = fl.id AND op.voided_at IS NULL
+      LEFT JOIN raw_bag_allocation_sessions ras
+        ON ras.inventory_bag_id = ib.id AND ras.allocation_status = 'OPEN'
+      WHERE po.is_tablet_po = true
+      GROUP BY po.id, ib.id
+    ),
+    zoho_blockers AS (
+      SELECT po.id AS po_id, COUNT(DISTINCT op.id)::int AS blocker_count
+      FROM purchase_orders po
+      JOIN receives r ON r.po_id = po.id
+      JOIN small_boxes sb ON sb.receive_id = r.id
+      JOIN inventory_bags ib ON ib.small_box_id = sb.id
+      JOIN workflow_bags wb ON wb.inventory_bag_id = ib.id
+      JOIN finished_lots fl ON fl.workflow_bag_id = wb.id
+      JOIN zoho_production_output_ops op
+        ON op.finished_lot_id = fl.id AND op.voided_at IS NULL
+      WHERE po.is_tablet_po = true
+        AND op.status IN ('NEEDS_MAPPING', 'FAILED', 'DRAFT', 'PREVIEWED', 'HELD', 'NEEDS_REVIEW')
+      GROUP BY po.id
+    )
+    SELECT
+      po.id,
+      po.po_number,
+      po.vendor_name,
+      po.status,
+      (SELECT COUNT(*)::int FROM receives r WHERE r.po_id = po.id) AS receive_count,
+      COALESCE((SELECT COUNT(*)::int FROM bag_state bs WHERE bs.po_id = po.id), 0) AS bag_count,
+      COALESCE((
+        SELECT COUNT(*)::int FROM bag_state bs
+        WHERE bs.po_id = po.id AND bs.bag_done AND NOT COALESCE(bs.has_open_allocation, false)
+      ), 0) AS done_bag_count,
+      COALESCE((SELECT zb.blocker_count FROM zoho_blockers zb WHERE zb.po_id = po.id), 0) AS zoho_blocker_count
+    FROM purchase_orders po
+    WHERE po.is_tablet_po = true
+    ORDER BY po.opened_at DESC
+  `)) as unknown as Row[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    poNumber: r.po_number,
+    vendorName: r.vendor_name,
+    status: r.status,
+    receiveCount: Number(r.receive_count ?? 0),
+    bagCount: Number(r.bag_count ?? 0),
+    doneBagCount: Number(r.done_bag_count ?? 0),
+    openBagCount: Math.max(0, Number(r.bag_count ?? 0) - Number(r.done_bag_count ?? 0)),
+    zohoBlockerCount: Number(r.zoho_blocker_count ?? 0),
+    bucket: classifyPoCloseoutIndexBucket({
+      poStatus: r.status,
+      receivedBagCount: Number(r.bag_count ?? 0),
+      doneBagCount: Number(r.done_bag_count ?? 0),
+      zohoBlockerCount: Number(r.zoho_blocker_count ?? 0),
+    }),
+  }));
 }
