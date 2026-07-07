@@ -151,7 +151,9 @@
       "Bash(scp -o ConnectTimeout=15 /tmp/remediate-bag-card-104-rebase.ts root@192.168.1.190:/tmp/remediate.ts)",
       "Bash(perl -0pi -e 's/inArray\\\\\\(rawBagAllocationSessions\\\\.allocationStatus, \\\\[\"CLOSED\", \"DEPLETED\"\\\\]\\\\\\)/inArray\\(rawBagAllocationSessions.allocationStatus, [...TERMINAL_ALLOCATION_STATUSES]\\)/g' lib/db/queries/finished-lots.ts)",
       "Bash(perl -0pi -e 's/<TH \\\\/>/<TH>{\" \"}<\\\\/TH>/g' \"app/\\(admin\\)/po-closeout/[poId]/page.tsx\" \"app/\\(admin\\)/po-closeout/page.tsx\")",
-      "Bash(npm version *)"
+      "Bash(npm version *)",
+      "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/repair-receipt-352171-run2-seal-pack-backfill.ts root@192.168.1.190:/tmp/repair-352171.ts)",
+      "Bash(echo \"eslint exit: $?\")"
     ]
   }
 }

@@ -31,8 +31,20 @@ import { PageHeader, StatusPill } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
+import { loadBagProductionSummaries } from "@/lib/db/queries/bag-production-summary";
+import { BagProductionSummaryInline } from "@/components/admin/bag-production-summary-inline";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const r = await getReceive(id);
+  return { title: r ? `Receive ${r.receive.receiveName}` : "Receive" };
+}
 
 export default async function ReceiveDetailPage({
   params,
@@ -123,6 +135,10 @@ export default async function ReceiveDetailPage({
       hasFinishedLot: (prev?.hasFinishedLot ?? false) || row.finishedLotId != null,
     });
   }
+
+  // BAG-PRODUCTION-SUMMARY-1 — read-only per-bag Received / Produced /
+  // Remaining / Complete breakdown from canonical workflow/allocation data.
+  const productionByBag = await loadBagProductionSummaries({ receiveId: id });
 
   const bagEditHistories = groupBagEditHistories({
     bags: r.bags.map((b) => ({
@@ -261,6 +277,7 @@ export default async function ReceiveDetailPage({
                       <TH className="text-right">Weight (kg)</TH>
                       <TH>Notes</TH>
                       <TH>Status</TH>
+                      <TH>Production</TH>
                       <TH>Floor ready</TH>
                       <TH>Edits</TH>
                       <TH className="text-right">Actions</TH>
@@ -325,6 +342,16 @@ export default async function ReceiveDetailPage({
                                   lifecycleByBag.get(bag.id)?.hasFinishedLot ?? false,
                               })}
                             />
+                          </TD>
+                          <TD>
+                            {productionByBag.get(bag.id) ? (
+                              <BagProductionSummaryInline
+                                summary={productionByBag.get(bag.id)!}
+                                variant="row"
+                              />
+                            ) : (
+                              <span className="text-xs text-text-muted">—</span>
+                            )}
                           </TD>
                           <TD>
                             {readinessByBag.get(bag.id) ? (
