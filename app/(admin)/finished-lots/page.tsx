@@ -10,6 +10,8 @@ import { AutoReleaseAllButton } from "./auto-release-all-button";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Finished Lots" };
+
 const STATUS_KIND: Record<string, "ok" | "warn" | "danger" | "neutral" | "info"> = {
   PENDING_QC: "warn",
   RELEASED: "ok",

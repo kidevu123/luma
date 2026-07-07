@@ -41,6 +41,8 @@ import { BackfillSafeAllocationsButton } from "./backfill-allocations-button";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Partial Bag Workbench" };
+
 function SectionTable({
   rows,
   variant,

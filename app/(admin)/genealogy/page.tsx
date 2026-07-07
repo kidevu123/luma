@@ -15,6 +15,8 @@ import { DataTable, THead, TR, TH, TD, EmptyRow } from "@/components/ui/table";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Bag Genealogy" };
+
 export default async function GenealogySearchPage({
   searchParams,
 }: {

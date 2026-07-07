@@ -36,6 +36,8 @@ import { CorrectionTrigger } from "./_correction-trigger";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "QC Review" };
+
 const QC_EVENT_LABELS: Record<string, string> = {
   PACKAGING_DAMAGE_RETURN: "Damage return",
   REWORK_SENT: "Rework sent",

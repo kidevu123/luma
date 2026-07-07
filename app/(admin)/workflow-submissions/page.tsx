@@ -29,6 +29,8 @@ import { ClipboardList } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Workflows" };
+
 const STAGES = [
   "STARTED",
   "BLISTERED",

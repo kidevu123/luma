@@ -33,6 +33,8 @@ import { rebuildAllMaterialProjectionsAction } from "@/lib/admin/rebuild-materia
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "PO Reconciliation v2" };
+
 const SCOPE_TYPES = [
   "PACKAGING_LOT",
   "ROLL",

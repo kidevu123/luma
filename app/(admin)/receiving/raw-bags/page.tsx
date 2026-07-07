@@ -30,6 +30,8 @@ import { SyncPoButton } from "./sync-po-button";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Receive Raw Pills" };
+
 export default async function ReceiveRawBagsPage({
   searchParams,
 }: {

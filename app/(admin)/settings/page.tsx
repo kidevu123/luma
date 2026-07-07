@@ -47,6 +47,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Settings" };
+
 const SETTINGS_ICONS: Record<SettingsHubIcon, LucideIcon> = {
   Users,
   PackageCheck,

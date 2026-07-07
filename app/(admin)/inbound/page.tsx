@@ -15,6 +15,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Receiving" };
+
 type ReceiveRow = Awaited<ReturnType<typeof listReceives>>[number];
 
 function statusChipClass(label: string): string {

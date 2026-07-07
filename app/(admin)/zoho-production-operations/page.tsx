@@ -28,6 +28,8 @@ import { ProductionOutputStagingButtons } from "./staging-buttons";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Zoho Production Output" };
+
 function StatusChip({ status, uiStatus }: { status: string; uiStatus: string }) {
   const tone =
     uiStatus === "committed"

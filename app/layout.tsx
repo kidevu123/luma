@@ -22,7 +22,13 @@ const fraunces = Fraunces({
 });
 
 export const metadata = {
-  title: "Luma — Production Command",
+  // PAGE-TITLES-1 — pages set their own title (e.g. "PO Closeout") and the
+  // template renders it as "Luma — PO Closeout"; pages without their own
+  // metadata keep the default.
+  title: {
+    default: "Luma — Production Command",
+    template: "Luma — %s",
+  },
   description: "Manufacturing intelligence for the production floor",
 };
 

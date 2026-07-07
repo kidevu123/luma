@@ -37,6 +37,8 @@ import { LUMA_TIMEZONE } from "@/lib/ui/luma-display";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Dashboard" };
+
 // ── Page ───────────────────────────────────────────────────────────
 
 export default async function DashboardPage() {

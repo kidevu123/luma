@@ -49,6 +49,8 @@ import { MetricsHashScroll } from "@/components/metrics/metrics-hash-scroll";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Metrics" };
+
 // ── helpers ───────────────────────────────────────────────────────────────
 
 function fmtSec(s: number | null | undefined): string {

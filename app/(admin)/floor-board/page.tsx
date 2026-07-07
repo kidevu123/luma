@@ -31,6 +31,8 @@ import { SevenDayPulse } from "./_components/seven-day-pulse";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Live Floor" };
+
 async function getCompanyTimezone(): Promise<string> {
   const rows = await db
     .select({ timezone: companies.timezone })

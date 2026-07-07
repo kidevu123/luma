@@ -13,6 +13,8 @@ import { listPoSummaries } from "@/lib/production/po-reconciliation";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "PO Reconciliation" };
+
 export default async function PoReconciliationListPage({
   searchParams,
 }: {
