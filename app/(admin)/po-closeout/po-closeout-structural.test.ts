@@ -62,7 +62,9 @@ describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped
 describe("PO closeout pages", () => {
   it("list page is admin-gated with a PO search/picker", () => {
     expect(listPageSrc).toMatch(/requireAdmin\(\)/);
-    expect(listPageSrc).toMatch(/listCloseoutPoOptions/);
+    // BAG-PRODUCTION-SUMMARY-1: the index now uses the Active/Closed rollup
+    // loader instead of the plain PO options list.
+    expect(listPageSrc).toMatch(/listCloseoutPoIndexRollups/);
     expect(listPageSrc).toMatch(/Search PO number or vendor/);
   });
   it("detail page is admin-gated, renders summary cards, filter tabs, checklist, links, batch buttons, plain-language copy", () => {
