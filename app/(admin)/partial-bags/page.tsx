@@ -31,6 +31,9 @@ import {
   labelPartialBagEndingBalanceSource,
 } from "@/lib/production/partial-bag-resolution-constants";
 import { formatRemainingEstimate } from "@/lib/production/partial-bag-lifecycle";
+import { loadBagProductionSummaries } from "@/lib/db/queries/bag-production-summary";
+import type { BagProductionSummary } from "@/lib/production/bag-production-summary";
+import { BagProductionSummaryInline } from "@/components/admin/bag-production-summary-inline";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { PartialBagCorrectionMenu } from "./correction-menu";
@@ -42,11 +45,14 @@ function SectionTable({
   rows,
   variant,
   systemDerived,
+  productionSummaries,
 }: {
   rows: PartialBagAdminRow[];
   variant: "ready" | "needs_closeout" | "missing_linkage";
   /** Per-bag system-derived resolution (from production output), keyed by bagId. */
   systemDerived?: Map<string, SystemDerivedResolution>;
+  /** BAG-PRODUCTION-SUMMARY-1 — read-only per-bag breakdown, keyed by bagId. */
+  productionSummaries?: Map<string, BagProductionSummary>;
 }) {
   if (rows.length === 0) {
     return (
@@ -224,6 +230,19 @@ function SectionTable({
                       </p>
                     );
                   })()}
+                  {productionSummaries?.get(row.bagId) ? (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-[10px] font-medium text-brand-700 hover:underline">
+                        Production summary
+                      </summary>
+                      <div className="mt-1">
+                        <BagProductionSummaryInline
+                          summary={productionSummaries.get(row.bagId)!}
+                          variant="panel"
+                        />
+                      </div>
+                    </details>
+                  ) : null}
                 </td>
                 <td className="py-2 align-top">
                   <div className="flex flex-col gap-1.5">
@@ -279,6 +298,12 @@ export default async function PartialBagWorkbenchPage() {
       loadHeldAndDepletedPartialBags(),
       loadHeldFinalizedPartialBottleBags(),
     ]);
+  // BAG-PRODUCTION-SUMMARY-1 — read-only expected-vs-recorded remaining
+  // context for every bag on the workbench.
+  const productionSummaries = await loadBagProductionSummaries({
+    inventoryBagIds: rows.map((r) => r.bagId),
+  });
+
   const ready = rows.filter((r) => r.eligibility === "ready");
   const needsCloseout = rows.filter(
     (r) => r.eligibility === "needs_allocation_closeout",
@@ -460,7 +485,7 @@ export default async function PartialBagWorkbenchPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <SectionTable rows={ready} variant="ready" />
+          <SectionTable rows={ready} variant="ready" productionSummaries={productionSummaries} />
         </CardContent>
       </Card>
 
@@ -476,7 +501,7 @@ export default async function PartialBagWorkbenchPage() {
             Partial use indicated but no reliable ending balance. These are NOT
             reusable inventory until the remaining count is recorded.
           </p>
-          <SectionTable rows={needsCloseout} variant="needs_closeout" systemDerived={systemDerived} />
+          <SectionTable rows={needsCloseout} variant="needs_closeout" systemDerived={systemDerived} productionSummaries={productionSummaries} />
         </CardContent>
       </Card>
 
@@ -490,7 +515,7 @@ export default async function PartialBagWorkbenchPage() {
             Packaging evidence exists but no allocation ledger links the bag to
             its run. Resolve to reconstruct the ledger before reuse.
           </p>
-          <SectionTable rows={missingLinkage} variant="missing_linkage" systemDerived={systemDerived} />
+          <SectionTable rows={missingLinkage} variant="missing_linkage" systemDerived={systemDerived} productionSummaries={productionSummaries} />
         </CardContent>
       </Card>
 

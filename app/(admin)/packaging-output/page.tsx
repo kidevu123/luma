@@ -34,6 +34,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Package, CheckCircle2, AlertTriangle, TrendingUp } from "lucide-react";
 import { BacklogRowActions } from "./backlog-row-actions";
 import { BacklogStatusChip, ZohoReadyChip } from "./backlog-status-chip";
+import { loadBagProductionSummariesByWorkflowBag } from "@/lib/db/queries/bag-production-summary";
+import { BagProductionSummaryInline } from "@/components/admin/bag-production-summary-inline";
 import {
   derivePoOutputComparison,
   listPoSummaries,
@@ -217,6 +219,12 @@ export default async function PackagingOutputPage({
         : "Missing data";
 
   const hasQueue = awaitingLotTotal > 0 || awaitingFinalize.length > 0;
+
+  // BAG-PRODUCTION-SUMMARY-1 — read-only source-bag production context for
+  // the awaiting-lot queue (received / produced / remaining / allocation).
+  const sourceBagSummaries = await loadBagProductionSummariesByWorkflowBag(
+    awaitingLot.map((b) => b.workflowBagId),
+  );
 
   type MaterialBurnRow = {
     packaging_material_id: string;
@@ -632,6 +640,19 @@ export default async function PackagingOutputPage({
                           <tr key={bag.workflowBagId} className="border-b border-border/30 last:border-0">
                             <td className="py-2 pr-4 font-mono text-[11.5px] text-text-strong">
                               {bag.receiptNumber ?? <span className="text-text-subtle">—</span>}
+                              {sourceBagSummaries.get(bag.workflowBagId) ? (
+                                <details className="mt-1 font-sans">
+                                  <summary className="cursor-pointer text-[10px] font-medium text-brand-700 hover:underline">
+                                    Source bag
+                                  </summary>
+                                  <div className="mt-1 min-w-[260px]">
+                                    <BagProductionSummaryInline
+                                      summary={sourceBagSummaries.get(bag.workflowBagId)!}
+                                      variant="panel"
+                                    />
+                                  </div>
+                                </details>
+                              ) : null}
                             </td>
                             <td className="py-2 pr-4">
                               <div className="text-text-strong">{bag.productName ?? <span className="text-text-subtle text-[11px]">—</span>}</div>

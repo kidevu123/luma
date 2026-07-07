@@ -13,8 +13,22 @@ import { StatusActions } from "./status-actions";
 import { ZohoDryRunCard } from "./zoho-dry-run";
 import { ZohoQueueCard } from "./zoho-queue-card";
 import { ZohoProductionOutputPreviewCard } from "./zoho-production-output-preview-card";
+import { loadBagProductionSummariesByWorkflowBag } from "@/lib/db/queries/bag-production-summary";
+import { BagProductionSummaryInline } from "@/components/admin/bag-production-summary-inline";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const lot = await getFinishedLot(id);
+  return {
+    title: lot ? `Finished Lot ${lot.lot.finishedLotNumber}` : "Finished Lot",
+  };
+}
 
 const STATUS_KIND: Record<string, "ok" | "warn" | "danger" | "neutral" | "info"> = {
   PENDING_QC: "warn",
@@ -38,6 +52,13 @@ export default async function FinishedLotDetailPage({
     getActiveZohoProductionOutputOpForLot(id),
   ]);
   if (!lot) notFound();
+
+  // BAG-PRODUCTION-SUMMARY-1 — source-bag production context (read-only).
+  const sourceBagSummary = lot.lot.workflowBagId
+    ? (
+        await loadBagProductionSummariesByWorkflowBag([lot.lot.workflowBagId])
+      ).get(lot.lot.workflowBagId) ?? null
+    : null;
 
   return (
     <div className="space-y-5">
@@ -204,6 +225,10 @@ export default async function FinishedLotDetailPage({
               )}
             </CardContent>
           </Card>
+
+          {sourceBagSummary ? (
+            <BagProductionSummaryInline summary={sourceBagSummary} variant="panel" />
+          ) : null}
 
           <Card>
             <CardHeader>

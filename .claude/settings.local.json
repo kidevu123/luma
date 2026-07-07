@@ -153,7 +153,8 @@
       "Bash(perl -0pi -e 's/<TH \\\\/>/<TH>{\" \"}<\\\\/TH>/g' \"app/\\(admin\\)/po-closeout/[poId]/page.tsx\" \"app/\\(admin\\)/po-closeout/page.tsx\")",
       "Bash(npm version *)",
       "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/repair-receipt-352171-run2-seal-pack-backfill.ts root@192.168.1.190:/tmp/repair-352171.ts)",
-      "Bash(echo \"eslint exit: $?\")"
+      "Bash(echo \"eslint exit: $?\")",
+      "Bash(perl -pi -e 's/<SectionTable rows=\\\\{ready\\\\} variant=\"ready\" \\\\/>/<SectionTable rows={ready} variant=\"ready\" productionSummaries={productionSummaries} \\\\/>/; s/<SectionTable rows=\\\\{needsCloseout\\\\} variant=\"needs_closeout\" systemDerived=\\\\{systemDerived\\\\} \\\\/>/<SectionTable rows={needsCloseout} variant=\"needs_closeout\" systemDerived={systemDerived} productionSummaries={productionSummaries} \\\\/>/; s/<SectionTable rows=\\\\{missingLinkage\\\\} variant=\"missing_linkage\" systemDerived=\\\\{systemDerived\\\\} \\\\/>/<SectionTable rows={missingLinkage} variant=\"missing_linkage\" systemDerived={systemDerived} productionSummaries={productionSummaries} \\\\/>/' \"app/\\(admin\\)/partial-bags/page.tsx\")"
     ]
   }
 }

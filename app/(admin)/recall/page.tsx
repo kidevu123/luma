@@ -30,6 +30,9 @@ import {
   type RecallSearchKind,
 } from "@/lib/production/recall-passport-loaders";
 import { firstFinishedLotId } from "@/lib/production/recall-passport";
+import { loadBagProductionSummaries } from "@/lib/db/queries/bag-production-summary";
+import type { BagProductionSummary } from "@/lib/production/bag-production-summary";
+import { BagProductionSummaryInline } from "@/components/admin/bag-production-summary-inline";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 
@@ -131,6 +134,15 @@ export default async function RecallPage({
   const hasResults =
     passport != null &&
     (passport.rawBags.length > 0 || passport.finishedLots.length > 0);
+
+  // BAG-PRODUCTION-SUMMARY-1 — per-bag production breakdown for raw-bag
+  // matches. Renders even when no finished lot exists (raw-bag-only,
+  // awaiting-lot, and recovered states all resolve to honest labels).
+  const productionSummaries = passport && passport.rawBags.length > 0
+    ? await loadBagProductionSummaries({
+        inventoryBagIds: passport.rawBags.map((b) => b.id),
+      })
+    : new Map<string, BagProductionSummary>();
 
   return (
     <div className="space-y-5">
@@ -380,7 +392,7 @@ function RecallPassportView({ passport }: { passport: RecallPassport }) {
       {(passport.warnings.length > 0 || passport.missingLinks.length > 0) && (
         <WarningsSection passport={passport} />
       )}
-      <RawBagsSection passport={passport} />
+      <RawBagsSection passport={passport} productionSummaries={productionSummaries} />
       <WorkflowSection passport={passport} />
       <OutputsSection passport={passport} />
       <PackagingSection passport={passport} />
@@ -499,7 +511,13 @@ function WarningsSection({ passport }: { passport: RecallPassport }) {
   );
 }
 
-function RawBagsSection({ passport }: { passport: RecallPassport }) {
+function RawBagsSection({
+  passport,
+  productionSummaries,
+}: {
+  passport: RecallPassport;
+  productionSummaries: Map<string, BagProductionSummary>;
+}) {
   return (
     <div className="rounded-xl border border-border bg-surface overflow-hidden">
       <div className="px-4 py-3 border-b border-border/60">
@@ -538,6 +556,19 @@ function RawBagsSection({ passport }: { passport: RecallPassport }) {
                       {b.internalReceiptNumber ?? (
                         <span className="text-amber-700 italic">missing</span>
                       )}
+                      {productionSummaries.get(b.id) ? (
+                        <details className="mt-1 font-sans font-normal">
+                          <summary className="cursor-pointer text-[10px] font-medium text-brand-700 hover:underline">
+                            Production summary
+                          </summary>
+                          <div className="mt-1 min-w-[260px]">
+                            <BagProductionSummaryInline
+                              summary={productionSummaries.get(b.id)!}
+                              variant="panel"
+                            />
+                          </div>
+                        </details>
+                      ) : null}
                     </Td>
                     <Td className="font-mono text-[10.5px] text-text-muted">
                       {b.bagQrCode ?? (
