@@ -329,7 +329,7 @@ export default async function RecallPage({
           </p>
         </div>
       ) : (
-        <RecallPassportView passport={passport!} />
+        <RecallPassportView passport={passport!} productionSummaries={productionSummaries} />
       )}
     </div>
   );
@@ -385,7 +385,13 @@ function ExportBar({
 // Passport view
 // ─────────────────────────────────────────────────────────────────────
 
-function RecallPassportView({ passport }: { passport: RecallPassport }) {
+function RecallPassportView({
+  passport,
+  productionSummaries,
+}: {
+  passport: RecallPassport;
+  productionSummaries: Map<string, BagProductionSummary>;
+}) {
   return (
     <div className="space-y-5">
       <PassportSummary passport={passport} />
