@@ -2,13 +2,34 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Check, X, Minus } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { purchaseOrders } from "@/lib/db/schema";
 import { loadPoCloseout, type PoCloseoutRow } from "@/lib/db/queries/po-closeout";
+import { loadBagProductionSummaries } from "@/lib/db/queries/bag-production-summary";
+import type { BagProductionSummary } from "@/lib/production/bag-production-summary";
+import { BagProductionSummaryInline } from "@/components/admin/bag-production-summary-inline";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { RowStatusBadge, OverallStatusBadge } from "../status-badge";
 import { PoBatchButtons } from "../batch-buttons";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ poId: string }>;
+}) {
+  // Cheap title lookup — never runs the full closeout loader twice.
+  const { poId } = await params;
+  const [po] = await db
+    .select({ poNumber: purchaseOrders.poNumber })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.id, poId))
+    .limit(1);
+  return { title: po ? `PO Closeout ${po.poNumber}` : "PO Closeout" };
+}
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -27,6 +48,46 @@ function matchesFilter(row: PoCloseoutRow, filter: FilterKey): boolean {
     case "blocked": return row.status === "BLOCKED";
     case "done": return row.status === "DONE";
     default: return true;
+  }
+}
+
+// BAG-PRODUCTION-SUMMARY-1 — read-only production-data filters. These
+// compose with the status filter above and never touch verdict logic.
+const SHOW_FILTERS = [
+  { key: "any", label: "All production states" },
+  { key: "has-production", label: "Has production" },
+  { key: "no-production", label: "No production yet" },
+  { key: "partial", label: "Partial / split" },
+  { key: "multi-run", label: "Multiple runs" },
+  { key: "over-consumed", label: "Over-consumed" },
+  { key: "awaiting-lot", label: "Awaiting lot" },
+  { key: "zoho-blocked", label: "Zoho blocked" },
+] as const;
+type ShowKey = (typeof SHOW_FILTERS)[number]["key"];
+
+function matchesShowFilter(
+  summary: BagProductionSummary | undefined,
+  row: PoCloseoutRow,
+  show: ShowKey,
+): boolean {
+  if (show === "any") return true;
+  switch (show) {
+    case "has-production":
+      return (summary?.producedTablets ?? 0) > 0 || summary?.flags.consumptionUnknown === true;
+    case "no-production":
+      return summary != null && summary.producedTablets === 0;
+    case "partial":
+      return summary?.flags.partialRemaining === true || summary?.flags.splitBag === true;
+    case "multi-run":
+      return summary?.flags.multipleWorkflows === true;
+    case "over-consumed":
+      return summary?.flags.overConsumed === true;
+    case "awaiting-lot":
+      return summary?.workflow?.finalized === true && summary.finishedLot == null;
+    case "zoho-blocked":
+      return row.zoho === "FAILED" || row.zoho === "NOT_READY" || summary?.zoho.status === "NEEDS_MAPPING";
+    default:
+      return true;
   }
 }
 
@@ -79,18 +140,26 @@ export default async function PoCloseoutDetailPage({
   searchParams,
 }: {
   params: Promise<{ poId: string }>;
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; show?: string }>;
 }) {
   await requireAdmin();
   const { poId } = await params;
-  const { filter: rawFilter } = await searchParams;
+  const { filter: rawFilter, show: rawShow } = await searchParams;
   const filter = (FILTERS.find((f) => f.key === rawFilter)?.key ?? "all") as FilterKey;
+  const show = (SHOW_FILTERS.find((f) => f.key === rawShow)?.key ?? "any") as ShowKey;
 
   const summary = await loadPoCloseout(poId);
   if (!summary) notFound();
 
+  // Per-bag Received / Produced / Remaining breakdown (read-only).
+  const productionByBag = await loadBagProductionSummaries({ poId });
+
   const c = summary.counts;
-  const shown = summary.rows.filter((r) => matchesFilter(r, filter));
+  const shown = summary.rows.filter(
+    (r) =>
+      matchesFilter(r, filter) &&
+      matchesShowFilter(productionByBag.get(r.inventoryBagId), r, show),
+  );
   const issueReady = summary.rows.filter((r) => r.action === "AUTO_ISSUE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
   const releaseReady = summary.rows.filter((r) => r.action === "AUTO_RELEASE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
 
@@ -193,12 +262,31 @@ export default async function PoCloseoutDetailPage({
         })}
       </div>
 
+      {/* Production-data filters (read-only view filters) */}
+      <div className="flex flex-wrap gap-1.5">
+        {SHOW_FILTERS.map((f) => {
+          const active = f.key === show;
+          return (
+            <Link
+              key={f.key}
+              href={`/po-closeout/${poId}?filter=${filter}&show=${f.key}`}
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
+                active ? "border-brand-500 bg-brand-50 text-brand-800 font-medium" : "border-border text-text-muted hover:bg-surface-2"
+              }`}
+            >
+              {f.label}
+            </Link>
+          );
+        })}
+      </div>
+
       {/* Rows */}
       <DataTable>
         <THead>
           <TR>
             <TH>Bag / receipt</TH>
             <TH>Flavor</TH>
+            <TH>Production</TH>
             <TH>Status</TH>
             <TH>What&apos;s next</TH>
             <TH>Checklist</TH>
@@ -220,6 +308,16 @@ export default async function PoCloseoutDetailPage({
                     <div className="text-[10px] text-text-subtle">Bag {row.bagNumber ?? "?"} · {row.bagQrCode ?? "no QR"}</div>
                   </TD>
                   <TD className="text-xs">{row.tabletName ?? "—"}</TD>
+                  <TD>
+                    {productionByBag.get(row.inventoryBagId) ? (
+                      <BagProductionSummaryInline
+                        summary={productionByBag.get(row.inventoryBagId)!}
+                        variant="row"
+                      />
+                    ) : (
+                      <span className="text-xs text-text-muted">—</span>
+                    )}
+                  </TD>
                   <TD><RowStatusBadge status={row.status} /></TD>
                   <TD>
                     <div className="text-xs font-medium text-text-strong">{row.actionLabel}</div>
