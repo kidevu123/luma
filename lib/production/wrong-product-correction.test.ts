@@ -54,8 +54,8 @@ const COUNTS_352182: WrongProductCorrectionCounts = {
 
 function baseArgs() {
   return {
-    oldProduct: product(),
-    newProduct: newProduct(),
+    oldProduct: product() as CorrectionProductFacts | null,
+    newProduct: newProduct() as CorrectionProductFacts | null,
     isFinalized: true,
     alreadyQuarantined: false,
     zohoOutputCommitted: false,
