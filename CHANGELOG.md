@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.27.0] — 2026-07-08
+
+### Changed — NAV-DEMOTION-1: "Close out POs" is the primary reconciliation nav item (one-stop workspace, phase 3 of 3)
+- **Reconciliation & output** now holds a single primary entry: **Close out POs** (`/po-closeout`, minRole ADMIN — unchanged). Production Output, PO Reconciliation, Finished Lots, and Zoho Production Output moved to a new collapsed **Advanced** section at the bottom of the sidebar, with their labels, routes, and minRoles byte-identical (pinned by tests — nothing gets looser or stricter). The Advanced section auto-opens when the admin is already on one of its pages, so deep links are never hidden.
+- **No route deletions:** every bookmark, cross-link, and drawer "open full page" link keeps working. This completes the three-phase one-stop closeout design (`docs/superpowers/specs/2026-07-08-po-closeout-one-stop-design.md`): v1.25.0 bag drawer, v1.26.0 guided mode, v1.27.0 nav.
+- **Tests:** NAV-PHASED-1 sidebar suite updated to pin the new placement (Advanced section, collapsed flag, `<details>` rendering, exact minRoles of demoted items); v1.24.2 access-policy suite passes unchanged (guards untouched).
+
+### Notes
+- Config + rendering change only. No data model change, no mutation paths touched, no deploy-time mutation.
+
 ## [1.26.0] — 2026-07-08
 
 ### Added — GUIDED-CLOSEOUT-1: "Close this PO" guided mode (one-stop workspace, phase 2 of 3)

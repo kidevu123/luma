@@ -23,6 +23,7 @@ import {
   ScrollText,
   CloudUpload,
   GitCompare,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -148,9 +149,9 @@ export function Sidebar({ role }: { role: UserRole }) {
         {sections.length > 0 ? <hr className="border-border/50 mx-1 mb-2" /> : null}
 
         <div className="space-y-3 flex-1">
-          {sections.map((sec) => (
-            <div key={sec.heading}>
-              <SectionHeading>{sec.heading}</SectionHeading>
+          {sections.map((sec) => {
+            const sectionActive = sec.items.some((it) => isActive(pathname, it.href));
+            const list = (
               <ul className="space-y-px">
                 {sec.items.map((it) => (
                   <li key={it.href}>
@@ -158,8 +159,32 @@ export function Sidebar({ role }: { role: UserRole }) {
                   </li>
                 ))}
               </ul>
-            </div>
-          ))}
+            );
+            if (sec.collapsed) {
+              // NAV-DEMOTION-1 — Advanced stays closed unless the admin is
+              // already inside one of its pages (deep links never hide).
+              return (
+                <details key={sec.heading} open={sectionActive} className="group">
+                  <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                    <span className="flex items-center justify-between pr-2">
+                      <SectionHeading>{sec.heading}</SectionHeading>
+                      <ChevronRight
+                        aria-hidden
+                        className="h-3 w-3 text-text-subtle group-open:rotate-90 transition-transform"
+                      />
+                    </span>
+                  </summary>
+                  {list}
+                </details>
+              );
+            }
+            return (
+              <div key={sec.heading}>
+                <SectionHeading>{sec.heading}</SectionHeading>
+                {list}
+              </div>
+            );
+          })}
         </div>
 
         {settings ? (

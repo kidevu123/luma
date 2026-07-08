@@ -89,6 +89,6 @@ describe("PO closeout pages", () => {
     expect(detailPageSrc).not.toMatch(/open allocation session/i);
   });
   it("is registered in the admin nav under reconciliation & output", () => {
-    expect(navSrc).toMatch(/href: "\/po-closeout", label: "PO closeout"/);
+    expect(navSrc).toMatch(/href: "\/po-closeout", label: "Close out POs"/);
   });
 });

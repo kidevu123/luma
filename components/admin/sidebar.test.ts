@@ -18,6 +18,7 @@ const SECTION_HEADINGS = [
   "Run production",
   "Reconciliation & output",
   "Traceability & reporting",
+  "Advanced",
 ] as const;
 
 function sectionRange(heading: string): { start: number; end: number } {
@@ -94,18 +95,37 @@ describe("NAV-PHASED-1 · Run production entries", () => {
   });
 });
 
-describe("NAV-PHASED-1 · Reconciliation & output entries", () => {
-  it("Production output is in Reconciliation & output", () => {
-    expect(inSection("Reconciliation & output", '"/packaging-output"')).toBe(true);
+describe("NAV-DEMOTION-1 · Reconciliation & output is the closeout entry point", () => {
+  it("Close out POs (/po-closeout) is the Reconciliation & output item", () => {
+    expect(inSection("Reconciliation & output", '"/po-closeout"')).toBe(true);
+    expect(navSrc).toMatch(/href: "\/po-closeout", label: "Close out POs", minRole: "ADMIN"/);
   });
-  it("PO reconciliation is in Reconciliation & output", () => {
-    expect(inSection("Reconciliation & output", '"/po-reconciliation"')).toBe(true);
+  it("specialist pages moved OUT of Reconciliation & output", () => {
+    for (const href of ['"/packaging-output"', '"/po-reconciliation"', '"/finished-lots"', '"/zoho-production-operations"']) {
+      expect(inSection("Reconciliation & output", href), href).toBe(false);
+    }
   });
-  it("Finished lots is in Reconciliation & output", () => {
-    expect(inSection("Reconciliation & output", '"/finished-lots"')).toBe(true);
+});
+
+describe("NAV-DEMOTION-1 · Advanced section (collapsed, unchanged guards)", () => {
+  it("Advanced holds the demoted specialist pages", () => {
+    for (const href of ['"/packaging-output"', '"/po-reconciliation"', '"/finished-lots"', '"/zoho-production-operations"']) {
+      expect(inSection("Advanced", href), href).toBe(true);
+    }
   });
-  it("Zoho output is in Reconciliation & output", () => {
-    expect(inSection("Reconciliation & output", '"/zoho-production-operations"')).toBe(true);
+  it("Advanced is collapsed by default and rendered as a details element", () => {
+    const { start, end } = sectionRange("Advanced");
+    expect(navSrc.slice(start, end)).toMatch(/collapsed: true/);
+    expect(sidebarSrc).toMatch(/<details/);
+    expect(sidebarSrc).toMatch(/<summary/);
+  });
+  it("demoted items keep their exact minRoles (no access change)", () => {
+    const { start, end } = sectionRange("Advanced");
+    const advanced = navSrc.slice(start, end);
+    expect(advanced).toMatch(/href: "\/packaging-output", label: "Production output", minRole: "SESSION"/);
+    expect(advanced).toMatch(/href: "\/po-reconciliation", label: "PO reconciliation", minRole: "ADMIN"/);
+    expect(advanced).toMatch(/href: "\/finished-lots", label: "Finished lots", minRole: "SESSION"/);
+    expect(advanced).toMatch(/minRole: "SESSION",\s*\n\s*\},\s*\n\s*\]/);
   });
 });
 

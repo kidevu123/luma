@@ -21,6 +21,9 @@ export type AdminNavItemDef = {
 export type AdminNavSectionDef = {
   heading: string;
   items: AdminNavItemDef[];
+  /** NAV-DEMOTION-1 — collapsed sections render closed by default
+   *  (specialist/DB-style pages an admin rarely needs on the main path). */
+  collapsed?: boolean;
 };
 
 const ROLE_RANK: Record<UserRole, number> = {
@@ -66,17 +69,12 @@ export const ADMIN_NAV_SECTIONS: AdminNavSectionDef[] = [
     ],
   },
   {
+    // NAV-DEMOTION-1 — the closeout command center (with its bag drawer and
+    // guided mode) is the one primary reconciliation surface; the specialist
+    // pages live under Advanced below, routes and guards unchanged.
     heading: "Reconciliation & output",
     items: [
-      { href: "/packaging-output", label: "Production output", minRole: "SESSION" },
-      { href: "/po-closeout", label: "PO closeout", minRole: "ADMIN" },
-      { href: "/po-reconciliation", label: "PO reconciliation", minRole: "ADMIN" },
-      { href: "/finished-lots", label: "Finished lots", minRole: "SESSION" },
-      {
-        href: "/zoho-production-operations",
-        label: "Zoho production output",
-        minRole: "SESSION",
-      },
+      { href: "/po-closeout", label: "Close out POs", minRole: "ADMIN" },
     ],
   },
   {
@@ -86,6 +84,20 @@ export const ADMIN_NAV_SECTIONS: AdminNavSectionDef[] = [
       { href: "/metrics", label: "Metrics", minRole: "SESSION" },
       { href: "/operator-productivity", label: "Productivity", minRole: "SESSION" },
       { href: "/reports/audit-log", label: "Audit log", minRole: "LEAD" },
+    ],
+  },
+  {
+    heading: "Advanced",
+    collapsed: true,
+    items: [
+      { href: "/packaging-output", label: "Production output", minRole: "SESSION" },
+      { href: "/po-reconciliation", label: "PO reconciliation", minRole: "ADMIN" },
+      { href: "/finished-lots", label: "Finished lots", minRole: "SESSION" },
+      {
+        href: "/zoho-production-operations",
+        label: "Zoho production output",
+        minRole: "SESSION",
+      },
     ],
   },
 ];

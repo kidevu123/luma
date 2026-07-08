@@ -164,7 +164,8 @@
       "Bash(perl -0pi -e 's/\\(    revalidatePath\\\\\\(\"\\\\/finished-lots\"\\\\\\);\\\\n\\)  revalidatePath\\\\\\(\"\\\\/po-closeout\"\\\\\\);/$1    revalidatePath\\(\"\\\\/po-closeout\"\\);/g; s/\\(      revalidatePath\\\\\\(\"\\\\/finished-lots\"\\\\\\);\\\\n\\)  revalidatePath\\\\\\(\"\\\\/po-closeout\"\\\\\\);/$1      revalidatePath\\(\"\\\\/po-closeout\"\\);/g' \"app/\\(admin\\)/finished-lots/actions.ts\")",
       "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/correct-352176-second-packaging-session.ts root@192.168.1.190:/tmp/correct-352176.ts)",
       "Bash(perl -0pi -e 's/\\(      revalidatePath\\\\\\(`\\\\/po-closeout\\\\/\\\\$\\\\{poId\\\\}`\\\\\\);\\\\n\\)/$1      revalidatePath\\(\"\\\\/po-closeout\"\\);\\\\n/g' \"app/\\(admin\\)/po-closeout/actions.ts\")",
-      "Bash(perl -0pi -e 's/import \\\\{\\\\nimport \\\\{ AutoRefreshOnFocus \\\\} from \"\\\\@\\\\/components\\\\/admin\\\\/auto-refresh-on-focus\";\\\\n  loadActiveRunsMissingAllocation,/import \\\\{ AutoRefreshOnFocus \\\\} from \"\\\\@\\\\/components\\\\/admin\\\\/auto-refresh-on-focus\";\\\\nimport \\\\{\\\\n  loadActiveRunsMissingAllocation,/' \"app/\\(admin\\)/partial-bags/page.tsx\")"
+      "Bash(perl -0pi -e 's/import \\\\{\\\\nimport \\\\{ AutoRefreshOnFocus \\\\} from \"\\\\@\\\\/components\\\\/admin\\\\/auto-refresh-on-focus\";\\\\n  loadActiveRunsMissingAllocation,/import \\\\{ AutoRefreshOnFocus \\\\} from \"\\\\@\\\\/components\\\\/admin\\\\/auto-refresh-on-focus\";\\\\nimport \\\\{\\\\n  loadActiveRunsMissingAllocation,/' \"app/\\(admin\\)/partial-bags/page.tsx\")",
+      "Bash(perl -pi -e 's/expect\\\\\\(navSrc\\\\\\)\\\\.toMatch\\\\\\(\\\\/href: \"\\\\\\\\\\\\/po-closeout\", label: \"PO closeout\"\\\\/\\\\\\);/expect\\(navSrc\\).toMatch\\(\\\\/href: \"\\\\\\\\\\\\/po-closeout\", label: \"Close out POs\"\\\\/\\);/' \"app/\\(admin\\)/po-closeout/po-closeout-structural.test.ts\")"
     ]
   }
 }
