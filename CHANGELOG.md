@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.25.0] — 2026-07-08
+
+### Added — CLOSEOUT-DRAWER-1: PO Closeout bag drawer — verify in place, act in place (one-stop workspace, phase 1 of 3)
+- **Why:** closing out a PO meant bouncing between PO Closeout, Partial Bags, Production Output, Finished Lots, Zoho ops, Receive Detail, and Workflows. Phase 1 of the approved one-stop design (`docs/superpowers/specs/2026-07-08-po-closeout-one-stop-design.md`): every bag row on `/po-closeout/[poId]` now expands into a drawer with the full picture and every applicable action inline.
+- **Verify in place:** the drawer lazily loads a live, read-only aggregate (`lib/db/queries/bag-closeout-detail.ts`, `unstable_noStore`, write-free) composing existing sources only — the v1.24 per-bag production summary, the workflow event timeline (cap 50), the PO line ordered/received/consumed/finished cross-check (PO reconciliation derivation), Zoho readiness with the exact missing product-setup fields, and the bag's closeout-relevant audit trail (spec-pinned action prefixes, cap 30) — with a "Data as of" stamp; refetched on every open and after every action.
+- **Act in place — existing server actions verbatim, no new mutation endpoints:** QR reservation repair (Receive Detail's action), finished-lot auto-issue + release/hold (finished-lots actions), partial-bag resolution (use system-calculated remaining / correct remaining / mark depleted — Partial Bag Workbench actions), Zoho queue/retry (Zoho ops actions; queueing keeps its explicit confirm and never commits), and the v1.23 correction wizard embedded whole. Panels are gated by a pure, fail-closed `deriveApplicableBagActions` (unknown verdict → verify-only drawer); each panel links to its specialist page for edge cases.
+- **Liveness rollout:** `AutoRefreshOnFocus` now also mounted on Receive Detail, Production Output, Partial Bag Workbench, and Finished Lots — corrections applied anywhere appear on every open Luma surface on focus.
+- **Tests:** 12 pure gate tests + 15 structural tests (loader noStore/read-only/spec caps and prefixes; panels import existing actions only; no `"use server"` under `_drawer/`; Zoho confirm + never-commit pinned; drawer refetch; liveness mounts). 5,126 tests green.
+
+### Notes
+- **No new business logic; no schema change; no deploy-time mutation; no auto Zoho queue/commit.** Row columns, filters, batch buttons, and verdict logic unchanged — the row area is now a client table hosting the drawer. Phases 2 (guided "Close this PO" mode) and 3 (nav demotion) follow separately.
+
 ## [1.24.2] — 2026-07-08
 
 ### Fixed — ACCESS-POLICY-1: admin access to Reconciliation & Output pages (data fix + policy lock)

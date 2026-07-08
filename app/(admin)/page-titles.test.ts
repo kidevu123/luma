@@ -91,9 +91,13 @@ describe("BAG-PRODUCTION-SUMMARY-1 — surfaces render the breakdown", () => {
   it("PO Closeout detail renders per-bag production metrics and view filters", () => {
     const src = repo("app/(admin)/po-closeout/[poId]/page.tsx");
     expect(src).toMatch(/loadBagProductionSummaries\(\{ poId \}\)/);
-    expect(src).toMatch(/BagProductionSummaryInline/);
     expect(src).toMatch(/matchesShowFilter/);
     expect(src).toMatch(/over-consumed/i);
+    // CLOSEOUT-DRAWER-1: the per-bag metrics cell moved into the client
+    // rows component (which also hosts the drawer).
+    expect(repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx")).toMatch(
+      /BagProductionSummaryInline/,
+    );
   });
 
   it("Production Output, Partial Bags, Finished Lot detail, Recall show source-bag context", () => {
