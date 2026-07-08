@@ -14,6 +14,8 @@ import { PoBatchButtons } from "../batch-buttons";
 import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
 import { formatDateTimeEst } from "@/lib/ui/luma-display";
 import { CloseoutRows } from "../_drawer/closeout-rows";
+import { GuidedOverlay, type GuidedBagStep } from "../_guided/guided-overlay";
+import { deriveGuidedCloseoutQueue } from "@/lib/production/guided-closeout";
 
 export const dynamic = "force-dynamic";
 // CLOSEOUT-FRESHNESS-1 — operational page: never statically cached.
@@ -99,11 +101,11 @@ export default async function PoCloseoutDetailPage({
   searchParams,
 }: {
   params: Promise<{ poId: string }>;
-  searchParams: Promise<{ filter?: string; show?: string }>;
+  searchParams: Promise<{ filter?: string; show?: string; guided?: string; step?: string }>;
 }) {
   await requireAdmin();
   const { poId } = await params;
-  const { filter: rawFilter, show: rawShow } = await searchParams;
+  const { filter: rawFilter, show: rawShow, guided: rawGuided, step: rawStep } = await searchParams;
   const filter = (FILTERS.find((f) => f.key === rawFilter)?.key ?? "all") as FilterKey;
   const show = (SHOW_FILTERS.find((f) => f.key === rawShow)?.key ?? "any") as ShowKey;
 
@@ -122,9 +124,64 @@ export default async function PoCloseoutDetailPage({
   const issueReady = summary.rows.filter((r) => r.action === "AUTO_ISSUE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
   const releaseReady = summary.rows.filter((r) => r.action === "AUTO_RELEASE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
 
+  // GUIDED-CLOSEOUT-1 — ?guided=1&step=n renders the "Close this PO"
+  // overlay. The queue derives from the live rows on THIS render, so every
+  // step advance (a plain navigation) recomputes it — never snapshotted.
+  const guided = rawGuided === "1";
+  const parsedStep = Number.parseInt(rawStep ?? "0", 10);
+  const guidedStep = Number.isFinite(parsedStep) && parsedStep >= 0 ? parsedStep : 0;
+  const guidedQueue = deriveGuidedCloseoutQueue(summary.rows);
+  const hasSafeBatch = issueReady + releaseReady > 0;
+  const guidedTotalSteps = guidedQueue.length + (hasSafeBatch ? 1 : 0);
+  const bagIndex = guidedStep - (hasSafeBatch ? 1 : 0);
+  const currentGuidedStep = guided && bagIndex >= 0 && bagIndex < guidedQueue.length
+    ? guidedQueue[bagIndex]
+    : null;
+  const currentGuidedRow = currentGuidedStep
+    ? summary.rows.find((r) => r.inventoryBagId === currentGuidedStep.inventoryBagId) ?? null
+    : null;
+  const guidedBagStep: GuidedBagStep | null =
+    currentGuidedStep && currentGuidedRow
+      ? {
+          ...currentGuidedStep,
+          rowFacts: {
+            status: currentGuidedRow.status,
+            action: currentGuidedRow.action,
+            zoho: currentGuidedRow.zoho,
+            workflowBagId: currentGuidedRow.workflowBagId,
+            finishedLotId: currentGuidedRow.finishedLotId,
+            lotStatus: currentGuidedRow.lotStatus,
+            receiveId: currentGuidedRow.receiveId,
+          },
+        }
+      : null;
+  const guidedFinish =
+    guided && guidedStep >= guidedTotalSteps
+      ? {
+          done: c.done,
+          readyForAction: c.readyForAction,
+          needsReview: c.needsReview,
+          blocked: c.blocked,
+          topBlockers: summary.topBlockers,
+        }
+      : null;
+
   return (
     <div className="space-y-5">
       <AutoRefreshOnFocus />
+      {guided ? (
+        <GuidedOverlay
+          poId={poId}
+          poNumber={summary.poNumber}
+          step={guidedStep}
+          totalSteps={guidedTotalSteps}
+          hasSafeBatch={hasSafeBatch}
+          issueReady={issueReady}
+          releaseReady={releaseReady}
+          bagStep={guidedBagStep}
+          finish={guidedFinish}
+        />
+      ) : null}
       <div>
         <Link href="/po-closeout" className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text mb-2">
           <ArrowLeft className="h-3 w-3" /> All POs
@@ -132,7 +189,19 @@ export default async function PoCloseoutDetailPage({
         <PageHeader
           title={`PO ${summary.poNumber} — closeout`}
           description={summary.vendorName ?? "Closeout command center"}
-          actions={<OverallStatusBadge status={summary.overallStatus} />}
+          actions={
+            <div className="flex items-center gap-2">
+              {guidedTotalSteps > 0 ? (
+                <Link
+                  href={`/po-closeout/${poId}?guided=1&step=0`}
+                  className="rounded bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-800"
+                >
+                  Close this PO ({guidedTotalSteps} step{guidedTotalSteps === 1 ? "" : "s"})
+                </Link>
+              ) : null}
+              <OverallStatusBadge status={summary.overallStatus} />
+            </div>
+          }
         />
         <p className="mt-1 text-[10px] text-text-subtle">
           Data as of {formatDateTimeEst(summary.evaluatedAt.toISOString())} —

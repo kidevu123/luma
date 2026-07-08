@@ -218,3 +218,41 @@ describe("liveness rollout (CLOSEOUT-DRAWER-1)", () => {
     });
   }
 });
+
+// GUIDED-CLOSEOUT-1 — guided "Close this PO" mode: URL-driven live steps,
+// safe batch behind one confirm, no new mutation logic.
+describe("guided closeout mode (GUIDED-CLOSEOUT-1)", () => {
+  const pageSrc = repo("app/(admin)/po-closeout/[poId]/page.tsx");
+  const overlaySrc = repo("app/(admin)/po-closeout/_guided/guided-overlay.tsx");
+  const batchSrc = repo("app/(admin)/po-closeout/_guided/safe-batch-step.tsx");
+
+  it("page parses ?guided/step and derives the queue from live rows", () => {
+    expect(pageSrc).toMatch(/rawGuided === "1"/);
+    expect(pageSrc).toMatch(/deriveGuidedCloseoutQueue\(summary\.rows\)/);
+    expect(pageSrc).toMatch(/<GuidedOverlay/);
+    expect(pageSrc).toMatch(/Close this PO/);
+  });
+
+  it("overlay navigates via plain step links (fresh server render = live recompute)", () => {
+    expect(overlaySrc).toMatch(/\?guided=1&step=\$\{n\}/);
+    expect(overlaySrc).toMatch(/Queue recomputes from live data at every step/);
+    expect(overlaySrc).not.toMatch(/"use server"/);
+  });
+
+  it("bag steps reuse the Phase-1 drawer; floor-only steps say skip for now", () => {
+    expect(overlaySrc).toMatch(/<BagDrawer/);
+    expect(overlaySrc).toMatch(/Needs the floor — skip for now/);
+  });
+
+  it("safe batch wraps the two EXISTING PO batch actions behind one confirm and never touches Zoho", () => {
+    expect(batchSrc).toMatch(/autoIssueSafeLotsForPoAction/);
+    expect(batchSrc).toMatch(/autoReleaseSafeLotsForPoAction/);
+    expect(batchSrc).toMatch(/nothing touches Zoho/);
+    expect(batchSrc).toMatch(/checkbox/);
+    expect(batchSrc).not.toMatch(/"use server"/);
+  });
+
+  it("finish screen is honest about what Closed means", () => {
+    expect(overlaySrc).toMatch(/flips to Closed when every bag is resolved/);
+  });
+});
