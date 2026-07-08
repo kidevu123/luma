@@ -106,3 +106,53 @@ describe("mutating actions revalidate the closeout paths", () => {
     expect(src).toMatch(/revalidatePath\("\/po-closeout"\)/);
   });
 });
+
+// CLOSEOUT-DRAWER-1 — the bag drawer's detail aggregate is read-only, live,
+// and composes existing sources only.
+describe("bag closeout detail loader (CLOSEOUT-DRAWER-1)", () => {
+  const detailSrc = repo("lib/db/queries/bag-closeout-detail.ts");
+
+  it("opts out of framework caching", () => {
+    expect(detailSrc).toMatch(/unstable_noStore as noStore/);
+    expect(detailSrc).toMatch(
+      /export async function loadBagCloseoutDetail[\s\S]{0,400}noStore\(\);/,
+    );
+  });
+
+  it("is strictly read-only", () => {
+    expect(detailSrc).not.toMatch(
+      /\.insert\(|\.update\(|\.delete\(|projectEvent|writeAudit/,
+    );
+  });
+
+  it("composes existing sources (no recomputation, no new ledger)", () => {
+    expect(detailSrc).toMatch(/loadBagProductionSummaries/);
+    expect(detailSrc).toMatch(/deriveBagGenealogy/);
+    expect(detailSrc).toMatch(/derivePoOutputComparison/);
+    expect(detailSrc).toMatch(/evaluateProductSetupReadiness/);
+    expect(detailSrc).toMatch(/listAuditLogsForInventoryBags/);
+    expect(detailSrc).toMatch(/deriveApplicableBagActions/);
+  });
+
+  it("filters the audit trail by the spec prefixes and caps output", () => {
+    for (const prefix of [
+      "finished_lot.",
+      "raw_bag_allocation.",
+      "workflow_submissions.",
+      "inventory_bag.",
+      "qr_card.",
+      "live_ops_repair.",
+    ]) {
+      expect(detailSrc).toContain(`"${prefix}"`);
+    }
+    expect(detailSrc).toMatch(/TIMELINE_EVENT_CAP = 50/);
+    expect(detailSrc).toMatch(/ADMIN_ACTION_CAP = 30/);
+  });
+
+  it("is exposed through an admin-gated server action", () => {
+    const actionsSrc = repo("app/(admin)/po-closeout/actions.ts");
+    expect(actionsSrc).toMatch(
+      /loadBagCloseoutDetailAction[\s\S]{0,300}requireAdmin\(\)/,
+    );
+  });
+});

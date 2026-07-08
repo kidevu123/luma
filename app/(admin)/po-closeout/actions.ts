@@ -7,10 +7,30 @@
 // idempotent + race-safe). They never touch anything outside the PO, never
 // commit to Zoho, and write a PO-scoped batch audit.
 
-import { requireLead } from "@/lib/auth-guards";
+import { z } from "zod";
+import { requireAdmin, requireLead } from "@/lib/auth-guards";
 import { revalidatePath } from "next/cache";
 import { writeAudit } from "@/lib/db/audit";
 import { loadPoCloseout } from "@/lib/db/queries/po-closeout";
+import {
+  loadBagCloseoutDetail,
+  type BagCloseoutDetail,
+  type BagCloseoutRowFacts,
+} from "@/lib/db/queries/bag-closeout-detail";
+
+const bagCloseoutDetailSchema = z.object({
+  inventoryBagId: z.string().uuid(),
+  poId: z.string().uuid(),
+  row: z.object({
+    status: z.string().max(40),
+    action: z.string().max(60),
+    zoho: z.string().max(40),
+    workflowBagId: z.string().uuid().nullable(),
+    finishedLotId: z.string().uuid().nullable(),
+    lotStatus: z.string().max(40).nullable(),
+    receiveId: z.string().uuid().nullable(),
+  }),
+});
 import {
   repairAutoIssueFinishedLotForWorkflowBag,
   setFinishedLotStatus,
@@ -146,5 +166,34 @@ export async function autoReleaseSafeLotsForPoAction(poId: string): Promise<PoBa
     };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "PO auto-release failed." };
+  }
+}
+
+// ── CLOSEOUT-DRAWER-1 · lazy read-only drawer detail ─────────────────────────
+
+export type BagCloseoutDetailResult =
+  | { ok: true; detail: BagCloseoutDetail }
+  | { ok: false; error: string };
+
+/** READ-ONLY. Loads the per-bag drawer aggregate on demand. Admin-gated to
+ *  match the page; never mutates. */
+export async function loadBagCloseoutDetailAction(input: {
+  inventoryBagId: string;
+  poId: string;
+  row: BagCloseoutRowFacts;
+}): Promise<BagCloseoutDetailResult> {
+  await requireAdmin();
+  const parsed = bagCloseoutDetailSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Invalid drawer request." };
+  }
+  try {
+    const detail = await loadBagCloseoutDetail(parsed.data);
+    return { ok: true, detail };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to load bag detail.",
+    };
   }
 }
