@@ -156,3 +156,50 @@ describe("bag closeout detail loader (CLOSEOUT-DRAWER-1)", () => {
     );
   });
 });
+
+// CLOSEOUT-DRAWER-1 — drawer UI: verify-in-place + act-in-place with the
+// EXISTING server actions only.
+describe("bag drawer UI (CLOSEOUT-DRAWER-1)", () => {
+  const rowsSrc = repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx");
+  const drawerSrc = repo("app/(admin)/po-closeout/_drawer/bag-drawer.tsx");
+  const panelsSrc = repo("app/(admin)/po-closeout/_drawer/action-panels.tsx");
+
+  it("detail page renders rows through the drawer table", () => {
+    expect(repo("app/(admin)/po-closeout/[poId]/page.tsx")).toMatch(/<CloseoutRows/);
+    expect(rowsSrc).toMatch(/<BagDrawer/);
+  });
+
+  it("drawer lazy-loads live detail and refetches after actions", () => {
+    expect(drawerSrc).toMatch(/loadBagCloseoutDetailAction/);
+    expect(drawerSrc).toMatch(/onDone=\{\(\) => void refetch\(\)\}/);
+    expect(drawerSrc).toMatch(/router\.refresh\(\)/);
+  });
+
+  it("fail closed: no applicable actions renders no action panels", () => {
+    expect(panelsSrc).toMatch(/if \(keys\.length === 0\) return null;/);
+  });
+
+  it("panels import EXISTING server actions only — no new mutation endpoints in _drawer/", () => {
+    const panelImports: Array<[string, RegExp]> = [
+      ["qr-actions.tsx", /from "@\/app\/\(admin\)\/inbound\/\[id\]\/bag\/\[bagId\]\/edit\/actions"/],
+      ["lot-actions.tsx", /from "@\/app\/\(admin\)\/finished-lots\/actions"/],
+      ["partial-actions.tsx", /from "@\/app\/\(admin\)\/partial-bags\/actions"/],
+      ["zoho-actions.tsx", /from "@\/app\/\(admin\)\/zoho-production-operations\/actions"/],
+      ["correction-launcher.tsx", /_workflow-recovery-form/],
+    ];
+    for (const [file, pattern] of panelImports) {
+      const src = repo(`app/(admin)/po-closeout/_drawer/${file}`);
+      expect(src, file).toMatch(pattern);
+      expect(src, file).not.toMatch(/"use server"/);
+    }
+    expect(drawerSrc).not.toMatch(/"use server"/);
+    expect(rowsSrc).not.toMatch(/"use server"/);
+  });
+
+  it("zoho panel keeps queueing behind an explicit confirm and never commits", () => {
+    const src = repo("app/(admin)/po-closeout/_drawer/zoho-actions.tsx");
+    expect(src).toMatch(/I confirm this output should be queued/);
+    expect(src).toMatch(/nothing is committed by this/i);
+    expect(src).not.toMatch(/commit[A-Z]|processConsolidatedProductionOutputCommit/);
+  });
+});
