@@ -12,6 +12,7 @@
 
 import Link from "next/link";
 import { requireAdmin } from "@/lib/auth-guards";
+import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
 import {
   loadActiveRunsMissingAllocation,
   loadHeldAndDepletedPartialBags,
@@ -339,6 +340,7 @@ export default async function PartialBagWorkbenchPage() {
 
   return (
     <div className="space-y-5">
+      <AutoRefreshOnFocus />
       <PageHeader
         title="Partial Bag Workbench"
         description="Every partially used raw bag, split by lifecycle state. Only 'Ready to reuse' rows are valid inventory — needs-closeout and missing-linkage rows are blocked from new runs until resolved."

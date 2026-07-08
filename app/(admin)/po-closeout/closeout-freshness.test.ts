@@ -203,3 +203,18 @@ describe("bag drawer UI (CLOSEOUT-DRAWER-1)", () => {
     expect(src).not.toMatch(/commit[A-Z]|processConsolidatedProductionOutputCommit/);
   });
 });
+
+// CLOSEOUT-DRAWER-1 — liveness rollout: operational pages self-refresh on
+// tab focus so corrections propagate to every open surface.
+describe("liveness rollout (CLOSEOUT-DRAWER-1)", () => {
+  for (const page of [
+    "app/(admin)/inbound/[id]/page.tsx",
+    "app/(admin)/packaging-output/page.tsx",
+    "app/(admin)/partial-bags/page.tsx",
+    "app/(admin)/finished-lots/page.tsx",
+  ]) {
+    it(`${page} mounts AutoRefreshOnFocus`, () => {
+      expect(repo(page)).toMatch(/<AutoRefreshOnFocus \/>/);
+    });
+  }
+});

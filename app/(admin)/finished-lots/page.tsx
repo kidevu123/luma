@@ -7,6 +7,7 @@ import { PageHeader, StatusPill, EmptyState } from "@/components/ui/page-header"
 import { Button } from "@/components/ui/button";
 import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { AutoReleaseAllButton } from "./auto-release-all-button";
+import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,7 @@ export default async function FinishedLotsPage() {
   const pendingQc = releaseCandidates.length;
   return (
     <div className="space-y-5">
+      <AutoRefreshOnFocus />
       <PageHeader
         title="Finished lots"
         description="Each lot is the saleable output of a workflow bag — full genealogy back to source batches."

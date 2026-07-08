@@ -1,4 +1,5 @@
 import { formatDateTimeEst } from "@/lib/ui/luma-display";
+import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
 // packaging output / pack-out metrics.
 //
 // derivePackagingMetrics + deriveFinishedGoodsMetrics unchanged.
@@ -249,6 +250,7 @@ export default async function PackagingOutputPage({
 
   return (
     <div className="space-y-5">
+      <AutoRefreshOnFocus />
       <PageHeader
         title="Production output"
         description="Last 7 days. Unit types are separated end-to-end — cases, displays, and loose are never aggregated into a single number. Source: read_bag_metrics + finished_lots."

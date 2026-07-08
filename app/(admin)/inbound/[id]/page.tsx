@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Box as BoxIcon, Truck, FileText } from "lucide-react";
 import { requireSession } from "@/lib/auth-guards";
 import { getReceive } from "@/lib/db/queries/receives";
+import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
 import {
   listAuditLogsForInventoryBags,
   listQrCardBagEditAudits,
@@ -154,6 +155,7 @@ export default async function ReceiveDetailPage({
 
   return (
     <div className="space-y-5">
+      <AutoRefreshOnFocus />
       <div>
         <Link
           href="/inbound"
