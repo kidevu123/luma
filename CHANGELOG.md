@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.24.2] — 2026-07-08
+
+### Fixed — ACCESS-POLICY-1: admin access to Reconciliation & Output pages (data fix + policy lock)
+- **Root cause (read-only diagnosis, no code bug):** the affected admin's active OIDC account (`seri@haute.com`) had role **MANAGER** in production — provisioned below ADMIN during the local→OIDC account migration, while the disabled predecessor account (`seri@luma`) held ADMIN. Nav (`lib/auth/admin-nav.ts` minRole) and route guards (`requireAdmin` = OWNER|ADMIN) were already consistent, so MANAGER correctly lost both the sidebar links and the routes for PO Closeout and PO Reconciliation (Production Output / Finished Lots / Zoho Production Output are session-visible). No guard, enum, or session bug: role strings match the `user_role` enum exactly; sessions bake the role into the signed cookie at login (8h max age), so role changes require sign-out/sign-in.
+- **Approved data fix (audited, single row):** `seri@haute.com` MANAGER → ADMIN with an `audit_log` entry (`user.role_correction`, before/after + reason). **The user must sign out and back in** for the new role to take effect (JWT role claim). No other user, page guard, or nav rule changed — owner-only stays owner-only, MANAGER/LEAD/STAFF gain nothing.
+- **Policy lock (tests only, `lib/auth/access-policy.test.ts`, 12 tests):** ADMIN + OWNER can reach every Reconciliation & Output page (nav + route agree); ADMIN-gated pages are never looser in nav than at the route; MANAGER/LEAD/STAFF never meet the ADMIN nav floor; `requireAdmin` admits exactly OWNER|ADMIN; guards use the exact uppercase production role strings (no lowercase literals); stale-session semantics (cookie-baked role, 8h) are pinned so a future change is deliberate.
+
+### Notes
+- No production data mutated except the single approved user-role correction (with audit row). No finished lots, workflow events, allocation sessions, QR cards, Zoho ops, or closeout data touched.
+
 ## [1.24.1] — 2026-07-07
 
 ### Fixed — CLOSEOUT-FRESHNESS-1: PO Closeout can no longer show a stale snapshot
