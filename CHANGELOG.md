@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.26.0] — 2026-07-08
+
+### Added — GUIDED-CLOSEOUT-1: "Close this PO" guided mode (one-stop workspace, phase 2 of 3)
+- **A guided run from the PO Closeout detail page:** the new "Close this PO (N steps)" button opens a URL-addressable overlay (`?guided=1&step=n` — refresh/back work) that walks the admin through every unresolved bag in dependency order: QR → floor → partial remaining → lot → QC → Zoho → review. DONE bags are skipped; floor-only bags render "Needs the floor — skip for now" instead of pretending admins can fix them; unknown verdicts fail closed into the review phase, never dropped (`lib/production/guided-closeout.ts`, pure + unit-tested).
+- **Batch safe, confirm risky:** step 1 is "apply all safe actions" — one confirm runs the EXISTING PO-scoped auto-issue + auto-release batch actions (each re-checks eligibility per row in its own transaction; results and skipped-with-reason reported; nothing touches Zoho). Every judgment step (partials, corrections, QR, Zoho queue) renders the Phase-1 bag drawer with its per-action confirms.
+- **Live by construction:** step navigation is plain links, so every advance is a fresh server render — the queue recomputes from live data and work completed by anyone else makes steps disappear. The finish screen shows the live done/ready/review/blocked rollup with the exact open reasons, and states plainly that the PO flips to Closed only when every bag is resolved and Zoho output is queued or committed.
+- **Tests:** 7 pure queue tests + 5 structural tests (URL-driven navigation, drawer reuse, existing batch actions behind the confirm, no `"use server"` in guided components, honest finish copy). 5,138 tests green.
+
+### Notes
+- **No new mutation logic** — guided mode is ordering + presentation over Phase-1 panels and the existing batch actions. No auto Zoho queue/commit; no schema change; no deploy-time mutation. Phase 3 (nav demotion) follows separately.
+
 ## [1.25.0] — 2026-07-08
 
 ### Added — CLOSEOUT-DRAWER-1: PO Closeout bag drawer — verify in place, act in place (one-stop workspace, phase 1 of 3)
