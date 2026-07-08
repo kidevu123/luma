@@ -11,11 +11,16 @@ import { formatDateTimeEst } from "@/lib/ui/luma-display";
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { purchaseOrders } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   derivePoRawMaterialReconciliation,
+  summarizePoTabletBreakdown,
+  type PoTabletSummaryLine,
   type RawBagReconciliation,
   type PoReconciliation,
 } from "@/lib/production/po-reconciliation";
@@ -30,6 +35,21 @@ import {
 import type { MetricResult, Confidence } from "@/lib/production/types";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ poId: string }>;
+}) {
+  // Cheap title lookup — never runs the heavy reconciliation twice.
+  const { poId } = await params;
+  const [po] = await db
+    .select({ poNumber: purchaseOrders.poNumber })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.id, poId))
+    .limit(1);
+  return { title: po ? `PO Reconciliation ${po.poNumber}` : "PO Reconciliation" };
+}
 
 export default async function PoReconciliationDetailPage({
   params,
@@ -49,7 +69,9 @@ export default async function PoReconciliationDetailPage({
   return (
     <div className="space-y-5">
       <PageHeader
-        title={`PO ${recon.poNumber}`}
+        // The PO number already carries its "PO-" prefix — never prepend
+        // another "PO" (was rendering "PO PO-00238").
+        title={recon.poNumber}
         description={`${recon.vendorName ?? "—"} · ${recon.bagsReceived} bag${recon.bagsReceived === 1 ? "" : "s"} · ${recon.rawItemNames.join(", ") || "—"}`}
       />
 
@@ -240,14 +262,43 @@ function NumStat({ label, m }: { label: string; m: MetricResult }) {
 }
 
 function PoSummary({ recon }: { recon: PoReconciliation }) {
+  // RECON-TABLET-SUMMARY-1 — a PO can span multiple tablets; show the PO
+  // total AND the per-tablet split for bag counts + vendor declarations.
+  const tabletLines = summarizePoTabletBreakdown(recon.bagBreakdown);
+  const showTabletLines = tabletLines.length > 1 || tabletLines[0]?.tabletTypeId == null;
   return (
     <Card>
       <CardHeader>
         <CardTitle>1. PO summary</CardTitle>
       </CardHeader>
       <CardContent className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
-        <Stat label="Bags received" m={ok(recon.bagsReceived, "")} />
-        <Stat label="Vendor declared total" m={recon.vendorDeclaredTotal} />
+        <Stat
+          label="Bags received"
+          m={ok(recon.bagsReceived, "")}
+          breakdown={
+            showTabletLines
+              ? tabletLines.map((t) => ({
+                  label: t.tabletName,
+                  value: t.bagsReceived.toLocaleString(),
+                }))
+              : undefined
+          }
+        />
+        <Stat
+          label="Vendor declared total"
+          m={recon.vendorDeclaredTotal}
+          breakdown={
+            showTabletLines
+              ? tabletLines.map((t) => ({
+                  label: t.tabletName,
+                  value:
+                    t.vendorDeclared != null
+                      ? `${t.vendorDeclared.toLocaleString()}${t.vendorDeclaredComplete ? "" : " (partial)"}`
+                      : "Missing",
+                }))
+              : undefined
+          }
+        />
         <Stat label="Received net weight" m={recon.receivedNetWeightTotalGrams} />
         <Stat label="Internal estimated total" m={recon.internalEstimatedTotal} />
         <Stat label="Finished equivalent" m={recon.finishedEquivalentTotal} />
@@ -276,10 +327,11 @@ function BagBreakdown({ bags }: { bags: ReadonlyArray<RawBagReconciliation> }) {
               <thead className="text-text-muted uppercase">
                 <tr>
                   <th className="text-left p-2">Bag #</th>
+                  <th className="text-left p-2">Tablet</th>
                   <th className="text-left p-2">Vendor barcode</th>
                   <th className="text-left p-2">Status</th>
                   <th className="text-right p-2">Vendor count</th>
-                  <th className="text-right p-2">Net weight (g)</th>
+                  <th className="text-right p-2">Net weight</th>
                   <th className="text-right p-2">Our estimate</th>
                   <th className="text-right p-2">Finished</th>
                   <th className="text-right p-2">Known loss</th>
@@ -292,6 +344,11 @@ function BagBreakdown({ bags }: { bags: ReadonlyArray<RawBagReconciliation> }) {
                 {bags.map((b) => (
                   <tr key={b.inventoryBagId} className="border-t border-border/40">
                     <td className="p-2 tabular-nums">{b.bagNumber ?? "—"}</td>
+                    <td className="p-2">
+                      {b.tabletTypeName ?? (
+                        <span className="text-amber-700 italic">Unassigned</span>
+                      )}
+                    </td>
                     <td className="p-2 font-mono text-[10px]">
                       {b.vendorBarcode ?? "—"}
                     </td>
@@ -484,11 +541,30 @@ function MissingDataPanel({ recon }: { recon: PoReconciliation }) {
 
 // ─── tiny helpers ──────────────────────────────────────────────
 
-function Stat({ label, m }: { label: string; m: MetricResult }) {
+function Stat({
+  label,
+  m,
+  breakdown,
+}: {
+  label: string;
+  m: MetricResult;
+  /** Optional per-tablet lines rendered compactly under the PO total. */
+  breakdown?: Array<{ label: string; value: string }> | undefined;
+}) {
   return (
     <div className="rounded border border-border/60 bg-page px-3 py-2">
       <div className="text-[10px] uppercase text-text-muted tracking-wider">{label}</div>
       <div className="text-lg font-semibold tabular-nums">{render(m)}</div>
+      {breakdown && breakdown.length > 0 ? (
+        <div className="mt-1 space-y-0.5 border-t border-border/40 pt-1">
+          {breakdown.map((line) => (
+            <div key={line.label} className="flex items-baseline justify-between gap-2 text-[11px]">
+              <span className="text-text-muted truncate">{line.label}</span>
+              <span className="font-medium tabular-nums">{line.value}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {m.label && m.confidence === "MISSING" ? (
         <div className="text-[11px] text-text-muted">{m.label}</div>
       ) : null}
@@ -510,7 +586,12 @@ function render(m: MetricResult): string {
   if (m.value == null || m.confidence === "MISSING") return "—";
   if (typeof m.value === "number") {
     if (m.unit === "%") return `${m.value.toFixed(1)}%`;
-    return Math.abs(m.value) < 1 ? m.value.toFixed(3) : m.value.toLocaleString();
+    const text =
+      Math.abs(m.value) < 1 ? m.value.toFixed(3) : m.value.toLocaleString();
+    // Physical units are always shown so the metric is self-explanatory
+    // ("12,345 g", never a bare number). Count-like units stay implicit.
+    if (m.unit === "g" || m.unit === "kg") return `${text} ${m.unit}`;
+    return text;
   }
   return String(m.value);
 }

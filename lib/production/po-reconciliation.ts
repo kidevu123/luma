@@ -287,19 +287,53 @@ export async function deriveRawBagReconciliation(
   `)) as unknown as WfRow[];
   const workflowBagIds = wfRows.map((r) => r.id);
 
-  // Finished equivalent in tablet UoM.
-  // finished_lot_inputs.qty_consumed is in batch UoM. For tablet
-  // batches that's already tablets — straightforward.
-  type FinRow = { finished_tablets: number | null };
-  let finishedEquivalent: number | null = null;
-  if (bag.batch_id) {
-    const finRows = (await db.execute<FinRow>(sql`
-      SELECT SUM(fli.qty_consumed)::int AS finished_tablets
-      FROM finished_lot_inputs fli
-      WHERE fli.batch_id = ${bag.batch_id}
-    `)) as unknown as FinRow[];
-    finishedEquivalent = finRows[0]?.finished_tablets ?? null;
-  }
+  // Finished equivalent in tablet UoM — the workflow-visible truth for
+  // THIS bag (RECON-FINISHED-MATH-1). Previous derivation summed
+  // finished_lot_inputs by BATCH, so every bag in the same input lot
+  // showed the whole flavor's total (and the PO rollup multiplied it by
+  // the bag count). Now: sum over this bag's own workflow runs of
+  // produced units — recomputed live from the packaging counts × the
+  // product's CURRENT structure (same STALE-SNAPSHOT-MATH-1 rule the
+  // rest of Luma uses) — × tablets-per-unit. Recovered/excluded runs
+  // contribute nothing; a run with output but no tablets-per-unit makes
+  // the value honestly unknown instead of fabricating a number.
+  type FinRow = {
+    finished_tablets: number | null;
+    conversion_unknown: boolean | null;
+    finalized_runs: number | null;
+  };
+  const finRows = (await db.execute<FinRow>(sql`
+    SELECT
+      SUM(
+        CASE
+          WHEN COALESCE(rbs.excluded_from_output, false) THEN 0
+          ELSE (
+            CASE WHEN p.units_per_display IS NOT NULL AND p.displays_per_case IS NOT NULL
+              THEN m.master_cases * p.units_per_display * p.displays_per_case
+                 + m.displays_made * p.units_per_display + m.loose_cards
+              ELSE m.loose_cards END
+          ) * p.tablets_per_unit
+        END
+      )::int AS finished_tablets,
+      BOOL_OR(
+        p.tablets_per_unit IS NULL AND NOT COALESCE(rbs.excluded_from_output, false)
+      ) AS conversion_unknown,
+      COUNT(m.workflow_bag_id)::int AS finalized_runs
+    FROM workflow_bags wb
+    JOIN read_bag_metrics m  ON m.workflow_bag_id = wb.id
+    LEFT JOIN read_bag_state rbs ON rbs.workflow_bag_id = wb.id
+    LEFT JOIN products p     ON p.id = wb.product_id
+    WHERE wb.inventory_bag_id = ${inventoryBagId}
+  `)) as unknown as FinRow[];
+  const fin = finRows[0];
+  const finalizedRuns = fin?.finalized_runs ?? 0;
+  const finishedConversionUnknown = finalizedRuns > 0 && fin?.conversion_unknown === true;
+  const finishedEquivalent: number | null =
+    finalizedRuns === 0
+      ? 0
+      : finishedConversionUnknown
+        ? null
+        : (fin?.finished_tablets ?? 0);
 
   // Known damage / rework summed across the consuming workflow bags.
   type LossRow = { known_loss: number | null };
@@ -389,11 +423,16 @@ export async function deriveRawBagReconciliation(
   const finishedEquivalentMR =
     finishedEquivalent != null
       ? ok(finishedEquivalent, "units", {
-          explanation: `Sum of finished_lot_inputs.qty_consumed for batch ${bag.batch_id}.`,
+          explanation:
+            finalizedRuns === 0
+              ? "No finalized production runs for this bag yet."
+              : `Produced output of this bag's ${finalizedRuns} finalized run${finalizedRuns === 1 ? "" : "s"} (packaging counts × current product structure × tablets per unit).`,
         })
-      : bag.batch_id == null
-        ? missing("units", ["batch"], "No batch tied to bag — cannot compute finished output")
-        : ok(0, "units", { explanation: "No finished lots have consumed this batch yet." });
+      : missing(
+          "units",
+          ["tablets_per_unit"],
+          "Run has output but the product's tablets-per-unit is missing — complete product setup",
+        );
   const knownLossMR =
     knownLoss != null
       ? ok(knownLoss, "units", {
@@ -524,6 +563,50 @@ function emptyBagReconciliation(id: string): RawBagReconciliation {
     ourEstimateErrorPercent: missing("%", ["inventory_bag"], "Bag not found"),
     combinedConfidence: "MISSING",
   };
+}
+
+// ─── Per-tablet PO summary lines (RECON-TABLET-SUMMARY-1) ───────
+// A single PO can span multiple tablets; the summary shows the PO total
+// AND the per-tablet split for bag counts and vendor-declared totals.
+// Pure — derived from the already-computed bag breakdown.
+
+export type PoTabletSummaryLine = {
+  tabletTypeId: string | null;
+  /** Tablet name, or "Unassigned" when the bag has no tablet type. */
+  tabletName: string;
+  bagsReceived: number;
+  /** Sum of vendor-declared counts across this tablet's bags — null when
+   *  no bag of this tablet has a declared count (never fabricated 0). */
+  vendorDeclared: number | null;
+  /** False when some bags of this tablet are missing declared counts. */
+  vendorDeclaredComplete: boolean;
+};
+
+export function summarizePoTabletBreakdown(
+  bags: ReadonlyArray<
+    Pick<RawBagReconciliation, "tabletTypeId" | "tabletTypeName" | "vendorDeclaredCount">
+  >,
+): PoTabletSummaryLine[] {
+  const byTablet = new Map<string, PoTabletSummaryLine>();
+  for (const b of bags) {
+    const key = b.tabletTypeId ?? "__unassigned__";
+    const line = byTablet.get(key) ?? {
+      tabletTypeId: b.tabletTypeId,
+      tabletName: b.tabletTypeName ?? "Unassigned",
+      bagsReceived: 0,
+      vendorDeclared: null,
+      vendorDeclaredComplete: true,
+    };
+    line.bagsReceived += 1;
+    const declared = b.vendorDeclaredCount;
+    if (typeof declared.value === "number" && declared.confidence !== "MISSING") {
+      line.vendorDeclared = (line.vendorDeclared ?? 0) + declared.value;
+    } else {
+      line.vendorDeclaredComplete = false;
+    }
+    byTablet.set(key, line);
+  }
+  return [...byTablet.values()].sort((a, b) => a.tabletName.localeCompare(b.tabletName));
 }
 
 // ─── PO-level reconciliation ───────────────────────────────────

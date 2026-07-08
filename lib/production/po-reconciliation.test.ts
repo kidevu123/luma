@@ -349,3 +349,67 @@ describe("PO reconciliation invariants", () => {
     expect("qty_consumed").toBe("qty_consumed");
   });
 });
+
+// RECON-TABLET-SUMMARY-1 — per-tablet PO summary lines.
+import {
+  summarizePoTabletBreakdown,
+  type RawBagReconciliation,
+} from "./po-reconciliation";
+
+function bagLine(
+  tabletTypeId: string | null,
+  tabletTypeName: string | null,
+  declared: number | null,
+): Pick<RawBagReconciliation, "tabletTypeId" | "tabletTypeName" | "vendorDeclaredCount"> {
+  return {
+    tabletTypeId,
+    tabletTypeName,
+    vendorDeclaredCount:
+      declared != null
+        ? { value: declared, unit: "units", confidence: "HIGH", missingInputs: [] }
+        : { value: null, unit: "units", confidence: "MISSING", missingInputs: ["vendor_declared_count"] },
+  };
+}
+
+describe("summarizePoTabletBreakdown", () => {
+  it("groups bags and vendor-declared totals per tablet, sorted by name", () => {
+    const lines = summarizePoTabletBreakdown([
+      bagLine("t2", "Purple Haze", 7000),
+      bagLine("t1", "BlueRaz", 7200),
+      bagLine("t1", "BlueRaz", 7100),
+    ]);
+    expect(lines.map((l) => l.tabletName)).toEqual(["BlueRaz", "Purple Haze"]);
+    expect(lines[0]).toMatchObject({
+      bagsReceived: 2,
+      vendorDeclared: 14300,
+      vendorDeclaredComplete: true,
+    });
+    expect(lines[1]).toMatchObject({ bagsReceived: 1, vendorDeclared: 7000 });
+  });
+
+  it("missing declared counts never become zero — the line is marked partial", () => {
+    const [line] = summarizePoTabletBreakdown([
+      bagLine("t1", "BlueRaz", 7200),
+      bagLine("t1", "BlueRaz", null),
+    ]);
+    expect(line?.bagsReceived).toBe(2);
+    expect(line?.vendorDeclared).toBe(7200);
+    expect(line?.vendorDeclaredComplete).toBe(false);
+  });
+
+  it("a tablet with no declared counts at all stays null, not 0", () => {
+    const [line] = summarizePoTabletBreakdown([bagLine("t1", "BlueRaz", null)]);
+    expect(line?.vendorDeclared).toBeNull();
+    expect(line?.vendorDeclaredComplete).toBe(false);
+  });
+
+  it("bags without a tablet type group under Unassigned", () => {
+    const [line] = summarizePoTabletBreakdown([bagLine(null, null, 100)]);
+    expect(line?.tabletName).toBe("Unassigned");
+    expect(line?.tabletTypeId).toBeNull();
+  });
+
+  it("empty input produces no lines", () => {
+    expect(summarizePoTabletBreakdown([])).toEqual([]);
+  });
+});

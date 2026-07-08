@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.27.2] — 2026-07-08
+
+### Fixed — RECON-FIXES-1: PO reconciliation page — correct per-bag finished counts, per-tablet summary, header/unit/identity cleanup
+- **Finished counts were batch-level, not bag-level (trust-breaking):** the bag breakdown's "Finished" summed `finished_lot_inputs` by **batch**, so every bag in the same input lot showed the whole flavor's total — production dry-run on PO-00238 showed single ~7,200-tablet bags claiming up to **46,544** finished; the PO summary total then multiplied the error by the bag count. Rewritten to the workflow-visible operational truth per bag: the sum over THIS bag's own finalized runs of produced output (packaging counts × the product's **current** structure — same STALE-SNAPSHOT-MATH-1 live-math rule as the rest of Luma — × tablets-per-unit). Recovered/excluded runs contribute nothing; a run with output but no tablets-per-unit renders honestly unknown ("complete product setup"), never a fabricated number; no runs → 0 with plain-language explanation. The PO summary "Finished equivalent", variance math, settlement view, and CSV export all inherit the corrected values (they sum the bag rows).
+- **Header:** the detail page rendered "PO PO-00238" (hardcoded "PO " prefix + already-prefixed number). Title is now the PO number once, and the page gained a cheap `generateMetadata` ("PO Reconciliation PO-00238") that never runs the heavy loader twice.
+- **Per-tablet summary (new pure `summarizePoTabletBreakdown`, unit-tested):** "Bags received" and "Vendor declared total" now show the PO total plus a compact per-tablet split (a PO can span multiple tablets); missing declared counts render "Missing"/"(partial)", never a fabricated 0. Lines appear only when the PO actually spans multiple tablets (or has unassigned bags).
+- **Weight units:** `render()` now appends physical units — "Received net weight" and every gram-based metric shows "12,345 g" instead of a bare number (dispute-packet weights included); the bag table's net-weight header no longer needs the parenthetical.
+- **Tablet identity per bag row:** the bag breakdown (and the CSV export) gained a Tablet column bound to the bag's tablet type name — bag numbering alone is ambiguous when a PO spans multiple tablets; unassigned bags say so.
+- **Tests:** 5 new pure tests for the per-tablet summarizer + 10 structural pins (no header re-prefixing, per-bag scoping of finished, live-math formula, excluded-run handling, honest-unknown conversion, unit rendering, tablet columns in page + export). 5,167 tests green.
+
+### Notes
+- Read-only display/derivation fix; no schema change, no data mutation, no deploy-time effects. The old per-bag numbers were derived wrong — the underlying events, lots, and allocations were always correct.
+
 ## [1.27.1] — 2026-07-08
 
 ### Fixed — STALE-SNAPSHOT-MATH-1: produced-tablet math no longer trusts stale finalize-time snapshots

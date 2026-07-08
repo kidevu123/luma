@@ -81,6 +81,7 @@ export async function GET(
   csv += row(["Section", "Bag breakdown"]);
   csv += row([
     "Bag #",
+    "Tablet",
     "Vendor barcode",
     "Status",
     "Vendor declared",
@@ -95,6 +96,7 @@ export async function GET(
   for (const b of recon.bagBreakdown) {
     csv += row([
       b.bagNumber ?? "",
+      b.tabletTypeName ?? "",
       b.vendorBarcode ?? "",
       b.status,
       b.vendorDeclaredCount.value ?? "",
