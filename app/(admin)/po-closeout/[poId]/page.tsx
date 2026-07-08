@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Check, X, Minus } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -8,13 +8,12 @@ import { purchaseOrders } from "@/lib/db/schema";
 import { loadPoCloseout, type PoCloseoutRow } from "@/lib/db/queries/po-closeout";
 import { loadBagProductionSummaries } from "@/lib/db/queries/bag-production-summary";
 import type { BagProductionSummary } from "@/lib/production/bag-production-summary";
-import { BagProductionSummaryInline } from "@/components/admin/bag-production-summary-inline";
 import { PageHeader } from "@/components/ui/page-header";
-import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
-import { RowStatusBadge, OverallStatusBadge } from "../status-badge";
+import { OverallStatusBadge } from "../status-badge";
 import { PoBatchButtons } from "../batch-buttons";
 import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
 import { formatDateTimeEst } from "@/lib/ui/luma-display";
+import { CloseoutRows } from "../_drawer/closeout-rows";
 
 export const dynamic = "force-dynamic";
 // CLOSEOUT-FRESHNESS-1 — operational page: never statically cached.
@@ -93,50 +92,6 @@ function matchesShowFilter(
     default:
       return true;
   }
-}
-
-function rowLink(row: PoCloseoutRow): { href: string; label: string } | null {
-  switch (row.action) {
-    case "REPAIR_QR_RESERVATION":
-      return row.receiveId ? { href: `/inbound/${row.receiveId}`, label: "Open receive" } : null;
-    case "START_OR_FINALIZE_WORKFLOW":
-      return { href: "/workflow-submissions", label: "Open workflows" };
-    case "CORRECT_STARTING_BALANCE":
-    case "RECORD_REMAINING_OR_CLOSE_PARTIAL":
-      return { href: "/partial-bags", label: "Partial Bag Workbench" };
-    case "AUTO_ISSUE_FINISHED_LOT":
-      return { href: "/packaging-output", label: "Production output" };
-    case "AUTO_RELEASE_FINISHED_LOT":
-    case "REVIEW_QC_HOLD":
-      return row.finishedLotId ? { href: `/finished-lots/${row.finishedLotId}`, label: "Open lot" } : { href: "/finished-lots", label: "Finished lots" };
-    case "QUEUE_OR_RETRY_ZOHO":
-      return { href: "/zoho-production-operations", label: "Zoho output" };
-    case "FIX_PRODUCT_SETUP":
-      return { href: "/workflow-submissions", label: "Review" };
-    default:
-      return row.receiveId ? { href: `/inbound/${row.receiveId}`, label: "Open receive" } : null;
-  }
-}
-
-const ZOHO_LABEL: Record<string, string> = {
-  COMMITTED: "Committed",
-  QUEUED: "Queued",
-  READY_TO_QUEUE: "Ready to queue",
-  NOT_READY: "Not ready",
-  FAILED: "Failed",
-  NOT_APPLICABLE: "Not required",
-  UNCLEAR: "Unclear",
-};
-
-function Tick({ ok, label }: { ok: boolean | null; label: string }) {
-  const Icon = ok === null ? Minus : ok ? Check : X;
-  const cls = ok === null ? "text-text-subtle" : ok ? "text-green-600" : "text-amber-600";
-  return (
-    <span className={`inline-flex items-center gap-0.5 text-[10px] ${cls}`} title={label}>
-      <Icon className="h-3 w-3" aria-hidden />
-      {label}
-    </span>
-  );
 }
 
 export default async function PoCloseoutDetailPage({
@@ -289,74 +244,15 @@ export default async function PoCloseoutDetailPage({
         })}
       </div>
 
-      {/* Rows */}
-      <DataTable>
-        <THead>
-          <TR>
-            <TH>Bag / receipt</TH>
-            <TH>Flavor</TH>
-            <TH>Production</TH>
-            <TH>Status</TH>
-            <TH>What&apos;s next</TH>
-            <TH>Checklist</TH>
-            <TH>{" "}</TH>
-          </TR>
-        </THead>
-        <tbody>
-          {shown.length === 0 ? (
-            <TR>
-              <TD className="text-sm text-text-muted">No bags in this filter.</TD>
-            </TR>
-          ) : (
-            shown.map((row) => {
-              const link = rowLink(row);
-              return (
-                <TR key={row.inventoryBagId}>
-                  <TD>
-                    <div className="font-mono text-xs font-semibold">{row.receiptNumber ?? "—"}</div>
-                    <div className="text-[10px] text-text-subtle">Bag {row.bagNumber ?? "?"} · {row.bagQrCode ?? "no QR"}</div>
-                  </TD>
-                  <TD className="text-xs">{row.tabletName ?? "—"}</TD>
-                  <TD>
-                    {productionByBag.get(row.inventoryBagId) ? (
-                      <BagProductionSummaryInline
-                        summary={productionByBag.get(row.inventoryBagId)!}
-                        variant="row"
-                      />
-                    ) : (
-                      <span className="text-xs text-text-muted">—</span>
-                    )}
-                  </TD>
-                  <TD><RowStatusBadge status={row.status} /></TD>
-                  <TD>
-                    <div className="text-xs font-medium text-text-strong">{row.actionLabel}</div>
-                    <div className="text-[10px] text-text-muted">{row.reason}</div>
-                  </TD>
-                  <TD>
-                    <div className="flex flex-col gap-0.5">
-                      <Tick ok={row.checklist.received} label="Received" />
-                      <Tick ok={row.checklist.floorFinalizedOrExcluded} label="Finalized" />
-                      <Tick ok={row.checklist.finishedLotIssued} label="Lot issued" />
-                      <Tick ok={row.checklist.finishedLotReleasedOrHeld} label="Released/held" />
-                      <Tick
-                        ok={row.checklist.zohoQueuedOrCommittedOrNa}
-                        label={`Zoho: ${ZOHO_LABEL[row.zoho] ?? row.zoho}`}
-                      />
-                    </div>
-                  </TD>
-                  <TD className="text-right">
-                    {link ? (
-                      <Link href={link.href} className="text-xs font-medium text-brand-700 hover:underline whitespace-nowrap">
-                        {link.label}
-                      </Link>
-                    ) : null}
-                  </TD>
-                </TR>
-              );
-            })
-          )}
-        </tbody>
-      </DataTable>
+      {/* Rows — CLOSEOUT-DRAWER-1: each row expands into the bag drawer
+          (verify-in-place + act-in-place). */}
+      <CloseoutRows
+        poId={poId}
+        rows={shown.map((row) => ({
+          ...row,
+          productionSummary: productionByBag.get(row.inventoryBagId) ?? null,
+        }))}
+      />
     </div>
   );
 }

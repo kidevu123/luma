@@ -75,11 +75,16 @@ describe("PO closeout pages", () => {
     expect(detailPageSrc).toMatch(/PoBatchButtons/);
     expect(detailPageSrc).toMatch(/Finalized.{0,40}floor work is complete/);
     expect(detailPageSrc).toMatch(/Done.{0,60}no manual Luma action remains/);
-    // Links to existing pages (no new lifecycle surfaces).
-    expect(detailPageSrc).toMatch(/\/inbound\/\$\{row\.receiveId\}/);
-    expect(detailPageSrc).toMatch(/\/finished-lots\/\$\{row\.finishedLotId\}/);
-    expect(detailPageSrc).toMatch(/\/partial-bags/);
-    expect(detailPageSrc).toMatch(/\/zoho-production-operations/);
+    // CLOSEOUT-DRAWER-1: row rendering (incl. links to existing pages)
+    // moved into the client rows component — no new lifecycle surfaces.
+    const rowsSrc = readFileSync(
+      join(__dirname, "_drawer", "closeout-rows.tsx"),
+      "utf8",
+    );
+    expect(rowsSrc).toMatch(/\/inbound\/\$\{row\.receiveId\}/);
+    expect(rowsSrc).toMatch(/\/finished-lots\/\$\{row\.finishedLotId\}/);
+    expect(rowsSrc).toMatch(/\/partial-bags/);
+    expect(rowsSrc).toMatch(/\/zoho-production-operations/);
     // Avoid the "open allocation session" jargon in UI copy.
     expect(detailPageSrc).not.toMatch(/open allocation session/i);
   });
