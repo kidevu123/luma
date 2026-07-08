@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.27.1] — 2026-07-08
+
+### Fixed — STALE-SNAPSHOT-MATH-1: produced-tablet math no longer trusts stale finalize-time snapshots
+- **Bug (confirmed on receipt 6337-46):** PO Closeout showed 16,272 tablets produced; physical math says 19,872 (9 cases × 25 displays × 20 cards × 4 tabs + 23 displays × 20 × 4 + 8 × 4). Root cause: `read_bag_metrics.units_yielded` is snapshotted when a bag finalizes; the Hyroxi Mit A family's packaging structure was later corrected from 20 to 25 displays/case, and the snapshots were never invalidated — every affected bag read exactly 900 units (3,600 tablets) low. A read-only scan found **30 more stale bags** (BlueRaz, Pink Rozay, Purple Haze, Pineapple Express, Mango Peach). 6337-46 itself self-healed only because an unrelated ripped/damaged correction happened to reproject it.
+- **Fix, three layers:**
+  1. **Display math is live:** the per-bag production summary (PO Closeout, Receive Detail, Production Output, Partial Bags, Finished Lot detail, Recall) now recomputes units from the submitted counts × the product's CURRENT structure (`liveUnitsForWorkflow` reusing the existing `computeUnitsUnderProduct`); the snapshot is only a fallback when the structure is missing.
+  2. **Root cause closed:** `updateProduct` now reprojects `read_bag_metrics` (and the sku/material/station rollups) for every bag of a product whose units-per-display / displays-per-case changed, inside the same transaction, with a `product.structure_change_reprojection` audit row.
+  3. **Historical repair:** new bearer-authed maintenance endpoint `/api/cron/reproject-stale-bag-metrics` (same auth pattern as the auto-commit cron; never runs on deploy or on a timer) with `?dryRun=1`, capped at 200 rows, auditing each pass — used once to repair the 30 stale bags via the canonical `reprojectBagMetricsForWorkflowBag`.
+- **Tests:** 2 new pure regression tests (6337-46 numbers verbatim; snapshot-fallback only when structure missing; multi-workflow fixture corrected to live math) + 8 structural tests pinning the reprojection trigger, audit, route auth/dry-run/cap, and live-math wiring.
+
+### Notes
+- The repair endpoint is invoked manually (documented in the route header); deploys mutate nothing. Source events were always correct — only the derived snapshot and its rollups were stale.
+
 ## [1.27.0] — 2026-07-08
 
 ### Changed — NAV-DEMOTION-1: "Close out POs" is the primary reconciliation nav item (one-stop workspace, phase 3 of 3)

@@ -10,12 +10,20 @@
 // remaining is shown negative (over-consumed), ambiguity fails closed to
 // "Needs review".
 
+import { computeUnitsUnderProduct } from "@/lib/production/wrong-product-correction";
+
 export type BagSummaryWorkflowInput = {
   workflowBagId: string;
   productId: string | null;
   productName: string | null;
   productKind: string | null;
   tabletsPerUnit: number | null;
+  /** Current packaging structure — produced units are recomputed live from
+   *  the metrics COUNTS under this structure (STALE-SNAPSHOT-MATH-1: the
+   *  finalize-time units_yielded snapshot goes stale when the product's
+   *  structure is corrected afterwards). */
+  unitsPerDisplay: number | null;
+  displaysPerCase: number | null;
   stage: string | null;
   isFinalized: boolean;
   finalizedAt: Date | null;
@@ -191,14 +199,32 @@ type WorkflowProduction = {
   unknown: boolean;
 };
 
+/** Live units for a workflow with a metrics snapshot: recomputed from the
+ *  submitted COUNTS under the CURRENT product structure. The finalize-time
+ *  units_yielded snapshot is only a fallback (structure missing) — it goes
+ *  stale when the product's packaging structure is corrected after the bag
+ *  finalized (STALE-SNAPSHOT-MATH-1, receipt 6337-46). */
+function liveUnitsForWorkflow(wf: BagSummaryWorkflowInput): number | null {
+  if (!wf.metrics) return wf.deepestOutput?.units ?? null;
+  const live = computeUnitsUnderProduct(
+    {
+      masterCases: wf.metrics.masterCases,
+      displaysMade: wf.metrics.displaysMade,
+      looseCards: wf.metrics.looseCards,
+      bottlesCompleted: 0,
+    },
+    { unitsPerDisplay: wf.unitsPerDisplay, displaysPerCase: wf.displaysPerCase },
+  );
+  return live ?? wf.metrics.unitsYielded;
+}
+
 /** Produced tablets for one workflow. Excluded (recovered) workflows
  *  contribute nothing — their output is invalid for normal output. */
 function computeWorkflowProduction(wf: BagSummaryWorkflowInput): WorkflowProduction {
   if (wf.excludedFromOutput) {
     return { tablets: 0, units: null, source: null, unknown: false };
   }
-  const units =
-    wf.metrics?.unitsYielded ?? wf.deepestOutput?.units ?? null;
+  const units = liveUnitsForWorkflow(wf);
   if (units == null) {
     // No output recorded yet — honestly zero produced so far, not unknown.
     return { tablets: 0, units: null, source: null, unknown: false };
@@ -272,7 +298,11 @@ export function computeBagProductionSummary(
         loose: latestWithMetrics.metrics.looseCards,
         damaged: latestWithMetrics.metrics.damagedPackaging,
         ripped: latestWithMetrics.metrics.rippedCards,
-        unitsYielded: latestWithMetrics.metrics.unitsYielded,
+        // Live math — never the finalize-time snapshot (which goes stale
+        // when the product structure is corrected afterwards).
+        unitsYielded:
+          liveUnitsForWorkflow(latestWithMetrics) ??
+          latestWithMetrics.metrics.unitsYielded,
       }
     : null;
 

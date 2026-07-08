@@ -6,7 +6,9 @@ import {
   productPackagingSpecs,
   packagingMaterials,
   tabletTypes,
+  workflowBags,
 } from "@/lib/db/schema";
+import { reprojectBagMetricsForWorkflowBag } from "@/lib/projector/reproject-bag-metrics";
 import { writeAudit } from "@/lib/db/audit";
 import { compact } from "@/lib/db/compact";
 import type { CurrentUser } from "@/lib/auth";
@@ -123,6 +125,46 @@ export async function updateProduct(
       },
       tx,
     );
+
+    // STALE-SNAPSHOT-MATH-1 — read_bag_metrics.units_yielded is snapshotted
+    // at finalize time. When the packaging structure changes, every already-
+    // finalized bag of this product carries a stale snapshot (and stale
+    // sku/material/station rollups). Reproject them in the same transaction
+    // so the correction propagates everywhere at once (receipt 6337-46).
+    const structureChanged =
+      before.unitsPerDisplay !== row.unitsPerDisplay ||
+      before.displaysPerCase !== row.displaysPerCase;
+    if (structureChanged) {
+      const bags = await tx
+        .select({ id: workflowBags.id })
+        .from(workflowBags)
+        .where(eq(workflowBags.productId, id));
+      let reprojected = 0;
+      for (const bag of bags) {
+        const r = await reprojectBagMetricsForWorkflowBag(tx, bag.id);
+        if (r.updated) reprojected += 1;
+      }
+      await writeAudit(
+        {
+          actorId: actor.id,
+          actorRole: actor.role,
+          action: "product.structure_change_reprojection",
+          targetType: "Product",
+          targetId: id,
+          before: {
+            units_per_display: before.unitsPerDisplay,
+            displays_per_case: before.displaysPerCase,
+          },
+          after: {
+            units_per_display: row.unitsPerDisplay,
+            displays_per_case: row.displaysPerCase,
+            bags_reprojected: reprojected,
+          },
+        },
+        tx,
+      );
+    }
+
     return row;
   });
 }

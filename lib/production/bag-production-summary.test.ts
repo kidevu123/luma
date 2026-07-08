@@ -18,6 +18,9 @@ function workflow(
     productName: "Product A",
     productKind: "CARD",
     tabletsPerUnit: 4,
+    // Structure consistent with the helper's 10/44/0 counts → 1,640 units.
+    unitsPerDisplay: 10,
+    displaysPerCase: 12,
     stage: "FINALIZED",
     isFinalized: true,
     finalizedAt: new Date("2026-06-03T20:46:32Z"),
@@ -184,6 +187,59 @@ describe("produced tablets", () => {
     expect(s.percentComplete).toBeNull();
   });
 
+  it("recomputes produced from counts under the CURRENT product structure — stale finalize-time snapshots are ignored", () => {
+    // Receipt 6337-46 regression: bag finalized while the product said
+    // 20 displays/case (snapshot 4,068 units); structure later corrected to
+    // 25/case. Produced must be live math, not the stale snapshot.
+    const s = computeBagProductionSummary(
+      baseInput({
+        pillCount: 20000,
+        declaredPillCount: 20000,
+        workflows: [
+          workflow({
+            unitsPerDisplay: 20,
+            displaysPerCase: 25,
+            metrics: {
+              masterCases: 9,
+              displaysMade: 23,
+              looseCards: 8,
+              damagedPackaging: 0,
+              rippedCards: 17,
+              unitsYielded: 4068, // stale snapshot
+            },
+          }),
+        ],
+        allocationSessions: [],
+        finishedLots: [],
+        zoho: null,
+      }),
+    );
+    expect(s.outputCounts?.unitsYielded).toBe(4968); // 9×500 + 23×20 + 8
+    expect(s.producedTablets).toBe(19872); // 4,968 × 4 — never 16,272
+  });
+
+  it("falls back to the snapshot only when the packaging structure is missing", () => {
+    const s = computeBagProductionSummary(
+      baseInput({
+        workflows: [
+          workflow({
+            unitsPerDisplay: null,
+            displaysPerCase: null,
+            metrics: {
+              masterCases: 10,
+              displaysMade: 44,
+              looseCards: 0,
+              damagedPackaging: 0,
+              rippedCards: 1,
+              unitsYielded: 1640,
+            },
+          }),
+        ],
+      }),
+    );
+    expect(s.producedTablets).toBe(1640 * 4);
+  });
+
   it("recovered/excluded workflow output does not count as produced but is flagged", () => {
     const s = computeBagProductionSummary(
       baseInput({
@@ -215,13 +271,15 @@ describe("produced tablets", () => {
               looseCards: 5,
               damagedPackaging: 0,
               rippedCards: 0,
+              // Deliberately stale snapshot — live math (10×10 + 5 = 105
+              // units) must win.
               unitsYielded: 205,
             },
           }),
         ],
       }),
     );
-    expect(s.producedTablets).toBe(6560 + 820);
+    expect(s.producedTablets).toBe(6560 + 105 * 4);
     expect(s.flags.multipleWorkflows).toBe(true);
     expect(s.workflowCount).toBe(2);
   });
