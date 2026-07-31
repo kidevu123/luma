@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.28.0] — 2026-07-31
+
+### Added — KIOSK-1: floor kiosk mode — QR provisioning, deploy-drift reload, idle operator auto-sign-out
+- **Why:** tablets are being wall-mounted per production area (blistering, sealing, packaging, etc.), each running a dedicated OS-level kiosk-lock app (Fully Kiosk Browser / Guided Access) pointed at that station's existing `/floor/<scan_token>` URL. That URL-as-station-identity model already existed; this phase makes the page trustworthy to run unattended for weeks and easy to provision, without touching workflow logic or the future one-screen-one-action redesign (`docs/FLOOR_UI_POLISH_REQUIREMENTS.md`, still explicitly deferred).
+- **Admin provisioning:** each active station card on `/machines` now renders a QR code of its absolute floor URL (`lib/qrcode`, same library/pattern as QR card labels) so tablets can be set up by scanning instead of copy-pasting a UUID.
+- **Deploy-drift auto-reload:** a new `KioskShell` (mounted once in the floor layout) polls a new unauthenticated `GET /api/kiosk/build-info` endpoint every 3 minutes and hard-reloads the tab when the served build SHA no longer matches the running one — Luma auto-deploys `main` every ~60s via systemd timer, and a kiosk tab that's never manually refreshed could otherwise keep running a stale JS bundle against a new server build.
+- **Screen wake lock + offline banner:** `KioskShell` also requests `navigator.wakeLock` (re-acquired on visibility change, no-op where unsupported) and renders a fixed red banner when the tablet loses network, so an operator never taps into the void without a visible signal.
+- **Idle operator auto-sign-out:** a new `IdleOperatorGuard`, rendered only while a station operator session is open, auto-closes the session via the existing `endOperatorSessionAction` after 20 minutes with no pointer/touch/key activity (`STATION_OPERATOR_SESSION_IDLE_TIMEOUT_MINUTES`) — closes a real accountability gap where a walked-away shift's session stayed open indefinitely and any stray overnight tap would have been silently attributed to the wrong employee. If the close is refused (e.g. a blister bag needs a shift-end counter pause first), the session stays open and the idle timer simply resets.
+- **Tests:** 13 new pure unit tests for the deploy-drift comparison and idle-timeout threshold math.
+
+### Notes
+- No new schema, no PWA manifest/service worker (out of scope — kiosk lockdown is owned by the OS-level kiosk app per the confirmed hardware decision), no changes to `workflow_events`/projector paths or the floor screens' visual design.
+
 ## [1.27.2] — 2026-07-08
 
 ### Fixed — RECON-FIXES-1: PO reconciliation page — correct per-bag finished counts, per-tablet summary, header/unit/identity cleanup

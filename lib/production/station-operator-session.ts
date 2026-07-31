@@ -39,6 +39,13 @@ export type ActiveStationSession = Pick<
 export const FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS: ReadonlySet<string> =
   new Set(["BLISTER", "COMBINED", "BOTTLE_HANDPACK"]);
 
+/**
+ * Idle minutes before a kiosk auto-closes the open operator session.
+ * Prevents overnight taps from being attributed to a walked-away shift.
+ * Tunable constant — not a DB setting.
+ */
+export const STATION_OPERATOR_SESSION_IDLE_TIMEOUT_MINUTES = 20;
+
 /** True when an open session row satisfies first-op count accountability. */
 export function sessionSatisfiesFirstOpCount(session: {
   employeeId: string | null;

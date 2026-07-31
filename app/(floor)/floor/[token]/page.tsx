@@ -58,6 +58,7 @@ import {
 } from "@/lib/production/sealing-segments";
 import { hasPartialSealingCloseout, isWorkflowBagResumableAtSealingAfterPartialPackaging } from "@/lib/production/sealing-partial-closeout";
 import { OperatorSessionPanel } from "./operator-session-form";
+import { IdleOperatorGuard } from "./idle-operator-guard";
 import { listActiveEmployeeOptions } from "./operator-session-actions";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
 import { shouldRenderQcPanel } from "@/lib/production/qc-panel-helpers";
@@ -877,6 +878,10 @@ export default async function FloorStationPage({
           )}
         </p>
       </header>
+
+      {activeSession ? (
+        <IdleOperatorGuard token={token} stationId={station.station.id} />
+      ) : null}
 
       <OperatorSessionPanel
         token={token}

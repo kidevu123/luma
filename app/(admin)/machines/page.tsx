@@ -20,6 +20,7 @@ import {
   RotateTokenButton,
 } from "./forms";
 import { CopyFloorUrl } from "./copy-floor-url";
+import { KioskQr } from "./kiosk-qr";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,7 @@ function StationCard({
           Floor URL
         </p>
         <CopyFloorUrl token={station.scanToken} />
+        {station.isActive ? <KioskQr token={station.scanToken} /> : null}
         <p className="text-[10px] text-text-subtle mt-1.5 leading-relaxed">
           Scan token is stable when you edit the name. Rotate only if a tablet
           walks off. Inactive stations show a block message on the floor.
