@@ -7,6 +7,7 @@ import { DataTable, THead, TR, TH, TD } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
 import { formatDateTimeEst } from "@/lib/ui/luma-display";
+import { RefreshZohoButton } from "./refresh-zoho-button";
 
 export const dynamic = "force-dynamic";
 // CLOSEOUT-FRESHNESS-1 — operational page: never statically cached.
@@ -65,6 +66,7 @@ export default async function PoCloseoutListPage({
       <PageHeader
         title="PO closeout"
         description="One place to see, per PO, which bags are done and which still need a Luma action. A PO closed in Zoho counts as Closed; the Zoho chip marks closes where Luma work was left open."
+        actions={<RefreshZohoButton />}
       />
       <p className="text-[10px] text-text-subtle -mt-3">
         Data as of {formatDateTimeEst(evaluatedAt.toISOString())} — reloads
