@@ -84,7 +84,8 @@ export type SweepOutcome =
   | "permanent_failure"
   | "state_blocked"
   | "skipped_guard_blocked"
-  | "skipped_master_off";
+  | "skipped_master_off"
+  | "skipped_po_zoho_closed";
 
 export type SweepRowResult = {
   surface: "raw_bag_receive" | "production_output";
@@ -110,6 +111,10 @@ export type AutoCommitSweepDependencies = {
     now: Date,
     limit: number,
   ) => Promise<Array<{ id: string }>>;
+  /** Returns the subset of production-output op ids whose PO is in a Zoho
+   *  terminal state (closed/billed/cancelled). Those ops are skipped —
+   *  pushing output to a closed Zoho PO fails on Zoho's side. */
+  loadZohoClosedPoOpIds?: (opIds: string[]) => Promise<Set<string>>;
   commitRawBag?: typeof sharedCommitRawBagReceive;
   commitProductionOutput?: typeof sharedCommitProductionOutputOp;
   productionOutputCallable?: ProductionOutputCommitCallable;
@@ -171,6 +176,26 @@ const defaultProductionOutputCallable: ProductionOutputCommitCallable = async (i
   };
 };
 
+async function defaultLoadZohoClosedPoOpIds(opIds: string[]): Promise<Set<string>> {
+  if (opIds.length === 0) return new Set();
+  const rows = await db.execute<{ id: string }>(sql`
+    SELECT op.id
+    FROM zoho_production_output_ops op
+    JOIN finished_lots fl ON fl.id = op.finished_lot_id
+    JOIN workflow_bags wb ON wb.id = fl.workflow_bag_id
+    JOIN inventory_bags ib ON ib.id = wb.inventory_bag_id
+    JOIN small_boxes sb ON sb.id = ib.small_box_id
+    JOIN receives r ON r.id = sb.receive_id
+    JOIN purchase_orders po ON po.id = r.po_id
+    WHERE op.id IN (${sql.join(
+      opIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+      AND LOWER(TRIM(po.zoho_status)) IN ('closed', 'billed', 'cancelled')
+  `);
+  return new Set(Array.from(rows).map((r) => r.id));
+}
+
 function emptyTotals(): Record<SweepOutcome, number> {
   return {
     committed: 0,
@@ -181,6 +206,7 @@ function emptyTotals(): Record<SweepOutcome, number> {
     state_blocked: 0,
     skipped_guard_blocked: 0,
     skipped_master_off: 0,
+    skipped_po_zoho_closed: 0,
   };
 }
 
@@ -302,6 +328,10 @@ export async function runAutoCommitSweep(
     deps.loadProductionOutputEligible ?? defaultLoadProductionOutputEligible
   )(now, PER_PASS_LIMIT);
 
+  const zohoClosedOpIds = await (deps.loadZohoClosedPoOpIds ?? defaultLoadZohoClosedPoOpIds)(
+    poEligible.map((o) => o.id),
+  );
+
   for (const { id } of poEligible) {
     if (!gates.productionOutputWritesAllowed) {
       rows.push({
@@ -311,6 +341,16 @@ export async function runAutoCommitSweep(
         detail: gates.reasons.productionOutput ?? null,
       });
       totals.skipped_guard_blocked += 1;
+      continue;
+    }
+    if (zohoClosedOpIds.has(id)) {
+      rows.push({
+        surface: "production_output",
+        opId: id,
+        outcome: "skipped_po_zoho_closed",
+        detail: "PO is closed in Zoho — output intentionally not pushed",
+      });
+      totals.skipped_po_zoho_closed += 1;
       continue;
     }
     const commit = deps.commitProductionOutput ?? sharedCommitProductionOutputOp;

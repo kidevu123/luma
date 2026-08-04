@@ -55,6 +55,7 @@ beforeEach(() => {
       state_blocked: 0,
       skipped_guard_blocked: 0,
       skipped_master_off: 0,
+      skipped_po_zoho_closed: 0,
     },
   });
 });

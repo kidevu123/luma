@@ -8,9 +8,12 @@ import type { SharedRawBagCommitResult } from "./shared-raw-bag-receive-commit";
 
 // Mock @/lib/db so the route-level loaders never touch a real DB even
 // when a test forgets to inject loadRawBagEligible / loadProductionOutputEligible.
+// execute is mocked to return an empty iterable so defaultLoadZohoClosedPoOpIds
+// returns an empty Set (no POs are closed) in tests that don't inject loadZohoClosedPoOpIds.
 vi.mock("@/lib/db", () => ({
   db: {
     select: vi.fn(),
+    execute: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -325,5 +328,43 @@ describe("runAutoCommitSweep — gates-off → no live gateway call", () => {
       productionOutputCallable: callable,
     });
     expect(callable).not.toHaveBeenCalled();
+  });
+});
+
+describe("runAutoCommitSweep — Zoho-closed PO skip", () => {
+  it("skips production-output ops whose PO is closed in Zoho, with outcome skipped_po_zoho_closed", async () => {
+    const commitSpy = vi.fn(async (input: { opId: string }) => okPoCommit(input.opId));
+    const summary = await runAutoCommitSweep({
+      env: ENABLED_PO_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [],
+      loadProductionOutputEligible: async () => [{ id: "op-1" }, { id: "op-2" }],
+      loadZohoClosedPoOpIds: async (ids) => new Set(ids.filter((i) => i === "op-1")),
+      commitProductionOutput: commitSpy as never,
+      productionOutputCallable: vi.fn() as never,
+    });
+    expect(summary.totals.skipped_po_zoho_closed).toBe(1);
+    const skipped = summary.rows.find((r) => r.opId === "op-1");
+    expect(skipped?.outcome).toBe("skipped_po_zoho_closed");
+    expect(skipped?.detail).toBe("PO is closed in Zoho — output intentionally not pushed");
+    // commit must be called ONLY for op-2
+    expect(commitSpy).toHaveBeenCalledTimes(1);
+    expect(commitSpy.mock.calls[0]![0].opId).toBe("op-2");
+  });
+
+  it("raw-bag surface is NOT affected by the Zoho-closed PO check", async () => {
+    const commitRawBag = vi.fn(async (input: { opId: string }) => okRawBagCommit(input.opId));
+    // loadZohoClosedPoOpIds is NOT injected — default would run but we mock loadRawBagEligible
+    const summary = await runAutoCommitSweep({
+      env: ENABLED_RAW_BAG_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [{ id: "rb-1" }],
+      loadProductionOutputEligible: async () => [],
+      commitRawBag: commitRawBag as never,
+    });
+    // raw-bag ops should still commit normally
+    expect(commitRawBag).toHaveBeenCalledTimes(1);
+    expect(summary.totals.committed).toBe(1);
+    expect(summary.totals.skipped_po_zoho_closed).toBe(0);
   });
 });
