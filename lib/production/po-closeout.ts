@@ -400,8 +400,15 @@ export type PoCloseoutIndexBucket = "ACTIVE" | "CLOSED";
 
 /** Zoho PO statuses that mean the PO is finished on Zoho's side. Raw values
  *  as Zoho sends them; compared case-insensitively. Absence (null) is NOT
- *  terminal — a never-synced PO keeps the conservative local logic. */
-const ZOHO_TERMINAL_STATUSES = new Set(["closed", "billed", "cancelled"]);
+ *  terminal — a never-synced PO keeps the conservative local logic.
+ *
+ *  Confirmed against live gateway data (2026-08-04): the raw `zoho_status`
+ *  field takes draft / issued / partially_received / received / cancelled
+ *  across all 87 synced POs. Fully-received POs are what Zoho presents as
+ *  "closed" in its UI — their raw status is "received". "closed" and "billed"
+ *  are retained defensively for other Zoho plan variants / future gateway
+ *  changes. "partially_received" is explicitly NOT terminal. */
+const ZOHO_TERMINAL_STATUSES = new Set(["received", "closed", "billed", "cancelled"]);
 
 export function isZohoTerminalStatus(raw: string | null | undefined): boolean {
   if (!raw) return false;

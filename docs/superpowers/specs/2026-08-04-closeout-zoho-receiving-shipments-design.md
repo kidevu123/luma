@@ -65,8 +65,12 @@ Changes:
   mapped enum keeps its existing semantics.
 - **Classifier:** `classifyPoCloseoutIndexBucket` gains a
   `zohoTerminal` input (true when `zoho_status` is one of the Zoho
-  terminal states: closed, billed, cancelled — exact set confirmed
-  against real synced values during implementation). `zohoTerminal`
+  terminal states: received, closed, billed, cancelled — confirmed
+  against live gateway data 2026-08-04: the raw field takes
+  draft / issued / partially_received / received / cancelled across all
+  87 synced POs; fully-received POs carry raw status "received", which
+  is what Zoho presents as "closed"; "closed"/"billed" retained
+  defensively for other Zoho variants). `zohoTerminal`
   forces the Closed bucket. Absence of `zoho_status` (never synced,
   e.g. manual POs) changes nothing: existing conservative logic
   applies. Missing is not treated as closed *or* open-in-Zoho.

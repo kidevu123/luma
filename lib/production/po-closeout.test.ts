@@ -448,14 +448,19 @@ describe("classifyPoCloseoutRow on a Zoho-closed PO", () => {
 });
 
 describe("isZohoTerminalStatus", () => {
-  it("is true for closed/billed/cancelled, case-insensitive", () => {
+  it("is true for received/closed/billed/cancelled, case-insensitive", () => {
+    expect(isZohoTerminalStatus("received")).toBe(true);
     expect(isZohoTerminalStatus("closed")).toBe(true);
     expect(isZohoTerminalStatus("Billed")).toBe(true);
     expect(isZohoTerminalStatus("CANCELLED")).toBe(true);
   });
   it("is false for open-ish, unknown, and missing values", () => {
     expect(isZohoTerminalStatus("issued")).toBe(false);
+    // guard against substring confusion: partially_received contains "received"
+    // but is NOT terminal — Zoho marks a fully-received PO as "received", not
+    // "partially_received".
     expect(isZohoTerminalStatus("partially_received")).toBe(false);
+    expect(isZohoTerminalStatus("draft")).toBe(false);
     expect(isZohoTerminalStatus("")).toBe(false);
     expect(isZohoTerminalStatus(null)).toBe(false);
     expect(isZohoTerminalStatus(undefined)).toBe(false);
