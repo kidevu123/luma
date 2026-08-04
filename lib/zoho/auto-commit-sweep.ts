@@ -55,26 +55,31 @@ import type { CurrentUser } from "@/lib/auth";
 // many rows are eligible, they'll roll over to the next pass.
 const PER_PASS_LIMIT = 25;
 
-// Synthetic actor for cron-triggered audit rows. The audit table
-// expects a real user, but the cron isn't a real operator. The actor
-// id is null so audit-log readers can distinguish operator action
-// from cron action; the role string makes that distinction obvious
-// in the timeline.
+// Synthetic actor for cron-triggered audit rows. Both id and role are
+// null: audit_log.actor_id has a FK to users.id (inserting a
+// non-existent UUID would violate it) and actor_role is the user_role
+// Postgres enum (OWNER/ADMIN/MANAGER/LEAD/STAFF — "CRON" is not a
+// member). Cron provenance is already carried by the audit action
+// strings and can be identified by a null actor_id at query time.
 export const CRON_ACTOR: Pick<CurrentUser, "id" | "role"> = {
-   
   id: null as any,
-   
-  role: "CRON" as any,
+  role: null as any,
 };
 
 // Synthetic CurrentUser-shaped object for production-output (the
-// existing primitives require a full CurrentUser).
+// existing primitives require a full CurrentUser). id and role are
+// null for the same reasons as CRON_ACTOR above: the zero-UUID would
+// violate the audit_log.actor_id FK (no such row in users), and any
+// role string must be a valid user_role enum member. All
+// FK-constrained columns on zoho_production_output_ops that carry a
+// user id (approved_by_user_id, commit_requested_by_user_id, etc.)
+// are set by the human operator at approve/queue time — the cron
+// commit path does not write actor.id to any op column.
 const CRON_PRODUCTION_OUTPUT_ACTOR = {
-  id: "00000000-0000-0000-0000-000000000000",
-  role: "ADMIN" as const,
-  email: "cron@luma.local",
+  id: null,
+  role: null,
+  email: null,
   employeeId: null,
-  name: "luma-zoho-auto-commit-cron",
 } as unknown as CurrentUser;
 
 export type SweepOutcome =

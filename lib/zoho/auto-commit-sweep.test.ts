@@ -9,6 +9,10 @@ import type {
 } from "./shared-production-output-commit";
 import type { SharedRawBagCommitResult } from "./shared-raw-bag-receive-commit";
 
+// Valid user_role enum values accepted by Postgres. "CRON" is NOT a member
+// and null is the correct cron sentinel for both id and role.
+const VALID_USER_ROLES = new Set(["OWNER", "ADMIN", "MANAGER", "LEAD", "STAFF"]);
+
 // Mock @/lib/db so the route-level loaders never touch a real DB even
 // when a test forgets to inject loadRawBagEligible / loadProductionOutputEligible.
 // execute is mocked to return an empty iterable so defaultLoadZohoClosedPoOpIds
@@ -405,5 +409,55 @@ describe("runAutoCommitSweep — Zoho-closed PO skip", () => {
     expect(commitRawBag).toHaveBeenCalledTimes(1);
     expect(summary.totals.committed).toBe(1);
     expect(summary.totals.skipped_po_zoho_closed).toBe(0);
+  });
+});
+
+describe("CRON-ACTOR-PIN-1: cron never passes enum-invalid roles or fabricated UUIDs", () => {
+  // Regression pin for the incident where CRON_ACTOR.role = "CRON" (not a
+  // valid user_role enum member) caused `invalid input value for enum
+  // user_role: "CRON"` on the first live auto-commit sweep pass. And
+  // CRON_PRODUCTION_OUTPUT_ACTOR carried a fabricated UUID that would have
+  // violated the audit_log.actor_id FK to users.id.
+
+  it("raw-bag commit is called with actor.role = null (not a non-enum string)", async () => {
+    const capturedActors: Array<{ id: unknown; role: unknown }> = [];
+    const commitRawBag = vi.fn(async (input: { opId: string; actor: { id: unknown; role: unknown } }) => {
+      capturedActors.push({ id: input.actor.id, role: input.actor.role });
+      return okRawBagCommit(input.opId);
+    });
+    await runAutoCommitSweep({
+      env: ENABLED_RAW_BAG_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [{ id: "rb-cron-pin" }],
+      loadProductionOutputEligible: async () => [],
+      commitRawBag: commitRawBag as never,
+    });
+    expect(capturedActors).toHaveLength(1);
+    const actor = capturedActors[0]!;
+    // id must be null (no fabricated UUID that would violate FK to users.id)
+    expect(actor.id).toBeNull();
+    // role must be null OR a valid enum member — never an invalid string like "CRON"
+    expect(actor.role === null || VALID_USER_ROLES.has(actor.role as string)).toBe(true);
+  });
+
+  it("production-output commit is called with actor.id = null and actor.role = null", async () => {
+    const capturedActors: Array<{ id: unknown; role: unknown }> = [];
+    const commitPo = vi.fn(async (input: { opId: string; actor: { id: unknown; role: unknown } }) => {
+      capturedActors.push({ id: input.actor.id, role: input.actor.role });
+      return okPoCommit(input.opId);
+    });
+    await runAutoCommitSweep({
+      env: ENABLED_PO_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [],
+      loadProductionOutputEligible: async () => [{ id: "po-cron-pin" }],
+      commitProductionOutput: commitPo as never,
+    });
+    expect(capturedActors).toHaveLength(1);
+    const actor = capturedActors[0]!;
+    // id must be null (zero-UUID "00000000-..." has no row in users.id → FK violation)
+    expect(actor.id).toBeNull();
+    // role must be null OR a valid enum member — never a non-member string
+    expect(actor.role === null || VALID_USER_ROLES.has(actor.role as string)).toBe(true);
   });
 });

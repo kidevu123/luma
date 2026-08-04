@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.29.3] — 2026-08-04
+
+### Fixed — CRON-ACTOR-1: auto-commit sweep passes null id/role actors — CRON is not a user_role; zero-UUID actor would violate FK
+- **Root cause (active):** `CRON_ACTOR.role` was set to `"CRON"` (cast via `as any`). The `audit_log.actor_role` column is the `user_role` Postgres enum (values: OWNER/ADMIN/MANAGER/LEAD/STAFF); inserting `"CRON"` raises `invalid input value for enum user_role: "CRON"` and 500s the entire sweep.
+- **Root cause (latent):** `CRON_PRODUCTION_OUTPUT_ACTOR.id` was `"00000000-0000-0000-0000-000000000000"`. The `audit_log.actor_id` column has a FK to `users.id`; inserting a UUID with no matching users row would raise a FK violation on the first production-output auto-commit. This path never ran before today.
+- **Fix:** Both actors now carry `id: null` and `role: null`. Audit columns `actor_id` / `actor_role` are both nullable — null is the correct cron sentinel. No FK-constrained columns on `zoho_production_output_ops` are written with actor.id during the commit path (those columns were set by the human operator at approve/queue time).
+- **Regression pins (`CRON-ACTOR-PIN-1`):** 2 new tests in `lib/zoho/auto-commit-sweep.test.ts` capture the actor passed to each commit fn and assert `actor.id === null` and `actor.role === null || VALID_USER_ROLES.has(actor.role)` — pins that the cron never passes enum-invalid roles or fabricated UUIDs.
+
 ## [1.29.2] — 2026-08-04
 
 ### Fixed — SWEEP-DATE-1: auto-commit sweep 500 — raw sql`` Date param in production-output eligibility loader
