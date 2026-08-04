@@ -209,6 +209,18 @@ export default async function PoCloseoutDetailPage({
         </p>
       </div>
 
+      {summary.closedInZoho ? (
+        <div className="rounded-lg border border-sky-300/50 bg-sky-50/60 px-4 py-2.5 text-[12px] text-sky-900">
+          <span className="font-semibold">Closed in Zoho</span>
+          {" — this PO is "}
+          <span className="font-mono">{summary.zohoStatus}</span>
+          {" on Zoho's side, so it counts as Closed here."}
+          {summary.outputsNeverPushed > 0
+            ? ` ${summary.outputsNeverPushed} output${summary.outputsNeverPushed === 1 ? " was" : "s were"} never pushed to Zoho; auto-commit skips this PO.`
+            : null}
+        </div>
+      ) : null}
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
         {[

@@ -357,6 +357,46 @@ describe("classifyPoCloseoutIndexBucket", () => {
   });
 });
 
+// Task 5 — fixtures for Zoho-closed PO suppression tests.
+const releasedReadyToQueueRow: PoCloseoutRowInput = {
+  ...doneRow,
+  zoho: "READY_TO_QUEUE",
+};
+
+const inProgressRow: PoCloseoutRowInput = {
+  ...doneRow,
+  hasWorkflow: true,
+  workflowFinalized: false,
+  hasFinishedLot: false,
+  finishedLotId: null,
+  lotStatus: null,
+  zoho: "NOT_APPLICABLE",
+};
+
+describe("classifyPoCloseoutRow on a Zoho-closed PO", () => {
+  it("READY_TO_QUEUE is suppressed to DONE with an explicit never-pushed reason", () => {
+    const v = classifyPoCloseoutRow({ ...releasedReadyToQueueRow, poZohoClosed: true });
+    expect(v.status).toBe("DONE");
+    expect(v.action).toBe("NONE");
+    expect(v.reason).toBe("Closed in Zoho — output was never pushed to Zoho");
+  });
+  it("NOT_READY and FAILED are suppressed the same way", () => {
+    for (const zoho of ["NOT_READY", "FAILED"] as const) {
+      const v = classifyPoCloseoutRow({ ...releasedReadyToQueueRow, zoho, poZohoClosed: true });
+      expect(v.status).toBe("DONE");
+      expect(v.reason).toBe("Closed in Zoho — output was never pushed to Zoho");
+    }
+  });
+  it("does not change pre-release steps (a bag still on the floor stays visible)", () => {
+    const v = classifyPoCloseoutRow({ ...inProgressRow, poZohoClosed: true });
+    expect(v.status).toBe("NEEDS_REVIEW");
+  });
+  it("without poZohoClosed nothing changes", () => {
+    const v = classifyPoCloseoutRow(releasedReadyToQueueRow);
+    expect(v.status).toBe("READY_FOR_ACTION");
+  });
+});
+
 describe("isZohoTerminalStatus", () => {
   it("is true for closed/billed/cancelled, case-insensitive", () => {
     expect(isZohoTerminalStatus("closed")).toBe(true);

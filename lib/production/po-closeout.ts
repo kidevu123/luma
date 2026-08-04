@@ -102,6 +102,10 @@ export type PoCloseoutRowInput = {
   releaseStatus: "AUTO_RELEASE_READY" | "NEEDS_QC_REVIEW" | "BLOCKED" | "ALREADY_RELEASED" | "NOT_FOUND" | null;
   releaseMessage: string | null;
   zoho: PoCloseoutZohoStatus;
+  /** True when the PO's raw Zoho status is terminal (closed/billed/cancelled).
+   *  Pending Zoho output then stops counting as open work (suppress + flag —
+   *  the page banner reports how many outputs were never pushed). */
+  poZohoClosed?: boolean;
 };
 
 export type PoCloseoutRowVerdict = {
@@ -330,6 +334,18 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
   // Done policy: a released lot is DONE only when its Zoho output is QUEUED (the
   // worker will commit it) or COMMITTED, or Zoho output is explicitly not
   // required. READY_TO_QUEUE is NOT done — an admin still has to queue it.
+  if (input.poZohoClosed) {
+    switch (input.zoho) {
+      case "READY_TO_QUEUE":
+      case "NOT_READY":
+      case "FAILED":
+        return done("Closed in Zoho — output was never pushed to Zoho");
+      case "QUEUED":
+        return done("Closed in Zoho — queued output will not be committed");
+      default:
+        break; // COMMITTED / NOT_APPLICABLE / UNCLEAR fall through unchanged
+    }
+  }
   switch (input.zoho) {
     case "COMMITTED":
       return done("Released and committed to Zoho");

@@ -76,6 +76,12 @@ export type PoCloseoutSummary = {
   };
   /** True when production-output persistence is on (Zoho output is required). */
   zohoRequired: boolean;
+  /** Raw Zoho status on the PO (null if never synced). */
+  zohoStatus: string | null;
+  /** True when the PO's Zoho status is terminal (closed/billed/cancelled). */
+  closedInZoho: boolean;
+  /** Count of finished lots that were never pushed to Zoho (only meaningful when closedInZoho). */
+  outputsNeverPushed: number;
   topBlockers: Array<{ reason: string; count: number }>;
   rows: PoCloseoutRow[];
   /** CLOSEOUT-FRESHNESS-1 — when this snapshot was computed from the live
@@ -113,7 +119,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
   // from any framework cache; every request recomputes from the live DB.
   noStore();
   const [po] = await db
-    .select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber, vendorName: purchaseOrders.vendorName })
+    .select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber, vendorName: purchaseOrders.vendorName, zohoStatus: purchaseOrders.zohoStatus })
     .from(purchaseOrders)
     .where(eq(purchaseOrders.id, poId))
     .limit(1);
@@ -123,6 +129,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
   // to have a Zoho op — so a missing op is "required but not queued", not
   // "not applicable". When disabled, Zoho output is genuinely not required.
   const zohoRequired = isProductionOutputPersistEnabled();
+  const closedInZoho = isZohoTerminalStatus(po.zohoStatus);
 
   // All inventory bags for this PO (chain: inventory_bags → small_boxes → receives).
   const bagRows = await db
@@ -159,6 +166,9 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
         zohoCommitted: 0, zohoQueued: 0, zohoReadyToQueue: 0, zohoFailed: 0,
       },
       zohoRequired,
+      zohoStatus: po.zohoStatus ?? null,
+      closedInZoho,
+      outputsNeverPushed: 0,
       topBlockers: [],
       rows: [],
       evaluatedAt: new Date(),
@@ -269,6 +279,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
 
   // Compose each row (fail closed per row — never throw the whole page).
   const rows: PoCloseoutRow[] = [];
+  let outputsNeverPushed = 0;
   for (const b of bagRows) {
     const wf = wfByInventory.get(b.inventoryBagId);
     const lot = wf ? lotByWorkflow.get(wf.id) : undefined;
@@ -382,7 +393,12 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       releaseStatus,
       releaseMessage,
       zoho: zohoStatus,
+      ...(closedInZoho ? { poZohoClosed: true } : {}),
     };
+
+    if (closedInZoho && hasFinishedLot && zohoStatus !== "COMMITTED" && zohoStatus !== "NOT_APPLICABLE") {
+      outputsNeverPushed += 1;
+    }
 
     const verdict = classifyPoCloseoutRow(input);
     rows.push({
@@ -427,6 +443,9 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       zohoFailed: rows.filter((r) => r.zoho === "FAILED").length,
     },
     zohoRequired,
+    zohoStatus: po.zohoStatus ?? null,
+    closedInZoho,
+    outputsNeverPushed,
     topBlockers: [...blockerTally.entries()]
       .map(([reason, count]) => ({ reason, count }))
       .sort((a, b) => b.count - a.count)
