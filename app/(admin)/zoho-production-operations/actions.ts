@@ -32,14 +32,16 @@ export async function processNextQueuedProductionOutputAction(): Promise<void> {
 
 export async function queueProductionOutputOpAction(
   formData: FormData,
-): Promise<void> {
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const session = await requireSession();
-  if (session.role !== "OWNER" && session.role !== "ADMIN") return;
+  if (session.role !== "OWNER" && session.role !== "ADMIN")
+    return { ok: false, error: "Not authorized." };
   const opId = String(formData.get("opId") ?? "");
-  if (!opId) return;
+  if (!opId) return { ok: false, error: "Missing operation id." };
 
-  await queueConsolidatedProductionOutputOp(opId, session);
+  const result = await queueConsolidatedProductionOutputOp(opId, session);
   revalidatePath("/zoho-production-operations");
+  return result;
 }
 
 export async function loadConsolidatedProductionOutputOpsAction() {
@@ -49,12 +51,17 @@ export async function loadConsolidatedProductionOutputOpsAction() {
 
 export async function retryPreviewProductionOutputOpAction(
   formData: FormData,
-): Promise<void> {
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const session = await requireSession();
-  if (session.role !== "OWNER" && session.role !== "ADMIN") return;
+  if (session.role !== "OWNER" && session.role !== "ADMIN")
+    return { ok: false, error: "Not authorized." };
   const opId = String(formData.get("opId") ?? "");
-  if (!opId) return;
+  if (!opId) return { ok: false, error: "Missing operation id." };
 
-  await retryConsolidatedProductionOutputPreview(opId, session);
+  const result = await retryConsolidatedProductionOutputPreview(opId, session);
   revalidatePath("/zoho-production-operations");
+  // retryConsolidatedProductionOutputPreview returns { ok: false; reason: string }
+  // on failure — normalise the key to `error` for a consistent surface.
+  if (!result.ok) return { ok: false, error: result.reason };
+  return { ok: true };
 }

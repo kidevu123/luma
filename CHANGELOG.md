@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.1] — 2026-08-04
+
+### Fixed — QUEUE-FIX-1: surface queue/retry refusals in the bag drawer; disable queue for non-queueable ops
+- **Root cause:** `queueProductionOutputOpAction` and `retryPreviewProductionOutputOpAction` both discarded their service-layer result objects and returned `void`. The bag drawer's "Queue for Zoho" button called `onDone()` unconditionally after the action, silently advancing past a refusal (e.g. NEEDS_MAPPING ops that cannot be queued). The queue button was also enabled for any op status as long as the confirm checkbox was ticked.
+- **Fix:** Both actions now return `Promise<{ ok: true } | { ok: false; error: string }>`. The drawer captures the result: on failure it renders the error in the panel's standard red error style and does not call `onDone()`; on success it calls `onDone()` as before. The "Queue for Zoho" button is now disabled (with an inline explanation) whenever the op status is not READY or FAILED. The ops page's "Retry preview" form was converted to a `RetryPreviewButton` client component that surfaces refusals inline.
+- **Tests:** 6 new source-pin assertions in `po-closeout-structural.test.ts` covering the action return types, guard error shapes, drawer error branch, and QUEUE button disabled condition (suite now 17).
+
 ## [1.29.0] — 2026-08-04
 
 ### Added — ZOHO-TRUTH-1: closeout list reads Zoho as the source of truth for PO status

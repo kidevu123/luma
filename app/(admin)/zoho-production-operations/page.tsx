@@ -17,8 +17,7 @@ import { isChocoDriftSku } from "@/lib/zoho/v1206-choco-drift-pilot-contract";
 // AND product-readiness facets (see lib/zoho/zoho-live-commit-eligibility.ts).
 // Operators toggle the flag on the product page; this queue page no
 // longer needs a hard-coded SKU badge.
-import { retryPreviewProductionOutputOpAction } from "./actions";
-import { ProductionOutputStagingButtons } from "./staging-buttons";
+import { ProductionOutputStagingButtons, RetryPreviewButton } from "./staging-buttons";
 // ZOHO-STAGING-BUFFER-v1.1.0 — processNextQueuedProductionOutputAction
 // is intentionally NOT imported here. The single operator/cron entry
 // path for production-output commit is sharedCommitProductionOutputOp,
@@ -223,12 +222,7 @@ export default async function ZohoProductionOperationsPage() {
                         op.status !== "COMMITTING" &&
                         op.status !== "QUEUED" &&
                         !op.voidedAt ? (
-                          <form action={retryPreviewProductionOutputOpAction} className="mt-1">
-                            <input type="hidden" name="opId" value={op.id} />
-                            <button type="submit" className="text-[10.5px] text-text-muted underline">
-                              Retry preview
-                            </button>
-                          </form>
+                          <RetryPreviewButton opId={op.id} />
                         ) : null}
                       </td>
                     </tr>

@@ -92,3 +92,58 @@ describe("PO closeout pages", () => {
     expect(navSrc).toMatch(/href: "\/po-closeout", label: "Close out POs"/);
   });
 });
+
+describe("QUEUE-FIX-1: zoho-actions drawer — surfaces action refusals; disables queue for non-queueable ops", () => {
+  const zohoActionsSrc = readFileSync(
+    join(__dirname, "_drawer", "zoho-actions.tsx"),
+    "utf8",
+  );
+  const zohoOpActionsSrc = repo(
+    "app/(admin)/zoho-production-operations/actions.ts",
+  );
+
+  it("queueProductionOutputOpAction returns a result object, not void", () => {
+    // Return type must be Promise<{ ok: true } | { ok: false; error: string }>
+    expect(zohoOpActionsSrc).toMatch(
+      /queueProductionOutputOpAction[\s\S]{0,200}Promise<\s*\{\s*ok:\s*true\s*\}\s*\|\s*\{\s*ok:\s*false;\s*error:\s*string\s*\}/,
+    );
+  });
+
+  it("retryPreviewProductionOutputOpAction returns a result object, not void", () => {
+    expect(zohoOpActionsSrc).toMatch(
+      /retryPreviewProductionOutputOpAction[\s\S]{0,200}Promise<\s*\{\s*ok:\s*true\s*\}\s*\|\s*\{\s*ok:\s*false;\s*error:\s*string\s*\}/,
+    );
+  });
+
+  it("action guard returns { ok: false, error } instead of bare return", () => {
+    // Both actions must return an error object when auth fails, not silently return void.
+    expect(zohoOpActionsSrc).toMatch(/ok: false, error: "Not authorized\."/);
+    expect(zohoOpActionsSrc).toMatch(/ok: false, error: "Missing operation id\."/);
+  });
+
+  it("drawer captures the action result and renders an error branch on failure", () => {
+    // actionError state and the error paragraph must both exist.
+    expect(zohoActionsSrc).toMatch(/actionError/);
+    expect(zohoActionsSrc).toMatch(/border-red-200.*bg-red-50|bg-red-50.*border-red-200/);
+    // On !ok, setActionError is called instead of onDone.
+    expect(zohoActionsSrc).toMatch(/setActionError\(result\.error\)/);
+    // onDone is only called on success (result.ok is checked before calling onDone).
+    expect(zohoActionsSrc).toMatch(/result\.ok[\s\S]{0,200}onDone\(\)/);
+  });
+
+  it("QUEUE button disabled condition references READY and FAILED statuses", () => {
+    // QUEUEABLE_STATUSES must include both READY and FAILED.
+    expect(zohoActionsSrc).toMatch(/QUEUEABLE_STATUSES/);
+    expect(zohoActionsSrc).toMatch(/"READY"/);
+    expect(zohoActionsSrc).toMatch(/"FAILED"/);
+    // notQueueable is used in the disabled prop.
+    expect(zohoActionsSrc).toMatch(/notQueueable/);
+    expect(zohoActionsSrc).toMatch(/disabled=\{[\s\S]{0,80}notQueueable/);
+  });
+
+  it("renders an inline reason when the op cannot be queued", () => {
+    // The human-readable refusal message appears in the drawer.
+    expect(zohoActionsSrc).toMatch(/Cannot queue/);
+    expect(zohoActionsSrc).toMatch(/resolve the blocker first/);
+  });
+});

@@ -32,6 +32,42 @@ import {
   unholdProductionOutputOp,
   voidProductionOutputOpAction,
 } from "./staging-actions";
+import { retryPreviewProductionOutputOpAction } from "./actions";
+
+/** Inline retry-preview button for the ops page. Shows the refusal reason on failure. */
+export function RetryPreviewButton({ opId }: { opId: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="mt-1 flex flex-col gap-0.5">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => {
+          setError(null);
+          const fd = new FormData();
+          fd.set("opId", opId);
+          startTransition(async () => {
+            const result = await retryPreviewProductionOutputOpAction(fd);
+            if (result.ok) {
+              router.refresh();
+            } else {
+              setError(result.error);
+            }
+          });
+        }}
+        className="text-[10.5px] text-text-muted underline disabled:opacity-50"
+      >
+        {pending ? "Retrying…" : "Retry preview"}
+      </button>
+      {error ? (
+        <p className="text-[10px] text-rose-700">{error}</p>
+      ) : null}
+    </div>
+  );
+}
 
 export type ProductionOutputStagingRow = {
   id: string;

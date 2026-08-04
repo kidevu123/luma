@@ -12,6 +12,8 @@ import {
 } from "@/app/(admin)/zoho-production-operations/actions";
 import type { ProductSetupReadiness } from "@/lib/production/product-setup-readiness";
 
+const QUEUEABLE_STATUSES = new Set(["READY", "FAILED"]);
+
 export function ZohoActions({
   mode,
   op,
@@ -25,8 +27,13 @@ export function ZohoActions({
 }) {
   const [pending, setPending] = React.useState(false);
   const [confirmed, setConfirmed] = React.useState(false);
+  const [actionError, setActionError] = React.useState<string | null>(null);
 
   const blockers = setup?.missingFields.filter((f) => f.kind === "ZOHO_PUSH_BLOCKER") ?? [];
+
+  // For QUEUE mode: the button is only enabled when the op is in a queueable state.
+  const notQueueable =
+    mode === "QUEUE" && op != null && !QUEUEABLE_STATUSES.has(op.status);
 
   return (
     <div className="rounded border border-border bg-surface px-3 py-2 space-y-1.5">
@@ -54,7 +61,13 @@ export function ZohoActions({
             Op <span className="font-mono text-[9.5px]">{op.id.slice(0, 8)}</span> —{" "}
             <span className="font-medium">{op.status}</span>
           </p>
-          {mode === "QUEUE" ? (
+          {notQueueable ? (
+            <p className="text-[10.5px] text-text-muted">
+              Cannot queue: op is {op.status} — resolve the blocker first (fix
+              mapping / confirm the source bag&apos;s Zoho receive), then Retry preview.
+            </p>
+          ) : null}
+          {mode === "QUEUE" && !notQueueable ? (
             <label className="flex items-start gap-2 text-[10.5px]">
               <input
                 type="checkbox"
@@ -65,17 +78,33 @@ export function ZohoActions({
               <span>I confirm this output should be queued for Zoho.</span>
             </label>
           ) : null}
+          {actionError ? (
+            <p className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[10.5px] text-red-800">
+              {actionError}
+            </p>
+          ) : null}
           <button
             type="button"
-            disabled={pending || (mode === "QUEUE" && (!confirmed || blockers.length > 0))}
+            disabled={
+              pending ||
+              notQueueable ||
+              (mode === "QUEUE" && (!confirmed || blockers.length > 0))
+            }
             onClick={async () => {
               setPending(true);
+              setActionError(null);
               const fd = new FormData();
               fd.set("opId", op.id);
-              if (mode === "RETRY") await retryPreviewProductionOutputOpAction(fd);
-              else await queueProductionOutputOpAction(fd);
+              const result =
+                mode === "RETRY"
+                  ? await retryPreviewProductionOutputOpAction(fd)
+                  : await queueProductionOutputOpAction(fd);
               setPending(false);
-              onDone();
+              if (!result.ok) {
+                setActionError(result.error);
+              } else {
+                onDone();
+              }
             }}
             className="rounded bg-brand-700 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
           >
