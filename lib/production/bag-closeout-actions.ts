@@ -40,6 +40,7 @@ export function deriveApplicableBagActions(input: {
       actions.push("REPAIR_QR");
       break;
     case "AUTO_ISSUE_FINISHED_LOT":
+    case "ISSUE_FINISHED_LOT":
       actions.push("ISSUE_LOT");
       break;
     case "AUTO_RELEASE_FINISHED_LOT":
@@ -49,8 +50,12 @@ export function deriveApplicableBagActions(input: {
       actions.push("REVIEW_HOLD");
       break;
     case "CORRECT_STARTING_BALANCE":
-    case "RECORD_REMAINING_OR_CLOSE_PARTIAL":
       actions.push("RESOLVE_PARTIAL");
+      break;
+    case "RECORD_REMAINING_OR_CLOSE_PARTIAL":
+      // The partial panel resolves an OPEN allocation session; without one
+      // it has nothing to act on (renders a contradictory dead-end).
+      if (input.allocationOpen) actions.push("RESOLVE_PARTIAL");
       break;
     case "QUEUE_OR_RETRY_ZOHO":
       actions.push(input.zoho === "FAILED" ? "ZOHO_RETRY" : "ZOHO_QUEUE");

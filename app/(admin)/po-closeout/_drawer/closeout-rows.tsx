@@ -35,6 +35,7 @@ function rowLink(row: PoCloseoutRow): { href: string; label: string } | null {
     case "RECORD_REMAINING_OR_CLOSE_PARTIAL":
       return { href: "/partial-bags", label: "Partial Bag Workbench" };
     case "AUTO_ISSUE_FINISHED_LOT":
+    case "ISSUE_FINISHED_LOT":
       return { href: "/packaging-output", label: "Production output" };
     case "AUTO_RELEASE_FINISHED_LOT":
     case "REVIEW_QC_HOLD":
@@ -84,7 +85,7 @@ export function CloseoutRows({
           <TH>Status</TH>
           <TH>What&apos;s next</TH>
           <TH>Checklist</TH>
-          <TH>{" "}</TH>
+          <TH>Go to</TH>
         </TR>
       </THead>
       <tbody>

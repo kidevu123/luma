@@ -53,8 +53,10 @@ describe("deriveApplicableBagActions — verdict mapping", () => {
 
   it("partial resolution for both partial verdicts", () => {
     expectActions({ rowAction: "CORRECT_STARTING_BALANCE" }, ["RESOLVE_PARTIAL"]);
+    // RECORD_REMAINING_OR_CLOSE_PARTIAL only opens the panel when an allocation
+    // session is actually open (otherwise the panel has nothing to act on).
     expectActions(
-      { rowAction: "RECORD_REMAINING_OR_CLOSE_PARTIAL", rowStatus: "NEEDS_REVIEW" },
+      { rowAction: "RECORD_REMAINING_OR_CLOSE_PARTIAL", rowStatus: "NEEDS_REVIEW", allocationOpen: true },
       ["RESOLVE_PARTIAL"],
     );
   });
@@ -95,6 +97,48 @@ describe("deriveApplicableBagActions — correction wizard availability", () => 
       rowStatus: "NEEDS_REVIEW",
     });
     expect(got).not.toContain("CORRECTION_WIZARD");
+  });
+});
+
+describe("deriveApplicableBagActions — ISSUE_FINISHED_LOT and partial gate", () => {
+  it("ISSUE_FINISHED_LOT maps to the issue-lot panel", () => {
+    const actions = deriveApplicableBagActions({
+      rowStatus: "READY_FOR_ACTION",
+      rowAction: "ISSUE_FINISHED_LOT",
+      zoho: "NOT_APPLICABLE",
+      hasWorkflow: true,
+      hasFinishedLot: false,
+      lotStatus: null,
+      allocationOpen: false,
+    });
+    expect(actions).toContain("ISSUE_LOT");
+    expect(actions).not.toContain("RESOLVE_PARTIAL");
+  });
+
+  it("RECORD_REMAINING_OR_CLOSE_PARTIAL without an open session shows no partial panel", () => {
+    const actions = deriveApplicableBagActions({
+      rowStatus: "NEEDS_REVIEW",
+      rowAction: "RECORD_REMAINING_OR_CLOSE_PARTIAL",
+      zoho: "NOT_APPLICABLE",
+      hasWorkflow: true,
+      hasFinishedLot: false,
+      lotStatus: null,
+      allocationOpen: false,
+    });
+    expect(actions).not.toContain("RESOLVE_PARTIAL");
+  });
+
+  it("RECORD_REMAINING_OR_CLOSE_PARTIAL with an open session keeps the partial panel", () => {
+    const actions = deriveApplicableBagActions({
+      rowStatus: "NEEDS_REVIEW",
+      rowAction: "RECORD_REMAINING_OR_CLOSE_PARTIAL",
+      zoho: "NOT_APPLICABLE",
+      hasWorkflow: true,
+      hasFinishedLot: false,
+      lotStatus: null,
+      allocationOpen: true,
+    });
+    expect(actions).toContain("RESOLVE_PARTIAL");
   });
 });
 

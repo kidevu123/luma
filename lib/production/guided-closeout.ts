@@ -47,6 +47,7 @@ function phaseForAction(action: string): GuidedPhase {
     case "RECORD_REMAINING_OR_CLOSE_PARTIAL":
       return "PARTIAL";
     case "AUTO_ISSUE_FINISHED_LOT":
+    case "ISSUE_FINISHED_LOT":
       return "LOT";
     case "AUTO_RELEASE_FINISHED_LOT":
     case "REVIEW_QC_HOLD":
