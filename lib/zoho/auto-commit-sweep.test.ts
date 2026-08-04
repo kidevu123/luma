@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runAutoCommitSweep } from "./auto-commit-sweep";
+import { ZOHO_TERMINAL_STATUS_LIST } from "@/lib/production/po-closeout";
 import type {
   ProductionOutputCommitCallable,
   SharedProductionOutputCommitResult,
@@ -328,6 +329,16 @@ describe("runAutoCommitSweep — gates-off → no live gateway call", () => {
       productionOutputCallable: callable,
     });
     expect(callable).not.toHaveBeenCalled();
+  });
+});
+
+describe("ZOHO_TERMINAL_STATUS_LIST — regression pin (sweep must match classifier)", () => {
+  it("contains received, closed, billed, cancelled — and NOT partially_received", () => {
+    expect(ZOHO_TERMINAL_STATUS_LIST).toContain("received");
+    expect(ZOHO_TERMINAL_STATUS_LIST).toContain("closed");
+    expect(ZOHO_TERMINAL_STATUS_LIST).toContain("billed");
+    expect(ZOHO_TERMINAL_STATUS_LIST).toContain("cancelled");
+    expect(ZOHO_TERMINAL_STATUS_LIST).not.toContain("partially_received");
   });
 });
 

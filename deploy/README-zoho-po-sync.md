@@ -3,11 +3,11 @@
 ## Files in this directory
 
 - `luma-zoho-po-sync.service` — systemd service unit (one-shot curl)
-- `luma-zoho-po-sync.timer`   — systemd timer (daily at 03:59 US Eastern)
+- `luma-zoho-po-sync.timer`   — systemd timer (hourly at :59 US Eastern)
 
 ## What the cron does
 
-Once per day at **03:59 US Eastern** (EST/EDT), the timer triggers the
+Once per hour at **:59 US Eastern** (EST/EDT), the timer triggers the
 service, which `POST`s to
 `http://localhost:3000/api/cron/zoho-po-sync` with a bearer token.
 The route:
@@ -30,7 +30,7 @@ In `/etc/luma/.env` (mode 0600, read by the luma-app container):
 # Cron auth — same secret the systemd service uses
 LUMA_CRON_SECRET=<generate-with-openssl-rand-base64-32>
 
-# Master switch for the daily PO sync
+# Master switch for the hourly PO sync
 ZOHO_PO_SYNC_ENABLED=true
 ```
 
@@ -60,11 +60,19 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now luma-zoho-po-sync.timer
 ```
 
-Verify the timer fires at 03:59 **US Eastern**:
+> **Prod rollout note — systemd units are NOT deployed by the compose drift timer.**
+> After merging, copy the unit to the LXC manually and reload:
+> ```bash
+> sudo cp /opt/luma/deploy/luma-zoho-po-sync.timer /etc/systemd/system/
+> sudo systemctl daemon-reload
+> sudo systemctl restart luma-zoho-po-sync.timer
+> ```
+
+Verify the timer fires hourly at :59 **US Eastern**:
 
 ```bash
 sudo systemctl list-timers luma-zoho-po-sync.timer --no-pager
-# NEXT should read … 03:59:00 EDT (or EST in winter), not UTC
+# NEXT should show :59:00 EDT (or EST in winter) for the next hour, not UTC
 ```
 
 ## Verification commands

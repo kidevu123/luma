@@ -36,6 +36,7 @@ import { and, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { zohoProductionOutputOps, zohoRawBagReceives } from "@/lib/db/schema";
 import { resolveAutoCommitWriteGates, type AutoCommitWriteGates } from "@/lib/zoho/auto-commit-write-gates";
+import { ZOHO_TERMINAL_STATUS_LIST } from "@/lib/production/po-closeout";
 import {
   sharedCommitRawBagReceive,
   type SharedRawBagCommitResult,
@@ -112,8 +113,9 @@ export type AutoCommitSweepDependencies = {
     limit: number,
   ) => Promise<Array<{ id: string }>>;
   /** Returns the subset of production-output op ids whose PO is in a Zoho
-   *  terminal state (closed/billed/cancelled). Those ops are skipped —
-   *  pushing output to a closed Zoho PO fails on Zoho's side. */
+   *  terminal state (received/closed/billed/cancelled — see ZOHO_TERMINAL_STATUSES
+   *  in lib/production/po-closeout.ts). Those ops are skipped — pushing output
+   *  to a closed Zoho PO fails on Zoho's side. */
   loadZohoClosedPoOpIds?: (opIds: string[]) => Promise<Set<string>>;
   commitRawBag?: typeof sharedCommitRawBagReceive;
   commitProductionOutput?: typeof sharedCommitProductionOutputOp;
@@ -191,7 +193,10 @@ async function defaultLoadZohoClosedPoOpIds(opIds: string[]): Promise<Set<string
       opIds.map((id) => sql`${id}`),
       sql`, `,
     )})
-      AND LOWER(TRIM(po.zoho_status)) IN ('closed', 'billed', 'cancelled')
+      AND LOWER(TRIM(po.zoho_status)) IN (${sql.join(
+        ZOHO_TERMINAL_STATUS_LIST.map((s) => sql`${s}`),
+        sql`, `,
+      )})
   `);
   return new Set(Array.from(rows).map((r) => r.id));
 }

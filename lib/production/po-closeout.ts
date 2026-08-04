@@ -108,9 +108,9 @@ export type PoCloseoutRowInput = {
   releaseStatus: "AUTO_RELEASE_READY" | "NEEDS_QC_REVIEW" | "BLOCKED" | "ALREADY_RELEASED" | "NOT_FOUND" | null;
   releaseMessage: string | null;
   zoho: PoCloseoutZohoStatus;
-  /** True when the PO's raw Zoho status is terminal (closed/billed/cancelled).
-   *  Pending Zoho output then stops counting as open work (suppress + flag —
-   *  the page banner reports how many outputs were never pushed). */
+  /** True when the PO's raw Zoho status is terminal (received/closed/billed/cancelled —
+   *  see ZOHO_TERMINAL_STATUSES). Pending Zoho output then stops counting as open work
+   *  (suppress + flag — the page banner reports how many outputs were never pushed). */
   poZohoClosed?: boolean;
 };
 
@@ -409,6 +409,11 @@ export type PoCloseoutIndexBucket = "ACTIVE" | "CLOSED";
  *  are retained defensively for other Zoho plan variants / future gateway
  *  changes. "partially_received" is explicitly NOT terminal. */
 const ZOHO_TERMINAL_STATUSES = new Set(["received", "closed", "billed", "cancelled"]);
+
+/** Canonical list form of ZOHO_TERMINAL_STATUSES for SQL IN-list consumers
+ *  (auto-commit sweep). Kept in the same module so the classifier and the
+ *  sweep can never disagree about what "closed in Zoho" means. */
+export const ZOHO_TERMINAL_STATUS_LIST: readonly string[] = [...ZOHO_TERMINAL_STATUSES];
 
 export function isZohoTerminalStatus(raw: string | null | undefined): boolean {
   if (!raw) return false;

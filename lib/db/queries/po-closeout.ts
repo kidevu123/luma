@@ -81,7 +81,7 @@ export type PoCloseoutSummary = {
   zohoRequired: boolean;
   /** Raw Zoho status on the PO (null if never synced). */
   zohoStatus: string | null;
-  /** True when the PO's Zoho status is terminal (closed/billed/cancelled). */
+  /** True when the PO's Zoho status is terminal (received/closed/billed/cancelled — see ZOHO_TERMINAL_STATUSES). */
   closedInZoho: boolean;
   /** Count of finished lots that were never pushed to Zoho (only meaningful when closedInZoho). */
   outputsNeverPushed: number;
