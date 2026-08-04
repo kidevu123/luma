@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowUp, ArrowDown } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -16,6 +16,13 @@ import { formatDateTimeEst } from "@/lib/ui/luma-display";
 import { CloseoutRows } from "../_drawer/closeout-rows";
 import { GuidedOverlay, type GuidedBagStep } from "../_guided/guided-overlay";
 import { deriveGuidedCloseoutQueue } from "@/lib/production/guided-closeout";
+import {
+  sortCloseoutRows,
+  listDistinctTablets,
+  filterRowsByTablet,
+  type CloseoutSortKey,
+  type CloseoutSortDir,
+} from "@/lib/production/closeout-row-sort";
 
 export const dynamic = "force-dynamic";
 // CLOSEOUT-FRESHNESS-1 — operational page: never statically cached.
@@ -96,16 +103,23 @@ function matchesShowFilter(
   }
 }
 
+const SORT_OPTIONS: { key: CloseoutSortKey; label: string }[] = [
+  { key: "receipt", label: "Bag/receipt" },
+  { key: "tablet", label: "Tablet" },
+  { key: "started", label: "Date started" },
+  { key: "completed", label: "Date completed" },
+];
+
 export default async function PoCloseoutDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ poId: string }>;
-  searchParams: Promise<{ filter?: string; show?: string; guided?: string; step?: string }>;
+  searchParams: Promise<{ filter?: string; show?: string; guided?: string; step?: string; sort?: string; dir?: string; tablet?: string }>;
 }) {
   await requireAdmin();
   const { poId } = await params;
-  const { filter: rawFilter, show: rawShow, guided: rawGuided, step: rawStep } = await searchParams;
+  const { filter: rawFilter, show: rawShow, guided: rawGuided, step: rawStep, sort: rawSort, dir: rawDir, tablet: rawTablet } = await searchParams;
   const filter = (FILTERS.find((f) => f.key === rawFilter)?.key ?? "all") as FilterKey;
   const show = (SHOW_FILTERS.find((f) => f.key === rawShow)?.key ?? "any") as ShowKey;
 
@@ -121,6 +135,19 @@ export default async function PoCloseoutDetailPage({
       matchesFilter(r, filter) &&
       matchesShowFilter(productionByBag.get(r.inventoryBagId), r, show),
   );
+
+  // Sort + tablet filter (applied after status/show filters).
+  const sortKey: CloseoutSortKey = (["receipt", "tablet", "started", "completed"] as const).find((k) => k === rawSort) ?? "receipt";
+  const sortDir: CloseoutSortDir = rawDir === "desc" ? "desc" : "asc";
+  const tablet = rawTablet != null && rawTablet.length > 0 ? rawTablet : null;
+  const tablets = listDistinctTablets(summary.rows);
+  const visible = sortCloseoutRows(filterRowsByTablet(shown, tablet), sortKey, sortDir);
+
+  // URL helper — preserves filter/show/sort/dir/tablet; guided links remain separate.
+  const qs = (over: Partial<Record<"filter" | "show" | "sort" | "dir" | "tablet", string>>) => {
+    const p = new URLSearchParams({ filter, show, sort: sortKey, dir: sortDir, ...(tablet ? { tablet } : {}), ...over });
+    return `/po-closeout/${poId}?${p.toString()}`;
+  };
   const issueReady = summary.rows.filter((r) => r.action === "AUTO_ISSUE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
   const releaseReady = summary.rows.filter((r) => r.action === "AUTO_RELEASE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
 
@@ -302,7 +329,7 @@ export default async function PoCloseoutDetailPage({
           return (
             <Link
               key={f.key}
-              href={`/po-closeout/${poId}?filter=${f.key}`}
+              href={qs({ filter: f.key })}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                 active ? "border-brand-500 bg-brand-50 text-brand-800" : "border-border text-text-muted hover:bg-surface-2"
               }`}
@@ -320,7 +347,7 @@ export default async function PoCloseoutDetailPage({
           return (
             <Link
               key={f.key}
-              href={`/po-closeout/${poId}?filter=${filter}&show=${f.key}`}
+              href={qs({ show: f.key })}
               className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
                 active ? "border-brand-500 bg-brand-50 text-brand-800 font-medium" : "border-border text-text-muted hover:bg-surface-2"
               }`}
@@ -331,11 +358,60 @@ export default async function PoCloseoutDetailPage({
         })}
       </div>
 
+      {/* Sort controls */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-text-muted font-medium pr-1">Sort:</span>
+        {SORT_OPTIONS.map((opt) => {
+          const active = sortKey === opt.key;
+          const nextDir = active && sortDir === "asc" ? "desc" : "asc";
+          return (
+            <Link
+              key={opt.key}
+              href={qs({ sort: opt.key, dir: nextDir })}
+              className={`inline-flex items-center gap-0.5 rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
+                active ? "border-brand-500 bg-brand-50 text-brand-800 font-medium" : "border-border text-text-muted hover:bg-surface-2"
+              }`}
+            >
+              {opt.label}
+              {active ? (
+                sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+              ) : null}
+            </Link>
+          );
+        })}
+      </div>
+
+      {/* Tablet filter (only when multiple tablets in this PO) */}
+      {tablets.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-text-muted font-medium pr-1">Tablet:</span>
+          <Link
+            href={qs({ tablet: "" })}
+            className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
+              tablet == null ? "border-brand-500 bg-brand-50 text-brand-800 font-medium" : "border-border text-text-muted hover:bg-surface-2"
+            }`}
+          >
+            All tablets
+          </Link>
+          {tablets.map((name) => (
+            <Link
+              key={name}
+              href={qs({ tablet: name })}
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
+                tablet === name ? "border-brand-500 bg-brand-50 text-brand-800 font-medium" : "border-border text-text-muted hover:bg-surface-2"
+              }`}
+            >
+              {name}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+
       {/* Rows — CLOSEOUT-DRAWER-1: each row expands into the bag drawer
           (verify-in-place + act-in-place). */}
       <CloseoutRows
         poId={poId}
-        rows={shown.map((row) => ({
+        rows={visible.map((row) => ({
           ...row,
           productionSummary: productionByBag.get(row.inventoryBagId) ?? null,
         }))}

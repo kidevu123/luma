@@ -52,6 +52,8 @@ export type PoCloseoutRow = PoCloseoutRowVerdict & {
   finishedLotNumber: string | null;
   lotStatus: string | null;
   zoho: PoCloseoutZohoStatus;
+  startedAt: Date | null;
+  finalizedAt: Date | null;
 };
 
 export type PoCloseoutSummary = {
@@ -415,6 +417,8 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       finishedLotNumber: lot?.finishedLotNumber ?? null,
       lotStatus,
       zoho: zohoStatus,
+      startedAt: wf?.startedAt ?? null,
+      finalizedAt: wf?.finalizedAt ?? null,
     });
   }
 
