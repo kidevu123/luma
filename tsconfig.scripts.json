@@ -31,7 +31,8 @@
     "scripts/repair-qr-inventory.ts",
     "scripts/fix-station-handpack-kind.ts",
     "scripts/verify-deploy.ts",
-    "scripts/audit-product-zoho-readiness.ts"
+    "scripts/audit-product-zoho-readiness.ts",
+    "scripts/backfill-source-bag-zoho-receive-previews.ts"
   ],
   "exclude": ["node_modules"]
 }

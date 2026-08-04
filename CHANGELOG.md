@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.29.4] — 2026-08-04
+
+### Changed — BACKFILL-APPLY-1: wire raw-bag receive backfill apply mode; live-pipeline acknowledgment flag + eligibility stamp
+- **`--apply-preview-only` now seeds real rows:** calls `seedPendingRawBagReceiveRows` (idempotent — skips bags that already have a row) and freezes the gateway payload. Does not commit, does not call the gateway directly.
+- **`--acknowledge-live-pipeline` replaces era-specific guard:** the old guard that refused when `ZOHO_BAG_FINISH_RECEIVE_COMMIT_ENABLED=true` would now always refuse (pipeline is live). Replaced with an explicit acknowledgment flag; without it, `--apply-preview-only` prints an explanation and exits non-zero.
+- **`--po=<po_number>` filter:** repeatable or comma-separated. Limits eligible bags to those whose receive PO matches. Example: `--po=PO-00206 --po=PO-00238`.
+- **`--stamp-eligible-now`:** after seeding, sets `auto_commit_eligible_at = now()` on rows seeded THIS RUN only (skips rows from prior runs), bypassing the 24h buffer so the next auto-commit sweep picks them up immediately. Writes one audit row per stamped row (`zoho_raw_bag_receive.auto_commit_eligibility_stamped`). Off by default.
+- **Per-bag output:** each bag now prints `receipt`, `po`, `inventory_bag_id`, and `action` (`seeded | skipped-existing | skipped-committed | dry-run:would-seed-pending`); end-of-run summary count.
+
 ## [1.29.3] — 2026-08-04
 
 ### Fixed — CRON-ACTOR-1: auto-commit sweep passes null id/role actors — CRON is not a user_role; zero-UUID actor would violate FK
