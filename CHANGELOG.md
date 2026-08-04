@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.29.0] — 2026-08-04
+
+### Added — ZOHO-TRUTH-1: closeout list reads Zoho as the source of truth for PO status
+- **Zoho-closed POs now land in Closed, not Open:** the closeout list queries the raw `zoho_status` columns introduced on `purchase_orders` (populated by the existing sync path); any PO whose Zoho status maps to the Zoho-terminal bucket is rendered in the **Closed** tab with a **Zoho-closed** origin chip, distinguishing it from Luma-closed POs (all outputs pushed and committed) at a glance. The mapping is pure and unit-tested.
+- **Suppress + flag for never-pushed outputs:** POs that are Zoho-closed but have Luma outputs that were never pushed show a suppressed-row banner rather than hiding the discrepancy; operators see the anomaly plainly without the row blocking the Closed bucket.
+- **Hourly sync + manual refresh:** a new `/api/cron/zoho-status-sync` bearer-authed route (same auth pattern as existing cron routes) refreshes `zoho_status` for open POs on an hourly systemd timer; a **Refresh** button on the closeout list header triggers the same sync on demand so admins do not wait up to 60 minutes after a Zoho close.
+
+### Changed — CLOSEOUT-UX-1: closeout detail header dedup, bag table sort, and tablet filter
+- **Header dedup:** the PO Closeout detail page no longer renders the PO number twice (was "PO PO-00238"); the heading shows the number once.
+- **Bag table sort + tablet filter:** the bag breakdown table is now sortable by key columns (status, received, finished, variance) and gains a tablet-type filter dropdown so admins working multi-tablet POs can narrow the view without losing overall context.
+
+### Fixed — DRAWER-FIX-1: bag drawer — Issue finished lot action available for finalized bags without an open allocation session
+- **Root cause:** the drawer's `deriveApplicableBagActions` gated the "Issue finished lot" action on an open allocation session being present; finalized bags that had no open session (the common post-run state) fell through to the verify-only view even when an un-issued finished lot existed. The gate is now: finalized bag + finished lot exists + lot not yet issued — no session requirement. The action itself (existing `issueFinishedLotAction`) is unchanged; only the drawer eligibility check is corrected.
+- **Tests:** regression pin added to the 12 pure gate tests.
+
+### Added — RECEIVING-SHIPMENTS-1: intake shipment step and PO receives grouped by shipment
+- **Intake shipment step:** the receive flow gains a new first step where the operator identifies (or creates) the inbound shipment before recording individual package receives — shipments are now a first-class entity in the receive path rather than an optional annotation.
+- **Receives grouped by shipment:** the PO Receive Detail page now groups received bags under their parent shipment, with per-shipment subtotals and a collapse/expand affordance, replacing the flat chronological list that became unreadable for POs spanning multiple deliveries.
+- **Shipment queries + actions:** new `lib/db/queries/shipments.ts` and `lib/actions/shipments.ts` cover list, create, and associate operations; all writes go through the standard `audit_log` path.
+
+### Notes
+- No breaking schema change visible to floor PWA or Zoho integration service. Raw `zoho_status` columns are additive. Existing `/floor/*` scan paths and `workflow_events` projector are untouched.
+
 ## [1.28.0] — 2026-07-31
 
 ### Added — KIOSK-1: floor kiosk mode — QR provisioning, deploy-drift reload, idle operator auto-sign-out

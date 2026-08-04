@@ -54,7 +54,9 @@ describe("RECEIVES-BY-PO-1 · inbound/page.tsx grouping", () => {
   });
 
   it("individual receives remain listed and clickable", () => {
-    expect(src).toMatch(/group\.receives\.map/);
+    // Receives are sub-grouped by shipment; iteration is over sg.receives
+    // (shipment group receives), not directly over group.receives.
+    expect(src).toMatch(/sg\.receives\.map/);
     expect(src).toMatch(/href=\{`\/inbound\/\$\{receive\.id\}`\}/);
     expect(src).toMatch(/receive\.receiveName \?\? "Unknown receive"/);
   });

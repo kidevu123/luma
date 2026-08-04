@@ -426,7 +426,7 @@ describe("cron auth — cumulative pointer", () => {
 // ─── Functional integration: sweep + GUARD_BLOCKED outcome ─────
 
 vi.mock("@/lib/db", () => ({
-  db: { select: vi.fn() },
+  db: { select: vi.fn(), execute: vi.fn().mockResolvedValue([]) },
 }));
 
 vi.mock("@/lib/db/audit", () => ({
