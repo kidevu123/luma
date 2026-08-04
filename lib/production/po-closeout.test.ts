@@ -5,6 +5,7 @@ import {
   classifyPoCloseoutIndexBucket,
   classifyPoCloseoutRow,
   derivePoOverallStatus,
+  isZohoTerminalStatus,
   summarizeRowStatuses,
   type PoCloseoutRowInput,
 } from "./po-closeout";
@@ -286,6 +287,7 @@ describe("classifyPoCloseoutIndexBucket", () => {
     receivedBagCount: 10,
     doneBagCount: 10,
     zohoBlockerCount: 0,
+    zohoTerminal: false,
   };
 
   it("all bags done + no zoho blockers on a RECEIVED PO = CLOSED", () => {
@@ -302,6 +304,7 @@ describe("classifyPoCloseoutIndexBucket", () => {
         receivedBagCount: 0,
         doneBagCount: 0,
         zohoBlockerCount: 0,
+        zohoTerminal: false,
       }),
     ).toBe("CLOSED");
   });
@@ -326,6 +329,7 @@ describe("classifyPoCloseoutIndexBucket", () => {
           receivedBagCount: 0,
           doneBagCount: 0,
           zohoBlockerCount: 0,
+          zohoTerminal: false,
         }),
       ).toBe("ACTIVE");
     }
@@ -338,6 +342,7 @@ describe("classifyPoCloseoutIndexBucket", () => {
         receivedBagCount: 0,
         doneBagCount: 0,
         zohoBlockerCount: 0,
+        zohoTerminal: false,
       }),
     ).toBe("ACTIVE");
   });
@@ -349,5 +354,36 @@ describe("classifyPoCloseoutIndexBucket", () => {
         poStatus: "SOMETHING_NEW",
       }),
     ).toBe("ACTIVE");
+  });
+});
+
+describe("isZohoTerminalStatus", () => {
+  it("is true for closed/billed/cancelled, case-insensitive", () => {
+    expect(isZohoTerminalStatus("closed")).toBe(true);
+    expect(isZohoTerminalStatus("Billed")).toBe(true);
+    expect(isZohoTerminalStatus("CANCELLED")).toBe(true);
+  });
+  it("is false for open-ish, unknown, and missing values", () => {
+    expect(isZohoTerminalStatus("issued")).toBe(false);
+    expect(isZohoTerminalStatus("partially_received")).toBe(false);
+    expect(isZohoTerminalStatus("")).toBe(false);
+    expect(isZohoTerminalStatus(null)).toBe(false);
+    expect(isZohoTerminalStatus(undefined)).toBe(false);
+  });
+});
+
+describe("classifyPoCloseoutIndexBucket with zohoTerminal", () => {
+  const base = { poStatus: "OPEN", receivedBagCount: 5, doneBagCount: 0, zohoBlockerCount: 3 };
+  it("Zoho terminal forces CLOSED regardless of open work and blockers", () => {
+    expect(classifyPoCloseoutIndexBucket({ ...base, zohoTerminal: true })).toBe("CLOSED");
+  });
+  it("never-synced PO keeps existing conservative behavior", () => {
+    expect(classifyPoCloseoutIndexBucket({ ...base, zohoTerminal: false })).toBe("ACTIVE");
+    expect(
+      classifyPoCloseoutIndexBucket({
+        poStatus: "RECEIVED", receivedBagCount: 2, doneBagCount: 2,
+        zohoBlockerCount: 0, zohoTerminal: false,
+      }),
+    ).toBe("CLOSED");
   });
 });

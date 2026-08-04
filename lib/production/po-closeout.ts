@@ -356,6 +356,16 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
 
 export type PoCloseoutIndexBucket = "ACTIVE" | "CLOSED";
 
+/** Zoho PO statuses that mean the PO is finished on Zoho's side. Raw values
+ *  as Zoho sends them; compared case-insensitively. Absence (null) is NOT
+ *  terminal — a never-synced PO keeps the conservative local logic. */
+const ZOHO_TERMINAL_STATUSES = new Set(["closed", "billed", "cancelled"]);
+
+export function isZohoTerminalStatus(raw: string | null | undefined): boolean {
+  if (!raw) return false;
+  return ZOHO_TERMINAL_STATUSES.has(raw.trim().toLowerCase());
+}
+
 export type PoCloseoutIndexRollup = {
   poStatus: string;
   receivedBagCount: number;
@@ -365,6 +375,9 @@ export type PoCloseoutIndexRollup = {
   doneBagCount: number;
   /** Active (non-voided) Zoho ops that still need admin attention. */
   zohoBlockerCount: number;
+  /** True when purchase_orders.zoho_status is a Zoho terminal state.
+   *  Zoho is the source of truth for closeout: terminal → CLOSED. */
+  zohoTerminal: boolean;
 };
 
 const CLOSED_ELIGIBLE_PO_STATUSES = new Set(["RECEIVED", "CLOSED"]);
@@ -372,6 +385,7 @@ const CLOSED_ELIGIBLE_PO_STATUSES = new Set(["RECEIVED", "CLOSED"]);
 export function classifyPoCloseoutIndexBucket(
   input: PoCloseoutIndexRollup,
 ): PoCloseoutIndexBucket {
+  if (input.zohoTerminal) return "CLOSED";
   if (input.poStatus === "CANCELLED") return "CLOSED";
   if (!CLOSED_ELIGIBLE_PO_STATUSES.has(input.poStatus)) return "ACTIVE";
   if (input.receivedBagCount === 0) return "ACTIVE";

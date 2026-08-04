@@ -567,6 +567,7 @@ export async function listCloseoutPoIndexRollups(): Promise<CloseoutPoIndexRow[]
       receivedBagCount: Number(r.bag_count ?? 0),
       doneBagCount: Number(r.done_bag_count ?? 0),
       zohoBlockerCount: Number(r.zoho_blocker_count ?? 0),
+      zohoTerminal: false, // Task 4 wires the real value
     }),
   }));
 }
