@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { runAutoCommitSweep } from "./auto-commit-sweep";
 import { ZOHO_TERMINAL_STATUS_LIST } from "@/lib/production/po-closeout";
 import type {
@@ -339,6 +341,32 @@ describe("ZOHO_TERMINAL_STATUS_LIST — regression pin (sweep must match classif
     expect(ZOHO_TERMINAL_STATUS_LIST).toContain("billed");
     expect(ZOHO_TERMINAL_STATUS_LIST).toContain("cancelled");
     expect(ZOHO_TERMINAL_STATUS_LIST).not.toContain("partially_received");
+  });
+});
+
+describe("SWEEP-DATE-PIN-1: default loaders — structural source pins (Date param safety)", () => {
+  // These pins guard against the latent regression (v1.1.0–v1.29.1) where
+  // defaultLoadProductionOutputEligible used a raw sql`` fragment
+  //   sql`${zohoProductionOutputOps.autoCommitEligibleAt} <= ${now}`
+  // which fails serialization in the production Postgres driver when `now` is
+  // a Date.  Both default loaders must use the lte() builder.
+  const sweepSrc = readFileSync(
+    join(process.cwd(), "lib/zoho/auto-commit-sweep.ts"),
+    "utf8",
+  );
+
+  it("defaultLoadRawBagEligible uses lte() with autoCommitEligibleAt", () => {
+    expect(sweepSrc).toMatch(/lte\(zohoRawBagReceives\.autoCommitEligibleAt,\s*now\)/);
+  });
+
+  it("defaultLoadProductionOutputEligible uses lte() with autoCommitEligibleAt", () => {
+    expect(sweepSrc).toMatch(/lte\(zohoProductionOutputOps\.autoCommitEligibleAt,\s*now\)/);
+  });
+
+  it("source contains NO raw sql`` fragment comparing autoCommitEligibleAt (regression absence pin)", () => {
+    // The bug: sql`${zohoXxx.autoCommitEligibleAt} <= ${now}` passes a Date
+    // into a raw template, which the production driver cannot serialize.
+    expect(sweepSrc).not.toMatch(/sql`\$\{zoho\w+\.autoCommitEligibleAt\}/);
   });
 });
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.29.2] — 2026-08-04
+
+### Fixed — SWEEP-DATE-1: auto-commit sweep 500 — raw sql`` Date param in production-output eligibility loader
+- **Root cause:** `defaultLoadProductionOutputEligible` in `lib/zoho/auto-commit-sweep.ts` used a raw Drizzle `sql`` template fragment (`sql\`${zohoProductionOutputOps.autoCommitEligibleAt} <= ${now}\``) to compare the eligibility timestamp. The production Postgres driver cannot serialize a raw `Date` object inside a `sql`` fragment and throws `TypeError: The "string" argument must be of type string or an instance of Buffer or ArrayBuffer. Received an instance of Date`, causing every cron invocation to 500. The sibling loader `defaultLoadRawBagEligible` already used the correct `lte()` builder.
+- **Latent since v1.1.0:** the `ZOHO_AUTO_COMMIT_ENABLED` master flag was off in all environments since the module shipped; unit tests inject mock loaders and never exercised the default. The bug was first hit today (2026-08-04) when the master flag was enabled on staging.
+- **Fix:** replaced the raw fragment with `lte(zohoProductionOutputOps.autoCommitEligibleAt, now)` — identical to the pattern in the raw-bag loader. `lte` was already imported.
+- **Regression pins:** 3 new structural source-pin assertions in `lib/zoho/auto-commit-sweep.test.ts` (`SWEEP-DATE-PIN-1`): both default loaders must use `lte(` with `autoCommitEligibleAt`; source must contain NO raw ``sql`${zohoXxx.autoCommitEligibleAt}`` fragment (absence pin).
+
 ## [1.29.1] — 2026-08-04
 
 ### Fixed — QUEUE-FIX-1: surface queue/retry refusals in the bag drawer; disable queue for non-queueable ops

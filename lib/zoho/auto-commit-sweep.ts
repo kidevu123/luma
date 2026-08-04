@@ -150,7 +150,7 @@ async function defaultLoadProductionOutputEligible(now: Date, limit: number) {
     .where(
       and(
         eq(zohoProductionOutputOps.status, "QUEUED"),
-        sql`${zohoProductionOutputOps.autoCommitEligibleAt} <= ${now}`,
+        lte(zohoProductionOutputOps.autoCommitEligibleAt, now),
         isNull(zohoProductionOutputOps.heldAt),
         isNull(zohoProductionOutputOps.voidedAt),
       ),

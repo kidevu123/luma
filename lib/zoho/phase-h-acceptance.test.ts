@@ -162,7 +162,7 @@ describe("queue/state behavior — loader query filters", () => {
     expect(loaderSlice).toMatch(
       /eq\(zohoProductionOutputOps\.status,\s*"QUEUED"\)/,
     );
-    expect(loaderSlice).toMatch(/autoCommitEligibleAt[\s\S]*<=\s*\$\{now\}/);
+    expect(loaderSlice).toMatch(/lte\(zohoProductionOutputOps\.autoCommitEligibleAt,\s*now\)/);
     expect(loaderSlice).toMatch(/isNull\(zohoProductionOutputOps\.heldAt\)/);
     expect(loaderSlice).toMatch(/isNull\(zohoProductionOutputOps\.voidedAt\)/);
   });
