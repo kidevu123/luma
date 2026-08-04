@@ -64,7 +64,7 @@ export default async function PoCloseoutListPage({
       <AutoRefreshOnFocus />
       <PageHeader
         title="PO closeout"
-        description="One place to see, per PO, which bags are done and which still need a Luma action. Active means at least one bag or Zoho output still needs attention; Closed means no manual Luma action remains."
+        description="One place to see, per PO, which bags are done and which still need a Luma action. A PO closed in Zoho counts as Closed; the Zoho chip marks closes where Luma work was left open."
       />
       <p className="text-[10px] text-text-subtle -mt-3">
         Data as of {formatDateTimeEst(evaluatedAt.toISOString())} — reloads
@@ -148,9 +148,19 @@ export default async function PoCloseoutListPage({
                   <StatusPill kind="neutral">{p.status}</StatusPill>
                 </TD>
                 <TD>
-                  <StatusPill kind={p.bucket === "CLOSED" ? "ok" : "warn"}>
-                    {p.bucket === "CLOSED" ? "Closed" : "Active"}
-                  </StatusPill>
+                  <div className="flex items-center gap-1.5">
+                    <StatusPill kind={p.bucket === "CLOSED" ? "ok" : "warn"}>
+                      {p.bucket === "CLOSED" ? "Closed" : "Active"}
+                    </StatusPill>
+                    {p.closedByZohoOverride ? (
+                      <span
+                        className="inline-flex items-center h-5 px-1.5 rounded border border-sky-300/50 bg-sky-50/80 text-[10px] font-medium text-sky-700"
+                        title="Closed because the PO is closed in Zoho; some Luma work was never completed. Open the closeout for details."
+                      >
+                        Zoho
+                      </span>
+                    ) : null}
+                  </div>
                 </TD>
                 <TD className="text-right tabular-nums text-xs">{p.receiveCount}</TD>
                 <TD className="text-right tabular-nums text-xs">{p.bagCount}</TD>

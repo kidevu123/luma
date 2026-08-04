@@ -31,6 +31,7 @@ import {
   classifyPoCloseoutIndexBucket,
   derivePoOverallStatus,
   summarizeRowStatuses,
+  isZohoTerminalStatus,
   type PoCloseoutRowInput,
   type PoCloseoutRowVerdict,
   type PoCloseoutZohoStatus,
@@ -458,12 +459,14 @@ export type CloseoutPoIndexRow = {
   poNumber: string;
   vendorName: string | null;
   status: string;
+  zohoStatus: string | null;
   receiveCount: number;
   bagCount: number;
   doneBagCount: number;
   openBagCount: number;
   zohoBlockerCount: number;
   bucket: PoCloseoutIndexBucket;
+  closedByZohoOverride: boolean;
 };
 
 /** READ-ONLY. One cheap aggregate per tablet PO for the Active/Closed index.
@@ -484,6 +487,7 @@ export async function listCloseoutPoIndexRollups(): Promise<CloseoutPoIndexRow[]
     po_number: string;
     vendor_name: string | null;
     status: string;
+    zoho_status: string | null;
     receive_count: number;
     bag_count: number;
     done_bag_count: number;
@@ -540,6 +544,7 @@ export async function listCloseoutPoIndexRollups(): Promise<CloseoutPoIndexRow[]
       po.po_number,
       po.vendor_name,
       po.status,
+      po.zoho_status,
       (SELECT COUNT(*)::int FROM receives r WHERE r.po_id = po.id) AS receive_count,
       COALESCE((SELECT COUNT(*)::int FROM bag_state bs WHERE bs.po_id = po.id), 0) AS bag_count,
       COALESCE((
@@ -552,22 +557,30 @@ export async function listCloseoutPoIndexRollups(): Promise<CloseoutPoIndexRow[]
     ORDER BY po.opened_at DESC
   `)) as unknown as Row[];
 
-  return rows.map((r) => ({
-    id: r.id,
-    poNumber: r.po_number,
-    vendorName: r.vendor_name,
-    status: r.status,
-    receiveCount: Number(r.receive_count ?? 0),
-    bagCount: Number(r.bag_count ?? 0),
-    doneBagCount: Number(r.done_bag_count ?? 0),
-    openBagCount: Math.max(0, Number(r.bag_count ?? 0) - Number(r.done_bag_count ?? 0)),
-    zohoBlockerCount: Number(r.zoho_blocker_count ?? 0),
-    bucket: classifyPoCloseoutIndexBucket({
+  return rows.map((r) => {
+    const zohoTerminal = isZohoTerminalStatus(r.zoho_status);
+    const bucket = classifyPoCloseoutIndexBucket({
       poStatus: r.status,
       receivedBagCount: Number(r.bag_count ?? 0),
       doneBagCount: Number(r.done_bag_count ?? 0),
       zohoBlockerCount: Number(r.zoho_blocker_count ?? 0),
-      zohoTerminal: false, // Task 4 wires the real value
-    }),
-  }));
+      zohoTerminal,
+    });
+    const openBagCount = Math.max(0, Number(r.bag_count ?? 0) - Number(r.done_bag_count ?? 0));
+    return {
+      id: r.id,
+      poNumber: r.po_number,
+      vendorName: r.vendor_name,
+      status: r.status,
+      zohoStatus: r.zoho_status,
+      receiveCount: Number(r.receive_count ?? 0),
+      bagCount: Number(r.bag_count ?? 0),
+      doneBagCount: Number(r.done_bag_count ?? 0),
+      openBagCount,
+      zohoBlockerCount: Number(r.zoho_blocker_count ?? 0),
+      bucket,
+      closedByZohoOverride:
+        zohoTerminal && (openBagCount > 0 || Number(r.zoho_blocker_count ?? 0) > 0),
+    };
+  });
 }
