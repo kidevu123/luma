@@ -25,6 +25,7 @@ import { canRepairQrReservation } from "@/lib/db/queries/bag-edits";
 import { getProductionOutputBacklogRow } from "@/lib/db/queries/production-output-backlog";
 import { evaluateFinishedLotReleaseEligibility } from "@/lib/production/finished-lot-release-eligibility";
 import { computeOpenSessionRebaseEligibility } from "@/lib/production/open-session-rebase";
+import { assertAutoLotRepairAllowed } from "@/lib/production/auto-lot-backlog-eligibility";
 import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
 import {
   classifyPoCloseoutRow,
@@ -344,6 +345,8 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
           autoIssue = {
             autoIssuable: backlog.evaluation.autoIssuable,
             action: backlog.evaluation.action,
+            code: backlog.evaluation.code,
+            repairIssueReady: assertAutoLotRepairAllowed(backlog.evaluation).ok,
             label: backlog.evaluation.label,
             nextStep: backlog.evaluation.nextStep,
           };

@@ -26,6 +26,7 @@ export type PoCloseoutAction =
   | "CORRECT_STARTING_BALANCE"
   | "RECORD_REMAINING_OR_CLOSE_PARTIAL"
   | "AUTO_ISSUE_FINISHED_LOT"
+  | "ISSUE_FINISHED_LOT"
   | "AUTO_RELEASE_FINISHED_LOT"
   | "REVIEW_QC_HOLD"
   | "FIX_PRODUCT_SETUP"
@@ -92,6 +93,11 @@ export type PoCloseoutRowInput = {
     | {
         autoIssuable: boolean;
         action: "AUTO_ISSUE_NOW" | "REPAIR_ALLOCATION" | "FIX_PRODUCT_SETUP" | "REVIEW_MANUALLY" | "NONE";
+        /** Raw AutoLotBacklogBlockerCode from the evaluator. */
+        code: string;
+        /** assertAutoLotRepairAllowed(evaluation).ok — the existing
+         *  repair-issue service can complete this bag in one call. */
+        repairIssueReady: boolean;
         label: string;
         nextStep: string;
       }
@@ -294,6 +300,26 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
       return verdict("READY_FOR_ACTION", "Finalized — ready to issue finished lot", "AUTO_ISSUE_FINISHED_LOT", "Auto-issue finished lot");
     }
     if (ai?.action === "REPAIR_ALLOCATION") {
+      if (ai.code === "MISSING_ALLOCATION_SESSION") {
+        // No open allocation session exists. The partial-resolution panel has
+        // nothing to resolve — the truthful next step is issuing the lot via
+        // the existing repair-issue service (which records the allocation as
+        // part of the issue), or manual review when balances are underivable.
+        if (ai.repairIssueReady) {
+          return verdict(
+            "READY_FOR_ACTION",
+            "Finalized — awaiting lot; balances derivable from production output",
+            "ISSUE_FINISHED_LOT",
+            "Issue finished lot",
+          );
+        }
+        return verdict(
+          "NEEDS_REVIEW",
+          "Finalized — no allocation session and balances cannot be derived",
+          "REVIEW_MANUALLY",
+          "Review manually",
+        );
+      }
       if (input.rebaseAvailable) {
         return verdict("READY_FOR_ACTION", "Split/partial bag: starting balance can be corrected", "CORRECT_STARTING_BALANCE", "Correct starting balance");
       }

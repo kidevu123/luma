@@ -102,7 +102,7 @@ describe("classifyPoCloseoutRow — journey", () => {
       finishedLotId: null,
       lotStatus: null,
       zoho: "NOT_APPLICABLE",
-      autoIssue: { autoIssuable: true, action: "AUTO_ISSUE_NOW", label: "Ready", nextStep: "Issue" },
+      autoIssue: { autoIssuable: true, action: "AUTO_ISSUE_NOW", code: "READY_TO_AUTO_ISSUE", repairIssueReady: true, label: "Ready", nextStep: "Issue" },
     });
     expect(r.status).toBe("READY_FOR_ACTION");
     expect(r.action).toBe("AUTO_ISSUE_FINISHED_LOT");
@@ -112,7 +112,7 @@ describe("classifyPoCloseoutRow — journey", () => {
   it("finalized without lot + REPAIR_ALLOCATION + rebase available = READY (correct starting balance)", () => {
     const r = classifyPoCloseoutRow({
       ...doneRow, bagStatus: "IN_USE", hasFinishedLot: false, finishedLotId: null, lotStatus: null, zoho: "NOT_APPLICABLE",
-      autoIssue: { autoIssuable: false, action: "REPAIR_ALLOCATION", label: "x", nextStep: "Correct balance" },
+      autoIssue: { autoIssuable: false, action: "REPAIR_ALLOCATION", code: "MISSING_STARTING_BALANCE", repairIssueReady: false, label: "x", nextStep: "Correct balance" },
       rebaseAvailable: true,
     });
     expect(r.status).toBe("READY_FOR_ACTION");
@@ -122,7 +122,7 @@ describe("classifyPoCloseoutRow — journey", () => {
   it("finalized without lot + REPAIR_ALLOCATION + no rebase = NEEDS_REVIEW (record remaining)", () => {
     const r = classifyPoCloseoutRow({
       ...doneRow, bagStatus: "IN_USE", hasFinishedLot: false, finishedLotId: null, lotStatus: null, zoho: "NOT_APPLICABLE",
-      autoIssue: { autoIssuable: false, action: "REPAIR_ALLOCATION", label: "x", nextStep: "Record remaining" },
+      autoIssue: { autoIssuable: false, action: "REPAIR_ALLOCATION", code: "MISSING_STARTING_BALANCE", repairIssueReady: false, label: "x", nextStep: "Record remaining" },
       rebaseAvailable: false,
     });
     expect(r.status).toBe("NEEDS_REVIEW");
@@ -132,7 +132,7 @@ describe("classifyPoCloseoutRow — journey", () => {
   it("finalized without lot + FIX_PRODUCT_SETUP = BLOCKED", () => {
     const r = classifyPoCloseoutRow({
       ...doneRow, bagStatus: "IN_USE", hasFinishedLot: false, finishedLotId: null, lotStatus: null, zoho: "NOT_APPLICABLE",
-      autoIssue: { autoIssuable: false, action: "FIX_PRODUCT_SETUP", label: "x", nextStep: "Fix product" },
+      autoIssue: { autoIssuable: false, action: "FIX_PRODUCT_SETUP", code: "MISSING_TABLETS_PER_UNIT", repairIssueReady: false, label: "x", nextStep: "Fix product" },
     });
     expect(r.status).toBe("BLOCKED");
     expect(r.action).toBe("FIX_PRODUCT_SETUP");
@@ -191,6 +191,56 @@ describe("classifyPoCloseoutRow — journey", () => {
   it("unknown Zoho status on a released lot fails closed to NEEDS_REVIEW", () => {
     const r = classifyPoCloseoutRow({ ...doneRow, zoho: "UNCLEAR" });
     expect(r.status).toBe("NEEDS_REVIEW");
+  });
+});
+
+describe("finalized awaiting lot, no open allocation session", () => {
+  const finalizedNoLot: PoCloseoutRowInput = {
+    ...doneRow,
+    bagStatus: "IN_USE",
+    hasFinishedLot: false,
+    finishedLotId: null,
+    lotStatus: null,
+    zoho: "NOT_APPLICABLE",
+    workflowFinalized: true,
+    hasWorkflow: true,
+    autoIssue: {
+      autoIssuable: false,
+      action: "REPAIR_ALLOCATION",
+      code: "MISSING_ALLOCATION_SESSION",
+      repairIssueReady: true,
+      label: "Missing allocation session",
+      nextStep: "Repair allocation",
+    },
+    rebaseAvailable: false,
+  };
+
+  it("derivable balances -> READY_FOR_ACTION Issue finished lot (bug 352283)", () => {
+    const v = classifyPoCloseoutRow(finalizedNoLot);
+    expect(v.status).toBe("READY_FOR_ACTION");
+    expect(v.action).toBe("ISSUE_FINISHED_LOT");
+    expect(v.actionLabel).toBe("Issue finished lot");
+  });
+
+  it("underivable balances -> NEEDS_REVIEW manual, NOT the partial path", () => {
+    const v = classifyPoCloseoutRow({
+      ...finalizedNoLot,
+      autoIssue: { ...finalizedNoLot.autoIssue!, repairIssueReady: false },
+    });
+    expect(v.status).toBe("NEEDS_REVIEW");
+    expect(v.action).toBe("REVIEW_MANUALLY");
+  });
+
+  it("open session missing starting balance keeps the partial path", () => {
+    const v = classifyPoCloseoutRow({
+      ...finalizedNoLot,
+      autoIssue: {
+        ...finalizedNoLot.autoIssue!,
+        code: "MISSING_STARTING_BALANCE",
+        repairIssueReady: false,
+      },
+    });
+    expect(v.action).toBe("RECORD_REMAINING_OR_CLOSE_PARTIAL");
   });
 });
 
