@@ -187,7 +187,7 @@ export default async function PoCloseoutDetailPage({
           <ArrowLeft className="h-3 w-3" /> All POs
         </Link>
         <PageHeader
-          title={`PO ${summary.poNumber} — closeout`}
+          title={`${summary.poNumber} — closeout`}
           description={summary.vendorName ?? "Closeout command center"}
           actions={
             <div className="flex items-center gap-2">
