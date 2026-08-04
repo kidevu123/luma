@@ -40,9 +40,12 @@ import { FloorReadinessCell } from "@/components/admin/floor-readiness-cell";
 import { evaluateRawBagIntakeDraftReadiness } from "@/lib/production/floor-readiness";
 import {
   createRawBagIntakeAction,
+  createShipmentAction,
+  listShipmentsForPoAction,
   loadIntakeBagReadinessAction,
   lookupRawBagAction,
 } from "./actions";
+import type { PoShipmentOption } from "@/lib/db/queries/shipments";
 import { RawBagZohoReceivePendingBanner } from "@/components/admin/raw-bag-zoho-receive-pending-banner";
 import { IntakeReceiveZohoSummaryBanner } from "@/components/admin/intake-receive-zoho-summary";
 
@@ -101,6 +104,28 @@ export function RawBagIntakeForm({
   const [numberOfBags, setNumberOfBags] = React.useState<string>("10");
   const [declaredTotal, setDeclaredTotal] = React.useState<string>("");
   const [receiptStart, setReceiptStart] = React.useState<string>("");
+
+  // ── Shipment state ──────────────────────────────────────────────────
+  // "new" = operator will create a shipment on submit; otherwise an id.
+  const [shipmentChoice, setShipmentChoice] = React.useState<"new" | string>("new");
+  const [shipmentCarrier, setShipmentCarrier] = React.useState("");
+  const [shipmentTracking, setShipmentTracking] = React.useState("");
+  const [shipmentOptions, setShipmentOptions] = React.useState<PoShipmentOption[]>([]);
+  const [, startShipmentLoad] = React.useTransition();
+
+  // Reset shipment state whenever the selected PO changes.
+  React.useEffect(() => {
+    setShipmentChoice("new");
+    setShipmentCarrier("");
+    setShipmentTracking("");
+    setShipmentOptions([]);
+    if (!poId) return;
+    startShipmentLoad(() => {
+      void listShipmentsForPoAction(poId).then((res) => {
+        if (res.ok) setShipmentOptions(res.shipments);
+      });
+    });
+  }, [poId]);
 
   const [rows, setRows] = React.useState<RawBagRowSeed[]>([]);
   const [pending, setPending] = React.useState(false);
@@ -180,6 +205,26 @@ export function RawBagIntakeForm({
     setPending(true);
     setErrorMessage(null);
     setResult(null);
+
+    // Resolve shipmentId: create first if "new", then include in payload.
+    let resolvedShipmentId: string | null = null;
+    if (poMode === "LOCAL_PO" && poId) {
+      if (shipmentChoice === "new") {
+        const shipmentInput: { poId: string; carrier?: string; trackingNumber?: string } = { poId };
+        if (shipmentCarrier.trim()) shipmentInput.carrier = shipmentCarrier.trim();
+        if (shipmentTracking.trim()) shipmentInput.trackingNumber = shipmentTracking.trim();
+        const res = await createShipmentAction(shipmentInput);
+        if (!res.ok) {
+          setPending(false);
+          setErrorMessage(`Could not create shipment: ${res.error}`);
+          return;
+        }
+        resolvedShipmentId = res.shipmentId;
+      } else {
+        resolvedShipmentId = shipmentChoice;
+      }
+    }
+
     const payload = {
       poMode,
       poId: poMode === "LOCAL_PO" ? poId || null : null,
@@ -193,6 +238,7 @@ export function RawBagIntakeForm({
       tabletTypeId,
       supplierLotNumber: supplierLot.trim(),
       notes: null,
+      shipmentId: resolvedShipmentId,
       rows: rows.map((r) => ({
         bagSequence: r.bagSequence,
         receiptNumber: r.receiptNumber.trim(),
@@ -345,6 +391,66 @@ export function RawBagIntakeForm({
           </div>
         )}
       </ProductionSection>
+
+      {/* SECTION 1B — SHIPMENT (only when a LOCAL_PO is selected) */}
+      {poMode === "LOCAL_PO" && poId ? (
+        <ProductionSection
+          title="Shipment"
+          subtitle="Which delivery did these boxes arrive on? Reuse the shipment if you are receiving more flavors from the same delivery."
+          tone="INFO"
+        >
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input
+                  type="radio"
+                  name="shipmentChoice"
+                  value="new"
+                  checked={shipmentChoice === "new"}
+                  onChange={() => setShipmentChoice("new")}
+                  className="accent-brand-600"
+                />
+                New shipment
+              </label>
+              {shipmentOptions.map((opt) => (
+                <label key={opt.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input
+                    type="radio"
+                    name="shipmentChoice"
+                    value={opt.id}
+                    checked={shipmentChoice === opt.id}
+                    onChange={() => setShipmentChoice(opt.id)}
+                    className="accent-brand-600"
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+            {shipmentChoice === "new" ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1">
+                  <Label htmlFor="shipmentCarrier">Carrier (optional)</Label>
+                  <Input
+                    id="shipmentCarrier"
+                    value={shipmentCarrier}
+                    onChange={(e) => setShipmentCarrier(e.target.value)}
+                    placeholder="e.g. FedEx"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="shipmentTracking">Tracking number (optional)</Label>
+                  <Input
+                    id="shipmentTracking"
+                    value={shipmentTracking}
+                    onChange={(e) => setShipmentTracking(e.target.value)}
+                    placeholder="e.g. 771234567890"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </ProductionSection>
+      ) : null}
 
       {/* SECTION 2 — SUPPLIER LOT SETUP */}
       <ProductionSection

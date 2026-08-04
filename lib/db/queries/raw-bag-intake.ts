@@ -27,6 +27,7 @@ import {
   purchaseOrders,
   qrCards,
   receives,
+  shipments,
   smallBoxes,
   tabletTypes,
   workflowBags,
@@ -399,6 +400,23 @@ export async function createRawBagIntakeAtomic(
       batchIdByLot.get(input.supplierLotNumber) ?? firstBatchId;
     if (!defaultBatchId) throw new Error("intake: no batch resolved");
 
+    // ── Shipment guard: if a shipmentId was supplied, verify it belongs
+    // to this PO before we insert anything. Fail closed on mismatch.
+    const resolvedShipmentId = input.shipmentId ?? null;
+    if (resolvedShipmentId) {
+      const [shipmentRow] = await tx
+        .select({ id: shipments.id, poId: shipments.poId })
+        .from(shipments)
+        .where(eq(shipments.id, resolvedShipmentId))
+        .limit(1);
+      if (!shipmentRow) {
+        return { ok: false, error: "Selected shipment not found." };
+      }
+      if (shipmentRow.poId !== resolvedPoId) {
+        throw new Error("Shipment belongs to a different PO");
+      }
+    }
+
     // ── Insert receive with a deterministic name. {PO}-R{seq}; seq
     // computed from existing receives for this PO.
     let receiveSeq = 1;
@@ -416,6 +434,7 @@ export async function createRawBagIntakeAtomic(
         compact({
           poId: resolvedPoId,
           poLineId: resolvedPoLineId,
+          shipmentId: resolvedShipmentId,
           receiveName,
           receivedById: actor.id,
           notes: input.notes ?? null,

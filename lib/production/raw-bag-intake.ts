@@ -331,6 +331,7 @@ export const rawBagIntakeInputSchema = z.object({
   supplierLotNumber: z.string().trim().min(1).max(80),
   receivedAt: z.string().datetime().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  shipmentId: z.string().uuid().nullable().optional(),
   rows: z
     .array(
       z.object({
