@@ -36,9 +36,13 @@ export async function listReceives() {
         JOIN tablet_types tt ON tt.id = sb.default_tablet_type_id
         WHERE sb.receive_id = ${receives.id}
       )`,
+      shipmentId: receives.shipmentId,
+      shipmentCarrier: shipments.carrier,
+      shipmentTracking: shipments.trackingNumber,
     })
     .from(receives)
     .leftJoin(purchaseOrders, eq(receives.poId, purchaseOrders.id))
+    .leftJoin(shipments, eq(receives.shipmentId, shipments.id))
     .orderBy(desc(receives.receivedAt));
 }
 

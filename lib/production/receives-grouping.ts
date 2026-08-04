@@ -115,6 +115,68 @@ export function groupReceivesByPo<T extends GroupableReceive>(
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// SHIPMENT-INTAKE-1 — second grouping tier inside one PO group
+// ---------------------------------------------------------------------------
+
+const NO_SHIPMENT_KEY = "__no_shipment__";
+
+export type ShipmentReceiveGroup<T> = {
+  key: string;
+  isLegacy: boolean;
+  carrier: string | null;
+  trackingNumber: string | null;
+  receives: T[];
+  totalBags: number;
+  latestReceivedAt: Date | null;
+};
+
+/** Group the receives within a single PO group by shipment. Groups are ordered
+ *  by their latest received timestamp (desc); the legacy group (no shipment_id)
+ *  always sorts last. No synthetic shipment record is fabricated. */
+export function groupPoReceivesByShipment<
+  T extends GroupableReceive & {
+    shipmentId: string | null;
+    shipmentCarrier: string | null;
+    shipmentTracking: string | null;
+  },
+>(rows: T[]): ShipmentReceiveGroup<T>[] {
+  const groups = new Map<string, ShipmentReceiveGroup<T>>();
+  for (const row of rows) {
+    const key = row.shipmentId ?? NO_SHIPMENT_KEY;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        key,
+        isLegacy: key === NO_SHIPMENT_KEY,
+        carrier: row.shipmentCarrier,
+        trackingNumber: row.shipmentTracking,
+        receives: [],
+        totalBags: 0,
+        latestReceivedAt: null,
+      };
+      groups.set(key, g);
+    }
+    g.receives.push(row);
+    g.totalBags += row.bagCount ?? 0;
+    const received = toDate(row.receive.receivedAt);
+    if (received != null && (g.latestReceivedAt == null || received > g.latestReceivedAt)) {
+      g.latestReceivedAt = received;
+    }
+  }
+  const result = Array.from(groups.values());
+  for (const g of result) {
+    g.receives.sort((a, b) =>
+      byReceivedAtDesc(toDate(a.receive.receivedAt), toDate(b.receive.receivedAt)),
+    );
+  }
+  result.sort((a, b) => {
+    if (a.isLegacy !== b.isLegacy) return a.isLegacy ? 1 : -1;
+    return byReceivedAtDesc(a.latestReceivedAt, b.latestReceivedAt);
+  });
+  return result;
+}
+
 /** Compact "5 receives · 46 bags · Open" summary line for a PO group header. */
 export function formatReceiveGroupSummary(group: {
   totalReceives: number;

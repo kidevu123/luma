@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   groupReceivesByPo,
   formatReceiveGroupSummary,
+  groupPoReceivesByShipment,
   type GroupableReceive,
 } from "./receives-grouping";
 
@@ -141,5 +142,106 @@ describe("formatReceiveGroupSummary", () => {
     expect(
       formatReceiveGroupSummary({ totalReceives: 1, totalBags: 1, status: { label: "Closed", openCount: 0, closedCount: 1 } }),
     ).toBe("1 receive · 1 bag · Closed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SHIPMENT-INTAKE-1 — second grouping tier
+// ---------------------------------------------------------------------------
+
+type ShipmentableReceive = GroupableReceive & {
+  shipmentId: string | null;
+  shipmentCarrier: string | null;
+  shipmentTracking: string | null;
+};
+
+function rs(
+  id: string,
+  opts: {
+    poId?: string | null;
+    poNumber?: string | null;
+    vendor?: string | null;
+    bagCount?: number | null;
+    receivedAt?: Date | string | null;
+    closedAt?: Date | string | null;
+    shipmentId?: string | null;
+    shipmentCarrier?: string | null;
+    shipmentTracking?: string | null;
+  } = {},
+): ShipmentableReceive {
+  return {
+    receive: {
+      id,
+      poId: opts.poId ?? null,
+      receivedAt: opts.receivedAt ?? null,
+      closedAt: opts.closedAt ?? null,
+    },
+    poNumber: opts.poNumber ?? null,
+    vendor: opts.vendor ?? null,
+    bagCount: opts.bagCount ?? null,
+    shipmentId: opts.shipmentId ?? null,
+    shipmentCarrier: opts.shipmentCarrier ?? null,
+    shipmentTracking: opts.shipmentTracking ?? null,
+  };
+}
+
+describe("groupPoReceivesByShipment", () => {
+  it("groups receives under their shipment, newest shipment first", () => {
+    // S1: older shipment, 2 receives with bags 2+3=5
+    // S2: newer shipment, 1 receive with 4 bags
+    const rows = [
+      rs("r1", { shipmentId: "S1", shipmentCarrier: "FedEx", shipmentTracking: "123", bagCount: 2, receivedAt: "2026-06-10T10:00:00Z" }),
+      rs("r2", { shipmentId: "S1", shipmentCarrier: "FedEx", shipmentTracking: "123", bagCount: 3, receivedAt: "2026-06-11T10:00:00Z" }),
+      rs("r3", { shipmentId: "S2", shipmentCarrier: "UPS",   shipmentTracking: "456", bagCount: 4, receivedAt: "2026-06-20T10:00:00Z" }),
+    ];
+    const groups = groupPoReceivesByShipment(rows);
+    expect(groups).toHaveLength(2);
+    // Newest shipment (S2, Jun 20) is first
+    expect(groups[0]!.key).toBe("S2");
+    expect(groups[0]!.totalBags).toBe(4);
+    expect(groups[0]!.receives).toHaveLength(1);
+    expect(groups[0]!.isLegacy).toBe(false);
+    // S1 is second with 2 receives and 5 bags
+    expect(groups[1]!.key).toBe("S1");
+    expect(groups[1]!.totalBags).toBe(5);
+    expect(groups[1]!.receives).toHaveLength(2);
+    expect(groups[1]!.carrier).toBe("FedEx");
+    expect(groups[1]!.trackingNumber).toBe("123");
+    expect(groups[1]!.latestReceivedAt?.toISOString()).toBe("2026-06-11T10:00:00.000Z");
+  });
+
+  it("null-shipment receives collapse into one legacy group, sorted last", () => {
+    const rows = [
+      rs("r1", { shipmentId: "S1", bagCount: 2, receivedAt: "2026-06-10T10:00:00Z" }),
+      rs("r2", { shipmentId: null,  bagCount: 3, receivedAt: "2026-06-08T10:00:00Z" }),
+      rs("r3", { shipmentId: null,  bagCount: 4, receivedAt: "2026-06-09T10:00:00Z" }),
+    ];
+    const groups = groupPoReceivesByShipment(rows);
+    expect(groups).toHaveLength(2);
+    // Real shipment first
+    expect(groups[0]!.key).toBe("S1");
+    expect(groups[0]!.isLegacy).toBe(false);
+    // Legacy group last
+    const legacy = groups[1]!;
+    expect(legacy.key).toBe("__no_shipment__");
+    expect(legacy.isLegacy).toBe(true);
+    expect(legacy.totalBags).toBe(7); // 3 + 4
+    expect(legacy.receives).toHaveLength(2);
+    expect(legacy.carrier).toBeNull();
+    expect(legacy.trackingNumber).toBeNull();
+  });
+
+  it("preserves the generic row type (receiveName still accessible)", () => {
+    type ExtendedReceive = ShipmentableReceive & { receiveName: string };
+    const rows: ExtendedReceive[] = [
+      { ...rs("r1", { shipmentId: "S1", bagCount: 5 }), receiveName: "PO123-R1" },
+      { ...rs("r2", { shipmentId: "S1", bagCount: 2 }), receiveName: "PO123-R2" },
+    ];
+    const groups = groupPoReceivesByShipment(rows);
+    expect(groups).toHaveLength(1);
+    // TypeScript: receiveName is accessible on the generic row
+    const firstName = groups[0]!.receives[0]!.receiveName;
+    expect(typeof firstName).toBe("string");
+    expect(groups[0]!.totalBags).toBe(7); // 5 + 2
   });
 });

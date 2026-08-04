@@ -10,6 +10,7 @@ import { ReceivingTabs } from "@/components/ui/receiving-tabs";
 import {
   groupReceivesByPo,
   formatReceiveGroupSummary,
+  groupPoReceivesByShipment,
   type PoReceiveGroup,
 } from "@/lib/production/receives-grouping";
 
@@ -38,7 +39,7 @@ export default async function InboundPage() {
       <ReceivingTabs />
       <PageHeader
         title="Receives"
-        description="History of all tablet and packaging receives. Each receive links to a PO and contains boxes and bags."
+        description="History of all tablet and packaging receives, grouped by delivery. Each shipment contains the per-flavor receives that arrived together."
         actions={
           <div className="flex items-center gap-2">
             <Button asChild>
@@ -92,8 +93,11 @@ export default async function InboundPage() {
 
 // RECEIVES-BY-PO-1 — one card per PO. Header carries the shared PO/vendor
 // context + rollup (receives, bags, status, latest received); the individual
-// receives stay listed and clickable underneath, exactly as before.
+// receives are sub-grouped by shipment via native <details> elements.
+// SHIPMENT-INTAKE-1 — legacy receives (no shipment_id) are placed under
+// "Earlier receives" and always sort last; no synthetic shipment is fabricated.
 function PoReceiveGroupCard({ group }: { group: PoReceiveGroup<ReceiveRow> }) {
+  const shipmentGroups = groupPoReceivesByShipment(group.receives);
   return (
     <div className="rounded-xl border border-border bg-surface overflow-hidden">
       <div className="px-4 py-3 border-b border-border/60 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
@@ -130,36 +134,73 @@ function PoReceiveGroupCard({ group }: { group: PoReceiveGroup<ReceiveRow> }) {
           </span>
         </div>
       </div>
-      <DataTable>
-        <THead>
-          <TR>
-            <TH>Receive</TH>
-            <TH>Tablet / Flavor</TH>
-            <TH>Received</TH>
-            <TH className="text-right">Bags</TH>
-            <TH>Status</TH>
-          </TR>
-        </THead>
-        <tbody>
-          {group.receives.map(({ receive, tabletTypes, bagCount }) => (
-            <TR key={receive.id}>
-              <TD className="font-medium">
-                <Link href={`/inbound/${receive.id}`} className="hover:underline">
-                  {receive.receiveName ?? "Unknown receive"}
-                </Link>
-              </TD>
-              <TD className="text-xs text-text-muted">{formatFlavorSummary(tabletTypes)}</TD>
-              <TD className="text-text-muted text-xs">
-                {formatDateTimeEst(receive.receivedAt as unknown as string)}
-              </TD>
-              <TD className="text-right tabular-nums">{bagCount ?? 0}</TD>
-              <TD className="text-text-muted text-xs">
-                {receive.closedAt ? "Closed" : "Open"}
-              </TD>
-            </TR>
-          ))}
-        </tbody>
-      </DataTable>
+      <div className="divide-y divide-border/60">
+        {shipmentGroups.map((sg, idx) => {
+          const flavorSet = new Set<string>();
+          for (const row of sg.receives) {
+            if (row.tabletTypes) {
+              for (const f of row.tabletTypes.split(", ")) {
+                flavorSet.add(f.trim());
+              }
+            }
+          }
+          const flavorCount = flavorSet.size;
+          const title = sg.isLegacy
+            ? "Earlier receives"
+            : [
+                "Shipment",
+                sg.carrier ?? null,
+                sg.trackingNumber ? `· ${sg.trackingNumber}` : null,
+              ]
+                .filter(Boolean)
+                .join(" ");
+          return (
+            <details key={sg.key} {...(idx === 0 ? { open: true } : {})}>
+              <summary className="px-4 py-2.5 cursor-pointer list-none flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-surface-2/40 hover:bg-surface-2/70 transition-colors">
+                <span className="text-[12.5px] font-medium text-text-strong">{title}</span>
+                <span className="text-[11px] text-text-muted tabular-nums">
+                  {flavorCount} {flavorCount === 1 ? "flavor" : "flavors"} &middot; {sg.totalBags} {sg.totalBags === 1 ? "bag" : "bags"}
+                  {sg.latestReceivedAt != null && (
+                    <span className="hidden sm:inline text-text-subtle ml-2">
+                      &middot; {formatDateTimeEst(sg.latestReceivedAt)}
+                    </span>
+                  )}
+                </span>
+              </summary>
+              <DataTable>
+                <THead>
+                  <TR>
+                    <TH>Receive</TH>
+                    <TH>Tablet / Flavor</TH>
+                    <TH>Received</TH>
+                    <TH className="text-right">Bags</TH>
+                    <TH>Status</TH>
+                  </TR>
+                </THead>
+                <tbody>
+                  {sg.receives.map(({ receive, tabletTypes, bagCount }) => (
+                    <TR key={receive.id}>
+                      <TD className="font-medium">
+                        <Link href={`/inbound/${receive.id}`} className="hover:underline">
+                          {receive.receiveName ?? "Unknown receive"}
+                        </Link>
+                      </TD>
+                      <TD className="text-xs text-text-muted">{formatFlavorSummary(tabletTypes)}</TD>
+                      <TD className="text-text-muted text-xs">
+                        {formatDateTimeEst(receive.receivedAt as unknown as string)}
+                      </TD>
+                      <TD className="text-right tabular-nums">{bagCount ?? 0}</TD>
+                      <TD className="text-text-muted text-xs">
+                        {receive.closedAt ? "Closed" : "Open"}
+                      </TD>
+                    </TR>
+                  ))}
+                </tbody>
+              </DataTable>
+            </details>
+          );
+        })}
+      </div>
     </div>
   );
 }
