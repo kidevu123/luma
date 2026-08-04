@@ -546,6 +546,11 @@ export const purchaseOrders = pgTable(
     vendorName: text("vendor_name"),
     status: poStatusEnum("status").notNull().default("OPEN"),
     zohoPoId: text("zoho_po_id"),
+    /** Raw Zoho PO status verbatim (e.g. "issued", "closed", "billed",
+     *  "cancelled"). Stored unmapped for data honesty; null = never synced.
+     *  The mapped local enum in `status` keeps its own semantics. */
+    zohoStatus: text("zoho_status"),
+    zohoStatusSyncedAt: timestamp("zoho_status_synced_at", { withTimezone: true }),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     notes: text("notes"),
