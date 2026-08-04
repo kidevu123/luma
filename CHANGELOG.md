@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.5] — 2026-08-04
+
+### Fixed — ZOHO-TIMEOUT-1: preview/assembly client timeout 10s -> env-tunable 45s default
+- **Root cause (active):** Both `callZohoAssemblyService` (assembly-service-client.ts) and `callProductionOutputPreview` (production-output-preview.ts) hardcoded a 10s abort timeout. The Zoho Integration Service gateway fans out multiple Zoho API round-trips internally and routinely takes slightly longer. Confirmed 2026-08-04: gateway logged HTTP 200 OK moments after Luma's client fired AbortController.abort(). Every preview retry therefore recorded blocker PREVIEW_FAILED "Network error: This operation was aborted" and the op remained NEEDS_MAPPING permanently.
+- **Fix:** New `resolveZohoServiceTimeoutMs(env)` helper exported from `assembly-service-client.ts`. Both call sites use `opts.timeoutMs ?? resolveZohoServiceTimeoutMs(env)`. Default is 45s; override via `ZOHO_SERVICE_TIMEOUT_MS=<ms>` (must be >= 1000; garbage/absent/sub-1000 falls back to 45000).
+- **Tests:** 9 new unit tests in `lib/zoho/zoho-service-timeout.test.ts` covering valid env value, garbage string, empty string, missing, sub-1000, exactly 1000, Infinity, and no-argument invocation.
+
 ## [1.29.4] — 2026-08-04
 
 ### Changed — BACKFILL-APPLY-1: wire raw-bag receive backfill apply mode; live-pipeline acknowledgment flag + eligibility stamp

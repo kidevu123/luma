@@ -20,6 +20,19 @@ export const ZOHO_BEARER_SECRET_ENV = "ZOHO_SERVICE_BEARER_SECRET";
 export const ZOHO_DRY_RUN_ENABLED_ENV = "ZOHO_DRY_RUN_WRITES_ENABLED";
 export const ZOHO_WAREHOUSE_ID_ENV = "ZOHO_WAREHOUSE_ID";
 
+// ─── Timeout helper ───────────────────────────────────────────────────────────
+
+/** Preview/assembly calls fan out multiple Zoho API round-trips at the
+ *  gateway and routinely exceed 10s. Confirmed 2026-08-04: gateway returned
+ *  200 OK moments after the old 10s abort fired. Env-tunable; 45s default. */
+export function resolveZohoServiceTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env["ZOHO_SERVICE_TIMEOUT_MS"];
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 1000 ? n : 45_000;
+}
+
 // ─── Error class ──────────────────────────────────────────────────────────────
 
 export class ZohoAssemblyServiceError extends Error {
@@ -166,7 +179,7 @@ export async function callZohoAssemblyService(opts: {
 }): Promise<AssemblyServiceCallResult> {
   const env = opts.env ?? process.env;
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const timeoutMs = opts.timeoutMs ?? resolveZohoServiceTimeoutMs(env);
 
   // Step 1: validate config
   const config = validateAssemblyServiceConfig(env);

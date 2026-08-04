@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { isProductionOutputPreviewEnabled } from "@/lib/zoho/production-output-config";
 import { mapProductionOutputPreviewQuantities } from "@/lib/zoho/production-output-preview-quantities";
+import { resolveZohoServiceTimeoutMs } from "@/lib/zoho/assembly-service-client";
 
 export const PRODUCTION_OUTPUT_PREVIEW_PATH =
   "/zoho/luma/production-output/preview";
@@ -401,7 +402,7 @@ export async function callProductionOutputPreview(opts: {
   }
 
   const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 10_000);
+  const timeout = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? resolveZohoServiceTimeoutMs(opts.env ?? process.env));
   let response: Response;
 
   try {
