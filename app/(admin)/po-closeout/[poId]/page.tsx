@@ -261,6 +261,12 @@ export default async function PoCloseoutDetailPage({
           <span className="font-medium">{c.zohoQueued}</span> · ready to queue:{" "}
           <span className="font-medium text-brand-700">{c.zohoReadyToQueue}</span> · failed:{" "}
           <span className="font-medium text-red-700">{c.zohoFailed}</span>.
+          {summary.closedInZoho ? (
+            <span>
+              {" "}These are Zoho op states; this PO is closed in Zoho, so unpushed outputs stay
+              unpushed and are not counted as open work.
+            </span>
+          ) : null}
         </p>
       </div>
 
