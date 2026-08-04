@@ -138,25 +138,23 @@ function PoReceiveGroupCard({ group }: { group: PoReceiveGroup<ReceiveRow> }) {
         {shipmentGroups.map((sg, idx) => {
           const flavorSet = new Set<string>();
           for (const row of sg.receives) {
-            if (row.tabletTypes) {
+            if (row.tabletTypes?.trim()) {
               for (const f of row.tabletTypes.split(", ")) {
                 flavorSet.add(f.trim());
               }
             }
           }
           const flavorCount = flavorSet.size;
+          // Same em-dash convention as buildShipmentLabel ("Shipment 2 — FedEx 771234").
+          const meta = [sg.carrier, sg.trackingNumber].filter(Boolean).join(" ");
           const title = sg.isLegacy
             ? "Earlier receives"
-            : [
-                "Shipment",
-                sg.carrier ?? null,
-                sg.trackingNumber ? `· ${sg.trackingNumber}` : null,
-              ]
-                .filter(Boolean)
-                .join(" ");
+            : meta
+              ? `Shipment — ${meta}`
+              : "Shipment";
           return (
             <details key={sg.key} {...(idx === 0 ? { open: true } : {})}>
-              <summary className="px-4 py-2.5 cursor-pointer list-none flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-surface-2/40 hover:bg-surface-2/70 transition-colors">
+              <summary className="px-4 py-2.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-surface-2/40 hover:bg-surface-2/70 transition-colors">
                 <span className="text-[12.5px] font-medium text-text-strong">{title}</span>
                 <span className="text-[11px] text-text-muted tabular-nums">
                   {flavorCount} {flavorCount === 1 ? "flavor" : "flavors"} &middot; {sg.totalBags} {sg.totalBags === 1 ? "bag" : "bags"}
