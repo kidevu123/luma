@@ -3,6 +3,7 @@
 // INTAKE-WORKFLOW-1 — server actions for /receiving/raw-bags.
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { requireAdmin, requireLead } from "@/lib/auth-guards";
 import { syncPurchaseOrdersFromZoho, type PoSyncResult } from "@/lib/zoho/po-sync";
 import { db } from "@/lib/db";
@@ -35,6 +36,11 @@ import {
   verifyRawBagHistoricalZohoReceive,
 } from "@/lib/zoho/raw-bag-intake-receive";
 import type { PurchaseReceiveVerificationResult } from "@/lib/zoho/purchase-receive-verification";
+import {
+  createShipmentForPo,
+  listShipmentsForPo,
+  type PoShipmentOption,
+} from "@/lib/db/queries/shipments";
 
 export async function createRawBagIntakeAction(
   raw: unknown,
@@ -223,5 +229,46 @@ export async function syncPurchaseOrdersFromZohoAction(): Promise<
     return { ok: true, result };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function createShipmentAction(input: {
+  poId: string;
+  carrier?: string;
+  trackingNumber?: string;
+}): Promise<{ ok: true; shipmentId: string } | { ok: false; error: string }> {
+  try {
+    const actor = await requireLead();
+    const parsed = z
+      .object({
+        poId: z.string().uuid(),
+        carrier: z.string().max(120).optional(),
+        trackingNumber: z.string().max(120).optional(),
+      })
+      .safeParse(input);
+    if (!parsed.success) return { ok: false, error: "Invalid shipment input." };
+    const { id } = await createShipmentForPo({
+      poId: parsed.data.poId,
+      carrier: parsed.data.carrier ?? null,
+      trackingNumber: parsed.data.trackingNumber ?? null,
+    }, actor);
+    revalidatePath("/receiving/raw-bags");
+    revalidatePath("/inbound");
+    return { ok: true, shipmentId: id };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function listShipmentsForPoAction(
+  poId: string,
+): Promise<{ ok: true; shipments: PoShipmentOption[] } | { ok: false; error: string }> {
+  try {
+    await requireLead();
+    const parsed = z.string().uuid().safeParse(poId);
+    if (!parsed.success) return { ok: false, error: "Invalid PO id." };
+    return { ok: true, shipments: await listShipmentsForPo(parsed.data) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
