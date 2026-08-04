@@ -1302,3 +1302,146 @@ describe("tablet-filtered sync — tabletOnly: true", () => {
     expect(result.detailsFetched).toBe(1);
   });
 });
+
+// 11. mapZohoStatus closed/billed (tested through upsert behavior)
+describe("mapZohoStatus closed/billed", () => {
+  it('Zoho "closed" → local "CLOSED" on insert', async () => {
+    mockList.mockResolvedValueOnce({
+      ok: true,
+      data: [makeZohoPo({ status: "closed" })],
+      meta: META,
+    });
+
+    let capturedValues: Record<string, unknown> | null = null;
+    const insertSpy = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((vals: Record<string, unknown>) => {
+        capturedValues = vals;
+        return { returning: vi.fn().mockResolvedValue([{ id: "new-uuid" }]) };
+      }),
+    });
+
+    const mockDb = {
+      select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+      insert: insertSpy,
+      update: vi.fn(),
+    };
+
+    await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+
+    expect(capturedValues).not.toBeNull();
+    expect(capturedValues!["status"]).toBe("CLOSED");
+  });
+
+  it('Zoho "billed" → local "CLOSED" on insert', async () => {
+    mockList.mockResolvedValueOnce({
+      ok: true,
+      data: [makeZohoPo({ status: "billed" })],
+      meta: META,
+    });
+
+    let capturedValues: Record<string, unknown> | null = null;
+    const insertSpy = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((vals: Record<string, unknown>) => {
+        capturedValues = vals;
+        return { returning: vi.fn().mockResolvedValue([{ id: "new-uuid" }]) };
+      }),
+    });
+
+    const mockDb = {
+      select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+      insert: insertSpy,
+      update: vi.fn(),
+    };
+
+    await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+
+    expect(capturedValues).not.toBeNull();
+    expect(capturedValues!["status"]).toBe("CLOSED");
+  });
+});
+
+// 12. Raw zoho_status persistence
+describe("raw zoho_status persistence", () => {
+  it("stores raw status + synced-at on insert", async () => {
+    mockList.mockResolvedValueOnce({
+      ok: true,
+      data: [makeZohoPo({ status: "closed" })],
+      meta: META,
+    });
+
+    let capturedValues: Record<string, unknown> | null = null;
+    const insertSpy = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((vals: Record<string, unknown>) => {
+        capturedValues = vals;
+        return { returning: vi.fn().mockResolvedValue([{ id: "new-uuid" }]) };
+      }),
+    });
+
+    const mockDb = {
+      select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+      insert: insertSpy,
+      update: vi.fn(),
+    };
+
+    const before = new Date();
+    await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+    const after = new Date();
+
+    expect(capturedValues).not.toBeNull();
+    expect(capturedValues!["status"]).toBe("CLOSED");
+    expect(capturedValues!["zohoStatus"]).toBe("closed");
+    expect(capturedValues!["zohoStatusSyncedAt"]).toBeInstanceOf(Date);
+    const syncedAt = capturedValues!["zohoStatusSyncedAt"] as Date;
+    expect(syncedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(syncedAt.getTime()).toBeLessThanOrEqual(after.getTime());
+  });
+
+  it("stores raw status + synced-at on update even when local status is terminal", async () => {
+    // Existing local row is RECEIVED (terminal); Zoho now says "closed"
+    mockList.mockResolvedValueOnce({
+      ok: true,
+      data: [makeZohoPo({ status: "closed" })],
+      meta: META,
+    });
+
+    const existingPo = {
+      id: "existing-uuid",
+      poNumber: "PO-2026-001",
+      parentPoNumber: null,
+      vendorName: "ACME Pharma",
+      status: "RECEIVED",
+      zohoPoId: "ZPOID-001",
+      openedAt: new Date("2026-05-20"),
+      closedAt: null,
+      notes: null,
+    };
+
+    let capturedSet: Record<string, unknown> | null = null;
+    const updateSpy = vi.fn().mockReturnValue({
+      set: vi.fn().mockImplementation((vals: Record<string, unknown>) => {
+        capturedSet = vals;
+        return { where: vi.fn().mockResolvedValue([]) };
+      }),
+    });
+
+    const mockDb = {
+      select: () => ({ from: () => ({ where: () => Promise.resolve([existingPo]) }) }),
+      insert: vi.fn(),
+      update: updateSpy,
+    };
+
+    const before = new Date();
+    await syncPurchaseOrdersFromZoho({ dbOverride: mockDb as unknown as typeof db });
+    const after = new Date();
+
+    // Terminal status guard must hold — no status field in update payload
+    expect(capturedSet).not.toBeNull();
+    expect(capturedSet).not.toHaveProperty("status");
+    // But raw Zoho status and synced-at must always be written
+    expect(capturedSet!["zohoStatus"]).toBe("closed");
+    expect(capturedSet!["zohoStatusSyncedAt"]).toBeInstanceOf(Date);
+    const syncedAt = capturedSet!["zohoStatusSyncedAt"] as Date;
+    expect(syncedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(syncedAt.getTime()).toBeLessThanOrEqual(after.getTime());
+  });
+});

@@ -70,6 +70,8 @@ function mapZohoStatus(zohoStatus: string): LocalPoStatus {
     case "received":           return "RECEIVED";
     case "draft":              return "DRAFT";
     case "cancelled":          return "CANCELLED";
+    case "closed":             return "CLOSED";
+    case "billed":             return "CLOSED";
     default:                   return "OPEN"; // safe default for unknown future statuses
   }
 }
@@ -233,6 +235,8 @@ async function upsertPo(
         zohoPoId: zohoPo.purchaseorder_id,
         openedAt,
         isTabletPo,
+        zohoStatus: zohoPo.status,
+        zohoStatusSyncedAt: new Date(),
       })
       .returning({ id: purchaseOrders.id });
 
@@ -255,10 +259,14 @@ async function upsertPo(
 
     // Always refresh vendorName and openedAt;
     // only update status when the PO is not already in a terminal state.
+    // zohoStatus and zohoStatusSyncedAt are always written regardless of the
+    // terminal-status guard — we always want to record what Zoho is reporting.
     const updatePayload: Partial<typeof purchaseOrders.$inferInsert> = {
       vendorName: zohoPo.vendor_name,
       openedAt,
       isTabletPo,
+      zohoStatus: zohoPo.status,
+      zohoStatusSyncedAt: new Date(),
     };
 
     if (!isTerminal) {
