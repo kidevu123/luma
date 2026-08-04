@@ -208,6 +208,7 @@ export function RawBagIntakeForm({
 
     // Resolve shipmentId: create first if "new", then include in payload.
     let resolvedShipmentId: string | null = null;
+    let createdNewShipment = false;
     if (poMode === "LOCAL_PO" && poId) {
       if (shipmentChoice === "new") {
         const shipmentInput: { poId: string; carrier?: string; trackingNumber?: string } = { poId };
@@ -220,9 +221,24 @@ export function RawBagIntakeForm({
           return;
         }
         resolvedShipmentId = res.shipmentId;
+        createdNewShipment = true;
       } else {
         resolvedShipmentId = shipmentChoice;
       }
+    }
+
+    // If the intake fails after we just created a shipment, refresh the
+    // shipment list and pre-select the new shipment so a retry reuses it
+    // instead of creating a second (orphan) shipment.
+    function reuseJustCreatedShipment() {
+      if (!createdNewShipment || !resolvedShipmentId || !poId) return;
+      const shipmentId = resolvedShipmentId;
+      setShipmentChoice(shipmentId);
+      startShipmentLoad(() => {
+        void listShipmentsForPoAction(poId).then((res) => {
+          if (res.ok) setShipmentOptions(res.shipments);
+        });
+      });
     }
 
     const payload = {
@@ -254,6 +270,7 @@ export function RawBagIntakeForm({
       setPending(false);
       if (!r.ok) {
         setErrorMessage(r.error);
+        reuseJustCreatedShipment();
       } else {
         setResult(r);
       }
@@ -265,6 +282,7 @@ export function RawBagIntakeForm({
           ? "The app was updated. Please refresh the page and try again."
           : `Save failed: ${msg}`,
       );
+      reuseJustCreatedShipment();
     }
   }
 

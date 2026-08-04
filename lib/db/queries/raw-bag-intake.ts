@@ -401,7 +401,10 @@ export async function createRawBagIntakeAtomic(
     if (!defaultBatchId) throw new Error("intake: no batch resolved");
 
     // ── Shipment guard: if a shipmentId was supplied, verify it belongs
-    // to this PO before we insert anything. Fail closed on mismatch.
+    // to this PO before we insert anything. Fail closed: both branches
+    // THROW (not early-return) so the batch qty increments above roll
+    // back with the rest of the transaction. The message surfaces to
+    // the form via mapIntakePersistenceError (err.message passthrough).
     const resolvedShipmentId = input.shipmentId ?? null;
     if (resolvedShipmentId) {
       const [shipmentRow] = await tx
@@ -410,7 +413,7 @@ export async function createRawBagIntakeAtomic(
         .where(eq(shipments.id, resolvedShipmentId))
         .limit(1);
       if (!shipmentRow) {
-        return { ok: false, error: "Selected shipment not found." };
+        throw new Error("Selected shipment not found.");
       }
       if (shipmentRow.poId !== resolvedPoId) {
         throw new Error("Shipment belongs to a different PO");
