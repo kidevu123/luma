@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.29.9] - 2026-08-05
+
+### Fixed
+- zoho: component batch allocation from supplier lot for batch-tracked items; add tablet_types.zoho_batch_tracked opt-in flag; Hyroxi MIT A items now produce component_batches entries (lots CA4PI16, CA4PILE16)
+
 ## [1.29.8] — 2026-08-05
 
 ### Fixed — display assembly quantity includes case-embedded displays; fail closed on missing displays-per-case

@@ -82,12 +82,7 @@ describe("deriveNormalizedBomQuantitiesFromRows — BlueRaz fixture", () => {
     expect(r.batchTrackedItemIds.size).toBe(0);
   });
 
-  // BATCH-TRACKING-CONTRACT-v1.4.5 — explicit contract pin: the
-  // deriver returns the same shape for batchTrackedItemIds as the
-  // existing pilot contracts (empty Set). If a future patch adds an
-  // opt-in mechanism, this test should be updated AND the pilots
-  // should be migrated to that opt-in too — not selectively widened.
-  it("returns an empty batchTrackedItemIds Set regardless of how many tablets are derived (matches pilot contract)", () => {
+  it("returns an empty batchTrackedItemIds Set when no tablet has zohoBatchTracked=true (backward-compat default)", () => {
     const r = deriveNormalizedBomQuantitiesFromRows({
       product: { id: "p-1", tabletsPerUnit: 4 },
       allowedTablets: [
@@ -105,9 +100,6 @@ describe("deriveNormalizedBomQuantitiesFromRows — BlueRaz fixture", () => {
     });
     expect(r.batchTrackedItemIds).toBeInstanceOf(Set);
     expect(r.batchTrackedItemIds.size).toBe(0);
-    // Per pilot contract: any caller passing this opts to the
-    // existing builder treats it the same as the pilot opts (no
-    // batch resolution for any tablet).
   });
 });
 
@@ -235,5 +227,73 @@ describe("deriveNormalizedBomQuantitiesFromRows — partial Zoho coverage", () =
     expect(r.warnings.length).toBe(1);
     expect(r.warnings[0]?.code).toBe("ALLOWED_TABLET_WITHOUT_ZOHO_ITEM_ID");
     expect(r.warnings[0]?.message).toMatch(/No-ID Tablet/);
+  });
+});
+
+describe("deriveNormalizedBomQuantitiesFromRows — zohoBatchTracked opt-in", () => {
+  it("populates batchTrackedItemIds only for tablets with zohoBatchTracked=true", () => {
+    const r = deriveNormalizedBomQuantitiesFromRows({
+      product: { id: "p-1", tabletsPerUnit: 4 },
+      allowedTablets: [
+        {
+          tabletTypeId: "t-1",
+          tabletTypeName: "Batch-Tracked Tablet",
+          zohoItemId: "zoho-bt",
+          isPrimary: true,
+          zohoBatchTracked: true,
+        },
+        {
+          tabletTypeId: "t-2",
+          tabletTypeName: "Non-Tracked Tablet",
+          zohoItemId: "zoho-nt",
+          isPrimary: false,
+          zohoBatchTracked: false,
+        },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // Both contribute to BOM quantities
+    expect(r.normalizedBomQuantities).toEqual({ "zoho-bt": 4, "zoho-nt": 4 });
+    // Only the batch-tracked one enters the set
+    expect(r.batchTrackedItemIds).toBeInstanceOf(Set);
+    expect(r.batchTrackedItemIds.size).toBe(1);
+    expect(r.batchTrackedItemIds.has("zoho-bt")).toBe(true);
+    expect(r.batchTrackedItemIds.has("zoho-nt")).toBe(false);
+  });
+
+  it("returns empty batchTrackedItemIds when zohoBatchTracked is absent (backward-compat default)", () => {
+    const r = deriveNormalizedBomQuantitiesFromRows({
+      product: { id: "p-1", tabletsPerUnit: 4 },
+      allowedTablets: [
+        {
+          tabletTypeId: "t-1",
+          tabletTypeName: "Legacy Tablet",
+          zohoItemId: "zoho-legacy",
+          isPrimary: true,
+          // zohoBatchTracked omitted — should default to not-batch-tracked
+        },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.batchTrackedItemIds.size).toBe(0);
+  });
+
+  it("adds all batch-tracked tablets to the set when multiple are marked true", () => {
+    const r = deriveNormalizedBomQuantitiesFromRows({
+      product: { id: "p-1", tabletsPerUnit: 4 },
+      allowedTablets: [
+        { tabletTypeId: "t-1", tabletTypeName: "MIT A Pineapple", zohoItemId: "5254962000003150096", isPrimary: true, zohoBatchTracked: true },
+        { tabletTypeId: "t-2", tabletTypeName: "MIT A Pink Rose", zohoItemId: "5254962000003150110", isPrimary: false, zohoBatchTracked: true },
+        { tabletTypeId: "t-3", tabletTypeName: "FX MIT Pineapple", zohoItemId: "5254962000004758415", isPrimary: false, zohoBatchTracked: false },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.batchTrackedItemIds.size).toBe(2);
+    expect(r.batchTrackedItemIds.has("5254962000003150096")).toBe(true);
+    expect(r.batchTrackedItemIds.has("5254962000003150110")).toBe(true);
+    expect(r.batchTrackedItemIds.has("5254962000004758415")).toBe(false);
   });
 });

@@ -393,6 +393,11 @@ export const tabletTypes = pgTable(
     zohoItemId: text("zoho_item_id"),
     /** ZOHO-PRODUCTION-OUTPUT-V1206 — stable family for PO/output validation. */
     productFamily: text("product_family"),
+    /** ZOHO-BATCH-TRACKING-v1.29.9 — true when Zoho Inventory has
+     *  track_batch_number=true for this tablet's raw item. When set,
+     *  the production-output builder resolves a Zoho batch from the
+     *  bag's supplier lot and includes it in component_batches. */
+    zohoBatchTracked: boolean("zoho_batch_tracked").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
