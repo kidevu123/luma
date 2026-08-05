@@ -600,6 +600,10 @@ export async function autoCreateAndReleaseFinishedLotForWorkflowBag(
     packagedAt: Date;
     counts: PackagingFinishedLotCounts;
     actor: FinishedLotAuditActor;
+    /** When true, skip the allocation close step because the run's own session
+     *  is already closed with matching numbers (Bug B fix: same-workflow
+     *  premature/system closeout). Never touch the closed session — it is correct. */
+    skipAllocationClose?: boolean;
   },
 ): Promise<AutoFinishedLotReleaseResult> {
   const [bag] = await tx
@@ -741,27 +745,46 @@ export async function autoCreateAndReleaseFinishedLotForWorkflowBag(
     ).lot;
 
   if (!existingForBag) {
-    const allocationClose = await closeAllocationForProductionOutputInTx(tx, {
-      workflowBagId: args.workflowBagId,
-      productId: bag.productId,
-      unitsProduced: draft.unitsProduced,
-      finishedLotId: lot.id,
-      allowRepairOpen: true,
-      consumedQtySource: "OUTPUT_DERIVED",
-      endingBalanceSource: "OUTPUT_DERIVED",
-      notes: "Auto-closed after packaging close-out.",
-      actor: args.actor,
-    });
-    if (!allocationClose.ok) {
-      const blockedReason = allocationClose.code as Extract<
-        AutoFinishedLotReleaseResult,
-        { ok: false }
-      >["reason"];
-      return {
-        ok: false,
-        reason: blockedReason,
-        message: allocationClose.error,
-      };
+    if (!args.skipAllocationClose) {
+      // Normal path: close the open allocation session for this run.
+      const allocationClose = await closeAllocationForProductionOutputInTx(tx, {
+        workflowBagId: args.workflowBagId,
+        productId: bag.productId,
+        unitsProduced: draft.unitsProduced,
+        finishedLotId: lot.id,
+        allowRepairOpen: true,
+        consumedQtySource: "OUTPUT_DERIVED",
+        endingBalanceSource: "OUTPUT_DERIVED",
+        notes: "Auto-closed after packaging close-out.",
+        actor: args.actor,
+      });
+      if (!allocationClose.ok) {
+        const blockedReason = allocationClose.code as Extract<
+          AutoFinishedLotReleaseResult,
+          { ok: false }
+        >["reason"];
+        return {
+          ok: false,
+          reason: blockedReason,
+          message: allocationClose.error,
+        };
+      }
+    }
+    // When skipAllocationClose: the run's own session is already closed with
+    // matching numbers (same-workflow premature/system closeout, Bug B). Do NOT
+    // touch the closed session — it already records the correct consumption.
+    // Still link the session to this lot so Zoho assembly PO can resolve it.
+    if (bag.inventoryBagId) {
+      await tx
+        .update(rawBagAllocationSessions)
+        .set({ finishedLotId: lot.id })
+        .where(
+          and(
+            eq(rawBagAllocationSessions.workflowBagId, args.workflowBagId),
+            inArray(rawBagAllocationSessions.allocationStatus, ["CLOSED", "DEPLETED"]),
+            isNull(rawBagAllocationSessions.finishedLotId),
+          ),
+        );
     }
 
     effects.push({
@@ -856,6 +879,7 @@ export async function evaluateRepairAutoIssueEligibility(
     endingBalanceQty: number | null;
     startingBalanceQty: number | null;
     consumedQty: number | null;
+    workflowBagId: string | null;
   } | null = null;
 
   if (bag.inventoryBagId) {
@@ -883,6 +907,8 @@ export async function evaluateRepairAutoIssueEligibility(
         endingBalanceQty: rawBagAllocationSessions.endingBalanceQty,
         startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
         consumedQty: rawBagAllocationSessions.consumedQty,
+        // Bug B fix: needed to detect when the closed session is this run's own.
+        workflowBagId: rawBagAllocationSessions.workflowBagId,
       })
       .from(rawBagAllocationSessions)
       .where(
@@ -920,6 +946,9 @@ export async function evaluateRepairAutoIssueEligibility(
     lastClosedSessionEndingBalance: lastClosed?.endingBalanceQty ?? null,
     lastClosedSessionStartingBalance: lastClosed?.startingBalanceQty ?? null,
     lastClosedSessionConsumedQty: lastClosed?.consumedQty ?? null,
+    // Bug B fix: pass closed session's workflowBagId so the evaluator detects
+    // premature/system closeout of the current run.
+    lastClosedSessionWorkflowBagId: lastClosed?.workflowBagId ?? null,
     tabletsPerUnit: bag.tabletsPerUnit,
     unitsPerDisplay: bag.unitsPerDisplay,
     displaysPerCase: bag.displaysPerCase,
@@ -942,7 +971,7 @@ export async function evaluateRepairAutoIssueEligibility(
     lotNumberConflict,
   });
 
-  return { bag, evaluation };
+  return { bag, evaluation, lastClosedSessionWorkflowBagId: lastClosed?.workflowBagId ?? null };
 }
 
 /** Backlog repair: auto-issue a finalized bag that missed packaging auto-lot. */
@@ -971,6 +1000,13 @@ export async function repairAutoIssueFinishedLotForWorkflowBag(
     };
   }
 
+  // Bug B fix: when the run's own session was already closed (same-workflow
+  // premature/system closeout), skip the allocation-close step — the session
+  // already records the correct consumption with matching numbers.
+  const skipAllocationClose =
+    eligibility.lastClosedSessionWorkflowBagId != null &&
+    eligibility.lastClosedSessionWorkflowBagId === workflowBagId;
+
   const result = await db.transaction(async (tx) => {
     const { bag } = eligibility;
     if (!bag.finalizedAt) {
@@ -990,6 +1026,7 @@ export async function repairAutoIssueFinishedLotForWorkflowBag(
         looseCards: bag.looseCards ?? 0,
       },
       actor,
+      skipAllocationClose,
     });
   });
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.29.6] — 2026-08-05
+
+### Fixed — Bug A: finalized-count derivation undercounts multi-segment runs (phantom remaining tablets)
+- **Root cause:** `computeSystemDerivedResolutionForBag` derived remaining tablets via `deriveStageOutputForBag` + `pickDeepestOutput`, which sums sealing-segment events. For multi-pickup runs (paused/resumed, multiple station pickups), `SEALING_SEGMENT_COMPLETE` events only covered individual segments. Bag 1890-29 summed 1,428 sealing units while finalized packaging counts were 4,906 units (4 tabs/unit), causing the resolution to close at 14,288 remaining instead of 376 — fabricating 13,912 phantom tablets shown as available for reuse.
+- **Fix:** Added `pickFinalizedOutput` to `lib/production/system-derived-allocation.ts`. When `workflowBags.finalizedAt` is set, `computeSystemDerivedResolutionForBag` queries `read_bag_metrics` and derives units from finalized case/display/loose-card counts via the product's packaging structure. Stage-segment derivation is the fallback for mid-run (unfinalized) resolution so the floor live path is unchanged. Provenance is honest: audit note says "Calculated from finalized production counts" when finalized counts are used.
+- **Tests:** 5 new pure tests in `lib/production/system-derived-allocation.test.ts` covering real bag 1890-29 numbers (4,906 units = 49 cases x 100 + 6 loose), unfinalized fallback, incomplete structure, and zero-count cases.
+
+### Fixed — Bug B: auto-issue eligibility double-counts when run's own session is already closed
+- **Root cause:** `evaluateAutoLotBacklogRow` inferred starting balance via `resolveInferredStartingBalance`, using the last closed session's ending balance as a reopen base. When that closed session belonged to the same workflow being issued (premature/system closeout), the evaluator re-subtracted expected consumption from the prior session's ending balance, producing a negative result and returning `NEGATIVE_ENDING_BALANCE`, blocking issuing forever. Bag 1890-29: session CLOSED with ending 376, expected consumed 19,624 → computed ending 376 - 19,624 = -19,248.
+- **Fix:** Added `lastClosedSessionWorkflowBagId` to `AutoLotBacklogRowInput` and both loaders. When it matches the current `workflowBagId` and there is no open session, consumption is already ledgered — the evaluator uses the recorded ending balance directly without re-subtracting. Returns `READY_TO_AUTO_ISSUE` when `recordedConsumedQty === expectedConsumed` (ledger agrees with production counts). Returns `MANUAL_REVIEW_REQUIRED` with explicit next step when they disagree (fails closed). The issue transaction skips the allocation-close step (session already correct) and links the session to the new lot via a direct update.
+- **Tests:** 3 new tests in `lib/production/auto-lot-backlog-eligibility.test.ts`: same-workflow consumed == expected → READY_TO_AUTO_ISSUE with correct ending 376; consumed != expected → MANUAL_REVIEW_REQUIRED; different-workflow closed session → NEGATIVE_ENDING_BALANCE (regression pin on existing reopen-base behavior).
+
 ## [1.29.5] — 2026-08-04
 
 ### Fixed — ZOHO-TIMEOUT-1: preview/assembly client timeout 10s -> env-tunable 45s default

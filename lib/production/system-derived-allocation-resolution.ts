@@ -13,6 +13,7 @@ import {
   inventoryBags,
   products,
   rawBagAllocationSessions,
+  readBagMetrics,
   workflowBags,
 } from "@/lib/db/schema";
 import { closeAllocationSessionInTx } from "@/lib/production/raw-bag-allocation-lifecycle";
@@ -20,6 +21,7 @@ import { deriveStageOutputForBag } from "@/lib/production/output-reconciliation"
 import {
   deriveSystemRemainingFromOutput,
   pickDeepestOutput,
+  pickFinalizedOutput,
   labelSystemDerivedStage,
   SYSTEM_DERIVED_SOURCE,
   type SystemDerivedResult,
@@ -36,6 +38,9 @@ export type SystemDerivedResolution =
       workflowBagId: string;
       inventoryBagId: string;
       previousProductName: string | null;
+      /** True when derivation used finalized read_bag_metrics counts rather than
+       *  live stage-segment sums (Bug A fix for multi-pickup runs). */
+      usedFinalizedCounts: boolean;
     } & Extract<SystemDerivedResult, { eligible: true }>)
   | {
       available: false;
@@ -93,14 +98,21 @@ export async function computeSystemDerivedResolutionForBag(
   }
 
   // Product tablets-per-unit + name + deepest production output for the prior run.
+  // When the workflow bag is FINALIZED, prefer the finalized read_bag_metrics counts
+  // over stage-segment sums (Bug A fix): multi-pickup runs accumulate all segments
+  // into read_bag_metrics but sealing segments only reflect individual segment sums.
   let tabletsPerUnit: number | null = null;
   let previousProductName: string | null = null;
   let output: ReturnType<typeof pickDeepestOutput> = null;
+  let usedFinalizedCounts = false;
   if (session.workflowBagId) {
     const [wf] = await db
       .select({
         tabletsPerUnit: products.tabletsPerUnit,
         productName: products.name,
+        unitsPerDisplay: products.unitsPerDisplay,
+        displaysPerCase: products.displaysPerCase,
+        finalizedAt: workflowBags.finalizedAt,
       })
       .from(workflowBags)
       .leftJoin(products, eq(products.id, workflowBags.productId))
@@ -108,8 +120,42 @@ export async function computeSystemDerivedResolutionForBag(
       .limit(1);
     tabletsPerUnit = wf?.tabletsPerUnit ?? null;
     previousProductName = wf?.productName ?? null;
-    const stageOut = await deriveStageOutputForBag(session.workflowBagId);
-    output = pickDeepestOutput(stageOut);
+
+    // When finalized, use the finalized read_bag_metrics counts (authoritative
+    // across all pickups/segments). Fall back to stage-segment derivation for
+    // mid-run (unfinalized) resolution so the floor live path keeps working.
+    if (wf?.finalizedAt) {
+      const [metrics] = await db
+        .select({
+          masterCases: readBagMetrics.masterCases,
+          displaysMade: readBagMetrics.displaysMade,
+          looseCards: readBagMetrics.looseCards,
+        })
+        .from(readBagMetrics)
+        .where(eq(readBagMetrics.workflowBagId, session.workflowBagId))
+        .limit(1);
+      if (metrics) {
+        const finalizedOut = pickFinalizedOutput({
+          isFinalized: true,
+          masterCases: metrics.masterCases,
+          displaysMade: metrics.displaysMade,
+          looseCards: metrics.looseCards,
+          unitsPerDisplay: wf.unitsPerDisplay ?? null,
+          displaysPerCase: wf.displaysPerCase ?? null,
+        });
+        if (finalizedOut) {
+          output = finalizedOut;
+          usedFinalizedCounts = true;
+        }
+      }
+    }
+
+    // Fall back to stage-segment derivation when not finalized or finalized
+    // output could not be computed (incomplete packaging structure, zero counts).
+    if (!output) {
+      const stageOut = await deriveStageOutputForBag(session.workflowBagId);
+      output = pickDeepestOutput(stageOut);
+    }
   }
 
   const result = deriveSystemRemainingFromOutput({
@@ -138,6 +184,7 @@ export async function computeSystemDerivedResolutionForBag(
     workflowBagId: session.workflowBagId!,
     inventoryBagId,
     previousProductName,
+    usedFinalizedCounts,
     ...result,
   };
 }
@@ -238,13 +285,16 @@ export async function resolveAllocationFromProductionOutput(args: {
   }
 
   const stageLabel = labelSystemDerivedStage(resolution.outputStage);
+  const countSource = resolution.usedFinalizedCounts
+    ? "Calculated from finalized production counts"
+    : "Calculated from production counts";
   const note =
     args.note?.trim() ||
     `System-derived from production output (${stageLabel}): ` +
       `${resolution.startingTabletCount.toLocaleString()} start − ` +
       `${resolution.derivedConsumedTablets.toLocaleString()} consumed = ` +
       `${resolution.derivedRemainingTablets.toLocaleString()} remaining. ` +
-      `Calculated from production counts, not a physical count.`;
+      `${countSource}, not a physical count.`;
 
   return db.transaction(async (tx) => {
     const closed = await closeAllocationSessionInTx(tx, {
@@ -286,7 +336,10 @@ export async function resolveAllocationFromProductionOutput(args: {
           inventory_bag_id: resolution.inventoryBagId,
           operator_remaining_estimate: args.operatorRemainingEstimate ?? null,
           weigh_back_grams: args.weighBackGrams ?? null,
-          note: "Calculated from previous production counts — not physically counted.",
+          used_finalized_counts: resolution.usedFinalizedCounts,
+          note: resolution.usedFinalizedCounts
+            ? "Calculated from finalized production counts — not physically counted."
+            : "Calculated from previous production counts — not physically counted.",
         },
       },
       tx,

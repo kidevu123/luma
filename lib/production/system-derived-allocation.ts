@@ -58,6 +58,32 @@ export type SystemDerivedResult =
     }
   | { eligible: false; reason: SystemDerivedBlockReason; message: string };
 
+/** Pick output count from finalized packaging counts when the workflow bag is
+ *  FINALIZED. Finalized counts are more authoritative than stage-segment sums
+ *  for multi-pickup runs (Bug A): sealing segments may only sum partial segments
+ *  while the finalized read_bag_metrics reflects the total across all pickups.
+ *
+ *  Returns { units, stage: "PACKAGING" } when finalized counts yield a positive
+ *  unit count, or null when not finalized / structure incomplete / zero output
+ *  (fall through to stage-segment derivation). */
+export function pickFinalizedOutput(args: {
+  isFinalized: boolean;
+  masterCases: number;
+  displaysMade: number;
+  looseCards: number;
+  unitsPerDisplay: number | null;
+  displaysPerCase: number | null;
+}): { units: number; stage: SystemDerivedOutputStage } | null {
+  if (!args.isFinalized) return null;
+  if (!args.unitsPerDisplay || !args.displaysPerCase) return null;
+  const units =
+    args.masterCases * args.displaysPerCase * args.unitsPerDisplay +
+    args.displaysMade * args.unitsPerDisplay +
+    args.looseCards;
+  if (units <= 0) return null;
+  return { units, stage: "PACKAGING" };
+}
+
 /** Pick the deepest recorded output count. A tablet that reached a downstream
  *  stage certainly left the bag, so deeper stages give the most defensible
  *  "produced" figure. Returns null when nothing usable was recorded. */

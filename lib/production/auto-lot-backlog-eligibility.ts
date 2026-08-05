@@ -49,6 +49,11 @@ export type AutoLotBacklogRowInput = {
   lastClosedSessionEndingBalance: number | null;
   lastClosedSessionStartingBalance: number | null;
   lastClosedSessionConsumedQty: number | null;
+  /** The workflowBagId of the last closed session. When equal to this row's
+   *  workflowBagId and there is no open session, the run's own session was
+   *  already closed (premature/system closeout) — do NOT re-subtract consumption.
+   *  Null/undefined means we don't know or no closed session exists. */
+  lastClosedSessionWorkflowBagId?: string | null;
   tabletsPerUnit: number | null;
   unitsPerDisplay: number | null;
   displaysPerCase: number | null;
@@ -251,6 +256,36 @@ export function evaluateAutoLotBacklogRow(
   if (!consumption.ok) {
     const code = consumption.blocker as AutoLotBacklogBlockerCode;
     return finishEvaluation(code, input, null, null);
+  }
+
+  // Bug B fix — same-workflow closed session: the run's own allocation session
+  // was already closed (premature/system closeout). When the last closed session
+  // belongs to THIS workflow bag and there is no open session, consumption for
+  // this run is already ledgered — do NOT re-subtract from the starting balance.
+  // The expected ending balance is what the closed session recorded, not a
+  // recomputed number. Fail closed on disagreement (ledger must match output).
+  if (
+    !input.openAllocationSessionId &&
+    input.lastClosedSessionWorkflowBagId != null &&
+    input.lastClosedSessionWorkflowBagId === input.workflowBagId
+  ) {
+    const recordedConsumed = input.lastClosedSessionConsumedQty;
+    const recordedEnding = input.lastClosedSessionEndingBalance;
+    // Disagree: recorded consumedQty does not match expected production consumption.
+    // Fail closed — the closeout may be wrong and must be corrected first.
+    if (recordedConsumed !== consumption.expectedConsumed) {
+      return {
+        ...finishEvaluation("MANUAL_REVIEW_REQUIRED", input, consumption.expectedConsumed, recordedEnding),
+        nextStep: "Recorded closeout consumption does not match production counts — correct the allocation closeout first",
+      };
+    }
+    // Agree: ledger already settled — use the recorded ending balance.
+    return finishEvaluation(
+      "READY_TO_AUTO_ISSUE",
+      input,
+      consumption.expectedConsumed,
+      recordedEnding,
+    );
   }
 
   const startingBalance = resolveInferredStartingBalance(input);

@@ -141,6 +141,9 @@ export async function listProductionOutputBacklogWithEligibility(
         startingBalanceQty: rawBagAllocationSessions.startingBalanceQty,
         consumedQty: rawBagAllocationSessions.consumedQty,
         closedAt: rawBagAllocationSessions.closedAt,
+        // Bug B fix: needed to detect when the last closed session belongs to
+        // this workflow bag (premature/system closeout of the current run).
+        workflowBagId: rawBagAllocationSessions.workflowBagId,
       })
       .from(rawBagAllocationSessions)
       .where(
@@ -230,6 +233,9 @@ export async function listProductionOutputBacklogWithEligibility(
       lastClosedSessionEndingBalance: lastClosed?.endingBalanceQty ?? null,
       lastClosedSessionStartingBalance: lastClosed?.startingBalanceQty ?? null,
       lastClosedSessionConsumedQty: lastClosed?.consumedQty ?? null,
+      // Bug B fix: pass the closed session's workflowBagId so the evaluator can
+      // detect when the run's own session was already closed (premature closeout).
+      lastClosedSessionWorkflowBagId: lastClosed?.workflowBagId ?? null,
       tabletsPerUnit: bag.tabletsPerUnit,
       unitsPerDisplay: bag.unitsPerDisplay,
       displaysPerCase: bag.displaysPerCase,

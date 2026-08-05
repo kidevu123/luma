@@ -5,6 +5,7 @@ import {
   labelSystemDerivedStage,
   SYSTEM_DERIVED_SOURCE,
   type SystemDerivedInput,
+  pickFinalizedOutput,
 } from "./system-derived-allocation";
 
 const base: SystemDerivedInput = {
@@ -123,6 +124,76 @@ describe("pickDeepestOutput — deepest recorded stage wins", () => {
     expect(
       pickDeepestOutput({ finishedOutput: 0, packagedOutput: 0, sealedOutput: 0 }),
     ).toBeNull();
+  });
+});
+
+// Bug A tests — finalized count derivation.
+describe("pickFinalizedOutput — prefer finalized packaging counts over stage-segment sums (Bug A)", () => {
+  it(
+    "bag 1890-29: 4906 units × 4 tabletsPerUnit = 19624 tablets → remaining 376 of 20000 (not phantom 14288)",
+    () => {
+      // Real bug: sealing segments only summed 1428 units → consumed 5712 → remaining 14288 (phantom).
+      // Fix: use finalized counts → 4906 units → consumed 19624 → remaining 376 (correct).
+      const result = pickFinalizedOutput({
+        isFinalized: true,
+        masterCases: 49,
+        displaysMade: 0,
+        looseCards: 6,
+        unitsPerDisplay: 10,
+        displaysPerCase: 10,
+      });
+      expect(result).not.toBeNull();
+      expect(result?.units).toBe(4906); // 49 × 10 × 10 + 0 × 10 + 6
+      expect(result?.stage).toBe("PACKAGING");
+    },
+  );
+
+  it("returns null when not finalized (fall through to stage-segment path)", () => {
+    const result = pickFinalizedOutput({
+      isFinalized: false,
+      masterCases: 49,
+      displaysMade: 0,
+      looseCards: 6,
+      unitsPerDisplay: 10,
+      displaysPerCase: 10,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("returns null when packaging structure is incomplete (no unitsPerDisplay)", () => {
+    const result = pickFinalizedOutput({
+      isFinalized: true,
+      masterCases: 10,
+      displaysMade: 5,
+      looseCards: 2,
+      unitsPerDisplay: null,
+      displaysPerCase: 10,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("returns null when packaging structure is incomplete (no displaysPerCase)", () => {
+    const result = pickFinalizedOutput({
+      isFinalized: true,
+      masterCases: 10,
+      displaysMade: 5,
+      looseCards: 2,
+      unitsPerDisplay: 10,
+      displaysPerCase: null,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("returns null when finalized but zero units produced (no data to derive from)", () => {
+    const result = pickFinalizedOutput({
+      isFinalized: true,
+      masterCases: 0,
+      displaysMade: 0,
+      looseCards: 0,
+      unitsPerDisplay: 10,
+      displaysPerCase: 10,
+    });
+    expect(result).toBeNull();
   });
 });
 

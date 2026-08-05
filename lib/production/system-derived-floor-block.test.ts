@@ -16,6 +16,7 @@ describe("buildFloorOpenAllocationBlock — eligible", () => {
       workflowBagId: "wf-1",
       inventoryBagId: "inv-1",
       previousProductName: "Hyroxi Mit A - BlueRaz",
+      usedFinalizedCounts: false,
       eligible: true,
       startingTabletCount: 20000,
       derivedConsumedTablets: 12000,
