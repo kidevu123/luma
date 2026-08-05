@@ -7,6 +7,7 @@
 
 import type { BagCloseoutDetail } from "@/lib/db/queries/bag-closeout-detail";
 import type { BagCloseoutRowFacts } from "@/lib/db/queries/bag-closeout-detail";
+import { deriveApplicableBagActions } from "@/lib/production/bag-closeout-actions";
 import { QrActions } from "./qr-actions";
 import { LotActions } from "./lot-actions";
 import { PartialActions } from "./partial-actions";
@@ -24,7 +25,19 @@ export function ActionPanels({
   inventoryBagId: string;
   onDone: () => void;
 }) {
-  const keys = detail.applicableActions;
+  // Derive applicable action keys from the CURRENT server-rendered row facts
+  // on every render so that panels update immediately after an action
+  // revalidates the page (before or alongside the drawer's detail refetch).
+  // allocationOpen is the one fact that lives only in the fetched detail.
+  const keys = deriveApplicableBagActions({
+    rowStatus: row.status,
+    rowAction: row.action,
+    zoho: row.zoho,
+    hasWorkflow: row.workflowBagId != null,
+    hasFinishedLot: row.finishedLotId != null,
+    lotStatus: row.lotStatus,
+    allocationOpen: detail.summary?.allocation?.isOpen ?? false,
+  });
   if (keys.length === 0) return null;
 
   return (

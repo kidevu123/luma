@@ -55,6 +55,24 @@ export function BagDrawer({
     void refetch();
   }, [refetch]);
 
+  // Re-fetch when the server-rendered row facts change (action/status/lot id
+  // flip after a server action revalidates the page and router.refresh()
+  // delivers the updated RSC payload). This keeps the action panels in sync
+  // without requiring a full page navigation.
+  const prevRowKeyRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    const key = `${row.action}|${row.status}|${row.finishedLotId ?? ""}`;
+    if (prevRowKeyRef.current === null) {
+      // First render — initial load is already handled above.
+      prevRowKeyRef.current = key;
+      return;
+    }
+    if (prevRowKeyRef.current !== key) {
+      prevRowKeyRef.current = key;
+      void refetch();
+    }
+  }, [row.action, row.status, row.finishedLotId, refetch]);
+
   return (
     <div className="space-y-3 border-t border-border/60 bg-surface-2/40 p-4">
       <p className="text-[11px] text-text-muted">

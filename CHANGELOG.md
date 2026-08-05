@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.29.7] — 2026-08-05
+
+### Fixed — DRAWER-FRESHNESS-1: drawer panels track live row facts; issue/release actions revalidate closeout paths
+- **Root cause:** Two contributing bugs caused the PO Closeout drawer to go stale after an action. (1) `ActionPanels` derived applicable keys from `detail.applicableActions` (a snapshot from the last server fetch), so panels did not update when the row's action/status changed until the drawer was manually closed and reopened. (2) `repairAutoIssueFinishedLotAction` and `setFinishedLotStatusAction` in `finished-lots/actions.ts` called `revalidatePath("/po-closeout")` (the index only) but not the dynamic detail path, so the detail page row facts only refreshed on tab-refocus (AutoRefreshOnFocus) rather than immediately after the action.
+- **Fix (panels):** `ActionPanels` now calls `deriveApplicableBagActions` directly with the live `row` prop + `allocationOpen` from the fetched detail, so the displayed panels reflect the current server-rendered row facts on every render. `BagDrawer` also adds a `useEffect` keyed on `row.action`, `row.status`, and `row.finishedLotId` that triggers a detail re-fetch whenever those fields change (delivered by `router.refresh()` after revalidation), keeping both the panels and the detail data in sync.
+- **Fix (revalidation):** Added `revalidatePath("/po-closeout/[poId]", "page")` to both `repairAutoIssueFinishedLotAction` and `setFinishedLotStatusAction`, so the dynamic closeout detail page is revalidated immediately after a finished-lot mutation — not just on the next focus event.
+- **Tests:** Structural pins added to `po-closeout-structural.test.ts` (DRAWER-FRESHNESS-1 describe block): (a) action-panels derives keys from the row prop via `deriveApplicableBagActions`, not `detail.applicableActions`; (b) bag-drawer has a row-change effect keyed on action/status/finishedLotId; (c) both finished-lot actions contain the `"/po-closeout/[poId]", "page"` revalidatePath call.
+
 ## [1.29.6] — 2026-08-05
 
 ### Fixed — Bug A: finalized-count derivation undercounts multi-segment runs (phantom remaining tablets)

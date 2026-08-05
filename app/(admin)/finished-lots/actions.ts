@@ -127,6 +127,7 @@ export async function repairAutoIssueFinishedLotAction(workflowBagId: string) {
     revalidatePath("/packaging-output");
     revalidatePath("/finished-lots");
     revalidatePath("/po-closeout");
+    revalidatePath("/po-closeout/[poId]", "page");
     return {
       ok: true as const,
       finishedLotId: result.finishedLotId,
@@ -323,6 +324,7 @@ export async function setFinishedLotStatusAction(payload: unknown) {
     revalidatePath(`/finished-lots/${parsed.data.id}`);
     revalidatePath("/finished-lots");
     revalidatePath("/po-closeout");
+    revalidatePath("/po-closeout/[poId]", "page");
     return { ok: true as const };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Status change failed." };

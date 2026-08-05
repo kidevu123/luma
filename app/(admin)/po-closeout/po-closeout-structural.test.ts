@@ -147,3 +147,44 @@ describe("QUEUE-FIX-1: zoho-actions drawer — surfaces action refusals; disable
     expect(zohoActionsSrc).toMatch(/resolve the blocker first/);
   });
 });
+
+describe("DRAWER-FRESHNESS-1: panel keys track live row facts; finished-lot actions revalidate closeout paths", () => {
+  const drawerSrc = readFileSync(join(__dirname, "_drawer", "bag-drawer.tsx"), "utf8");
+  const panelsSrc = readFileSync(join(__dirname, "_drawer", "action-panels.tsx"), "utf8");
+  const finishedLotActionsSrc = repo("app/(admin)/finished-lots/actions.ts");
+
+  it("action-panels derives keys from the live row prop via deriveApplicableBagActions (not from a one-time snapshot)", () => {
+    // Must import and call deriveApplicableBagActions with row prop fields,
+    // not read keys directly from detail.applicableActions.
+    expect(panelsSrc).toMatch(/deriveApplicableBagActions/);
+    expect(panelsSrc).toMatch(/rowStatus: row\.status/);
+    expect(panelsSrc).toMatch(/rowAction: row\.action/);
+    // allocationOpen comes from the fetched detail, not from a stale snapshot.
+    expect(panelsSrc).toMatch(/allocationOpen: detail\./);
+    // Must NOT use detail.applicableActions as the primary keys source.
+    expect(panelsSrc).not.toMatch(/const keys = detail\.applicableActions/);
+  });
+
+  it("bag-drawer refetches when row action/status/finishedLotId change (not only on mount)", () => {
+    // A useEffect must key on row.action, row.status, and row.finishedLotId
+    // so that a revalidation + router.refresh() triggers a detail re-fetch.
+    expect(drawerSrc).toMatch(/row\.action/);
+    expect(drawerSrc).toMatch(/row\.status/);
+    expect(drawerSrc).toMatch(/row\.finishedLotId/);
+    // prevRowKeyRef (or equivalent tracking) ensures the re-fetch is reactive
+    // to row changes after the initial mount load.
+    expect(drawerSrc).toMatch(/prevRowKeyRef|row\.action[\s\S]{0,400}refetch/);
+  });
+
+  it("repairAutoIssueFinishedLotAction revalidates the dynamic closeout detail path", () => {
+    expect(finishedLotActionsSrc).toMatch(
+      /repairAutoIssueFinishedLotAction[\s\S]{0,600}revalidatePath\("\/po-closeout\/\[poId\]", "page"\)/,
+    );
+  });
+
+  it("setFinishedLotStatusAction revalidates the dynamic closeout detail path", () => {
+    expect(finishedLotActionsSrc).toMatch(
+      /setFinishedLotStatusAction[\s\S]{0,700}revalidatePath\("\/po-closeout\/\[poId\]", "page"\)/,
+    );
+  });
+});
