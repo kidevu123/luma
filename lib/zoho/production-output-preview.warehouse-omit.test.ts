@@ -18,6 +18,7 @@ const BASE_INPUT: ProductionOutputPreviewBuildInput = {
     zohoItemIdUnit: "unit-composite-1",
     zohoItemIdDisplay: null,
     zohoItemIdCase: null,
+    displaysPerCase: null,
   },
   metrics: {
     damagedPackaging: 0,

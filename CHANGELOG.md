@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.29.8] — 2026-08-05
+
+### Fixed — display assembly quantity includes case-embedded displays; fail closed on missing displays-per-case
+
+- **Root cause (lot 1890-29):** Both `mapProductionOutputPreviewQuantities` (quantities module) and `buildProductionOutputPreviewPayload` (preview path) sent `display_assembly_quantity` as the raw loose-display count only. The Zoho gateway plans displays from this quantity, then consumes `cases * displaysPerCase` additional displays from that plan. For lot 1890-29 (9 cases, 25 displays/case, 20 loose displays) Luma sent 20 but the gateway needed 245 (20 + 9 × 25), triggering `BOM_COMPONENT_INSUFFICIENT_STOCK`.
+- **Fix (quantities module):** Added `displaysPerCase: number | null` to `ProductionOutputQuantityBasis`. `display_assembly_quantity` is now computed as `looseDisplays + cases * (displaysPerCase ?? 0)`. When `displaysPerCase` is null/0, falls back to loose-displays-only (safe for no-case products).
+- **Fix (preview path):** Added `displaysPerCase` to `ProductionOutputPreviewBuildInput.product`. Fail-closed blocker (`field: "displays_per_case"`) is surfaced when `casesProduced > 0` and `displaysPerCase` is null or 0, with message "Displays per case missing on product — required to plan case-embedded display assemblies."
+- **Fix (service payload):** `buildProductionOutputServicePayloadFromLuma` threads `payload.product.displays_per_case` through to the quantities mapper. `LumaProductionOutputPayload.product` gains `displays_per_case: number | null`, populated from `products.displaysPerCase` in `loadAndBuildLumaProductionOutputPayload`.
+- **Fix (DB op record):** `opValuesFromPayload` in the consolidated query now derives `displayAssemblyQuantity` via the corrected mapper (was raw `displays_produced ?? 0`).
+- **Tests:** 6 new/updated tests across `production-output-preview-quantities.test.ts` and `production-output-preview.test.ts`. Existing assertions that encoded the old buggy display count were updated with explicit annotation. No committed ops/history touched.
+
 ## [1.29.7] — 2026-08-05
 
 ### Fixed — DRAWER-FRESHNESS-1: drawer panels track live row facts; issue/release actions revalidate closeout paths

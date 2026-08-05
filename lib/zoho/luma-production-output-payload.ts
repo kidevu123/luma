@@ -53,6 +53,9 @@ export type LumaProductionOutputPayload = {
     unit_composite_item_id: string | null;
     display_composite_item_id: string | null;
     case_composite_item_id: string | null;
+    /** Number of displays per case — required for correct display_assembly_quantity
+     *  when cases_produced > 0. Null when the product has no case packaging. */
+    displays_per_case: number | null;
   };
   source_receipts: LumaProductionOutputSourceReceipt[];
   source_receipt_evidence?: LumaProductionOutputSourceReceiptEvidence[];
@@ -139,6 +142,7 @@ type BuildInput = {
     zohoItemIdUnit: string | null;
     zohoItemIdDisplay: string | null;
     zohoItemIdCase: string | null;
+    displaysPerCase: number | null;
   } | null;
   metrics: {
     damagedPackaging: number | null;
@@ -279,6 +283,7 @@ export function buildLumaProductionOutputPayloadFromContext(
       unit_composite_item_id: unitComposite,
       display_composite_item_id: displayComposite,
       case_composite_item_id: caseComposite,
+      displays_per_case: input.product.displaysPerCase,
     },
     source_receipts: sourceReceipts,
     component_batches: componentBatches,
@@ -438,6 +443,7 @@ export async function loadAndBuildLumaProductionOutputPayload(
           zohoItemIdUnit: product.zohoItemIdUnit,
           zohoItemIdDisplay: product.zohoItemIdDisplay,
           zohoItemIdCase: product.zohoItemIdCase,
+          displaysPerCase: product.displaysPerCase ?? null,
         }
       : null,
     metrics,

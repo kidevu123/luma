@@ -554,6 +554,7 @@ async function loadProductionOutputPreviewLot(finishedLotId: string) {
         zohoItemIdUnit: products.zohoItemIdUnit,
         zohoItemIdDisplay: products.zohoItemIdDisplay,
         zohoItemIdCase: products.zohoItemIdCase,
+        displaysPerCase: products.displaysPerCase,
         zohoDefaultWarehouseId: products.zohoDefaultWarehouseId,
       },
       metrics: {

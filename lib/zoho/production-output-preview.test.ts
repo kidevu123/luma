@@ -23,6 +23,7 @@ const BASE_INPUT: ProductionOutputPreviewBuildInput = {
     zohoItemIdUnit: "unit-composite-1",
     zohoItemIdDisplay: "display-composite-1",
     zohoItemIdCase: "case-composite-1",
+    displaysPerCase: 20,
   },
   metrics: {
     damagedPackaging: 2,
@@ -60,7 +61,7 @@ describe("buildProductionOutputPreviewPayload", () => {
       unit_composite_item_id: "unit-composite-1",
       unit_assembly_quantity: 100,
       display_composite_item_id: "display-composite-1",
-      display_assembly_quantity: 5,
+      display_assembly_quantity: 25, // 5 loose + 1 case × 20 displays/case
       case_composite_item_id: "case-composite-1",
       case_assembly_quantity: 1,
       quantity_damaged: 2,
@@ -83,6 +84,7 @@ describe("buildProductionOutputPreviewPayload", () => {
         zohoItemIdUnit: "unit-composite-1",
         zohoItemIdDisplay: null,
         zohoItemIdCase: null,
+        displaysPerCase: null,
       },
     });
     expect(noDisplayCase.ok).toBe(true);
@@ -98,6 +100,7 @@ describe("buildProductionOutputPreviewPayload", () => {
         zohoItemIdUnit: "unit-composite-1",
         zohoItemIdDisplay: null,
         zohoItemIdCase: null,
+        displaysPerCase: null,
       },
     });
     expect(missingDisplay.ok).toBe(false);
@@ -134,6 +137,57 @@ describe("buildProductionOutputPreviewPayload", () => {
       message:
         "ZOHO_WAREHOUSE_ID is not configured and no warehouse ID was entered.",
     });
+  });
+
+  it("surfaces a blocker when cases > 0 but displaysPerCase is null (fail closed)", () => {
+    const result = buildProductionOutputPreviewPayload({
+      ...BASE_INPUT,
+      casesProduced: 3,
+      displaysProduced: 5,
+      product: {
+        ...BASE_INPUT.product!,
+        displaysPerCase: null,
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const blockerFields = result.blockers.map((b) => b.field);
+    expect(blockerFields).toContain("displays_per_case");
+    const blocker = result.blockers.find((b) => b.field === "displays_per_case");
+    expect(blocker?.message).toMatch(/displays per case/i);
+    expect(blocker?.message).toMatch(/case/i);
+  });
+
+  it("does not block when cases > 0 and displaysPerCase is provided", () => {
+    const result = buildProductionOutputPreviewPayload({
+      ...BASE_INPUT,
+      casesProduced: 9,
+      displaysProduced: 20,
+      unitsProduced: 4906,
+      product: {
+        ...BASE_INPUT.product!,
+        displaysPerCase: 25,
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // 1890-29 scenario: 20 loose + 9 × 25 = 245
+    expect(result.payload.display_assembly_quantity).toBe(245);
+  });
+
+  it("does not block when cases is zero regardless of displaysPerCase", () => {
+    const result = buildProductionOutputPreviewPayload({
+      ...BASE_INPUT,
+      casesProduced: 0,
+      displaysProduced: 10,
+      product: {
+        ...BASE_INPUT.product!,
+        displaysPerCase: null,
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.display_assembly_quantity).toBe(10);
   });
 });
 

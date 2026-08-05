@@ -15,6 +15,7 @@ const baseProduct = {
   zohoItemIdUnit: "zoho-unit-1",
   zohoItemIdDisplay: "zoho-display-1",
   zohoItemIdCase: "zoho-case-1",
+  displaysPerCase: null as number | null,
 };
 
 const baseLedgerRow = {

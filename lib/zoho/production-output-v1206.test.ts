@@ -33,6 +33,7 @@ const basePayloadInput = {
     zohoItemIdUnit: "5254962000003150096",
     zohoItemIdDisplay: null,
     zohoItemIdCase: null,
+    displaysPerCase: null,
   },
   metrics: { damagedPackaging: 0, rippedCards: 0, looseCards: 0 },
   ledgerRows: [
@@ -157,6 +158,7 @@ describe("v1.20.6 commit readiness", () => {
       unit_composite_item_id: "5254962000003150096",
       display_composite_item_id: null,
       case_composite_item_id: null,
+      displays_per_case: null,
     },
     source_receipts: [],
     component_batches: [],

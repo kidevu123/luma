@@ -84,6 +84,9 @@ export type ProductionOutputPreviewBuildInput = {
     zohoItemIdUnit: string | null;
     zohoItemIdDisplay: string | null;
     zohoItemIdCase: string | null;
+    /** Number of displays per case — required when casesProduced > 0 to compute
+     *  display_assembly_quantity correctly. Null triggers a fail-closed blocker. */
+    displaysPerCase: number | null;
   } | null;
   metrics?: {
     damagedPackaging: number | null;
@@ -141,8 +144,13 @@ export function buildProductionOutputPreviewPayload(
   const unitCompositeItemId = present(input.product?.zohoItemIdUnit);
   const displayCompositeItemId = present(input.product?.zohoItemIdDisplay);
   const caseCompositeItemId = present(input.product?.zohoItemIdCase);
-  const displayAssemblyQuantity = input.displaysProduced ?? 0;
-  const caseAssemblyQuantity = input.casesProduced ?? 0;
+  const displaysProduced = Math.max(0, input.displaysProduced ?? 0);
+  const caseAssemblyQuantity = Math.max(0, input.casesProduced ?? 0);
+  const displaysPerCase = input.product?.displaysPerCase ?? null;
+  // display_assembly_quantity = loose displays + case-embedded displays.
+  // When casesProduced > 0 and displaysPerCase is null/0, we fail closed (blocker below).
+  const displayAssemblyQuantity =
+    displaysProduced + caseAssemblyQuantity * Math.max(0, displaysPerCase ?? 0);
   const notes = present(input.mapping.notes);
 
   if (!purchaseorderId) {
@@ -182,6 +190,13 @@ export function buildProductionOutputPreviewPayload(
       message: "Product is missing Zoho case composite item ID.",
     });
   }
+  if (caseAssemblyQuantity > 0 && !(displaysPerCase != null && displaysPerCase > 0)) {
+    blockers.push({
+      field: "displays_per_case",
+      message:
+        "Displays per case missing on product — required to plan case-embedded display assemblies.",
+    });
+  }
   if (notes && notes.length > 1000) {
     blockers.push({
       field: "notes",
@@ -191,11 +206,13 @@ export function buildProductionOutputPreviewPayload(
 
   if (blockers.length > 0) return { ok: false, blockers };
 
+  // Pass raw displaysProduced and displaysPerCase — the mapper computes the total.
   const mappedQty = mapProductionOutputPreviewQuantities({
     unitsProduced: input.unitsProduced,
-    displaysProduced: displayAssemblyQuantity,
+    displaysProduced: displaysProduced,
     casesProduced: caseAssemblyQuantity,
     looseCards: input.metrics?.looseCards ?? null,
+    displaysPerCase: displaysPerCase,
   });
 
   // WAREHOUSE-CAPABILITY-v1.4.0 — payload.warehouse_id is OMITTED

@@ -42,6 +42,7 @@ export function buildProductionOutputServicePayloadFromLuma(
     displaysProduced: payload.output.displays_produced,
     casesProduced: payload.output.cases_produced,
     looseCards: payload.output.loose_cards,
+    displaysPerCase: payload.product.displays_per_case,
   });
 
   const evidence = payload.source_receipt_evidence ?? [];

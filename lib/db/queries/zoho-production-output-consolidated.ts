@@ -216,7 +216,13 @@ function opValuesFromPayload(
     zohoCaseCompositeItemId: payload.product.case_composite_item_id,
     quantityGood: payload.output.units_produced,
     unitAssemblyQuantity: payload.output.units_produced,
-    displayAssemblyQuantity: payload.output.displays_produced ?? 0,
+    displayAssemblyQuantity: mapProductionOutputPreviewQuantities({
+      unitsProduced: payload.output.units_produced,
+      displaysProduced: payload.output.displays_produced,
+      casesProduced: payload.output.cases_produced,
+      looseCards: payload.output.loose_cards,
+      displaysPerCase: payload.product.displays_per_case,
+    }).display_assembly_quantity,
     caseAssemblyQuantity: payload.output.cases_produced ?? 0,
     quantityDamaged: metricsKnown ? payload.output.damaged_packaging : null,
     quantityRipped: metricsKnown ? payload.output.ripped_cards : null,
@@ -226,6 +232,7 @@ function opValuesFromPayload(
           displaysProduced: payload.output.displays_produced,
           casesProduced: payload.output.cases_produced,
           looseCards: payload.output.loose_cards,
+          displaysPerCase: payload.product.displays_per_case,
         }).quantity_loose
       : null,
     quantityBasis: {

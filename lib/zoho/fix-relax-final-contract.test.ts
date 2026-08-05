@@ -94,6 +94,7 @@ describe("FIX Relax source allocation opts", () => {
       displaysProduced: 0,
       casesProduced: 0,
       looseCards: 10,
+      displaysPerCase: null,
     });
     expect(mapped.quantity_good).toBe(10);
     expect(mapped.quantity_loose).toBe(0);

@@ -41,6 +41,7 @@ function fixRelaxLumaPayload(): LumaProductionOutputPayload {
       unit_composite_item_id: FIX_RELAX_UNIT_COMPOSITE_ITEM_ID,
       display_composite_item_id: null,
       case_composite_item_id: null,
+      displays_per_case: null,
     },
     source_receipts: [
       {

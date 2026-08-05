@@ -135,6 +135,7 @@ describe("callProductionOutputCommit guard", () => {
         zohoItemIdUnit: "unit-1",
         zohoItemIdDisplay: null,
         zohoItemIdCase: null,
+        displaysPerCase: null,
       },
       ledgerRows: [
         {

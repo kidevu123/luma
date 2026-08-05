@@ -180,6 +180,7 @@ describe("production-output assembly-only gate", () => {
       displaysProduced: null,
       casesProduced: null,
       looseCards: 10,
+      displaysPerCase: null,
     });
     expect(mapped.quantity_good).toBe(10);
     expect(mapped.quantity_loose).toBe(0);
