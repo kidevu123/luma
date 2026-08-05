@@ -60,7 +60,13 @@ export type BagCloseoutDetail = {
   crossCheck: PoOutputComparisonLine | null;
   zohoReadiness: {
     setup: ProductSetupReadiness | null;
-    op: { id: string; status: string } | null;
+    /** Active op with its commit evidence fields when status=COMMITTED. */
+    op: {
+      id: string;
+      status: string;
+      committedAt: Date | null;
+      externalReferenceId: string | null;
+    } | null;
   };
   adminActions: BagCloseoutAdminAction[];
   applicableActions: BagDrawerActionKey[];
@@ -149,10 +155,22 @@ export async function loadBagCloseoutDetail(args: {
       });
     }
   }
-  let op: { id: string; status: string } | null = null;
+  let op: {
+    id: string;
+    status: string;
+    committedAt: Date | null;
+    externalReferenceId: string | null;
+  } | null = null;
   if (row.finishedLotId) {
     const activeOp = await getActiveZohoProductionOutputOpForLot(row.finishedLotId);
-    op = activeOp ? { id: activeOp.id, status: activeOp.status } : null;
+    op = activeOp
+      ? {
+          id: activeOp.id,
+          status: activeOp.status,
+          committedAt: activeOp.committedAt ?? null,
+          externalReferenceId: activeOp.externalReferenceId ?? null,
+        }
+      : null;
   }
 
   // Admin action trail — audit rows for the bag itself plus its workflow /

@@ -455,7 +455,7 @@ describe("first-deploy env posture — end-to-end behaviour", () => {
       env: FIRST_DEPLOY_ENV,
       now: new Date("2026-06-15T12:00:00Z"),
       loadRawBagEligible: async () => [{ id: "ignored" }],
-      loadProductionOutputEligible: async () => [{ id: "ignored" }],
+      loadProductionOutputEligible: async () => [{ id: "ignored", payloadKind: "preview" }],
     });
     expect(result.gates.autoCommitEnabled).toBe(false);
     expect(result.rows).toEqual([]);
@@ -468,7 +468,7 @@ describe("first-deploy env posture — end-to-end behaviour", () => {
       env: { ...FIRST_DEPLOY_ENV, ZOHO_AUTO_COMMIT_ENABLED: "true" },
       now: new Date("2026-06-15T12:00:00Z"),
       loadRawBagEligible: async () => [{ id: "rb-1" }, { id: "rb-2" }],
-      loadProductionOutputEligible: async () => [{ id: "po-1" }],
+      loadProductionOutputEligible: async () => [{ id: "po-1", payloadKind: "preview" }],
       commitRawBag: commitRawBag as never,
       commitProductionOutput: commitPo as never,
     });

@@ -52,10 +52,22 @@ export function VerifyPanel({ detail }: { detail: BagCloseoutDetail }) {
             Zoho readiness
           </p>
           {zohoReadiness.op ? (
-            <p className="mt-1 text-[11px]">
-              Active op: <span className="font-mono text-[10px]">{zohoReadiness.op.id.slice(0, 8)}</span>{" "}
-              — <span className="font-medium">{zohoReadiness.op.status}</span>
-            </p>
+            <>
+              <p className="mt-1 text-[11px]">
+                Active op: <span className="font-mono text-[10px]">{zohoReadiness.op.id.slice(0, 8)}</span>{" "}
+                — <span className="font-medium">{zohoReadiness.op.status}</span>
+              </p>
+              {zohoReadiness.op.status === "COMMITTED" &&
+              zohoReadiness.op.committedAt != null ? (
+                <p className="mt-0.5 text-[10.5px] text-good-700">
+                  Committed to Zoho{" "}
+                  {formatDateTimeEst(zohoReadiness.op.committedAt as unknown as string)}
+                  {zohoReadiness.op.externalReferenceId ? (
+                    <> — ref {zohoReadiness.op.externalReferenceId}</>
+                  ) : null}
+                </p>
+              ) : null}
+            </>
           ) : (
             <p className="mt-1 text-[11px] text-text-muted">No active Zoho op for this bag&apos;s lot.</p>
           )}

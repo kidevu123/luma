@@ -126,3 +126,44 @@ describe("Check constraint is satisfied for every consolidated insert site, not 
     expect(src).toMatch(/zoho_prod_output_ops_case_item_check/);
   });
 });
+
+describe("QUEUE-ELIGIBILITY-STAMP-1: queueConsolidatedProductionOutputOp stamps auto_commit_eligible_at", () => {
+  // Regression pin for the v1.29.10 incident: queueConsolidatedProductionOutputOp
+  // set status=QUEUED but did NOT stamp autoCommitEligibleAt. The sweep's
+  // eligibility predicate requires auto_commit_eligible_at <= now(), so
+  // admin-queued consolidated ops were never picked up by the cron.
+  // Fix: stamp autoCommitEligibleAt = now in the queue UPDATE so the next
+  // cron pass sees the row as eligible immediately.
+
+  it("queueConsolidatedProductionOutputOp stamps autoCommitEligibleAt in the .set() update", () => {
+    // The update must include autoCommitEligibleAt alongside status: 'QUEUED'.
+    const queueFnStart = src.indexOf("export async function queueConsolidatedProductionOutputOp");
+    expect(queueFnStart).toBeGreaterThan(-1);
+    // Slice 2000 chars to cover the full function body (function is ~1400 chars).
+    const queueFnBody = src.slice(queueFnStart, queueFnStart + 2000);
+    expect(queueFnBody).toMatch(/autoCommitEligibleAt/);
+    // The value must be `now` (the local Date), not null.
+    expect(queueFnBody).not.toMatch(/autoCommitEligibleAt:\s*null/);
+  });
+
+  it("the stamp is inside the queueConsolidatedProductionOutputOp .set() block (not elsewhere)", () => {
+    // Locate the .set({ ... }) block in queueConsolidatedProductionOutputOp
+    // and verify autoCommitEligibleAt is in it.
+    const queueFnStart = src.indexOf("export async function queueConsolidatedProductionOutputOp");
+    const setStart = src.indexOf(".set({", queueFnStart);
+    // Find the matching closing brace: count balanced braces from setStart.
+    let depth = 0;
+    let setEnd = setStart;
+    for (let i = setStart; i < src.length && i < setStart + 2000; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") { depth--; if (depth === 0) { setEnd = i; break; } }
+    }
+    expect(setStart).toBeGreaterThan(queueFnStart);
+    const setBlock = src.slice(setStart, setEnd + 1);
+    expect(setBlock).toMatch(/autoCommitEligibleAt/);
+  });
+
+  it("QUEUE-ELIGIBILITY-STAMP-1 marker comment is present near the stamp for future readers", () => {
+    expect(src).toMatch(/QUEUE-ELIGIBILITY-STAMP-1/);
+  });
+});

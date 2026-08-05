@@ -1090,6 +1090,12 @@ export async function queueConsolidatedProductionOutputOp(
       commitIdempotencyKey: idempotencyKey,
       commitRequestedAt: now,
       commitRequestedByUserId: actor.id,
+      // QUEUE-ELIGIBILITY-STAMP-1: admin queueing IS the approval for
+      // consolidated ops — stamp eligibility immediately so the next
+      // auto-commit sweep pass picks this op up. Without this stamp the
+      // eligibility predicate (auto_commit_eligible_at <= now()) never
+      // matches and the cron skips the row forever.
+      autoCommitEligibleAt: now,
       updatedAt: now,
     })
     .where(eq(zohoProductionOutputOps.id, opId))

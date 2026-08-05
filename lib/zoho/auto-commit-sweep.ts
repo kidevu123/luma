@@ -47,6 +47,7 @@ import {
   type SharedProductionOutputCommitResult,
 } from "@/lib/zoho/shared-production-output-commit";
 import { callProductionOutputCommit } from "@/lib/zoho/production-output-service-client";
+import { processConsolidatedProductionOutputCommit } from "@/lib/db/queries/zoho-production-output-consolidated";
 import type { ProductionOutputPreviewPayload } from "@/lib/zoho/production-output-preview";
 import type { CurrentUser } from "@/lib/auth";
 
@@ -110,20 +111,37 @@ export type SweepSummary = {
   totals: Record<SweepOutcome, number>;
 };
 
+/** Result shape returned by the consolidated commit callable (dep injection). */
+export type ConsolidatedProductionOutputCommitResult =
+  | { ok: true; externalReferenceId: string | null }
+  | { ok: false; reason: string; phase: "claim" | "gateway" | "complete" };
+
+/** Injectable callable wrapping processConsolidatedProductionOutputCommit. */
+export type ConsolidatedProductionOutputCommitCallable = (
+  opId: string,
+  actor: CurrentUser,
+) => Promise<ConsolidatedProductionOutputCommitResult>;
+
 export type AutoCommitSweepDependencies = {
   /** Inject these for tests; defaults call the real DB / commit fns. */
   loadRawBagEligible?: (now: Date, limit: number) => Promise<Array<{ id: string }>>;
+  /** Returns eligible production-output op ids WITH their payload_kind so the
+   *  sweep can route consolidated ops to the consolidated commit path. */
   loadProductionOutputEligible?: (
     now: Date,
     limit: number,
-  ) => Promise<Array<{ id: string }>>;
+  ) => Promise<Array<{ id: string; payloadKind: string }>>;
   /** Returns the subset of production-output op ids whose PO is in a Zoho
    *  terminal state (received/closed/billed/cancelled — see ZOHO_TERMINAL_STATUSES
    *  in lib/production/po-closeout.ts). Those ops are skipped — pushing output
    *  to a closed Zoho PO fails on Zoho's side. */
   loadZohoClosedPoOpIds?: (opIds: string[]) => Promise<Set<string>>;
   commitRawBag?: typeof sharedCommitRawBagReceive;
+  /** Legacy (non-consolidated) production-output commit path. */
   commitProductionOutput?: typeof sharedCommitProductionOutputOp;
+  /** Consolidated production-output commit path. Defaults to
+   *  processConsolidatedProductionOutputCommit. */
+  commitConsolidatedProductionOutput?: ConsolidatedProductionOutputCommitCallable;
   productionOutputCallable?: ProductionOutputCommitCallable;
   env?: Record<string, string | undefined>;
   now?: Date;
@@ -150,7 +168,10 @@ async function defaultLoadRawBagEligible(now: Date, limit: number) {
 
 async function defaultLoadProductionOutputEligible(now: Date, limit: number) {
   return db
-    .select({ id: zohoProductionOutputOps.id })
+    .select({
+      id: zohoProductionOutputOps.id,
+      payloadKind: zohoProductionOutputOps.payloadKind,
+    })
     .from(zohoProductionOutputOps)
     .where(
       and(
@@ -182,6 +203,20 @@ const defaultProductionOutputCallable: ProductionOutputCommitCallable = async (i
     message: result.message,
   };
 };
+
+/** Default consolidated commit callable — wraps processConsolidatedProductionOutputCommit
+ *  and normalises its result into the sweep's ConsolidatedProductionOutputCommitResult shape. */
+const defaultCommitConsolidatedProductionOutput: ConsolidatedProductionOutputCommitCallable =
+  async (opId, actor) => {
+    const result = await processConsolidatedProductionOutputCommit(opId, actor);
+    if (result.ok) {
+      return {
+        ok: true,
+        externalReferenceId: result.op.externalReferenceId ?? null,
+      };
+    }
+    return { ok: false, reason: result.error, phase: result.phase };
+  };
 
 async function defaultLoadZohoClosedPoOpIds(opIds: string[]): Promise<Set<string>> {
   if (opIds.length === 0) return new Set();
@@ -250,6 +285,24 @@ function classifyRawBagResult(result: SharedRawBagCommitResult): {
     }
   }
   return { outcome: "permanent_failure", detail: "Unknown outcome" };
+}
+
+/** Map a consolidated commit result (simpler shape — no review/mapping
+ *  classification; those blockers surface as claim-phase state_blocked) into
+ *  the sweep's SweepOutcome buckets. */
+function classifyConsolidatedCommitResult(
+  result: ConsolidatedProductionOutputCommitResult,
+): { outcome: SweepOutcome; detail: string | null } {
+  if (result.ok) {
+    return { outcome: "committed", detail: result.externalReferenceId };
+  }
+  // claim-phase failures map to state_blocked (op not in the right state,
+  // commit gate off, etc.).  gateway/complete failures are permanent_failure
+  // — human needs to investigate the Zoho response.
+  if (result.phase === "claim") {
+    return { outcome: "state_blocked", detail: result.reason };
+  }
+  return { outcome: "permanent_failure", detail: result.reason };
 }
 
 function classifyProductionOutputResult(
@@ -342,7 +395,7 @@ export async function runAutoCommitSweep(
     poEligible.map((o) => o.id),
   );
 
-  for (const { id } of poEligible) {
+  for (const { id, payloadKind } of poEligible) {
     if (!gates.productionOutputWritesAllowed) {
       rows.push({
         surface: "production_output",
@@ -363,16 +416,31 @@ export async function runAutoCommitSweep(
       totals.skipped_po_zoho_closed += 1;
       continue;
     }
-    const commit = deps.commitProductionOutput ?? sharedCommitProductionOutputOp;
-    const result = await commit({
-      opId: id,
-      source: "auto",
-      actor: CRON_PRODUCTION_OUTPUT_ACTOR,
-      callable: deps.productionOutputCallable ?? defaultProductionOutputCallable,
-    });
-    const { outcome, detail } = classifyProductionOutputResult(result);
-    rows.push({ surface: "production_output", opId: id, outcome, detail });
-    totals[outcome] += 1;
+
+    // CONSOLIDATED-SWEEP-ROUTE-1: route by payload_kind so consolidated ops
+    // never hit the legacy approval validation (status=APPROVED +
+    // approvedRequestHash match) that they can never satisfy. Consolidated
+    // ops carry status=QUEUED and no approvedRequestHash — they use their
+    // own claim/commit path.
+    if (payloadKind === "consolidated") {
+      const commitConsolidated =
+        deps.commitConsolidatedProductionOutput ?? defaultCommitConsolidatedProductionOutput;
+      const result = await commitConsolidated(id, CRON_PRODUCTION_OUTPUT_ACTOR);
+      const { outcome, detail } = classifyConsolidatedCommitResult(result);
+      rows.push({ surface: "production_output", opId: id, outcome, detail });
+      totals[outcome] += 1;
+    } else {
+      const commit = deps.commitProductionOutput ?? sharedCommitProductionOutputOp;
+      const result = await commit({
+        opId: id,
+        source: "auto",
+        actor: CRON_PRODUCTION_OUTPUT_ACTOR,
+        callable: deps.productionOutputCallable ?? defaultProductionOutputCallable,
+      });
+      const { outcome, detail } = classifyProductionOutputResult(result);
+      rows.push({ surface: "production_output", opId: id, outcome, detail });
+      totals[outcome] += 1;
+    }
   }
 
   return {

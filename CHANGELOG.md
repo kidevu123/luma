@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.29.10] — 2026-08-05
+
+### Fixed — CONSOLIDATED-SWEEP-ROUTE-1: consolidated ops were never auto-committable — queue eligibility stamp + sweep routing by payload kind; drawer shows commit evidence
+
+- **Root cause (active — op 7aaf60a5):** Two independent bugs conspired to keep consolidated ops (payload_kind='consolidated') stuck in QUEUED forever. (1) `queueConsolidatedProductionOutputOp` stamped status=QUEUED but never set `auto_commit_eligible_at`, so the sweep's eligibility predicate (`auto_commit_eligible_at <= now()`) never matched — the cron skipped the row on every pass. (2) When an op did reach the sweep, it was committed through `sharedCommitProductionOutputOp` which demands status=APPROVED and a matching `approvedRequestHash`. Consolidated ops carry status=QUEUED and no `approvedRequestHash` → `APPROVED_HASH_MISMATCH` every time.
+- **Fix (Bug 1 — queue eligibility stamp):** `queueConsolidatedProductionOutputOp` now stamps `autoCommitEligibleAt: now` in the QUEUED update. Admin queueing IS the approval for consolidated ops — the cron commits on its next pass without any additional wait.
+- **Fix (Bug 2 — sweep routing by payload_kind):** `runAutoCommitSweep` now loads `payloadKind` alongside each eligible op's id. In the production-output pass, ops with `payloadKind='consolidated'` are routed to `processConsolidatedProductionOutputCommit` (via new injectable `commitConsolidatedProductionOutput` dep); all other payload kinds continue through `sharedCommitProductionOutputOp`. Claim-phase failures from the consolidated path map to `state_blocked`; gateway/complete failures map to `permanent_failure`. The null-actor safety invariant (CRON-ACTOR-PIN-1) applies to the consolidated path.
+- **Fix (Bug 3 — drawer commit evidence):** The PO-closeout bag drawer's ZOHO READINESS box now shows committed timestamp and Zoho reference when the active op is COMMITTED: "Committed to Zoho 8/5/2026, 12:10 PM — ref 5254962000007…". `BagCloseoutDetail.zohoReadiness.op` gains `committedAt` and `externalReferenceId` fields threaded from `getActiveZohoProductionOutputOpForLot`. Other op statuses are unchanged.
+- **Tests:** 10 new sweep-routing tests (CONSOLIDATED-SWEEP-ROUTE-1 in `auto-commit-sweep.test.ts`): consolidated path invoked/not legacy; mixed batch; claim/gateway failure classification; CRON-ACTOR-PIN-1 on consolidated path. 3 new structural source-pin tests (QUEUE-ELIGIBILITY-STAMP-1 in the consolidated contract test file). 4 new structural pin tests (COMMIT-EVIDENCE-1 in `po-closeout-structural.test.ts`). Existing phase-h and sweep tests updated to supply `payloadKind` on eligible loader rows. Total: 89 test files, 1226 passed.
+
 ## [1.29.9] - 2026-08-05
 
 ### Fixed

@@ -188,3 +188,37 @@ describe("DRAWER-FRESHNESS-1: panel keys track live row facts; finished-lot acti
     );
   });
 });
+
+describe("COMMIT-EVIDENCE-1: zoho readiness box shows committed timestamp + ref when op is COMMITTED", () => {
+  // Operator request: after auto-commit, the drawer must display proof of
+  // commit (timestamp + Zoho reference) instead of just the status label.
+  const verifyPanelSrc = readFileSync(join(__dirname, "_drawer", "verify-panel.tsx"), "utf8");
+  const bagCloseoutDetailSrc = repo("lib/db/queries/bag-closeout-detail.ts");
+
+  it("verify-panel guards on status === 'COMMITTED' before rendering commit evidence", () => {
+    expect(verifyPanelSrc).toMatch(/status === "COMMITTED"/);
+  });
+
+  it("verify-panel renders committed timestamp via formatDateTimeEst when committedAt is set", () => {
+    // Must check committedAt != null before rendering.
+    expect(verifyPanelSrc).toMatch(/committedAt/);
+    expect(verifyPanelSrc).toMatch(/formatDateTimeEst/);
+    // Must render the human copy "Committed to Zoho".
+    expect(verifyPanelSrc).toMatch(/Committed to Zoho/);
+  });
+
+  it("verify-panel renders externalReferenceId when present", () => {
+    expect(verifyPanelSrc).toMatch(/externalReferenceId/);
+    // Renders it with a label such as "ref".
+    expect(verifyPanelSrc).toMatch(/ref\s/);
+  });
+
+  it("bag-closeout-detail threads committedAt and externalReferenceId into the op field", () => {
+    // The op shape in BagCloseoutDetail must include both fields.
+    expect(bagCloseoutDetailSrc).toMatch(/committedAt/);
+    expect(bagCloseoutDetailSrc).toMatch(/externalReferenceId/);
+    // Both fields must be populated from getActiveZohoProductionOutputOpForLot result.
+    expect(bagCloseoutDetailSrc).toMatch(/activeOp\.committedAt/);
+    expect(bagCloseoutDetailSrc).toMatch(/activeOp\.externalReferenceId/);
+  });
+});

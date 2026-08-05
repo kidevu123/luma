@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { runAutoCommitSweep } from "./auto-commit-sweep";
+import type { ConsolidatedProductionOutputCommitResult } from "./auto-commit-sweep";
 import { ZOHO_TERMINAL_STATUS_LIST } from "@/lib/production/po-closeout";
 import type {
   ProductionOutputCommitCallable,
@@ -143,7 +144,7 @@ describe("runAutoCommitSweep — guard-blocked: no claim, no retry-budget burn",
       },
       now: NOW,
       loadRawBagEligible: async () => [],
-      loadProductionOutputEligible: async () => [{ id: "po-1" }],
+      loadProductionOutputEligible: async () => [{ id: "po-1", payloadKind: "preview" }],
       commitProductionOutput: commitPo as never,
     });
     expect(commitPo).not.toHaveBeenCalled();
@@ -174,7 +175,7 @@ describe("runAutoCommitSweep — claims eligible rows", () => {
       env: ENABLED_PO_ONLY,
       now: NOW,
       loadRawBagEligible: async () => [],
-      loadProductionOutputEligible: async () => [{ id: "po-1" }],
+      loadProductionOutputEligible: async () => [{ id: "po-1", payloadKind: "preview" }],
       commitProductionOutput: commitPo as never,
     });
     expect(commitPo).toHaveBeenCalledTimes(1);
@@ -263,8 +264,8 @@ describe("runAutoCommitSweep — outcome classification", () => {
       now: NOW,
       loadRawBagEligible: async () => [],
       loadProductionOutputEligible: async () => [
-        { id: "po-needs-review" },
-        { id: "po-committed" },
+        { id: "po-needs-review", payloadKind: "preview" },
+        { id: "po-committed", payloadKind: "preview" },
       ],
       commitProductionOutput: async (input) => {
         if (input.opId === "po-needs-review") {
@@ -295,7 +296,7 @@ describe("runAutoCommitSweep — idempotency invariants", () => {
       env: ENABLED_ALL,
       now: NOW,
       loadRawBagEligible: async () => [{ id: "r" }],
-      loadProductionOutputEligible: async () => [{ id: "p" }],
+      loadProductionOutputEligible: async () => [{ id: "p", payloadKind: "preview" }],
       commitRawBag: commitRawBag as never,
       commitProductionOutput: commitPo as never,
     });
@@ -331,7 +332,7 @@ describe("runAutoCommitSweep — gates-off → no live gateway call", () => {
       },
       now: NOW,
       loadRawBagEligible: async () => [],
-      loadProductionOutputEligible: async () => [{ id: "p" }],
+      loadProductionOutputEligible: async () => [{ id: "p", payloadKind: "preview" }],
       productionOutputCallable: callable,
     });
     expect(callable).not.toHaveBeenCalled();
@@ -381,7 +382,7 @@ describe("runAutoCommitSweep — Zoho-closed PO skip", () => {
       env: ENABLED_PO_ONLY,
       now: NOW,
       loadRawBagEligible: async () => [],
-      loadProductionOutputEligible: async () => [{ id: "op-1" }, { id: "op-2" }],
+      loadProductionOutputEligible: async () => [{ id: "op-1", payloadKind: "preview" }, { id: "op-2", payloadKind: "preview" }],
       loadZohoClosedPoOpIds: async (ids) => new Set(ids.filter((i) => i === "op-1")),
       commitProductionOutput: commitSpy as never,
       productionOutputCallable: vi.fn() as never,
@@ -450,7 +451,7 @@ describe("CRON-ACTOR-PIN-1: cron never passes enum-invalid roles or fabricated U
       env: ENABLED_PO_ONLY,
       now: NOW,
       loadRawBagEligible: async () => [],
-      loadProductionOutputEligible: async () => [{ id: "po-cron-pin" }],
+      loadProductionOutputEligible: async () => [{ id: "po-cron-pin", payloadKind: "preview" }],
       commitProductionOutput: commitPo as never,
     });
     expect(capturedActors).toHaveLength(1);
@@ -458,6 +459,143 @@ describe("CRON-ACTOR-PIN-1: cron never passes enum-invalid roles or fabricated U
     // id must be null (zero-UUID "00000000-..." has no row in users.id → FK violation)
     expect(actor.id).toBeNull();
     // role must be null OR a valid enum member — never a non-member string
+    expect(actor.role === null || VALID_USER_ROLES.has(actor.role as string)).toBe(true);
+  });
+});
+
+describe("CONSOLIDATED-SWEEP-ROUTE-1: sweep routes consolidated ops via consolidated path, legacy via shared path", () => {
+  // Regression pin for the incident where consolidated ops (payload_kind='consolidated',
+  // status=QUEUED, no approvedRequestHash) were sent through sharedCommitProductionOutputOp
+  // which demands status=APPROVED + approvedRequestHash matching requestHash → APPROVED_HASH_MISMATCH
+  // forever. Consolidated ops must go through their own commit path.
+
+  it("consolidated op: commitConsolidatedProductionOutput is invoked, NOT commitProductionOutput", async () => {
+    const commitConsolidated = vi.fn(async (opId: string): Promise<ConsolidatedProductionOutputCommitResult> => ({
+      ok: true,
+      externalReferenceId: "EXT-consolidated-1",
+    }));
+    const commitLegacy = vi.fn(async (input: { opId: string }) => okPoCommit(input.opId));
+
+    const summary = await runAutoCommitSweep({
+      env: ENABLED_PO_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [],
+      loadProductionOutputEligible: async () => [{ id: "cons-op-1", payloadKind: "consolidated" }],
+      commitConsolidatedProductionOutput: commitConsolidated,
+      commitProductionOutput: commitLegacy as never,
+    });
+
+    expect(commitConsolidated).toHaveBeenCalledTimes(1);
+    expect(commitConsolidated).toHaveBeenCalledWith("cons-op-1", expect.objectContaining({ id: null, role: null }));
+    expect(commitLegacy).not.toHaveBeenCalled();
+    expect(summary.totals.committed).toBe(1);
+    expect(summary.rows[0]!.detail).toBe("EXT-consolidated-1");
+  });
+
+  it("legacy op (payload_kind='preview'): commitProductionOutput is invoked, NOT commitConsolidatedProductionOutput", async () => {
+    const commitConsolidated = vi.fn(async (): Promise<ConsolidatedProductionOutputCommitResult> => ({
+      ok: true,
+      externalReferenceId: null,
+    }));
+    const commitLegacy = vi.fn(async (input: { opId: string }) => okPoCommit(input.opId));
+
+    const summary = await runAutoCommitSweep({
+      env: ENABLED_PO_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [],
+      loadProductionOutputEligible: async () => [{ id: "legacy-op-1", payloadKind: "preview" }],
+      commitConsolidatedProductionOutput: commitConsolidated,
+      commitProductionOutput: commitLegacy as never,
+    });
+
+    expect(commitLegacy).toHaveBeenCalledTimes(1);
+    expect(commitConsolidated).not.toHaveBeenCalled();
+    expect(summary.totals.committed).toBe(1);
+  });
+
+  it("mixed batch: consolidated op commits via consolidated path, legacy op via shared path, both committed", async () => {
+    const commitConsolidated = vi.fn(async (opId: string): Promise<ConsolidatedProductionOutputCommitResult> => ({
+      ok: true,
+      externalReferenceId: `EXT-cons-${opId}`,
+    }));
+    const commitLegacy = vi.fn(async (input: { opId: string }) => okPoCommit(input.opId));
+
+    const summary = await runAutoCommitSweep({
+      env: ENABLED_PO_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [],
+      loadProductionOutputEligible: async () => [
+        { id: "cons-op-2", payloadKind: "consolidated" },
+        { id: "legacy-op-2", payloadKind: "preview" },
+      ],
+      commitConsolidatedProductionOutput: commitConsolidated,
+      commitProductionOutput: commitLegacy as never,
+    });
+
+    expect(commitConsolidated).toHaveBeenCalledTimes(1);
+    expect(commitConsolidated.mock.calls[0]![0]).toBe("cons-op-2");
+    expect(commitLegacy).toHaveBeenCalledTimes(1);
+    expect(commitLegacy.mock.calls[0]![0].opId).toBe("legacy-op-2");
+    expect(summary.totals.committed).toBe(2);
+  });
+
+  it("consolidated claim-phase failure maps to state_blocked (not permanent_failure)", async () => {
+    const commitConsolidated = vi.fn(async (): Promise<ConsolidatedProductionOutputCommitResult> => ({
+      ok: false,
+      reason: "Op is in status COMMITTING; cannot claim.",
+      phase: "claim",
+    }));
+
+    const summary = await runAutoCommitSweep({
+      env: ENABLED_PO_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [],
+      loadProductionOutputEligible: async () => [{ id: "cons-op-3", payloadKind: "consolidated" }],
+      commitConsolidatedProductionOutput: commitConsolidated,
+    });
+
+    expect(summary.totals.state_blocked).toBe(1);
+    expect(summary.rows[0]!.outcome).toBe("state_blocked");
+    expect(summary.rows[0]!.detail).toContain("COMMITTING");
+  });
+
+  it("consolidated gateway-phase failure maps to permanent_failure", async () => {
+    const commitConsolidated = vi.fn(async (): Promise<ConsolidatedProductionOutputCommitResult> => ({
+      ok: false,
+      reason: "Zoho returned 422 Unknown item.",
+      phase: "gateway",
+    }));
+
+    const summary = await runAutoCommitSweep({
+      env: ENABLED_PO_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [],
+      loadProductionOutputEligible: async () => [{ id: "cons-op-4", payloadKind: "consolidated" }],
+      commitConsolidatedProductionOutput: commitConsolidated,
+    });
+
+    expect(summary.totals.permanent_failure).toBe(1);
+    expect(summary.rows[0]!.outcome).toBe("permanent_failure");
+  });
+
+  it("CRON-ACTOR-PIN-1 applies to consolidated path: actor.id === null, actor.role === null", async () => {
+    const capturedActors: Array<{ id: unknown; role: unknown }> = [];
+    const commitConsolidated = vi.fn(async (_opId: string, actor: { id: unknown; role: unknown }): Promise<ConsolidatedProductionOutputCommitResult> => {
+      capturedActors.push({ id: actor.id, role: actor.role });
+      return { ok: true, externalReferenceId: null };
+    });
+
+    await runAutoCommitSweep({
+      env: ENABLED_PO_ONLY,
+      now: NOW,
+      loadRawBagEligible: async () => [],
+      loadProductionOutputEligible: async () => [{ id: "cons-actor-pin", payloadKind: "consolidated" }],
+      commitConsolidatedProductionOutput: commitConsolidated as never,
+    });
+
+    expect(capturedActors).toHaveLength(1);
+    const actor = capturedActors[0]!;
+    expect(actor.id).toBeNull();
     expect(actor.role === null || VALID_USER_ROLES.has(actor.role as string)).toBe(true);
   });
 });
