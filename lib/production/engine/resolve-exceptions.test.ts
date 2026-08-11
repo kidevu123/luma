@@ -77,4 +77,23 @@ describe("evaluateChecks", () => {
     const blockers = blockersFromChecks(evaluateChecks(facts({ operationResolved: false })));
     expect(blockers[0]?.supervisorDetail).toContain("route");
   });
+
+  // The three inverted checks each pass when their fact is FALSE. Setting
+  // them one at a time is what catches a cross-wired inversion — e.g. the
+  // paused check reading bagOnHold. A test that leaves all three at the
+  // same default cannot distinguish them.
+  it.each([
+    ["bagOnHold", "hold", "BAG_ON_HOLD"],
+    ["bagPaused", "paused", "BAG_PAUSED"],
+    ["bagFinalized", "finalized", "BAG_FINALIZED"],
+  ] as const)(
+    "fails only the %s check when that fact alone is true",
+    (factKey, checkId, code) => {
+      const checks = evaluateChecks(facts({ [factKey]: true }));
+      const failed = checks.filter((c) => !c.passed);
+      expect(failed).toHaveLength(1);
+      expect(failed[0]?.id).toBe(checkId);
+      expect(failed[0]?.blocker?.code).toBe(code);
+    },
+  );
 });
