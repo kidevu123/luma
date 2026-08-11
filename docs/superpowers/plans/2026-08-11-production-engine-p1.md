@@ -88,15 +88,46 @@ describe("bagStageToQueueStageKey", () => {
 
 describe("queueStageKeyToBagStage", () => {
   it("maps the sealing queue back to the bag stage that enters it", () => {
-    expect(queueStageKeyToBagStage("SEALING_QUEUE")).toBe("BLISTERED");
+    expect(queueStageKeyToBagStage("SEALING_QUEUE", "CARD_BLISTER")).toBe("BLISTERED");
   });
 
   it("maps the finished-goods queue to FINALIZED", () => {
-    expect(queueStageKeyToBagStage("FINISHED_GOODS_QUEUE")).toBe("FINALIZED");
+    expect(queueStageKeyToBagStage("FINISHED_GOODS_QUEUE", "CARD_BLISTER")).toBe(
+      "FINALIZED",
+    );
   });
 
   it("returns null for staging keys that have no bag-stage equivalent", () => {
-    expect(queueStageKeyToBagStage("POST_BLISTER_STAGING")).toBeNull();
+    expect(queueStageKeyToBagStage("POST_BLISTER_STAGING", "CARD_BLISTER")).toBeNull();
+  });
+
+  it("resolves the sticker queue differently per route", () => {
+    // Fill happens first on BOTTLE, so a bag reaching the sticker queue
+    // is already BLISTERED. On STICKER_ONLY stickering IS the first
+    // operation, so the same queue is entered at STARTED. A flat
+    // (non-route-parameterized) table cannot express both.
+    expect(queueStageKeyToBagStage("BOTTLE_STICKER_QUEUE", "BOTTLE")).toBe("BLISTERED");
+    expect(queueStageKeyToBagStage("BOTTLE_STICKER_QUEUE", "STICKER_ONLY")).toBe(
+      "STARTED",
+    );
+  });
+
+  it("returns null without a route rather than guessing", () => {
+    expect(queueStageKeyToBagStage("SEALING_QUEUE", null)).toBeNull();
+  });
+
+  it("is the inverse of bagStageToQueueStageKey for every mid-route stage", () => {
+    for (const [routeCode, stages] of [
+      ["CARD_BLISTER", ["STARTED", "BLISTERED", "SEALED"]],
+      ["BOTTLE", ["STARTED", "BLISTERED", "SEALED"]],
+      ["STICKER_ONLY", ["STARTED", "SEALED"]],
+    ] as const) {
+      for (const stage of stages) {
+        const queue = bagStageToQueueStageKey(stage, routeCode);
+        expect(queue).not.toBeNull();
+        expect(queueStageKeyToBagStage(queue, routeCode)).toBe(stage);
+      }
+    }
   });
 });
 ```
@@ -150,19 +181,6 @@ const QUEUE_FOR_BAG_STAGE: Readonly<
   },
 };
 
-/** Queue stage key → the bag stage that puts a bag into it. Staging
- *  keys (POST_*_STAGING) have no bag-stage equivalent and return null. */
-const BAG_STAGE_FOR_QUEUE: Readonly<Record<string, string>> = {
-  RECEIVING_QUEUE: "STARTED",
-  BLISTER_QUEUE: "STARTED",
-  SEALING_QUEUE: "BLISTERED",
-  BOTTLE_FILL_QUEUE: "STARTED",
-  BOTTLE_STICKER_QUEUE: "BLISTERED",
-  BOTTLE_INDUCTION_QUEUE: "BLISTERED",
-  PACKAGING_QUEUE: "SEALED",
-  FINISHED_GOODS_QUEUE: "FINALIZED",
-};
-
 export function bagStageToQueueStageKey(
   bagStage: string | null | undefined,
   routeCode: string | null | undefined,
@@ -173,11 +191,35 @@ export function bagStageToQueueStageKey(
   return table[bagStage] ?? null;
 }
 
+/** Queue stage key → the bag stage that puts a bag into it, within a
+ *  route.
+ *
+ *  Route-parameterized because the same queue key means different
+ *  things on different routes: BOTTLE_STICKER_QUEUE is entered at
+ *  BLISTERED on the BOTTLE route (fill happens first) but at STARTED on
+ *  STICKER_ONLY (stickering IS the first operation). Both routes are
+ *  seeded in drizzle/0013_route_operation_compat.sql. A flat table
+ *  would silently return the wrong stage for one of them.
+ *
+ *  Derived by inverting QUEUE_FOR_BAG_STAGE so the two directions
+ *  cannot drift apart. Staging keys (POST_*_STAGING) appear in no
+ *  forward table and correctly return null.
+ *
+ *  Note the deliberate asymmetry at the end of a route: the forward
+ *  table sends a PACKAGED bag to FINISHED_GOODS_QUEUE, and this
+ *  function maps that key back to FINALIZED, not PACKAGED. Entering
+ *  the finished-goods queue is what finalizes a bag, so the pair is
+ *  not a round-trip identity there. */
 export function queueStageKeyToBagStage(
   queueStageKey: string | null | undefined,
+  routeCode: string | null | undefined,
 ): string | null {
-  if (!queueStageKey) return null;
-  return BAG_STAGE_FOR_QUEUE[queueStageKey] ?? null;
+  if (!queueStageKey || !routeCode) return null;
+  if (queueStageKey === "FINISHED_GOODS_QUEUE") return "FINALIZED";
+  const table = QUEUE_FOR_BAG_STAGE[routeCode];
+  if (!table) return null;
+  const match = Object.entries(table).find(([, queue]) => queue === queueStageKey);
+  return match?.[0] ?? null;
 }
 ```
 
