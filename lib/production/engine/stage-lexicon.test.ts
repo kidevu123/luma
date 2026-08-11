@@ -32,14 +32,45 @@ describe("bagStageToQueueStageKey", () => {
 
 describe("queueStageKeyToBagStage", () => {
   it("maps the sealing queue back to the bag stage that enters it", () => {
-    expect(queueStageKeyToBagStage("SEALING_QUEUE")).toBe("BLISTERED");
+    expect(queueStageKeyToBagStage("SEALING_QUEUE", "CARD_BLISTER")).toBe("BLISTERED");
   });
 
   it("maps the finished-goods queue to FINALIZED", () => {
-    expect(queueStageKeyToBagStage("FINISHED_GOODS_QUEUE")).toBe("FINALIZED");
+    expect(queueStageKeyToBagStage("FINISHED_GOODS_QUEUE", "CARD_BLISTER")).toBe(
+      "FINALIZED",
+    );
   });
 
   it("returns null for staging keys that have no bag-stage equivalent", () => {
-    expect(queueStageKeyToBagStage("POST_BLISTER_STAGING")).toBeNull();
+    expect(queueStageKeyToBagStage("POST_BLISTER_STAGING", "CARD_BLISTER")).toBeNull();
+  });
+
+  it("resolves the sticker queue differently per route", () => {
+    // Fill happens first on BOTTLE, so a bag reaching the sticker queue
+    // is already BLISTERED. On STICKER_ONLY stickering IS the first
+    // operation, so the same queue is entered at STARTED. A flat
+    // (non-route-parameterized) table cannot express both.
+    expect(queueStageKeyToBagStage("BOTTLE_STICKER_QUEUE", "BOTTLE")).toBe("BLISTERED");
+    expect(queueStageKeyToBagStage("BOTTLE_STICKER_QUEUE", "STICKER_ONLY")).toBe(
+      "STARTED",
+    );
+  });
+
+  it("returns null without a route rather than guessing", () => {
+    expect(queueStageKeyToBagStage("SEALING_QUEUE", null)).toBeNull();
+  });
+
+  it("is the inverse of bagStageToQueueStageKey for every mid-route stage", () => {
+    for (const [routeCode, stages] of [
+      ["CARD_BLISTER", ["STARTED", "BLISTERED", "SEALED"]],
+      ["BOTTLE", ["STARTED", "BLISTERED", "SEALED"]],
+      ["STICKER_ONLY", ["STARTED", "SEALED"]],
+    ] as const) {
+      for (const stage of stages) {
+        const queue = bagStageToQueueStageKey(stage, routeCode);
+        expect(queue).not.toBeNull();
+        expect(queueStageKeyToBagStage(queue, routeCode)).toBe(stage);
+      }
+    }
   });
 });
