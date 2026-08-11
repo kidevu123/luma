@@ -19,3 +19,10 @@ export { resolveCompletionInputs } from "./resolve-completion";
 export { resolveOperation, pickOperationForStationKind } from "./resolve-operation";
 export type { ResolvedOperation } from "./resolve-operation";
 export { bagStageToQueueStageKey, queueStageKeyToBagStage } from "./stage-lexicon";
+export {
+  getStationView,
+  assembleStationView,
+  buildNextAction,
+  operationVerb,
+} from "./station-view";
+export type { NextActionInput, StationViewRows } from "./station-view";
