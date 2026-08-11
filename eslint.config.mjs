@@ -61,4 +61,21 @@ export default [
       ...nextPlugin.configs["core-web-vitals"].rules,
     },
   },
+  {
+    files: ["app/(floor)/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "warn",
+        {
+          patterns: [
+            {
+              group: ["@/lib/production/*", "!@/lib/production/engine"],
+              message:
+                "Floor code must go through lib/production/engine. See docs/superpowers/specs/2026-08-11-production-engine-operator-experience-design.md",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
