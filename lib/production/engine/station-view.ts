@@ -119,6 +119,17 @@ export async function getStationView(stationId: string): Promise<StationView> {
       })
     : null;
 
+  const currentBagLabel = currentAtStation
+    ? buildCurrentBagDisplayLabel({
+        cardLabel: currentAtStation.card?.label ?? null,
+        poNumber: currentAtStation.poNumber,
+        tabletTypeName: currentAtStation.tabletTypeName,
+        productName: currentAtStation.product?.name ?? null,
+        inventoryBagNumber: currentAtStation.inventoryBagNumber,
+        workflowBagNumber: currentAtStation.bag.bagNumber,
+      })
+    : null;
+
   return assembleStationView({
     station: {
       id: stationRow.station.id,
@@ -129,17 +140,16 @@ export async function getStationView(stationId: string): Promise<StationView> {
     session: session
       ? { id: session.id, employeeNameSnapshot: session.employeeNameSnapshot }
       : null,
-    current: currentAtStation
+    current: currentAtStation && currentBagLabel
       ? {
           workflowBagId: currentAtStation.bag.id,
-          bagLabel: buildCurrentBagDisplayLabel({
-            cardLabel: currentAtStation.card?.label ?? null,
-            poNumber: currentAtStation.poNumber,
-            tabletTypeName: currentAtStation.tabletTypeName,
-            productName: currentAtStation.product?.name ?? null,
-            inventoryBagNumber: currentAtStation.inventoryBagNumber,
-            workflowBagNumber: currentAtStation.bag.bagNumber,
-          }).primary,
+          // buildCurrentBagDisplayLabel returns
+          // { primary, secondary, hasReceivedContext } — NOT a string.
+          // page.tsx:980-984 renders primary as the heading and secondary
+          // as a subline, so both must survive into StationView or the
+          // rewire in Task 8 would visibly change the screen.
+          bagLabel: currentBagLabel.primary,
+          bagSubLabel: currentBagLabel.secondary,
           productName: currentAtStation.product?.name ?? null,
           productId: currentAtStation.bag.productId,
           stage: currentAtStation.state?.stage ?? null,
@@ -158,6 +168,7 @@ export type StationViewRows = {
   current: {
     workflowBagId: string;
     bagLabel: string;
+    bagSubLabel: string | null;
     productName: string | null;
     productId: string | null;
     stage: string | null;
@@ -174,6 +185,7 @@ export function assembleStationView(rows: StationViewRows): StationView {
     ? {
         workflowBagId: rows.current.workflowBagId,
         bagLabel: rows.current.bagLabel,
+        bagSubLabel: rows.current.bagSubLabel,
         productName: rows.current.productName,
         statusLine: rows.operation
           ? `Ready to ${operationVerb(rows.operation.operationCode).toLowerCase()}`

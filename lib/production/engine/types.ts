@@ -29,7 +29,12 @@ export type CompletionInput = {
 
 export type CurrentWork = {
   workflowBagId: string;
+  /** buildCurrentBagDisplayLabel().primary — e.g. "PO 1234 - Chocolate Brown - Bag 12". */
   bagLabel: string;
+  /** buildCurrentBagDisplayLabel().secondary — the raw QR card label, shown as
+   *  a subline beneath bagLabel. page.tsx renders this today; dropping it
+   *  would be a visible change, which Phase 1 forbids. */
+  bagSubLabel: string | null;
   productName: string | null;
   /** Operator-facing status, e.g. "Ready to seal". Never a stage name. */
   statusLine: string;

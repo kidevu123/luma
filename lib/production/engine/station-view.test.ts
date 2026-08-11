@@ -25,6 +25,7 @@ const OP: RouteOperationView = {
 const CURRENT: CurrentWork = {
   workflowBagId: "bag-1",
   bagLabel: "1042",
+  bagSubLabel: null,
   productName: "Chocolate Brown",
   statusLine: "Ready to seal",
   progress: null,
@@ -130,7 +131,8 @@ function rows(over: Partial<StationViewRows> = {}): StationViewRows {
     session: { id: "sess1", employeeNameSnapshot: "Ana R." },
     current: {
       workflowBagId: "bag-1",
-      bagLabel: "1042",
+      bagLabel: "PO 1234 - Chocolate Brown - Bag 12",
+      bagSubLabel: "1042",
       productName: "Chocolate Brown",
       productId: "prod-1",
       stage: "BLISTERED",
@@ -207,5 +209,22 @@ describe("assembleStationView", () => {
     const view = assembleStationView(rows());
     expect(view.upNext).toEqual([]);
     expect(view.supervisor).toBeNull();
+  });
+
+  it("carries both label lines so the rewire cannot drop the subline", () => {
+    // page.tsx:980-984 renders primary as the heading and secondary as a
+    // subline. Task 8 feeds that JSX from StationView, so losing either
+    // here would be a visible change — which Phase 1 forbids.
+    const view = assembleStationView(rows());
+    expect(view.current?.bagLabel).toBe("PO 1234 - Chocolate Brown - Bag 12");
+    expect(view.current?.bagSubLabel).toBe("1042");
+  });
+
+  it("tolerates a bag with no subline", () => {
+    const base = rows();
+    const view = assembleStationView(
+      rows({ current: base.current ? { ...base.current, bagSubLabel: null } : null }),
+    );
+    expect(view.current?.bagSubLabel).toBeNull();
   });
 });
