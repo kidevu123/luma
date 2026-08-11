@@ -32,9 +32,20 @@ export function resolveCompletionInputs(
   }
 
   // Physical damage is a human observation at every operation that
-  // produces output, and is always optional.
-  if (inputs.length > 0) {
-    inputs.push({ key: "damaged", label: "Damaged", unit: op.outputUnit, required: false });
+  // produces output, and is always optional. Gate on outputUnit rather
+  // than on inputs.length: "produces output" is the actual rule, and an
+  // operation could gain a derived count without requiresCounter.
+  if (op.outputUnit != null) {
+    inputs.push({
+      key: "damaged",
+      label: "Damaged",
+      // Packaging reports three different units (cases, displays, loose
+      // units), so a single outputUnit would mislabel two of them.
+      // Deliberately unitless until Phase 4 confirms with the floor
+      // which granularity operators actually count damage in.
+      unit: PACKAGING_OPERATIONS.has(op.operationCode) ? null : op.outputUnit,
+      required: false,
+    });
   }
 
   return inputs;
