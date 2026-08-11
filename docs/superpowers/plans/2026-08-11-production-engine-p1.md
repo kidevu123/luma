@@ -1893,12 +1893,63 @@ Replace the current-work query at `app/(floor)/floor/[token]/page.tsx:92-156` wi
 Run: `npm run build && npm run dev`
 Open a station URL. The screen must be pixel-identical to before this task. If anything moved, the rewire is wrong.
 
-- [ ] **Step 7: Restore the boundary to error**
+- [ ] **Step 7: Ratchet the boundary instead of restoring it to error**
 
-In `eslint.config.mjs`, change the `no-restricted-imports` severity from `"warn"` back to `"error"`.
+The original plan said to restore the rule to `"error"` here. **That is not achievable in Phase 1 and the instruction is withdrawn.** Task 5 measured 82 violations across 15 files under `app/(floor)/floor/[token]/`. Phase 1 only rewires the current-work query in `page.tsx` and the body of `fireStageEventAction`; the rest — `stage-action-buttons.tsx`, `scan-card-form.tsx`, the roll and QC panels — keep their direct imports until the Phase 4 screen rewrite. Setting `"error"` now would leave `npm run lint` failing, which violates a Global Constraint of this plan and the repo's own "never push without lint clean" rule.
+
+Leave the severity at `"warn"` and enforce a ratchet instead: the count may fall, never rise. Replace the contents of `lib/production/engine/boundary.test.ts` with a test that actually lints rather than string-matching the config (the existing test would pass even if the glob or the negation were wrong):
+
+```ts
+import { describe, it, expect } from "vitest";
+import { ESLint } from "eslint";
+
+// Baseline measured at Task 5. Phase 4 drives this to zero and flips the
+// rule to "error"; until then the only rule is that it must not grow.
+const BASELINE_VIOLATIONS = 82;
+
+describe("floor import boundary", () => {
+  it("blocks a non-engine lib/production import from floor code", async () => {
+    const eslint = new ESLint({ cwd: process.cwd() });
+    const [result] = await eslint.lintText(
+      `import { loadPartialReuseContext } from "@/lib/production/partial-bags";\n` +
+        `export const x = loadPartialReuseContext;\n`,
+      { filePath: "app/(floor)/floor/[token]/boundary-probe.ts" },
+    );
+    const restricted = (result?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-imports",
+    );
+    expect(restricted).toHaveLength(1);
+  });
+
+  it("permits importing the engine barrel from floor code", async () => {
+    const eslint = new ESLint({ cwd: process.cwd() });
+    const [result] = await eslint.lintText(
+      `import { resolveOperation } from "@/lib/production/engine";\n` +
+        `export const x = resolveOperation;\n`,
+      { filePath: "app/(floor)/floor/[token]/boundary-probe.ts" },
+    );
+    const restricted = (result?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-imports",
+    );
+    expect(restricted).toHaveLength(0);
+  });
+
+  it("does not let the floor violation count grow", async () => {
+    const eslint = new ESLint({ cwd: process.cwd() });
+    const results = await eslint.lintFiles(["app/(floor)/**/*.{ts,tsx}"]);
+    const count = results
+      .flatMap((r) => r.messages)
+      .filter((m) => m.ruleId === "no-restricted-imports").length;
+    expect(count).toBeLessThanOrEqual(BASELINE_VIOLATIONS);
+  });
+});
+```
+
+Run: `npx vitest run lib/production/engine/boundary.test.ts`
+Expected: PASS, 3 tests. If the third fails, Phase 1 added a new direct floor import — find it and route it through the barrel rather than raising the baseline.
 
 Run: `npm run lint`
-Expected: clean. If violations remain, they are floor imports Phase 1 did not remove — list them in the commit body as Phase 4 work rather than suppressing them.
+Expected: clean, warnings only. Record the current violation count in your report so Phase 4 can compare.
 
 - [ ] **Step 8: Version and CHANGELOG**
 
@@ -1924,7 +1975,7 @@ git commit -m "feat(engine): route floor through advanceBag and getStationView (
 ## Phase 1 exit criteria
 
 - [ ] `npx vitest run` — all 5,000+ tests green
-- [ ] `npm run typecheck && npm run lint` — clean, boundary rule at `"error"`
+- [ ] `npm run typecheck && npm run lint` — clean; boundary rule at `"warn"` with the floor violation count at or below the 82 measured in Task 5 (it reaches `"error"` in Phase 4, not here)
 - [ ] A station page is pixel-identical to pre-Phase-1
 - [ ] `fireStageEventAction` delegates to `advanceBag`
 - [ ] The bottle route-ordering conflict is either resolved or explicitly recorded as a Phase 2 blocker
