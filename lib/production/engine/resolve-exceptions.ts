@@ -96,6 +96,40 @@ export function evaluateChecks(facts: EngineFacts): CheckResult[] {
   ];
 }
 
+/** The blocker catalogue keyed by code, so callers outside the checklist
+ *  (advanceBag) raise the same Blocker the ? Help screen shows instead of
+ *  duplicating the literals. Facts are all-false here — every check
+ *  produces its blocker, and we pick by code. */
+const BLOCKER_CATALOGUE: ReadonlyMap<string, Blocker> = new Map(
+  evaluateChecks({
+    bagRecognized: false,
+    productResolved: false,
+    operationResolved: false,
+    materialsAvailable: false,
+    upstreamStageComplete: false,
+    bagPaused: true,
+    bagFinalized: true,
+    bagOnHold: true,
+    waitingForLabel: null,
+  })
+    .filter((c): c is CheckResult & { blocker: Blocker } => c.blocker !== null)
+    .map((c) => [c.blocker.code, c.blocker]),
+);
+
+/** Look up a Blocker by its stable code. Unknown codes fall back to a
+ *  generic supervisor prompt rather than throwing — a missing catalogue
+ *  entry must never take the floor down. */
+export function blockerFor(code: string): Blocker {
+  return (
+    BLOCKER_CATALOGUE.get(code) ?? {
+      code,
+      operatorSentence: "Luma cannot continue here. Ask a supervisor.",
+      supervisorDetail: `No blocker catalogue entry for code ${code}.`,
+      suggestedAction: "NOTIFY_SUPERVISOR",
+    }
+  );
+}
+
 export function blockersFromChecks(checks: readonly CheckResult[]): Blocker[] {
   return checks.filter((c) => !c.passed && c.blocker).map((c) => c.blocker as Blocker);
 }

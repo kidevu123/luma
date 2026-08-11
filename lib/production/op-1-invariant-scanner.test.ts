@@ -26,6 +26,10 @@ const REPO_ROOT = join(__dirname, "..", "..");
  *  enforces accountability on every emission in these files. */
 const LIVE_EMISSION_FILES: ReadonlyArray<string> = [
   "app/(floor)/floor/[token]/actions.ts",
+  // STAGE-EVENT-EXTRACT-1: fireStageEventAction's guard sequence and
+  // transaction body live here now; it emits BLISTER_COMPLETE,
+  // SEALING_COMPLETE, BAG_RELEASED and friends.
+  "lib/production/engine/record-stage-event.ts",
   "app/(floor)/floor/[token]/roll-actions.ts",
   "app/(floor)/floor/[token]/bag-allocation-actions.ts",
   "app/(admin)/inbound/packaging-materials/actions.ts",

@@ -13,7 +13,10 @@ export type {
   UpNextBag,
 } from "./types";
 
-export { evaluateChecks, blockersFromChecks } from "./resolve-exceptions";
+export { advanceBag, intentToEventType, buildRecordStageEventInput } from "./advance";
+export { recordStageEvent } from "./record-stage-event";
+export type { RecordStageEventInput } from "./record-stage-event";
+export { evaluateChecks, blockersFromChecks, blockerFor } from "./resolve-exceptions";
 export type { CheckResult, EngineFacts } from "./resolve-exceptions";
 export { resolveCompletionInputs } from "./resolve-completion";
 export { resolveOperation, pickOperationForStationKind } from "./resolve-operation";
