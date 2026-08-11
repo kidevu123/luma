@@ -603,9 +603,29 @@ describe("resolveCompletionInputs", () => {
   });
 
   it("labels inputs in plain language with no stage or event names", () => {
-    for (const input of resolveCompletionInputs(op({}))) {
+    const inputs = resolveCompletionInputs(op({}));
+    // Guard: without this the loop below would pass vacuously if the
+    // function ever regressed to returning an empty array.
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const input of inputs) {
       expect(input.label).not.toMatch(/_COMPLETE|QUEUE|STAGE/);
     }
+  });
+
+  it("leaves the damaged count unitless at packaging", () => {
+    // Packaging counts cases, displays and loose units; a single unit
+    // label on "damaged" would be wrong for two of the three.
+    const inputs = resolveCompletionInputs(
+      op({ operationCode: "PACKAGING", allowedStationKind: "PACKAGING", outputUnit: "cases" }),
+    );
+    expect(inputs.find((i) => i.key === "damaged")?.unit).toBeNull();
+  });
+
+  it("omits damaged entirely for an operation with no output", () => {
+    const inputs = resolveCompletionInputs(
+      op({ operationCode: "POST_BLISTER_STAGING", requiresCounter: false, outputUnit: null }),
+    );
+    expect(inputs).toEqual([]);
   });
 });
 ```
@@ -654,9 +674,20 @@ export function resolveCompletionInputs(
   }
 
   // Physical damage is a human observation at every operation that
-  // produces output, and is always optional.
-  if (inputs.length > 0) {
-    inputs.push({ key: "damaged", label: "Damaged", unit: op.outputUnit, required: false });
+  // produces output, and is always optional. Gate on outputUnit rather
+  // than on inputs.length: "produces output" is the actual rule, and an
+  // operation could gain a derived count without requiresCounter.
+  if (op.outputUnit != null) {
+    inputs.push({
+      key: "damaged",
+      label: "Damaged",
+      // Packaging reports three different units (cases, displays, loose
+      // units), so a single outputUnit would mislabel two of them.
+      // Deliberately unitless until Phase 4 confirms with the floor
+      // which granularity operators actually count damage in.
+      unit: PACKAGING_OPERATIONS.has(op.operationCode) ? null : op.outputUnit,
+      required: false,
+    });
   }
 
   return inputs;
