@@ -1219,24 +1219,132 @@ Expected: PASS, 5 tests
 
 - [ ] **Step 5: Add the DB-backed `getStationView`**
 
-Append to `lib/production/engine/station-view.ts`. Move the current-work query from `app/(floor)/floor/[token]/page.tsx:92-156` verbatim, reuse `getActiveStationSession` from `lib/production/station-operator-session.ts` and `buildCurrentBagDisplayLabel` from `lib/production/current-bag-display-label.ts`, then assemble:
+Append to `lib/production/engine/station-view.ts`. The current-work query is moved verbatim from `app/(floor)/floor/[token]/page.tsx:125-145` — do not redesign it.
 
 ```ts
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import {
+  inventoryBags,
+  machines,
+  products,
+  purchaseOrders,
+  qrCards,
+  readBagState,
+  readStationLive,
+  receives,
+  smallBoxes,
+  stations,
+  tabletTypes,
+  workflowBags,
+} from "@/lib/db/schema";
+import { getActiveStationSession } from "@/lib/production/station-operator-session";
+import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
+import { resolveOperation } from "./resolve-operation";
+import { evaluateChecks } from "./resolve-exceptions";
+import type { StationView } from "./types";
+
 export async function getStationView(stationId: string): Promise<StationView> {
-  // 1. station row + machine (stations join machines on stations.machineId)
-  // 2. active operator session  -> getActiveStationSession(db, stationId)
-  // 3. current bag at station   -> the read_station_live query from page.tsx:125-145
-  // 4. operation                -> resolveOperation({ productId, stationKind })
-  // 5. facts                    -> from read_bag_state (isPaused, isFinalized,
-  //                                isOnHold) plus resolveOperation's result
-  // 6. checks                   -> evaluateChecks(facts)
-  // 7. nextAction               -> buildNextAction({...})
-  //
-  // upNext is [] in Phase 1. read_bag_queue arrives in Phase 2.
+  const [stationRow] = await db
+    .select({ station: stations, machine: machines })
+    .from(stations)
+    .leftJoin(machines, eq(stations.machineId, machines.id))
+    .where(eq(stations.id, stationId));
+  if (!stationRow) throw new Error("Station not found.");
+
+  const session = await getActiveStationSession(db, stationId);
+
+  const [currentAtStation] = await db
+    .select({
+      bag: workflowBags,
+      card: qrCards,
+      state: readBagState,
+      product: products,
+      inventoryBagNumber: inventoryBags.bagNumber,
+      tabletTypeName: tabletTypes.name,
+      poNumber: purchaseOrders.poNumber,
+    })
+    .from(readStationLive)
+    .innerJoin(workflowBags, eq(readStationLive.currentWorkflowBagId, workflowBags.id))
+    .leftJoin(qrCards, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
+    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .leftJoin(products, eq(products.id, workflowBags.productId))
+    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+    .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+    .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+    .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+    .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
+    .where(eq(readStationLive.stationId, stationId));
+
+  const resolved = currentAtStation
+    ? await resolveOperation({
+        productId: currentAtStation.bag.productId,
+        stationKind: stationRow.station.kind,
+      })
+    : null;
+
+  const current = currentAtStation
+    ? {
+        workflowBagId: currentAtStation.bag.id,
+        bagLabel: buildCurrentBagDisplayLabel({
+          cardLabel: currentAtStation.card?.label ?? null,
+          poNumber: currentAtStation.poNumber,
+          tabletTypeName: currentAtStation.tabletTypeName,
+          productName: currentAtStation.product?.name ?? null,
+          inventoryBagNumber: currentAtStation.inventoryBagNumber,
+          workflowBagNumber: currentAtStation.bag.bagNumber,
+        }),
+        productName: currentAtStation.product?.name ?? null,
+        statusLine: resolved
+          ? `Ready to ${operationVerb(resolved.operation.operationCode).toLowerCase()}`
+          : "Waiting",
+        progress: null,
+      }
+    : null;
+
+  const checks = evaluateChecks({
+    bagRecognized: currentAtStation != null,
+    productResolved: currentAtStation?.bag.productId != null,
+    operationResolved: resolved != null,
+    // Phase 1 does not evaluate material availability; resolve-materials
+    // lands in Phase 2 with the queue read model.
+    materialsAvailable: true,
+    upstreamStageComplete: true,
+    bagPaused: currentAtStation?.state?.isPaused ?? false,
+    bagFinalized: currentAtStation?.state?.isFinalized ?? false,
+    bagOnHold: currentAtStation?.state?.isOnHold ?? false,
+    waitingForLabel: null,
+  });
+
+  return {
+    station: {
+      id: stationRow.station.id,
+      label: stationRow.station.label,
+      kind: stationRow.station.kind,
+      machineName: stationRow.machine?.name ?? null,
+    },
+    operator: session
+      ? { sessionId: session.id, name: session.employeeNameSnapshot ?? "Operator" }
+      : null,
+    // Supervisor sessions arrive in Phase 5.
+    supervisor: null,
+    current,
+    // read_bag_queue arrives in Phase 2.
+    upNext: [],
+    nextAction: buildNextAction({
+      hasOperatorSession: session != null,
+      current,
+      operation: resolved?.operation ?? null,
+      checks,
+      bagStage: currentAtStation?.state?.stage ?? null,
+      expected: null,
+    }),
+    capabilities: { canPause: current != null, canReportProblem: true },
+  };
 }
 ```
 
-Fill in each numbered step with the real query. Every value is available from the sources named above; add no new tables.
+Note: `machines.name` — confirm the column name against `lib/db/schema.ts` before writing; if it differs, use the actual column and keep the `machineName` field name.
 
 - [ ] **Step 6: Write an integration test for `getStationView`**
 
@@ -1385,38 +1493,135 @@ export function intentToEventType(
 Run: `npx vitest run lib/production/engine/advance.test.ts`
 Expected: PASS, 7 tests
 
-- [ ] **Step 5: Add the transactional `advanceBag`**
+- [ ] **Step 5: Extract `fireStageEventAction`'s body — do not reimplement it**
 
-Append to `lib/production/engine/advance.ts`. Reproduce the guard order from `fireStageEventAction`, converting each early `return { error }` into a `Blocker` rather than a string:
+`fireStageEventAction` is not a thin guard sequence. Its transaction also issues handpack blister card material (`issueHandpackBlisterCardMaterial`, `emitHandpackBlisterEstimatedMaterial`), handles partial-sealing close-out (`maybeAutoReleaseAfterPartialSealingClose`), and auto-releases on complete (`maybeAutoReleaseAfterComplete`). Reimplementing that in the engine would be a behavioural rewrite, which Phase 1 explicitly is not.
+
+Instead, **move the body verbatim** into a shared lib module. `actions.ts` is a `"use server"` file, so every export there must be a server action — the shared function cannot live in it.
+
+Create `lib/production/engine/record-stage-event.ts`:
 
 ```ts
-export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
-  // 1. load station + assertStationActiveForFloorActions
-  // 2. resolveOperation({ productId, stationKind }) -> operation
-  //    -> no operation: Blocker OPERATION_UNRESOLVED
-  // 3. intentToEventType(intent, operation.operationCode)
-  //    -> null: Blocker OPERATION_UNRESOLVED
-  // 4. read_bag_state guards: isPaused / isFinalized / isOnHold
-  // 5. checkStageProgression({ eventType, currentStage, isPaused, isFinalized })
-  //    -> not allowed: Blocker UPSTREAM_INCOMPLETE, supervisorDetail = reason
-  // 6. bottle finishing duplicate guard:
-  //    isBottleFinishingEvent + bottleFinishingAlreadyFired
-  // 7. db.transaction:
-  //      resolveStationAccountability(tx, { stationId, ... })
-  //      projectEvent(tx, { ...event, clientEventId })
-  //      writeAudit(tx, ...)
-  // 8. return { ok: true, view: await getStationView(input.stationId) }
-  //
-  // Every failure path returns { ok: false, blocker } — never throws to
-  // the caller, and never returns a raw error string.
+// Moved verbatim from app/(floor)/floor/[token]/actions.ts
+// (fireStageEventAction, guard sequence + transaction body).
+//
+// This is a pure relocation. Do not change behaviour, ordering, error
+// strings, or payload shapes — the parity gate in Task 8 depends on
+// this being bit-identical.
+
+export type RecordStageEventInput = {
+  station: StationRow;
+  workflowBagId: string;
+  eventType: string;
+  countTotal: number;
+  counterPresses?: number | undefined;
+  packsRemaining: number;
+  cardsReopened: number;
+  clientEventId?: string | undefined;
+  overrideEmployeeCode?: string | undefined;
+  pickedSealingProductId: string | null;
+  sealingCloseMode?: string | undefined;
+  partialCloseReason?: string | undefined;
+  partialCloseReasonNote?: string | undefined;
+};
+
+export async function recordStageEvent(
+  input: RecordStageEventInput,
+): Promise<{ ok: true } | { error: string }> {
+  // Body moved from actions.ts:1594-1950 unchanged, with `station`,
+  // `workflowBagId`, `eventType` etc. read from `input` instead of the
+  // parsed FormData, and the trailing revalidatePath() calls left
+  // behind in the action (they are Next.js concerns, not domain logic).
 }
 ```
 
-Idempotency comes from passing `input.clientEventId` through to `projectEvent`; confirm the convention in `lib/production/client-event-id-rule.test.ts` before wiring it.
+Then `fireStageEventAction` becomes:
 
-- [ ] **Step 6: Write the transaction tests**
+```ts
+const station = await authStation(token, stationId);
+const result = await recordStageEvent({
+  station,
+  workflowBagId,
+  eventType,
+  countTotal,
+  counterPresses,
+  packsRemaining,
+  cardsReopened,
+  clientEventId,
+  overrideEmployeeCode,
+  pickedSealingProductId,
+  sealingCloseMode: parsed.data.sealingCloseMode,
+  partialCloseReason: parsed.data.partialCloseReason,
+  partialCloseReasonNote: parsed.data.partialCloseReasonNote,
+});
+if ("error" in result) return { error: result.error };
+revalidatePath(`/floor/${token}`);
+revalidatePath(`/floor-board`);
+return { ok: true };
+```
 
-Add to `lib/production/engine/advance.test.ts`:
+**Run `npx vitest run` after this move and before writing `advanceBag`.** A verbatim relocation must leave every existing test green. If any fail, the move was not verbatim — fix it before continuing.
+
+- [ ] **Step 6: Add `advanceBag` as a thin adapter over `recordStageEvent`**
+
+```ts
+export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
+  const [stationRow] = await db
+    .select()
+    .from(stations)
+    .where(eq(stations.id, input.stationId));
+  if (!stationRow) {
+    return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
+  }
+
+  const [bag] = await db
+    .select({ productId: workflowBags.productId })
+    .from(workflowBags)
+    .where(eq(workflowBags.id, input.workflowBagId));
+
+  const resolved = await resolveOperation({
+    productId: bag?.productId ?? null,
+    stationKind: stationRow.kind,
+  });
+  if (!resolved) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
+
+  const eventType = intentToEventType(input.intent, resolved.operation.operationCode);
+  if (!eventType) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
+
+  const result = await recordStageEvent({
+    station: stationRow,
+    workflowBagId: input.workflowBagId,
+    eventType,
+    countTotal: input.inputs.counter ?? input.inputs.cases ?? 0,
+    packsRemaining: 0,
+    cardsReopened: 0,
+    ...(input.clientEventId ? { clientEventId: input.clientEventId } : {}),
+    pickedSealingProductId: null,
+  });
+
+  if ("error" in result) {
+    return {
+      ok: false,
+      blocker: {
+        code: "ADVANCE_REJECTED",
+        operatorSentence: "This step could not be recorded. Ask a supervisor.",
+        supervisorDetail: result.error,
+        suggestedAction: "NOTIFY_SUPERVISOR",
+      },
+    };
+  }
+
+  return { ok: true, view: await getStationView(input.stationId) };
+}
+```
+
+`blockerFor` is a small local helper returning the matching `Blocker` from the catalogue in `resolve-exceptions.ts`; add it there and export it so both modules share one definition rather than duplicating literals.
+
+Idempotency is inherited: `recordStageEvent` passes `clientEventId` to `projectEvent`, which swallows the duplicate-insert conflict on the partial unique index `(workflow_bag_id, event_type, client_event_id)`. Confirm against `lib/production/client-event-id-rule.test.ts`.
+
+- [ ] **Step 7: Write the transaction tests**
+
+Add to `lib/production/engine/advance.test.ts` (add `advanceBag` to the import at the top of the file):
 
 ```ts
 describe("advanceBag", () => {
@@ -1453,20 +1658,23 @@ describe("advanceBag", () => {
 });
 ```
 
-- [ ] **Step 7: Run everything**
+- [ ] **Step 8: Run everything**
 
-Run: `npx vitest run lib/production/engine && npm run typecheck && npm run lint`
-Expected: all clean
+Run: `npx vitest run && npm run typecheck && npm run lint`
 
-- [ ] **Step 8: Export and commit**
+Expected: all clean, including the full existing suite — the extraction in Step 5 touched a live production path, so the whole suite is the gate here, not just `lib/production/engine`.
 
-Add `export { advanceBag, intentToEventType } from "./advance";` to `lib/production/engine/index.ts`.
+- [ ] **Step 9: Export and commit**
+
+Add `export { advanceBag, intentToEventType } from "./advance";` and `export { recordStageEvent } from "./record-stage-event";` to `lib/production/engine/index.ts`.
 
 ```bash
 git add lib/production/engine/advance.ts \
         lib/production/engine/advance.test.ts \
-        lib/production/engine/index.ts
-git commit -m "feat(engine): advanceBag single write with blocker results"
+        lib/production/engine/record-stage-event.ts \
+        lib/production/engine/index.ts \
+        app/\(floor\)/floor/\[token\]/actions.ts
+git commit -m "feat(engine): extract stage-event recording and add advanceBag"
 ```
 
 ---
@@ -1542,28 +1750,42 @@ Define `seededProductIdForRoute` in the test file using the DB-test harness patt
 Run: `npx vitest run lib/production/engine/parity.test.ts`
 Expected: **This may legitimately fail on the BOTTLE route.** The spec records that `0013_route_operation_compat.sql` seeds `STICKERING` before `INDUCTION_SEAL`, while `BOTTLE-ORDER-FLEX-1` treats them as order-independent. If it fails only on bottle ordering, that is the known data conflict — do not paper over it. Stop and report; resolving it is a Phase 2 decision recorded in the spec's "Data reconciliation" section.
 
-- [ ] **Step 3: Rewire `fireStageEventAction` as a wrapper**
+- [ ] **Step 3: Prove the engine path and the legacy path agree**
 
-In `app/(floor)/floor/[token]/actions.ts:1553`, keep the `zod` parse and `authStation` call, then delegate. `authStation` returns the station row, not a session — get the session separately via `getActiveStationSession` from `lib/production/station-operator-session.ts`, which is already imported in this file via `resolveStationAccountability`:
+Task 7 already made `fireStageEventAction` a thin wrapper over the shared `recordStageEvent`. Do **not** additionally route the action through `advanceBag` — the action accepts inputs `advanceBag` has no place for (`sealingCloseMode`, `partialCloseReason`, `pickedSealingProductId`), and forcing them through the narrower contract would lose fidelity. Phase 4 retires the action once the new screen no longer submits those fields.
+
+What Phase 1 must prove instead is that both callers produce the same event for the common case. Add to `lib/production/engine/parity.test.ts`:
 
 ```ts
-const session = await getActiveStationSession(db, stationId);
-if (!session) return { error: "Open a shift before recording production." };
+it("advanceBag and fireStageEventAction record the same event for a plain complete", async () => {
+  const viaEngine = await advanceBag({
+    stationId: sealingStationId,
+    workflowBagId: bagA,
+    operatorSessionId: sessionId,
+    intent: "COMPLETE",
+    inputs: { counter: 52 },
+    clientEventId: crypto.randomUUID(),
+  });
+  expect(viaEngine.ok).toBe(true);
 
-const result = await advanceBag({
-  stationId,
-  workflowBagId,
-  operatorSessionId: session.id,
-  intent: eventType === "SEALING_COMPLETE" ? "CONFIRM_BAG_EMPTY" : "COMPLETE",
-  inputs: { counter: countTotal, damaged: 0 },
-  clientEventId,
+  const fd = new FormData();
+  fd.set("token", stationToken);
+  fd.set("workflowBagId", bagB);
+  fd.set("stationId", sealingStationId);
+  fd.set("eventType", "SEALING_SEGMENT_COMPLETE");
+  fd.set("countTotal", "52");
+  fd.set("clientEventId", crypto.randomUUID());
+  const viaAction = await fireStageEventAction(fd);
+  expect(viaAction).toEqual({ ok: true });
+
+  const [engineEvent] = await latestEventsFor(bagA);
+  const [actionEvent] = await latestEventsFor(bagB);
+  expect(engineEvent.eventType).toBe(actionEvent.eventType);
+  expect(engineEvent.payload).toEqual(actionEvent.payload);
 });
-if (!result.ok) return { error: result.blocker.operatorSentence };
-revalidatePath(`/floor/${token}`);
-return { ok: true };
 ```
 
-The signature and return shape are unchanged, so `stage-action-buttons.tsx` needs no edit.
+`bagA` and `bagB` are two equivalently-seeded bags at `BLISTERED`; `latestEventsFor` reads `workflow_events` ordered by `occurred_at desc limit 1`.
 
 - [ ] **Step 4: Run the full suite**
 
