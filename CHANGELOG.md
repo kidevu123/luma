@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.31.0] — 2026-08-12
+
+- Phase 2 of the production engine: per-bag queue read model (read_bag_queue), auto-release extended to bottle stations, release/finalize buttons removed from the floor (auto-advance covers the flow; sealing handoff and the not-pinned finalize fallback remain), bottle finishing order-independence expressed in route data (order_independent_group), advanceBag usable on all station kinds, and stations now see what is coming (upNext with median-based ETA).
+
 ## [1.30.0] — 2026-08-12
 
 - Production Engine phase 1: `getStationView()` and `advanceBag()` land behind the existing floor UI. Route decisions now resolve from `route_operations` with legacy fallback. No operator-visible change.

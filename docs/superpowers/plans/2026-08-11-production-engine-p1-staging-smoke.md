@@ -48,3 +48,43 @@ cannot reach.
 If any behaviour check fails, revert the branch. The extraction in
 Task 7 is the highest-risk change: record-stage-event.ts holds logic
 that previously lived inside fireStageEventAction.
+
+## Phase 2 (v1.31.0) — queue and auto-advance
+
+- [ ] Complete a blister bag: NO release button appears; the bag shows on a
+      sealing tablet's queue as READY without any operator action.
+- [ ] Scan-claim while upstream still runs (overlap): sealing can claim a
+      STARTED bag; Complete stays blocked until blister finishes.
+- [ ] Bottle fill complete: bag auto-releases; BOTH finishing stations see it
+      queued. After one finishing step, only the other station sees it.
+- [ ] Packaging complete on a pinned bag: finalizes with no button; the
+      queue row disappears.
+- [ ] The not-pinned finalize fallback still renders for a PACKAGED bag that
+      is no longer current at the station.
+- [ ] Sealing handoff button still present mid-bag (multi-sealer flow).
+- [ ] `npm run rebuild:read-models` repopulates read_bag_queue to the same
+      rows (spot-check one bag before/after).
+- [ ] claimQueuedBag double-tap: same clientEventId twice -> one BAG_PICKED_UP.
+- [ ] Two stations claim the same queued bag: one wins, the loser gets
+      "Another station is already working on this bag."
+- [ ] **Median-cycle SQL sanity.** For a product with 5+ recent bags at a
+      station kind, `loadMedianCycleMinutesByProduct` returns a plausible
+      number of minutes (not null, not negative, not absurdly large); a
+      product with fewer than 5 recent bags gets `etaMinutes: null`.
+- [ ] **Upstream-holder queue visibility.** A bag still being blistered
+      (held by the blister station, whose kind is NOT in the sealing row's
+      `eligible_station_kinds`) appears in the sealing station's `upNext`.
+      A bag already claimed by a second SEALING station (a true destination
+      peer) does NOT appear in the first sealing station's `upNext`.
+- [ ] **Concurrent same-kind claim.** Two stations of the SAME kind claim
+      one queued bag at once. The loser's response carries blocker code
+      `BAG_ALREADY_CLAIMED` ("Another station is already working on this
+      bag.") — assert the code, not that the queue row is gone. The
+      winner's claim REWRITES the row to the winner's downstream
+      destination rather than deleting it; only `BAG_FINALIZED` deletes a
+      queue row.
+- [ ] **Two-sealer overlap, final close.** Sealer B overlap-claims a bag
+      still being sealed on sealer A. Sealer A fires the final sealing
+      close. Sealer B's station returns to the scan form immediately
+      (stale sibling pin auto-released) rather than staying stuck showing
+      the now-finished bag.
