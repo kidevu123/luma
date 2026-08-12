@@ -2,7 +2,7 @@
 // table. Decision logic is pure (lib/production/engine/queue-transitions);
 // this module fetches the inputs and applies the mutation.
 
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import type { db as Db } from "@/lib/db";
 import {
   inventoryBags,
@@ -213,11 +213,21 @@ export async function applyBagQueueTransition(
     });
 }
 
-/** Full rebuild: wipe, then replay the entire workflow_events table in
- *  order through the same transition logic (finalized bags REMOVE their
- *  own rows during the replay). Secondary sort on id: occurred_at ties
- *  exist in legacy imports and queue transitions are order-sensitive,
- *  so replay must at least be deterministic across runs. */
+/** Full rebuild: wipe, then replay the workflow_events of every
+ *  IN-FLIGHT bag in order through the same transition logic. Secondary
+ *  sort on id: occurred_at ties exist in legacy imports and queue
+ *  transitions are order-sensitive, so replay must at least be
+ *  deterministic across runs.
+ *
+ *  Scoped to workflow_bags.finalized_at IS NULL. This is equivalent to
+ *  replaying everything, not an approximation: a finalized bag's replay
+ *  ends in BAG_FINALIZED, whose transition is REMOVE, so its row is
+ *  deleted again before the rebuild returns — replaying it costs a
+ *  per-event round trip to produce nothing. Void-repaired bags have
+ *  finalized_at nulled by the repair, so they are correctly INCLUDED
+ *  and re-queued. Every year of finished history used to be replayed
+ *  row by row here; the filter keeps the runtime proportional to work
+ *  actually on the floor. */
 export async function rebuildBagQueue(tx: Tx): Promise<{ rows: number }> {
   await tx.execute(sql`DELETE FROM read_bag_queue;`);
   const events = await tx
@@ -228,6 +238,8 @@ export async function rebuildBagQueue(tx: Tx): Promise<{ rows: number }> {
       occurredAt: workflowEvents.occurredAt,
     })
     .from(workflowEvents)
+    .innerJoin(workflowBags, eq(workflowBags.id, workflowEvents.workflowBagId))
+    .where(isNull(workflowBags.finalizedAt))
     .orderBy(workflowEvents.occurredAt, workflowEvents.id);
   for (const ev of events) {
     await applyBagQueueTransition(tx, ev, ev.occurredAt);

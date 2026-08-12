@@ -537,6 +537,10 @@ export async function projectBagReleasedEvent(
     releasedAtStage: string;
     accountability: StationAccountability;
     clientEventId?: string | null | undefined;
+    /** Extra payload keys for system-initiated releases (e.g. the
+     *  auto_release_reason marker on stale sibling pin clearing). Merged
+     *  after the base keys; callers must not shadow them. */
+    payloadExtra?: Record<string, unknown> | undefined;
   },
 ): Promise<void> {
   await projectEvent(tx, {
@@ -546,6 +550,7 @@ export async function projectBagReleasedEvent(
     payload: {
       station_kind: args.stationKind,
       released_at_stage: args.releasedAtStage,
+      ...(args.payloadExtra ?? {}),
     },
     ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
     enteredByUserId: args.accountability.enteredByUserId,
@@ -661,6 +666,11 @@ async function releaseStaleSiblingSealingPins(
       stationKind: "SEALING",
       releasedAtStage: "SEALED",
       accountability: args.accountability,
+      // The accountability carried here is the FIRING station's operator —
+      // the sibling's operator did nothing. Without this marker the audit
+      // trail reads as station A's operator releasing station B's bag.
+      // The marker says the system cleared a stale pin, not a person.
+      payloadExtra: { auto_release_reason: "STALE_SIBLING_SEALING_PIN" },
       ...(siblingClientEventId ? { clientEventId: siblingClientEventId } : {}),
     });
   }

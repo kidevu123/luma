@@ -364,6 +364,13 @@ describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
       /eq\(readStationLive\.currentWorkflowBagId, args\.workflowBagId\)/,
     );
     expect(helperBlock).toMatch(/-auto-release-sibling-/);
+    // P2-SIBLING-ATTRIBUTION-1: the event carries the firing station's
+    // operator, so it must also carry the marker saying the SYSTEM cleared
+    // a stale pin — otherwise the audit reads as that operator releasing
+    // another station's bag.
+    expect(helperBlock).toMatch(
+      /auto_release_reason: "STALE_SIBLING_SEALING_PIN"/,
+    );
   });
 
   it("auto-release uses STATION_RELEASE_FROM_STAGE.SEALING (SEALED) and idempotent station pin check", () => {

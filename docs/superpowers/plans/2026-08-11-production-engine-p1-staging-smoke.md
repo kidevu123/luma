@@ -51,6 +51,29 @@ that previously lived inside fireStageEventAction.
 
 ## Phase 2 (v1.31.0) — queue and auto-advance
 
+Run these two FIRST, in order, before any floor behaviour check.
+
+- [ ] **Migration landed the finishing group.** Immediately after the
+      migration runs:
+      `SELECT count(*) FROM route_operations WHERE order_independent_group = 'BOTTLE_FINISHING';`
+      must return exactly `2`, and both rows must be on the BOTTLE route:
+      `SELECT r.code, o.code FROM route_operations ro JOIN production_routes r
+      ON r.id = ro.route_id JOIN operation_types o ON o.id =
+      ro.operation_type_id WHERE ro.order_independent_group =
+      'BOTTLE_FINISHING';` -> exactly two rows, both `BOTTLE`, one
+      `STICKERING` and one `INDUCTION_SEAL`. Any other count means the
+      order-independent finishing pair is wrong and bottle bags will queue
+      to the wrong station — stop and fix before letting the floor scan.
+- [ ] **Backfill the queue once, post-deploy.** Run
+      `npm run rebuild:read-models` ONE time after the deploy. Bags already
+      in flight when the deploy landed have no `read_bag_queue` row and will
+      never appear in any station's `upNext` without it. Record the wall
+      time of the run here: `________`. It replays only in-flight bags, so
+      it should finish in seconds to well under two minutes; if it exceeds
+      ~2 minutes, abort the smoke and investigate (a runtime that long means
+      the in-flight scope is not being applied and the rebuild is walking
+      finished history).
+
 - [ ] Complete a blister bag: NO release button appears; the bag shows on a
       sealing tablet's queue as READY without any operator action.
 - [ ] Scan-claim while upstream still runs (overlap): sealing can claim a
@@ -87,4 +110,18 @@ that previously lived inside fireStageEventAction.
       still being sealed on sealer A. Sealer A fires the final sealing
       close. Sealer B's station returns to the scan form immediately
       (stale sibling pin auto-released) rather than staying stuck showing
-      the now-finished bag.
+      the now-finished bag. The sibling's `BAG_RELEASED` payload carries
+      `auto_release_reason: "STALE_SIBLING_SEALING_PIN"` — check the event
+      row, so the audit does not read as sealer A's operator releasing
+      sealer B's bag.
+- [ ] **Finishing re-claim is refused, station stays free.** Take a bottle
+      bag whose sticker step has already run (bag at SEALED, waiting on
+      cap-seal or packaging) and scan its card at the SAME sticker station.
+      The pickup is REFUSED with a message naming what remains — "This bag
+      has already been stickered here — it is waiting for cap-sealing."
+      (or "...waiting for packaging." once both finishing steps are done).
+      The station is NOT pinned: it returns to the scan form and can
+      immediately claim the next bag. Repeat at a cap-seal station whose
+      cap-seal already fired. Before the fix this pinned the station with
+      no exit — complete refused, no release or finalize button — until
+      packaging finalized the bag.
