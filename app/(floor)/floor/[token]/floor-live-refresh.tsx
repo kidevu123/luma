@@ -25,6 +25,19 @@ export function FloorLiveRefresh({ token }: { token: string }) {
 
     function startSSE() {
       es = new EventSource(`/floor/api/stream/${token}`);
+      // Invariant: polling stops only when a live connection is
+      // confirmed (this "hello"), never merely on a reconnect attempt.
+      // A black-holed connection (e.g. WiFi drop that doesn't actively
+      // refuse) never fires onerror, so clearing the poll fallback on
+      // the retry itself — before the new EventSource proves it's
+      // live — would leave the tablet with neither SSE nor polling,
+      // silently stale for hours on unattended floor hardware.
+      es.addEventListener("hello", () => {
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+      });
       es.addEventListener("floor", () => debouncedRefresh());
       es.onerror = () => {
         if (closed) return;
@@ -35,10 +48,6 @@ export function FloorLiveRefresh({ token }: { token: string }) {
           retryTimeout = setTimeout(() => {
             retryTimeout = null;
             if (closed) return;
-            if (pollInterval) {
-              clearInterval(pollInterval);
-              pollInterval = null;
-            }
             startSSE();
           }, 60_000);
         }
