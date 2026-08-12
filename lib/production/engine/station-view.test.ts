@@ -160,6 +160,7 @@ function queueRow(over: Partial<QueueRowForUpNext> = {}): QueueRowForUpNext {
     productId: "prod-1",
     productName: "Chocolate Brown",
     readyState: "READY",
+    claimedByStationId: null,
     upstreamStartedAt: null,
     ...over,
   };
@@ -300,6 +301,7 @@ describe("mapQueueRowsToUpNext", () => {
         queueRow({
           workflowBagId: "running",
           readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: "blister-1",
           upstreamStartedAt: new Date("2026-08-12T12:00:00Z"),
         }),
         queueRow({ workflowBagId: "ready" }),
@@ -325,12 +327,13 @@ describe("mapQueueRowsToUpNext", () => {
     expect(out.map((b) => b.workflowBagId)).toEqual(["first", "second", "third"]);
   });
 
-  it("gives an ETA only to a running bag with a median and a start time", () => {
+  it("gives an ETA to a bag an upstream station is actively holding", () => {
     const out = mapQueueRowsToUpNext(
       [
         queueRow({
           workflowBagId: "running",
           readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: "blister-1",
           upstreamStartedAt: new Date("2026-08-12T12:00:00Z"),
         }),
       ],
@@ -340,12 +343,35 @@ describe("mapQueueRowsToUpNext", () => {
     expect(out[0]?.etaMinutes).toBe(4);
   });
 
+  it("says nothing for a bag released mid-work, rather than counting down to zero", () => {
+    // A sealing handoff fires BAG_RELEASED, which UNCLAIMs the row but
+    // leaves ready_state UPSTREAM_RUNNING and a stale upstream_started_at.
+    // Nobody is working this bag; the elapsed clock is meaningless, and
+    // the clamp would otherwise announce "any moment now" for a bag on a
+    // cart.
+    const out = mapQueueRowsToUpNext(
+      [
+        queueRow({
+          workflowBagId: "released",
+          readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: null,
+          upstreamStartedAt: new Date("2026-08-12T11:00:00Z"),
+        }),
+      ],
+      new Map([["prod-1", 14]]),
+      NOW,
+    );
+    expect(out[0]?.readyState).toBe("UPSTREAM_RUNNING");
+    expect(out[0]?.etaMinutes).toBeNull();
+  });
+
   it("says nothing rather than guessing when the product has no median", () => {
     const out = mapQueueRowsToUpNext(
       [
         queueRow({
           workflowBagId: "running",
           readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: "blister-1",
           upstreamStartedAt: new Date("2026-08-12T12:00:00Z"),
         }),
       ],
@@ -362,6 +388,7 @@ describe("mapQueueRowsToUpNext", () => {
           workflowBagId: "running",
           productId: null,
           readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: "blister-1",
           upstreamStartedAt: new Date("2026-08-12T12:00:00Z"),
         }),
       ],
@@ -402,7 +429,11 @@ describe("mapQueueRowsToUpNext", () => {
 
   it("does not mutate the rows it was handed", () => {
     const input = [
-      queueRow({ workflowBagId: "running", readyState: "UPSTREAM_RUNNING" }),
+      queueRow({
+        workflowBagId: "running",
+        readyState: "UPSTREAM_RUNNING",
+        claimedByStationId: "blister-1",
+      }),
       queueRow({ workflowBagId: "ready" }),
     ];
     mapQueueRowsToUpNext(input, new Map(), NOW);

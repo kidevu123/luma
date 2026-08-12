@@ -26,11 +26,25 @@ import { resolveStationAccountability } from "@/lib/production/station-operator-
 import { blockerFor } from "./resolve-exceptions";
 import type { Blocker } from "./types";
 
+/** Either the pool or an open transaction — the guard inputs load the
+ *  same way from both; only the row lock differs. */
+type Reader = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
+
 export type ClaimGuardInput = {
   stationKind: string;
   queueRow: {
     eligibleStationKinds: readonly string[];
+    /** The station currently HOLDING the bag. For a row still sitting in
+     *  THIS station's queue that is almost always the UPSTREAM station
+     *  working it — a destination-kind peer's claim advances the row out
+     *  of this queue entirely. So a non-null holder is not by itself a
+     *  reason to refuse; see claimedByStationKind. */
     claimedByStationId: string | null;
+    /** The holder's station kind, or null when unheld. This is what
+     *  separates "upstream is still working it" (claimable — that IS the
+     *  overlap scan) from "a peer of my own kind already took it"
+     *  (refuse). */
+    claimedByStationKind: string | null;
     /** READY | UPSTREAM_RUNNING. Deliberately NOT a guard: the pickup
      *  table below is the authority on whether a station may take a bag
      *  early. SEALING accepts STARTED and PACKAGING accepts BLISTERED
@@ -41,14 +55,15 @@ export type ClaimGuardInput = {
   bagStage: string | null;
   isPaused: boolean;
   isFinalized: boolean;
+  isOnHold: boolean;
 };
 
 /** Pure: may this station claim this bag? Null means yes.
  *
  *  Order matters — the operator sees the FIRST blocker only, so the most
- *  actionable fact wins: what the bag is (unknown/finished/paused)
- *  before whose it is (wrong station, already claimed) before how far
- *  along it is (stage). */
+ *  actionable fact wins: what the bag is (unknown/finished/held/paused)
+ *  before whose it is (wrong station, peer-claimed) before how far along
+ *  it is (stage). */
 export function checkClaimGuards(input: ClaimGuardInput): Blocker | null {
   // No queue row, or a queue row the bag-state projector has not caught
   // up with. Either way Luma cannot say what this bag is, and a claim
@@ -57,12 +72,13 @@ export function checkClaimGuards(input: ClaimGuardInput): Blocker | null {
     return blockerFor("BAG_UNRECOGNIZED");
   }
   if (input.isFinalized) return blockerFor("BAG_FINALIZED");
+  if (input.isOnHold) return blockerFor("BAG_ON_HOLD");
   if (input.isPaused) return blockerFor("BAG_PAUSED");
 
   if (!input.queueRow.eligibleStationKinds.includes(input.stationKind)) {
     return blockerFor("OPERATION_UNRESOLVED");
   }
-  if (input.queueRow.claimedByStationId != null) {
+  if (isHeldByDestinationPeer(input.queueRow)) {
     return blockerFor("BAG_ALREADY_CLAIMED");
   }
 
@@ -76,9 +92,85 @@ export function checkClaimGuards(input: ClaimGuardInput): Blocker | null {
   return null;
 }
 
+/** True when the holder is a station that could itself do THIS queue's
+ *  work — i.e. a real race (two sealers reaching for the same bag).
+ *
+ *  An upstream holder (a kind that is not in the row's
+ *  eligibleStationKinds) is the overlap-scan case and must NOT block:
+ *  the bag is on its way here and claiming it early is the point.
+ *
+ *  A non-null holder whose kind could not be resolved fails CLOSED. The
+ *  FK is ON DELETE SET NULL so this should be unreachable; if it ever
+ *  happens, refusing a claim is recoverable and double-claiming a bag is
+ *  not. */
+function isHeldByDestinationPeer(row: {
+  eligibleStationKinds: readonly string[];
+  claimedByStationId: string | null;
+  claimedByStationKind: string | null;
+}): boolean {
+  if (row.claimedByStationId == null) return false;
+  if (row.claimedByStationKind == null) return true;
+  return row.eligibleStationKinds.includes(row.claimedByStationKind);
+}
+
+/** Load everything checkClaimGuards needs. `lockQueueRow` takes a row
+ *  lock (SELECT ... FOR UPDATE) so concurrent claims serialize — see
+ *  claimQueuedBag. */
+async function loadClaimGuardInput(
+  tx: Reader,
+  args: { stationId: string; workflowBagId: string; stationKind: string },
+  lockQueueRow: boolean,
+): Promise<ClaimGuardInput> {
+  const queueSelect = tx
+    .select({
+      eligibleStationKinds: readBagQueue.eligibleStationKinds,
+      claimedByStationId: readBagQueue.claimedByStationId,
+      readyState: readBagQueue.readyState,
+    })
+    .from(readBagQueue)
+    .where(eq(readBagQueue.workflowBagId, args.workflowBagId));
+  // FOR UPDATE cannot be applied across the nullable side of an outer
+  // join, so the holder's kind is a second read rather than a join.
+  const [queueRow] = await (lockQueueRow ? queueSelect.for("update") : queueSelect);
+
+  let claimedByStationKind: string | null = null;
+  if (queueRow?.claimedByStationId) {
+    const [holder] = await tx
+      .select({ kind: stations.kind })
+      .from(stations)
+      .where(eq(stations.id, queueRow.claimedByStationId));
+    claimedByStationKind = holder?.kind ?? null;
+  }
+
+  const [state] = await tx
+    .select({
+      stage: readBagState.stage,
+      isPaused: readBagState.isPaused,
+      isFinalized: readBagState.isFinalized,
+      isOnHold: readBagState.isOnHold,
+    })
+    .from(readBagState)
+    .where(eq(readBagState.workflowBagId, args.workflowBagId));
+
+  return {
+    stationKind: args.stationKind,
+    queueRow: queueRow ? { ...queueRow, claimedByStationKind } : null,
+    bagStage: state?.stage ?? null,
+    isPaused: state?.isPaused ?? false,
+    isFinalized: state?.isFinalized ?? false,
+    isOnHold: state?.isOnHold ?? false,
+  };
+}
+
 /** Claim a queued bag for a station. Total function: every rejection is
  *  a Blocker, and unexpected failures are wrapped by advanceBag's catch
  *  (this is only reached from advanceBagInner, which runs inside it).
+ *
+ *  Concurrency: the authoritative check runs inside the transaction on a
+ *  row-locked queue row, so two tablets reaching for the same bag
+ *  serialize — the loser re-reads the post-claim row and is refused. The
+ *  unlocked pre-check is a fast path for the ordinary rejections; it can
+ *  never approve a claim on its own.
  *
  *  PRECONDITION — the caller MUST have authenticated the station, the
  *  same guarantee recordStageEvent requires. On the floor path that comes
@@ -94,34 +186,26 @@ export async function claimQueuedBag(input: {
     .where(eq(stations.id, input.stationId));
   if (!stationRow) return { ok: false, blocker: blockerFor("STATION_UNRESOLVED") };
 
-  const [queueRow] = await db
-    .select({
-      eligibleStationKinds: readBagQueue.eligibleStationKinds,
-      claimedByStationId: readBagQueue.claimedByStationId,
-      readyState: readBagQueue.readyState,
-    })
-    .from(readBagQueue)
-    .where(eq(readBagQueue.workflowBagId, input.workflowBagId));
+  const loadArgs = { ...input, stationKind: stationRow.kind };
 
-  const [state] = await db
-    .select({
-      stage: readBagState.stage,
-      isPaused: readBagState.isPaused,
-      isFinalized: readBagState.isFinalized,
-    })
-    .from(readBagState)
-    .where(eq(readBagState.workflowBagId, input.workflowBagId));
+  // Fast path: reject the ordinary cases (wrong station, paused, not
+  // ready yet) without opening a transaction.
+  const preBlocker = checkClaimGuards(
+    await loadClaimGuardInput(db, loadArgs, false),
+  );
+  if (preBlocker) return { ok: false, blocker: preBlocker };
 
-  const blocker = checkClaimGuards({
-    stationKind: stationRow.kind,
-    queueRow: queueRow ?? null,
-    bagStage: state?.stage ?? null,
-    isPaused: state?.isPaused ?? false,
-    isFinalized: state?.isFinalized ?? false,
-  });
-  if (blocker) return { ok: false, blocker };
+  return db.transaction(async (tx) => {
+    const locked = await loadClaimGuardInput(tx, loadArgs, true);
+    if (!locked.queueRow) {
+      // The row existed a moment ago and is gone now: a peer claimed it
+      // and the projector's WORKING transition advanced it out of this
+      // queue. That is the race, not a missing bag.
+      return { ok: false as const, blocker: blockerFor("BAG_ALREADY_CLAIMED") };
+    }
+    const blocker = checkClaimGuards(locked);
+    if (blocker) return { ok: false as const, blocker };
 
-  await db.transaction(async (tx) => {
     const accountability = await resolveStationAccountability(tx, {
       stationId: input.stationId,
       overrideEmployeeCode: null,
@@ -132,8 +216,8 @@ export async function claimQueuedBag(input: {
       eventType: "BAG_PICKED_UP",
       payload: {
         station_kind: stationRow.kind,
-        // state is non-null here: checkClaimGuards refuses a null stage.
-        from_stage: state?.stage ?? null,
+        // Non-null: checkClaimGuards refuses a null stage.
+        from_stage: locked.bagStage,
         claimed_from_queue: true,
       },
       clientEventId: input.clientEventId,
@@ -143,7 +227,6 @@ export async function claimQueuedBag(input: {
       accountableEmployeeNameSnapshot:
         accountability.accountableEmployeeNameSnapshot,
     });
+    return { ok: true as const };
   });
-
-  return { ok: true };
 }

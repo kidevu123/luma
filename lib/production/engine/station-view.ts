@@ -13,7 +13,8 @@
 // exercise. `new Date()` appears exactly once, in getStationView; the
 // pure side always takes `now` as a parameter.
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
   inventoryBags,
@@ -71,6 +72,11 @@ export type QueueRowForUpNext = {
   /** READY | UPSTREAM_RUNNING as stored. Anything else is treated as
    *  UPSTREAM_RUNNING — see mapQueueRowsToUpNext. */
   readyState: string;
+  /** The station HOLDING the bag right now — for a row in this queue,
+   *  normally the upstream station working it. Null means nobody has it:
+   *  either it is READY, or it was released mid-work and is sitting
+   *  somewhere. The ETA gate below turns on this. */
+  claimedByStationId: string | null;
   upstreamStartedAt: Date | null;
 };
 
@@ -95,21 +101,30 @@ export function mapQueueRowsToUpNext(
     const readyState: UpNextBag["readyState"] =
       row.readyState === "READY" ? "READY" : "UPSTREAM_RUNNING";
     const median = row.productId ? medianByProduct.get(row.productId) ?? null : null;
+    // An ETA is only computable while a station is ACTIVELY holding the
+    // bag. Two rows must never get one:
+    //   READY — waiting on an operator, not on upstream. "Not available
+    //     yet" would be false.
+    //   UPSTREAM_RUNNING with no holder — a bag released mid-work (a
+    //     sealing handoff fires BAG_RELEASED, which UNCLAIMs the row but
+    //     leaves ready_state and a now-stale upstream_started_at). The
+    //     elapsed clock keeps running against a bag nobody is touching,
+    //     so the countdown would reach zero and announce a bag that is
+    //     sitting on a cart. Unknown is the honest answer.
+    const etaIsComputable =
+      readyState === "UPSTREAM_RUNNING" && row.claimedByStationId != null;
     return {
       workflowBagId: row.workflowBagId,
       bagLabel: row.bagLabel,
       productName: row.productName,
       readyState,
-      // A READY bag is waiting on an operator, not on upstream — an ETA
-      // there would read as "not available yet", which is false.
-      etaMinutes:
-        readyState === "UPSTREAM_RUNNING"
-          ? etaMinutes({
-              medianMinutes: median,
-              upstreamStartedAt: row.upstreamStartedAt,
-              now,
-            })
-          : null,
+      etaMinutes: etaIsComputable
+        ? etaMinutes({
+            medianMinutes: median,
+            upstreamStartedAt: row.upstreamStartedAt,
+            now,
+          })
+        : null,
     };
   });
   // Ready bags first, otherwise the loader's order (ready_at) preserved.
@@ -147,16 +162,28 @@ export function buildNextAction(input: NextActionInput): NextAction {
  *      occurred_at(<X>_COMPLETE) - occurred_at(BAG_PICKED_UP |
  *                                              CARD_ASSIGNED | BAG_CLAIMED)
  *
- *  Scoped to the last 20 bags per product so a product that ran once last
- *  spring cannot anchor today's number, and to 30 days so a station whose
- *  machine was re-tuned is not judged by its old self.
+ *  Scoped to the 20 most recent COMPLETION EVENTS per product at this
+ *  kind (rn ranks completions, not bags — a bag that completes twice at
+ *  one kind contributes twice), and to 30 days so a station whose machine
+ *  was re-tuned is not judged by its old self.
  *
- *  Two deliberate exclusions:
+ *  Three deliberate exclusions:
  *    - SEALING_SEGMENT_COMPLETE is a per-lane segment, not the bag
  *      leaving the station; counting it would report a fraction of the
  *      real cycle for every sealing bag.
  *    - Rows with no preceding pickup at this kind are dropped by the
  *      LATERAL join rather than defaulting to zero.
+ *    - PAUSE TIME IS NOT SUBTRACTED. read_bag_state.paused_seconds_accum
+ *      exists and the projector's own convention says cycle-time math
+ *      should treat paused time as not counted (lib/projector/index.ts,
+ *      the BAG_PAUSED / BAG_RESUMED block). This v1 ignores it, in both
+ *      directions: a bag that sat through a lunch break inflates one
+ *      sample (the median's job is to absorb that), and a paused
+ *      upstream bag's ETA keeps marching down to 0 while nothing is
+ *      happening. The null-holder gate in mapQueueRowsToUpNext does NOT
+ *      cover the second case — a pause keeps the station's pin, so the
+ *      row still has a holder. Subtracting accumulated pause on both
+ *      sides is the fix; it is not done here.
  *
  *  Returns raw samples; medianCycleMinutes decides whether there are
  *  enough of them to say anything at all. */
@@ -256,8 +283,15 @@ export async function getStationView(stationId: string): Promise<StationView> {
       })
     : null;
 
-  // The five bags this station could take next. Unclaimed only — a bag
-  // another station is already holding is not this station's to offer.
+  // The five bags this station could take next.
+  //
+  // claimed_by_station_id is the station HOLDING the bag, which for a row
+  // still in THIS queue is normally the UPSTREAM station working it — so
+  // filtering on "unclaimed" would hide every bag still being made and
+  // leave a list that can only ever show READY rows. A holder hides the
+  // row only when the holder's own kind is in eligible_station_kinds:
+  // that is a destination peer (a second sealer) who really did take it.
+  const holder = alias(stations, "holder");
   const queueRows = await db
     .select({
       workflowBagId: readBagQueue.workflowBagId,
@@ -265,13 +299,18 @@ export async function getStationView(stationId: string): Promise<StationView> {
       productId: readBagQueue.productId,
       productName: readBagQueue.productName,
       readyState: readBagQueue.readyState,
+      claimedByStationId: readBagQueue.claimedByStationId,
       upstreamStartedAt: readBagQueue.upstreamStartedAt,
     })
     .from(readBagQueue)
+    .leftJoin(holder, eq(holder.id, readBagQueue.claimedByStationId))
     .where(
       and(
         sql`${stationRow.station.kind} = ANY(${readBagQueue.eligibleStationKinds})`,
-        isNull(readBagQueue.claimedByStationId),
+        or(
+          isNull(readBagQueue.claimedByStationId),
+          sql`NOT (${holder.kind}::text = ANY(${readBagQueue.eligibleStationKinds}))`,
+        ),
       ),
     )
     .orderBy(sql`${readBagQueue.readyState} = 'READY' DESC`, readBagQueue.readyAt)

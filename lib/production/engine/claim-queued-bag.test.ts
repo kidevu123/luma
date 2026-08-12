@@ -1,82 +1,148 @@
 import { describe, it, expect } from "vitest";
 import { checkClaimGuards } from "./claim-queued-bag";
 
+// An unheld row bound for the sealing queue. `claimedByStationId` is the
+// station HOLDING the bag, not a peer's reservation — see the queueRow
+// docs on ClaimGuardInput.
 const ROW = {
   eligibleStationKinds: ["SEALING"],
   claimedByStationId: null,
+  claimedByStationKind: null,
   readyState: "READY",
 };
+
+/** The real overlap shape the projector emits: blister is still working
+ *  the bag, so the row is UPSTREAM_RUNNING and HELD by the blister
+ *  station. BLISTER is not in eligibleStationKinds, so it is upstream,
+ *  not a peer. */
+const HELD_UPSTREAM = {
+  ...ROW,
+  readyState: "UPSTREAM_RUNNING",
+  claimedByStationId: "blister-1",
+  claimedByStationKind: "BLISTER",
+};
+
+const BASE = { isPaused: false, isFinalized: false, isOnHold: false };
 
 describe("checkClaimGuards", () => {
   it("allows an eligible unclaimed READY bag", () => {
     expect(
       checkClaimGuards({
+        ...BASE,
         stationKind: "SEALING",
         queueRow: ROW,
         bagStage: "BLISTERED",
-        isPaused: false,
-        isFinalized: false,
       }),
     ).toBeNull();
   });
 
-  it("allows the overlap claim while upstream still runs, per pickup rules", () => {
+  it("allows the overlap claim while an upstream station still holds the bag", () => {
+    // STATION_PICKUP_FROM_STAGE.SEALING includes STARTED precisely so a
+    // sealer can take a bag blister has not finished. The holder being
+    // non-null is the NORMAL state here, not a competing claim.
     expect(
       checkClaimGuards({
+        ...BASE,
         stationKind: "SEALING",
-        queueRow: { ...ROW, readyState: "UPSTREAM_RUNNING" },
-        bagStage: "STARTED", // STATION_PICKUP_FROM_STAGE.SEALING includes STARTED
-        isPaused: false,
-        isFinalized: false,
+        queueRow: HELD_UPSTREAM,
+        bagStage: "STARTED",
       }),
     ).toBeNull();
   });
 
-  it("rejects a station kind the queue row does not list", () => {
+  it("rejects a bag a peer of the same kind is already holding", () => {
+    // Two sealers reaching for the same bag: the holder's kind IS in
+    // eligibleStationKinds, so this is a real race.
     const b = checkClaimGuards({
-      stationKind: "PACKAGING",
-      queueRow: ROW,
-      bagStage: "BLISTERED",
-      isPaused: false,
-      isFinalized: false,
-    });
-    expect(b?.code).toBe("OPERATION_UNRESOLVED");
-  });
-
-  it("rejects a bag already claimed by another station", () => {
-    const b = checkClaimGuards({
+      ...BASE,
       stationKind: "SEALING",
-      queueRow: { ...ROW, claimedByStationId: "other-station" },
+      queueRow: {
+        ...ROW,
+        claimedByStationId: "sealer-2",
+        claimedByStationKind: "SEALING",
+      },
       bagStage: "BLISTERED",
-      isPaused: false,
-      isFinalized: false,
     });
-    expect(b).not.toBeNull();
     expect(b?.code).toBe("BAG_ALREADY_CLAIMED");
     expect(b?.operatorSentence).not.toMatch(/BLISTERED|QUEUE|_COMPLETE/);
   });
 
+  it("rejects a peer claim even when the queue lists several kinds", () => {
+    // Both bottle finishing kinds are eligible for the same row; either
+    // one holding it blocks the other.
+    const b = checkClaimGuards({
+      ...BASE,
+      stationKind: "BOTTLE_STICKER",
+      queueRow: {
+        ...ROW,
+        eligibleStationKinds: ["BOTTLE_STICKER", "BOTTLE_CAP_SEAL"],
+        claimedByStationId: "capseal-1",
+        claimedByStationKind: "BOTTLE_CAP_SEAL",
+      },
+      bagStage: "BLISTERED",
+    });
+    expect(b?.code).toBe("BAG_ALREADY_CLAIMED");
+  });
+
+  it("fails closed when the holder's kind cannot be resolved", () => {
+    // Held by SOMETHING Luma cannot name. Refusing a claim is
+    // recoverable; two stations working one bag is not.
+    const b = checkClaimGuards({
+      ...BASE,
+      stationKind: "SEALING",
+      queueRow: { ...ROW, claimedByStationId: "ghost", claimedByStationKind: null },
+      bagStage: "BLISTERED",
+    });
+    expect(b?.code).toBe("BAG_ALREADY_CLAIMED");
+  });
+
+  it("rejects a station kind the queue row does not list", () => {
+    const b = checkClaimGuards({
+      ...BASE,
+      stationKind: "PACKAGING",
+      queueRow: ROW,
+      bagStage: "BLISTERED",
+    });
+    expect(b?.code).toBe("OPERATION_UNRESOLVED");
+  });
+
   it("rejects a stage the pickup table does not allow", () => {
     const b = checkClaimGuards({
+      ...BASE,
       stationKind: "PACKAGING",
       queueRow: { ...ROW, eligibleStationKinds: ["PACKAGING"] },
       bagStage: "STARTED", // packaging picks up at BLISTERED or SEALED only
-      isPaused: false,
-      isFinalized: false,
     });
     expect(b?.code).toBe("UPSTREAM_INCOMPLETE");
   });
 
-  it("rejects paused, finalized, and unknown bags with the catalogue blockers", () => {
+  it("rejects paused, held, finished, and unknown bags with the catalogue blockers", () => {
+    const at = (over: Partial<Parameters<typeof checkClaimGuards>[0]>) =>
+      checkClaimGuards({
+        ...BASE,
+        stationKind: "SEALING",
+        queueRow: ROW,
+        bagStage: "BLISTERED",
+        ...over,
+      })?.code;
+    expect(at({ isPaused: true })).toBe("BAG_PAUSED");
+    expect(at({ isFinalized: true })).toBe("BAG_FINALIZED");
+    expect(at({ isOnHold: true })).toBe("BAG_ON_HOLD");
+    expect(at({ queueRow: null, bagStage: null })).toBe("BAG_UNRECOGNIZED");
+  });
+
+  it("refuses a held bag at claim time rather than letting it be claimed then blocked", () => {
+    // read_bag_state.is_on_hold is a supervisor decision. Claiming first
+    // and discovering it on the next screen wastes a trip to the machine.
     expect(
-      checkClaimGuards({ stationKind: "SEALING", queueRow: ROW, bagStage: "BLISTERED", isPaused: true, isFinalized: false })?.code,
-    ).toBe("BAG_PAUSED");
-    expect(
-      checkClaimGuards({ stationKind: "SEALING", queueRow: ROW, bagStage: "BLISTERED", isPaused: false, isFinalized: true })?.code,
-    ).toBe("BAG_FINALIZED");
-    expect(
-      checkClaimGuards({ stationKind: "SEALING", queueRow: null, bagStage: null, isPaused: false, isFinalized: false })?.code,
-    ).toBe("BAG_UNRECOGNIZED");
+      checkClaimGuards({
+        ...BASE,
+        isOnHold: true,
+        stationKind: "SEALING",
+        queueRow: HELD_UPSTREAM,
+        bagStage: "STARTED",
+      })?.code,
+    ).toBe("BAG_ON_HOLD");
   });
 
   it("rejects a bag with a queue row but no known stage", () => {
@@ -85,11 +151,10 @@ describe("checkClaimGuards", () => {
     // BAG_PICKED_UP from an unknown stage — refuse instead of guessing.
     expect(
       checkClaimGuards({
+        ...BASE,
         stationKind: "SEALING",
         queueRow: ROW,
         bagStage: null,
-        isPaused: false,
-        isFinalized: false,
       })?.code,
     ).toBe("BAG_UNRECOGNIZED");
   });
@@ -99,22 +164,33 @@ describe("checkClaimGuards", () => {
     // "this bag is already finished" is the actionable sentence; sending
     // the operator to a supervisor over routing would be noise.
     const b = checkClaimGuards({
+      ...BASE,
+      isFinalized: true,
       stationKind: "PACKAGING",
       queueRow: ROW,
       bagStage: "SEALED",
-      isPaused: false,
-      isFinalized: true,
     });
     expect(b?.code).toBe("BAG_FINALIZED");
   });
 
   it("never returns a blocker whose operator sentence names a stage or event", () => {
     const cases: Parameters<typeof checkClaimGuards>[0][] = [
-      { stationKind: "PACKAGING", queueRow: ROW, bagStage: "BLISTERED", isPaused: false, isFinalized: false },
-      { stationKind: "SEALING", queueRow: { ...ROW, claimedByStationId: "s2" }, bagStage: "BLISTERED", isPaused: false, isFinalized: false },
-      { stationKind: "PACKAGING", queueRow: { ...ROW, eligibleStationKinds: ["PACKAGING"] }, bagStage: "STARTED", isPaused: false, isFinalized: false },
-      { stationKind: "SEALING", queueRow: ROW, bagStage: "BLISTERED", isPaused: true, isFinalized: false },
-      { stationKind: "SEALING", queueRow: null, bagStage: null, isPaused: false, isFinalized: false },
+      { ...BASE, stationKind: "PACKAGING", queueRow: ROW, bagStage: "BLISTERED" },
+      {
+        ...BASE,
+        stationKind: "SEALING",
+        queueRow: { ...ROW, claimedByStationId: "s2", claimedByStationKind: "SEALING" },
+        bagStage: "BLISTERED",
+      },
+      {
+        ...BASE,
+        stationKind: "PACKAGING",
+        queueRow: { ...ROW, eligibleStationKinds: ["PACKAGING"] },
+        bagStage: "STARTED",
+      },
+      { ...BASE, isPaused: true, stationKind: "SEALING", queueRow: ROW, bagStage: "BLISTERED" },
+      { ...BASE, isOnHold: true, stationKind: "SEALING", queueRow: ROW, bagStage: "BLISTERED" },
+      { ...BASE, stationKind: "SEALING", queueRow: null, bagStage: null },
     ];
     for (const input of cases) {
       const b = checkClaimGuards(input);
