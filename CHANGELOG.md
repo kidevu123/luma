@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.30.0] — 2026-08-12
+
+- Production Engine phase 1: `getStationView()` and `advanceBag()` land behind the existing floor UI. Route decisions now resolve from `route_operations` with legacy fallback. No operator-visible change.
+
 ## [1.29.10] — 2026-08-05
 
 ### Fixed — CONSOLIDATED-SWEEP-ROUTE-1: consolidated ops were never auto-committable — queue eligibility stamp + sweep routing by payload kind; drawer shows commit evidence

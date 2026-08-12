@@ -76,7 +76,7 @@ import { StationRollPanel } from "./station-roll-panel";
 import { ElapsedTimer } from "./elapsed-timer";
 import { formatFloorTimeEastern } from "@/lib/floor-time";
 import { STATION_INACTIVE_FLOOR_MESSAGE } from "@/lib/production/station-management";
-import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
+import { getStationView } from "@/lib/production/engine";
 import { loadFloorAllocationPanelForWorkflowBag } from "@/lib/production/floor-allocation-display";
 import { RawBagAllocationPanel } from "./raw-bag-allocation-panel";
 
@@ -111,9 +111,15 @@ export default async function FloorStationPage({
   // OP-1C: active operator session
   // a new one. activeSession is null until someone runs Open shift;
   // the panel below handles both states.
-  const [activeSession, employeeOptions] = await Promise.all([
+  // STAGE-ENGINE-P1: stationView is the production engine's single
+  // tablet read. Phase 1 uses it for the current-bag display label only;
+  // every other resolution on this page still reads its own rows below
+  // and moves into the engine in Phase 4. Fetched alongside the session
+  // reads so the rewire costs no extra round trip in wall-clock terms.
+  const [activeSession, employeeOptions, stationView] = await Promise.all([
     getActiveStationSession(db, station.station.id),
     listActiveEmployeeOptions(),
+    getStationView(station.station.id),
   ]);
 
   // The bag at THIS station (and only this one) lives in
@@ -144,15 +150,16 @@ export default async function FloorStationPage({
     .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
     .where(eq(readStationLive.stationId, station.station.id));
 
-  const currentBagDisplayLabel = currentAtStation
-    ? buildCurrentBagDisplayLabel({
-        cardLabel: currentAtStation.card?.label ?? null,
-        poNumber: currentAtStation.poNumber,
-        tabletTypeName: currentAtStation.tabletTypeName,
-        productName: currentAtStation.product?.name ?? null,
-        inventoryBagNumber: currentAtStation.inventoryBagNumber,
-        workflowBagNumber: currentAtStation.bag.bagNumber,
-      })
+  // STAGE-ENGINE-P1: the heading and its subline now come from the
+  // engine's StationView instead of being derived here. getStationView
+  // runs the identical query and calls buildCurrentBagDisplayLabel with
+  // the identical arguments, so primary/secondary are the same strings
+  // this page produced before — see lib/production/engine/station-view.ts.
+  const currentBagDisplayLabel = stationView.current
+    ? {
+        primary: stationView.current.bagLabel,
+        secondary: stationView.current.bagSubLabel,
+      }
     : null;
 
   // RAW_BAG cards available to scan: ASSIGNED with no workflow bag
