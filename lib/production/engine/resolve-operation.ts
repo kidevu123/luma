@@ -35,11 +35,14 @@ export type ResolvedOperation = {
  *    HANDPACK_BLISTER -> BLISTER is this module's own choice. That table
  *    has NO HANDPACK_BLISTER key at all, so nothing corroborates it.
  *
- *  The HANDPACK_BLISTER entry is the live cause of blocker 3 in the
- *  Phase 2 preconditions on advanceBag (lib/production/engine/advance.ts):
- *  aliasing to BLISTER yields BLISTER_COMPLETE, which
- *  ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER rejects. Do not treat this
- *  alias as settled. */
+ *  The HANDPACK_BLISTER entry used to be the live cause of blocker 3 in
+ *  the Phase 1 preconditions on advanceBag: aliasing to BLISTER yields
+ *  BLISTER_COMPLETE, which ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER
+ *  rejects. Task 7 works around it downstream —
+ *  intentToEventType(intent, operationCode, stationKind) overrides the
+ *  event for HANDPACK_BLISTER stations. The alias itself is still
+ *  uncorroborated; the real fix is a HANDPACK_BLISTER route operation.
+ *  Do not treat this alias as settled. */
 const STATION_KIND_ALIAS: Readonly<Record<string, string>> = {
   COMBINED: "BLISTER",
   HANDPACK_BLISTER: "BLISTER",

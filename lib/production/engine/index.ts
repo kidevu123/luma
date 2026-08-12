@@ -26,8 +26,16 @@ export {
   getStationView,
   assembleStationView,
   buildNextAction,
+  mapQueueRowsToUpNext,
   operationVerb,
 } from "./station-view";
-export type { NextActionInput, StationViewRows } from "./station-view";
+export type {
+  NextActionInput,
+  QueueRowForUpNext,
+  StationViewRows,
+} from "./station-view";
+export { claimQueuedBag, checkClaimGuards } from "./claim-queued-bag";
+export type { ClaimGuardInput } from "./claim-queued-bag";
+export { medianCycleMinutes, etaMinutes } from "./eta";
 export { deriveQueueTransition, queueAfterWorkAt, queueRank } from "./queue-transitions";
 export type { QueueDestination, QueueTransition } from "./queue-transitions";

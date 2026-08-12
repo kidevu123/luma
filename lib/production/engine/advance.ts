@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { stations, workflowBags } from "@/lib/db/schema";
 import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
 import type { AdvanceInput, AdvanceIntent, AdvanceResult } from "./types";
+import { claimQueuedBag } from "./claim-queued-bag";
 import { blockerFor } from "./resolve-exceptions";
 import { resolveOperation } from "./resolve-operation";
 import { getStationView } from "./station-view";
@@ -36,15 +37,31 @@ const BAG_CLOSE_EVENT_FOR_OPERATION: Readonly<Record<string, string>> = {
   HEAT_SEAL: "SEALING_COMPLETE",
 };
 
+/** Station kinds whose completion event is NOT the one their aliased
+ *  operation implies. resolve-operation aliases HANDPACK_BLISTER onto the
+ *  BLISTER operation, so the operation code alone yields
+ *  BLISTER_COMPLETE — which ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER
+ *  rejects. The station kind is the tiebreaker, which is why this
+ *  function takes one. COMBINED aliases onto BLISTER too and is NOT
+ *  listed: BLISTER_COMPLETE is exactly what it fires. */
+const COMPLETE_EVENT_FOR_STATION_KIND: Readonly<
+  Record<string, Readonly<Record<string, string>>>
+> = {
+  HANDPACK_BLISTER: { BLISTER: "HANDPACK_BLISTER_COMPLETE" },
+};
+
 export function intentToEventType(
   intent: AdvanceIntent,
   operationCode: string,
+  stationKind: string,
 ): string | null {
   if (intent === "CLAIM") return "BAG_PICKED_UP";
   if (intent === "CONFIRM_BAG_EMPTY") {
     return BAG_CLOSE_EVENT_FOR_OPERATION[operationCode] ?? null;
   }
   if (intent === "COMPLETE") {
+    const byKind = COMPLETE_EVENT_FOR_STATION_KIND[stationKind]?.[operationCode];
+    if (byKind) return byKind;
     return COMPLETE_EVENT_FOR_OPERATION[operationCode] ?? null;
   }
   // RESOLVE_PARTIAL does not fire a workflow event; it records an
@@ -67,6 +84,13 @@ export function buildRecordStageEventInput(args: {
     workflowBagId: args.workflowBagId,
     eventType: args.eventType,
     countTotal: args.inputs.counter ?? args.inputs.cases ?? 0,
+    // Presence, not truthiness: recordStageEvent treats `undefined` as
+    // "no counter supplied" and refuses the seal, so a real reading of 0
+    // must survive. Under exactOptionalPropertyTypes the key must be
+    // absent rather than present-and-undefined when there is none.
+    ...(args.inputs.counterPresses != null
+      ? { counterPresses: args.inputs.counterPresses }
+      : {}),
     packsRemaining: 0,
     cardsReopened: 0,
     ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
@@ -75,56 +99,37 @@ export function buildRecordStageEventInput(args: {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// PHASE 2 PRECONDITIONS — advanceBag is NOT yet usable from the floor.
+// REMAINING LIMITATIONS — what advanceBag still cannot express.
 //
-// advanceBag has no production caller. It is unreachable from
-// app/(floor)/ today, and that is deliberate: wiring a caller now would
-// break three station kinds outright and silently drop six fields.
-// Everything below must be resolved BEFORE a caller is added, not after.
+// Task 7 closed the three hard blockers Phase 1 recorded here: sealing
+// carries counterPresses, CLAIM routes to claimQueuedBag instead of
+// recordStageEvent, and HANDPACK_BLISTER resolves its event from the
+// station kind. What is left is not a broken station kind — it is work
+// this contract does not model yet, all of it Phase 4:
 //
-// HARD BLOCKERS — these station kinds cannot succeed at all today:
+//   PACKAGING multi-counts. AdvanceInput.inputs carries damaged,
+//   displays and loose, and buildRecordStageEventInput reads NEITHER —
+//   countTotal takes `counter ?? cases ?? 0` and the rest are dropped.
+//   A packaging station that counts cases + displays + loose separately,
+//   or reports damage, records only its case count through this path.
+//   PACKAGING_SNAPSHOT is not reachable at all (no intent maps to it).
 //
-//   1. SEALING and COMBINED — no counterPresses.
-//      buildRecordStageEventInput() never sets `counterPresses`. Any
-//      SEALING_SEGMENT_COMPLETE (or SEALING_COMPLETE on a COMBINED
-//      station) therefore reaches the guard at
-//      record-stage-event.ts:282-284 with counterPresses === undefined
-//      and returns SEALING_COUNTER_PRESS_ERROR. The operator sees
-//      "This step could not be recorded." on every seal.
-//      Fix: carry the press count through AdvanceInput.inputs and map it.
+//   Partial sealing close-out. Four fields recordStageEvent accepts and
+//   this mapping does not supply:
+//     sealingCloseMode       — full vs partial close; defaults to "whole",
+//                              so a partial close cannot be requested.
+//     partialCloseReason     — required to justify a partial close.
+//     partialCloseReasonNote — the free-text detail for the above.
+//     packsRemaining / cardsReopened — hard-coded to 0 here.
 //
-//   2. Every kind, for intent "CLAIM" — unrecognised event type.
-//      intentToEventType("CLAIM", …) returns "BAG_PICKED_UP", which does
-//      not appear in ALLOWED_EVENTS_BY_KIND (record-stage-event.ts:89-104)
-//      under ANY station kind, so recordStageEvent rejects it.
-//      Fix: claim is not a stage event — route it to the pickup path
-//      instead of recordStageEvent, or add the kind entries.
+//   overrideEmployeeCode. No AdvanceInput field carries a per-form
+//   accountability override, so a first-op count with no open shift
+//   throws even when the operator supplied a code. AdvanceInput
+//   .operatorSessionId is still unread for the same reason.
 //
-//   3. HANDPACK_BLISTER — wrong event via the alias.
-//      STATION_KIND_ALIAS maps HANDPACK_BLISTER -> BLISTER
-//      (see STATION_KIND_ALIAS in resolve-operation.ts), so the resolved
-//      operation is BLISTER and
-//      intentToEventType yields "BLISTER_COMPLETE". But
-//      ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER permits only
-//      "HANDPACK_BLISTER_COMPLETE", so it is rejected.
-//      Fix: resolve the event from the STATION kind, not the aliased
-//      operation, or give HANDPACK_BLISTER its own route operation.
-//
-// SILENTLY DROPPED FIELDS — buildRecordStageEventInput() does not carry
-// these, and each one changes recorded behaviour when it is missing:
-//
-//   overrideEmployeeCode     — per-form accountability override; without
-//                              it a first-op count with no open shift
-//                              throws (record-stage-event.ts:344-351)
-//                              even when the operator supplied a code.
-//   sealingCloseMode         — full vs partial sealing close-out.
-//   partialCloseReason       — required to justify a partial close.
-//   partialCloseReasonNote   — the free-text detail for the above.
-//   packsRemaining           — hard-coded to 0 here.
-//   cardsReopened            — hard-coded to 0 here.
-//
-// Until every item above is addressed, the floor's own
-// fireStageEventAction remains the only correct write path.
+// Consequence: the floor's fireStageEventAction remains the write path
+// for packaging counts and partial sealing close-outs. A caller wired to
+// advanceBag today must not offer those gestures.
 // ─────────────────────────────────────────────────────────────────────
 export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
   try {
@@ -146,6 +151,20 @@ export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
 }
 
 async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
+  // A claim is not a stage event and needs no route operation — the
+  // queue row already says which kinds may take the bag. Short-circuit
+  // before resolveOperation so a bag whose product has no route can
+  // still be picked up (the operation only governs the WORK).
+  if (input.intent === "CLAIM") {
+    const claim = await claimQueuedBag({
+      stationId: input.stationId,
+      workflowBagId: input.workflowBagId,
+      clientEventId: input.clientEventId,
+    });
+    if (!claim.ok) return { ok: false, blocker: claim.blocker };
+    return { ok: true, view: await getStationView(input.stationId) };
+  }
+
   const [stationRow] = await db
     .select()
     .from(stations)
@@ -167,7 +186,11 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
   });
   if (!resolved) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
 
-  const eventType = intentToEventType(input.intent, resolved.operation.operationCode);
+  const eventType = intentToEventType(
+    input.intent,
+    resolved.operation.operationCode,
+    stationRow.kind,
+  );
   if (!eventType) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
 
   const result = await recordStageEvent(

@@ -91,6 +91,11 @@ export type AdvanceInput = {
   intent: AdvanceIntent;
   inputs: {
     counter?: number;
+    /** Sealing counter presses. Distinct from `counter`: recordStageEvent
+     *  multiplies presses by the machine's cards-per-press to derive the
+     *  sealed count, and REFUSES a sealing segment without it
+     *  (SEALING_COUNTER_PRESS_ERROR). */
+    counterPresses?: number;
     damaged?: number;
     cases?: number;
     displays?: number;

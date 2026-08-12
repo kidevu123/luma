@@ -109,6 +109,14 @@ const LEGACY_STATION_EVENT: ReadonlyArray<[string, string, string]> = [
   ["BOTTLE_HANDPACK", "BOTTLE", "BOTTLE_HANDPACK_COMPLETE"],
   ["BOTTLE_STICKER", "BOTTLE", "BOTTLE_STICKER_COMPLETE"],
   ["BOTTLE_CAP_SEAL", "BOTTLE", "BOTTLE_CAP_SEAL_COMPLETE"],
+  // Task 7: intentToEventType takes the STATION kind, so the two kinds
+  // that alias onto the BLISTER operation are no longer indistinguishable
+  // and can finally be pinned. HANDPACK_BLISTER fires its own event;
+  // COMBINED keeps the aliased one (ALLOWED_EVENTS_BY_KIND.COMBINED
+  // permits BLISTER_COMPLETE, ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER
+  // does not).
+  ["HANDPACK_BLISTER", "CARD_BLISTER", "HANDPACK_BLISTER_COMPLETE"],
+  ["COMBINED", "CARD_BLISTER", "BLISTER_COMPLETE"],
 ];
 
 const STATION = { id: "s1", label: "Sealing 2", kind: "SEALING" } as StationRow;
@@ -121,14 +129,16 @@ describe("station kind to workflow event mapping", () => {
       expect(ops).toBeDefined();
       const resolved = pickOperationForStationKind(ops!, stationKind);
       expect(resolved).not.toBeNull();
-      expect(intentToEventType("COMPLETE", resolved!.operationCode)).toBe(expectedEvent);
+      expect(
+        intentToEventType("COMPLETE", resolved!.operationCode, stationKind),
+      ).toBe(expectedEvent);
     },
   );
 
   it("every event the engine can fire is known to the legacy prereq table", () => {
     for (const [stationKind, routeCode] of LEGACY_STATION_EVENT) {
       const resolved = pickOperationForStationKind(SEEDED_ROUTES[routeCode]!, stationKind);
-      const event = intentToEventType("COMPLETE", resolved!.operationCode);
+      const event = intentToEventType("COMPLETE", resolved!.operationCode, stationKind);
       expect(Object.keys(EVENT_STAGE_PREREQ)).toContain(event);
     }
   });
@@ -164,10 +174,12 @@ describe("station kind to workflow event mapping", () => {
     //      fireStageEventAction, not a value read from the action. If the
     //      action's real call site changes, this keeps passing.
     //   2. The pinned call is a SEALING segment with NO counterPresses —
-    //      a shape the action never sends and that recordStageEvent would
-    //      reject outright (SEALING_COUNTER_PRESS_ERROR; see blocker 1 in
-    //      the Phase 2 preconditions on advance.ts). It pins the mapping,
-    //      not a call that could succeed.
+    //      a shape the action never sends and that recordStageEvent
+    //      rejects outright (SEALING_COUNTER_PRESS_ERROR). Since Task 7
+    //      the engine CAN carry presses (inputs.counterPresses), so this
+    //      is now a deliberately partial input, not an impossible one: it
+    //      pins the count routing, not a call that could succeed.
+    //      advance.test.ts covers the press passthrough.
     //   3. It iterates Object.keys(viaAction) only, so a field the engine
     //      FAILS to set (and the action does not list here) or an EXTRA
     //      field the engine adds are both invisible to it.
