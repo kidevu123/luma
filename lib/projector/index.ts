@@ -48,6 +48,7 @@ import { refreshMaterialReadModelsAfterBlister } from "./material-read-model-ref
 import { attributeFinalizedBag } from "./operator-daily-attribution";
 import { projectQcEvent, isQcEventType } from "./qc-events";
 import { projectFinishedLotForFinalizedBag } from "./finished-lot-passport";
+import { applyBagQueueTransition } from "./bag-queue";
 import {
   applyVoidErroneousBagFinalizationRepair,
   readResumeStageFromVoidCorrection,
@@ -734,6 +735,10 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
     });
     await refreshMaterialReadModelsAfterBlister(tx, ev.stationId);
   }
+
+  // P2-QUEUE-1 — maintain the per-bag queue row. Must run before
+  // pg_notify so SSE subscribers re-reading the queue see fresh rows.
+  await applyBagQueueTransition(tx, ev, occurredAt);
 
   // 4. pg_notify on a single channel — the SSE relay LISTENs on this
   //    channel and pushes a tiny JSON envelope to every connected

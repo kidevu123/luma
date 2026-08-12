@@ -19,6 +19,7 @@ import * as schema from "@/lib/db/schema";
 import { ensureLiveReadModelCoverage } from "@/lib/projector/live-read-models";
 import { rebuildDailyThroughput } from "@/lib/projector/daily-throughput";
 import { rebuildQueueState } from "@/lib/projector/queue-state";
+import { rebuildBagQueue } from "@/lib/projector/bag-queue";
 import { rebuildSkuDaily } from "@/lib/projector/sku-daily";
 import { rebuildMaterialReconciliation } from "@/lib/projector/material-reconciliation";
 import { rebuildMaterialReconciliationV2 } from "@/lib/projector/material-reconciliation-v2";
@@ -47,6 +48,7 @@ async function main() {
     "read_bag_state",
     "read_daily_throughput",
     "read_queue_state",
+    "read_bag_queue",
     "read_sku_daily",
     "read_material_reconciliation",
     "read_material_reconciliation_v2",
@@ -88,6 +90,9 @@ async function main() {
     await rebuildDailyThroughput(tx);
     console.log("[rebuild-read-models] rebuilding read_queue_state…");
     await rebuildQueueState(tx);
+    console.log("[rebuild-read-models] rebuilding read_bag_queue…");
+    const bagQueueResult = await rebuildBagQueue(tx);
+    console.log(`[rebuild-read-models]   read_bag_queue rows=${bagQueueResult.rows}`);
     console.log("[rebuild-read-models] rebuilding read_sku_daily…");
     await rebuildSkuDaily(tx);
     console.log("[rebuild-read-models] rebuilding read_material_reconciliation…");
