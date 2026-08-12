@@ -325,6 +325,47 @@ describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
     );
   });
 
+  // MULTI-SEALING-SAME-BAG-1: replaces the deleted "SEALING keeps manual
+  // Release available after another sealer completes the bag" scanner. That
+  // test protected an overlapped sealer's escape hatch from a stale pin; the
+  // system now clears the stale pin itself at final close, so the escape hatch
+  // is a server-side release, not a button. Structural anchor: the call sits
+  // inside recordStageEvent's transaction, in the isSealingFinal path, after
+  // the primary auto-release.
+  it("final sealing close releases stale sibling sealing pins from inside the transaction", () => {
+    expect(actionsSrc).toMatch(/await releaseStaleSiblingSealingPins\(tx, \{/);
+    const primaryIdx = actionsSrc.indexOf("await maybeAutoReleaseAfterComplete");
+    const siblingIdx = actionsSrc.indexOf("await releaseStaleSiblingSealingPins");
+    const outsideTxnIdx = actionsSrc.indexOf(
+      "export async function projectBagReleasedEvent",
+    );
+    expect(siblingIdx).toBeGreaterThan(primaryIdx);
+    expect(siblingIdx).toBeLessThan(outsideTxnIdx);
+    // Gated on the final (non-partial) sealing close.
+    const callBlock = actionsSrc.slice(siblingIdx - 200, siblingIdx);
+    expect(callBlock).toMatch(/isSealingFinal && !isPartialSealingClose/);
+  });
+
+  it("sibling pin release emits real BAG_RELEASED events scoped to SEALING stations", () => {
+    const helperIdx = actionsSrc.indexOf(
+      "async function releaseStaleSiblingSealingPins",
+    );
+    expect(helperIdx).toBeGreaterThan(-1);
+    const helperBlock = actionsSrc.slice(helperIdx, helperIdx + 1600);
+    // Real event through the shared projection — never a direct read-model write.
+    expect(helperBlock).toMatch(/projectBagReleasedEvent/);
+    expect(helperBlock).not.toMatch(/update\(readStationLive\)/);
+    // Only other SEALING stations pinned to this bag; packaging keeps its pin.
+    expect(helperBlock).toMatch(/eq\(stations\.kind, "SEALING"\)/);
+    expect(helperBlock).toMatch(
+      /ne\(readStationLive\.stationId, args\.firingStationId\)/,
+    );
+    expect(helperBlock).toMatch(
+      /eq\(readStationLive\.currentWorkflowBagId, args\.workflowBagId\)/,
+    );
+    expect(helperBlock).toMatch(/-auto-release-sibling-/);
+  });
+
   it("auto-release uses STATION_RELEASE_FROM_STAGE.SEALING (SEALED) and idempotent station pin check", () => {
     expect(actionsSrc).toMatch(/AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*SEALING/);
     const helperIdx = actionsSrc.indexOf("function maybeAutoReleaseAfterComplete");
