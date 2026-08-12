@@ -172,6 +172,18 @@ Branch `feat/production-engine-p2`. Three short notes for whoever reads
   5's concerns section for the argument that it may deserve revisiting
   once the bag also auto-releases at BLISTERED on a partial close.
 
+## Phase 3 outcomes
+
+Branch `feat/production-engine-p3`. Realtime shipped: floor tablets receive stream events from pg_notify and auto-refresh queues without operator touch. SSE route `/floor/api/stream/<stationToken>` is authed by station token and filtered by relevance rule:
+
+- **Own event:** if the event originates from the tablet's own station, refresh always.
+- **Same-kind peer:** if the event is from a different station but the same kind (e.g. SEALING to SEALING), refresh only when the event concerns a bag eligible for that station's queue.
+- **Claimable queue:** if the event stage matches a station kind in the bag's next route step, refresh.
+
+The stream uses hello-gated polling invariant: polling stops as soon as a connection proves live (EventSource open); if the connection drops, polling resumes at 60s. If the server restarts, the tablet reconnects SSE within ~60s.
+
+What CI cannot verify: the stream route end-to-end (staging smoke); EventSource reconnect behaviour under real traffic (staging smoke); the pg_notify round-trip latency and per-station filtering under load (staging smoke). Relevance rule and payload construction are pure-tested.
+
 ### Phase 2 deferred minors (final-review triaged, none floor-reachable)
 
 - Sibling-release payload marker shipped (`auto_release_reason`); the
