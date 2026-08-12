@@ -59,10 +59,12 @@ export async function applyBagQueueTransition(
     eventType: string;
   },
   occurredAt: Date,
-): Promise<void> {
+): Promise<{ stationKind: string | null; queueStageKey: string | null }> {
   // Cheap pre-filter: only flow events matter. deriveQueueTransition
   // re-checks; this just avoids the queries for the common case.
-  if (!FLOW_EVENTS.has(ev.eventType)) return;
+  if (!FLOW_EVENTS.has(ev.eventType)) {
+    return { stationKind: null, queueStageKey: null };
+  }
 
   const stationKind = ev.stationId
     ? (
@@ -93,7 +95,7 @@ export async function applyBagQueueTransition(
     .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
     .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
     .where(eq(workflowBags.id, ev.workflowBagId));
-  if (!bagRow) return;
+  if (!bagRow) return { stationKind, queueStageKey: null };
 
   // Bounded to events at or before THIS event so replay sees exactly
   // what live saw: during rebuild the table is already fully populated,
@@ -135,17 +137,17 @@ export async function applyBagQueueTransition(
     currentRow: currentRow ?? null,
   });
 
-  if (transition.kind === "NONE") return;
+  if (transition.kind === "NONE") return { stationKind, queueStageKey: null };
   if (transition.kind === "REMOVE") {
     await tx.delete(readBagQueue).where(eq(readBagQueue.workflowBagId, ev.workflowBagId));
-    return;
+    return { stationKind, queueStageKey: null };
   }
   if (transition.kind === "UNCLAIM") {
     await tx
       .update(readBagQueue)
       .set({ claimedByStationId: null, updatedAt: occurredAt })
       .where(eq(readBagQueue.workflowBagId, ev.workflowBagId));
-    return;
+    return { stationKind, queueStageKey: null };
   }
 
   const label = buildCurrentBagDisplayLabel({
@@ -187,7 +189,7 @@ export async function applyBagQueueTransition(
           upstreamStartedAt: occurredAt,
         },
       });
-    return;
+    return { stationKind, queueStageKey: transition.destination.queueStageKey };
   }
 
   // READY
@@ -211,6 +213,7 @@ export async function applyBagQueueTransition(
         // Keep upstream_started_at for cycle-time math.
       },
     });
+  return { stationKind, queueStageKey: transition.destination.queueStageKey };
 }
 
 /** Full rebuild: wipe, then replay the workflow_events of every

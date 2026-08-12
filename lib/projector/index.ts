@@ -738,7 +738,7 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
 
   // P2-QUEUE-1 — maintain the per-bag queue row. Must run before
   // pg_notify so SSE subscribers re-reading the queue see fresh rows.
-  await applyBagQueueTransition(tx, ev, occurredAt);
+  const queueInfo = await applyBagQueueTransition(tx, ev, occurredAt);
 
   // 4. pg_notify on a single channel — the SSE relay LISTENs on this
   //    channel and pushes a tiny JSON envelope to every connected
@@ -749,6 +749,8 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
     eventType: ev.eventType,
     workflowBagId: ev.workflowBagId,
     stationId: ev.stationId ?? null,
+    stationKind: queueInfo.stationKind,
+    queueStageKey: queueInfo.queueStageKey,
     occurredAt: occurredAt.toISOString(),
   };
   await tx.execute(
