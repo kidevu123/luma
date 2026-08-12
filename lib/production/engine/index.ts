@@ -29,3 +29,5 @@ export {
   operationVerb,
 } from "./station-view";
 export type { NextActionInput, StationViewRows } from "./station-view";
+export { deriveQueueTransition, queueAfterWorkAt } from "./queue-transitions";
+export type { QueueDestination, QueueTransition } from "./queue-transitions";
