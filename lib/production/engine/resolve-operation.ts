@@ -4,6 +4,14 @@
 // stage vocabularies do not line up (see stage-lexicon.ts), so
 // getOperationForStage() in lib/production/routes.ts cannot be called
 // with a bag's read_bag_state.stage.
+//
+// This module resolves by station kind, which is order-agnostic, so it
+// needs no changes for P2-BOTTLE-FLEX-1. Any caller that DOES need to
+// reason about ordering (e.g. "must X happen before Y") must consult
+// RouteOperationView.orderIndependentGroup rather than comparing
+// `sequence` directly: operations sharing a non-null group (see
+// migration 0071) are order-independent among themselves despite having
+// distinct sequence numbers.
 
 import {
   getRouteForProduct,

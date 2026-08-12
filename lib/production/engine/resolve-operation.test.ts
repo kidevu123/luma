@@ -18,6 +18,7 @@ function op(over: Partial<RouteOperationView>): RouteOperationView {
     requiresCounter: true,
     requiresTimer: true,
     outputUnit: "cards",
+    orderIndependentGroup: null,
     ...over,
   };
 }

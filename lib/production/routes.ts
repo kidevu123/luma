@@ -107,6 +107,9 @@ export type RouteOperationView = {
   requiresCounter: boolean;
   requiresTimer: boolean;
   outputUnit: string | null;
+  /** P2-BOTTLE-FLEX-1 — operations sharing a non-null group run in any
+   *  order among themselves. Null for strictly-sequenced operations. */
+  orderIndependentGroup: string | null;
 };
 
 /** Get the active route assignment for a product. Falls back to the
@@ -179,6 +182,7 @@ export async function getRouteOperations(routeId: string): Promise<RouteOperatio
       requiresCounter: routeOperations.requiresCounter,
       requiresTimer: routeOperations.requiresTimer,
       outputUnit: routeOperations.outputUnit,
+      orderIndependentGroup: routeOperations.orderIndependentGroup,
     })
     .from(routeOperations)
     .innerJoin(productionRoutes, eq(productionRoutes.id, routeOperations.routeId))

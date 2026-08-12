@@ -20,6 +20,7 @@ const OP: RouteOperationView = {
   requiresCounter: true,
   requiresTimer: true,
   outputUnit: "cards",
+  orderIndependentGroup: null,
 };
 
 const CURRENT: CurrentWork = {

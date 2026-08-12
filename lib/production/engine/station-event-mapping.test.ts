@@ -22,8 +22,13 @@
 //     docs/superpowers/plans/2026-08-11-production-engine-p1-staging-smoke.md
 //   - The fixture-vs-migration guard is a substring check, not a parser.
 //     It catches a renamed or deleted operation code; it does not catch
-//     a changed sequence, stage key or allowed station kind, except on
-//     the BOTTLE rows explicitly pinned by the divergence test below.
+//     a changed sequence, stage key or allowed station kind.
+//
+// RESOLVED (P2-BOTTLE-FLEX-1): the BOTTLE route's STICKERING/
+// INDUCTION_SEAL ordering conflict pinned in Phase 1 is resolved by
+// migration 0071, which sets route_operations.order_independent_group
+// = 'BOTTLE_FINISHING' on both operations. See the
+// "bottle finishing order-independence" describe block below.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -59,6 +64,7 @@ function op(
     requiresCounter: true,
     requiresTimer: false,
     outputUnit: "cards",
+    orderIndependentGroup: null,
   };
 }
 
@@ -193,58 +199,21 @@ describe("station kind to workflow event mapping", () => {
   });
 });
 
-// KNOWN DIVERGENCE — BOTTLE finishing order. Phase 2 must resolve this
-// and DELETE this test.
-//
-// Two sources of truth disagree about whether stickering and induction
-// sealing may run in either order:
-//
-//   route_operations (drizzle/0013) says ORDERED. STICKERING is
-//   sequence 3 and hands off to BOTTLE_INDUCTION_QUEUE, which is
-//   exactly INDUCTION_SEAL's stage_key at sequence 4. A bag cannot
-//   reach induction seal without passing through stickering.
-//
-//   stage-progression.ts says INTERCHANGEABLE (BOTTLE-ORDER-FLEX-1).
-//   Both BOTTLE_CAP_SEAL and BOTTLE_STICKER accept a bag from the same
-//   two stages, and EVENT_STAGE_PREREQ lets either event fire first.
-//   "Exactly once each" is enforced separately by
-//   bottleFinishingAlreadyFired, not by ordering.
-//
-// This test PASSES on purpose: it pins the contradiction so it cannot be
-// silently resolved in one place and not the other. Nothing in Phase 1
-// exercises the route's stage chain, so no other test would notice.
-describe("KNOWN DIVERGENCE: BOTTLE finishing order (Phase 2 must resolve)", () => {
-  it("route data orders STICKERING strictly before INDUCTION_SEAL", () => {
-    const bottle = SEEDED_ROUTES.BOTTLE!;
-    const stickering = bottle.find((o) => o.operationCode === "STICKERING");
-    const induction = bottle.find((o) => o.operationCode === "INDUCTION_SEAL");
-    expect(stickering?.sequence).toBe(3);
-    expect(induction?.sequence).toBe(4);
-    expect(stickering!.sequence).toBeLessThan(induction!.sequence);
-
-    // The fixture stubs stage keys, so the hand-off chain is read from
-    // the migration itself: STICKERING's next_stage_key is exactly
-    // INDUCTION_SEAL's stage_key.
-    const sql = readFileSync(MIGRATION, "utf8");
-    expect(sql).toMatch(
-      /\(3,\s*'STICKERING',\s*'BOTTLE_STICKER_QUEUE',\s*'BOTTLE_INDUCTION_QUEUE',\s*'BOTTLE_STICKER'/,
+describe("bottle finishing order-independence (P2-BOTTLE-FLEX-1)", () => {
+  it("the seeded BOTTLE route marks stickering and induction seal as one group", () => {
+    // Migration 0071 sets order_independent_group = 'BOTTLE_FINISHING'
+    // on exactly these two operations. The fixture mirrors the seed;
+    // the migration-text guard below keeps the mirror honest.
+    const sql = readFileSync(
+      join(process.cwd(), "drizzle", "0071_read_bag_queue_and_bottle_flex.sql"),
+      "utf8",
     );
-    expect(sql).toMatch(
-      /\(4,\s*'INDUCTION_SEAL',\s*'BOTTLE_INDUCTION_QUEUE',\s*'PACKAGING_QUEUE',\s*'BOTTLE_CAP_SEAL'/,
-    );
+    expect(sql).toContain("'BOTTLE_FINISHING'");
+    expect(sql).toMatch(/'STICKERING',\s*'INDUCTION_SEAL'/);
   });
 
-  it("stage-progression treats the same two stations as interchangeable", () => {
-    // Same accepted stages for both stations means neither is gated on
-    // the other having run first — the opposite of the route chain above.
-    expect(STATION_PICKUP_FROM_STAGE.BOTTLE_STICKER).toEqual(["BLISTERED", "SEALED"]);
+  it("code and data now agree: both finishing stations accept both entry stages", () => {
     expect(STATION_PICKUP_FROM_STAGE.BOTTLE_CAP_SEAL).toEqual(["BLISTERED", "SEALED"]);
-    expect(STATION_PICKUP_FROM_STAGE.BOTTLE_CAP_SEAL).toEqual(
-      STATION_PICKUP_FROM_STAGE.BOTTLE_STICKER,
-    );
-
-    // And either completion event may fire from either stage.
-    expect(EVENT_STAGE_PREREQ.BOTTLE_STICKER_COMPLETE).toEqual(["BLISTERED", "SEALED"]);
-    expect(EVENT_STAGE_PREREQ.BOTTLE_CAP_SEAL_COMPLETE).toEqual(["BLISTERED", "SEALED"]);
+    expect(STATION_PICKUP_FROM_STAGE.BOTTLE_STICKER).toEqual(["BLISTERED", "SEALED"]);
   });
 });
