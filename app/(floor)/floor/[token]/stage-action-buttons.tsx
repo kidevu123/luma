@@ -14,7 +14,6 @@ import {
   fireStageEventAction,
   saveSealingProductAction,
   finalizeBagAction,
-  releaseBagAction,
   releaseSealingHandoffAction,
   pauseBagAction,
   resumeBagAction,
@@ -22,10 +21,7 @@ import {
   packagingCompleteAction,
 } from "./actions";
 import { changeRollAction } from "./roll-actions";
-import {
-  STATION_RELEASE_FROM_STAGE,
-  STATIONS_THAT_FINALIZE,
-} from "@/lib/production/stage-progression";
+import { STATIONS_THAT_FINALIZE } from "@/lib/production/stage-progression";
 import {
   SEALING_PARTIAL_CLOSE_REASONS,
   SEALING_PARTIAL_CLOSE_REASON_LABELS,
@@ -353,41 +349,28 @@ export function StageActionButtons({
     router,
   ]);
 
-  // Release button shows after this station's stage event has fired
-  // and the bag is at the station's "ready to release" stage.
-  const releaseAtStage = STATION_RELEASE_FROM_STAGE[stationKind];
-  // HANDPACK_BLISTER auto-releases on complete server-side — no manual step.
-  // SEALING also auto-releases on the final station, but other overlapped
-  // sealing stations may still be pinned after another station submits the
-  // final full-bag close-out. Keep manual release available at SEALED so
-  // those stations can clear their own pin.
-  // BLISTER keeps manual release for legacy bags already BLISTERED but not yet released.
-  const releaseReady =
-    stationKind !== "HANDPACK_BLISTER" &&
-    releaseAtStage != null &&
-    currentStage === releaseAtStage;
-  const releaseLabel =
-    stationKind === "BLISTER"
-      ? "Release to sealing queue"
-      : stationKind === "SEALING"
-        ? "Release to packaging queue"
-        : // BOTTLE-ORDER-FLEX-1: after fill, cap-seal and sticker run in
-          // either order, and after either finishing step the bag goes to
-          // whichever step is left or on to packaging — so the bottle
-          // stations use a neutral "next station" label.
-          stationKind === "BOTTLE_HANDPACK"
-          ? "Release to finishing queue"
-          : stationKind === "BOTTLE_CAP_SEAL" ||
-              stationKind === "BOTTLE_STICKER"
-            ? "Release to next station"
-            : "Release to next station";
+  // P2-AUTO-ADVANCE-1: there is no manual "Release to next stage" button any
+  // more. Every station kind auto-releases on complete
+  // (AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS in
+  // lib/production/engine/record-stage-event.ts), and a bag that is still
+  // pinned here is picked up downstream by scanning the same card — pickup
+  // eligibility is stage-based, not pin-based. The sealing handoff button
+  // below stays: moving a partially-sealed bag to another sealer is a physical
+  // decision the system cannot infer (MULTI-SEALING-SAME-BAG-1).
 
-  // Only stations that finalize show the Finalize button — legacy
-  // fallback when a bag is PACKAGED but not yet finalized (e.g. Bag
-  // Card 117 before auto-finalize shipped). New close-outs auto-finalize.
+  // Finalize is the narrow fallback auto-finalize cannot reach.
+  // maybeAutoFinalizeAfterPackagingComplete (actions.ts) fires only for
+  // stationKind PACKAGING, only on a non-partial close-out, and only while the
+  // bag is still the station's read_station_live pin. This component renders
+  // only for the bag that IS that pin (page.tsx renders it under
+  // `currentAtStation`), and BAG_FINALIZED clears every station slot — so a bag
+  // sitting here at PACKAGED and unfinalized is by definition one auto-finalize
+  // did not close: a COMBINED station's packaged bag, a partial packaging
+  // close-out, or a pin that moved mid-close-out. Stage must be exactly
+  // PACKAGED — finalizeBagAction rejects every other stage, so the old
+  // read-model-lag (`currentStage == null`) case only ever produced an error.
   const canFinalize =
-    STATIONS_THAT_FINALIZE.has(stationKind) &&
-    (currentStage == null || currentStage === "PACKAGED");
+    STATIONS_THAT_FINALIZE.has(stationKind) && currentStage === "PACKAGED";
 
   function baseFd(opts: { withClientEventId?: boolean } = {}): FormData {
     const fd = new FormData();
@@ -441,18 +424,6 @@ export function StageActionButtons({
     setError(null);
     try {
       const r = await finalizeBagAction(baseFd());
-      if (r?.error) setError(r.error);
-    } finally {
-      setPending(null);
-    }
-  }
-
-  async function release() {
-    if (!workflowBagId) return;
-    setPending("release");
-    setError(null);
-    try {
-      const r = await releaseBagAction(baseFd());
       if (r?.error) setError(r.error);
     } finally {
       setPending(null);
@@ -832,22 +803,6 @@ export function StageActionButtons({
         </div>
       )}
 
-      {/* Release to next station — visible only after this station's
-       *  stage event has fired and the bag is ready to hand forward.
-       *  The QR card stays attached to the bag; the next station picks
-       *  up by scanning the same card. */}
-      {!isPaused && releaseReady && (
-        <button
-          type="button"
-          disabled={pending !== null}
-          onClick={release}
-          className="w-full h-14 inline-flex items-center justify-center gap-2 rounded-xl bg-sky-700 text-white text-base font-semibold shadow-sm hover:bg-sky-800 disabled:opacity-60 transition-colors"
-        >
-          <CheckCircle2 className="h-5 w-5" />
-          {pending === "release" ? "Releasing…" : releaseLabel}
-        </button>
-      )}
-
       {/* Pause / Resume row */}
       {!isPaused ? (
         <button
@@ -871,6 +826,8 @@ export function StageActionButtons({
         </button>
       )}
 
+      {/* Narrow fallback only — see canFinalize above. Packaging close-out
+       *  finalizes on its own whenever auto-finalize can reach the bag. */}
       {canFinalize && (
         <button
           type="button"

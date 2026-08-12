@@ -234,16 +234,13 @@ describe("STATION-HANDPACK-AUTO-RELEASE-1 · hand-pack complete auto-releases", 
     expect(actionsSrc).toMatch(/readStationLive\.currentWorkflowBagId/);
   });
 
-  it("HANDPACK_BLISTER hides manual Release button — BLISTER still shows it", () => {
-    expect(src).toMatch(/stationKind !== "HANDPACK_BLISTER"/);
-    const releaseBlock = src.slice(
-      src.indexOf("const releaseReady"),
-      src.indexOf("const releaseLabel"),
-    );
-    expect(releaseBlock).toMatch(/HANDPACK_BLISTER/);
-    expect(releaseBlock).not.toMatch(/stationKind !== "BLISTER"/);
-    const blisterReleaseAt = src.indexOf('stationKind === "BLISTER"');
-    expect(blisterReleaseAt).toBeGreaterThan(-1);
+  // P2-AUTO-ADVANCE-1: every station kind auto-releases now, so the manual
+  // release button is gone for HANDPACK_BLISTER and for every other kind.
+  it("no manual Release button for any station kind — auto-release covers the flow", () => {
+    expect(src).not.toMatch(/releaseBagAction/);
+    expect(src).not.toMatch(/const releaseReady/);
+    expect(src).not.toMatch(/const releaseLabel/);
+    expect(src).not.toMatch(/STATION_RELEASE_FROM_STAGE/);
   });
 
   it("sealing overlap pickup stages unchanged in stage-progression", () => {
@@ -275,15 +272,17 @@ describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
     expect(autoIdx).toBeGreaterThan(blisterIdx);
   });
 
-  it("BLISTER keeps manual Release button for legacy already-BLISTERED bags", () => {
-    const releaseBlock = src.slice(
-      src.indexOf("const releaseReady"),
-      src.indexOf("const releaseLabel"),
+  // P2-AUTO-ADVANCE-1: BLISTER's manual release button is gone too. A bag left
+  // pinned at BLISTERED is claimed by the sealing station scanning the same
+  // card — pickup eligibility is stage-based, not station-pin based.
+  it("BLISTER has no manual Release button — release chip labels removed", () => {
+    expect(src).not.toMatch(/Release to sealing queue/);
+    expect(src).not.toMatch(/Release to packaging queue/);
+    expect(src).not.toMatch(/Release to finishing queue/);
+    expect(src).not.toMatch(/Release to next station/);
+    expect(actionsSrc).toMatch(
+      /AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*"BLISTER"/,
     );
-    expect(releaseBlock).not.toMatch(/stationKind !== "BLISTER"/);
-    expect(releaseBlock).toMatch(/stationKind !== "HANDPACK_BLISTER"/);
-    expect(releaseBlock).not.toMatch(/stationKind !== "SEALING"/);
-    expect(src).toMatch(/Release to sealing queue/);
   });
 
   it("SEALING and HANDPACK_BLISTER auto-release unchanged", () => {
@@ -314,15 +313,16 @@ describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
     expect(autoIdx).toBeGreaterThan(sealingIdx);
   });
 
-  it("SEALING keeps manual Release available after another sealer completes the bag", () => {
-    const releaseBlock = src.slice(
-      src.indexOf("const releaseReady"),
-      src.indexOf("const releaseLabel"),
+  // P2-AUTO-ADVANCE-1: SEALING loses the manual release button, but the sealing
+  // HANDOFF button stays — moving a partially-sealed bag to another machine is
+  // a physical operator decision the system cannot infer (MULTI-SEALING-SAME-BAG-1).
+  it("SEALING keeps the handoff button after losing the manual Release button", () => {
+    expect(src).not.toMatch(/releaseBagAction/);
+    expect(src).toMatch(/releaseSealingHandoffAction/);
+    expect(src).toMatch(/Done at this machine — hand off to next sealer/);
+    expect(actionsSrc).toMatch(
+      /AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*SEALING/,
     );
-    expect(releaseBlock).not.toMatch(/stationKind !== "SEALING"/);
-    expect(releaseBlock).toMatch(/currentStage === releaseAtStage/);
-    expect(src).toMatch(/Release to sealing queue/);
-    expect(src).toMatch(/Release to packaging queue/);
   });
 
   it("auto-release uses STATION_RELEASE_FROM_STAGE.SEALING (SEALED) and idempotent station pin check", () => {
@@ -558,10 +558,18 @@ describe("PACKAGING-BOM-FOOTER-1 · static material footer gated on counts", () 
 });
 
 describe("PACKAGING-AUTO-FINALIZE-1 · manual finalize fallback for legacy PACKAGED bags", () => {
-  it("Finalize bag button still exists for legacy PACKAGED-not-finalized bags", () => {
+  // P2-AUTO-ADVANCE-1: the button survives only as the narrow fallback for bags
+  // auto-finalize cannot reach (COMBINED station, partial packaging close-out,
+  // pin moved mid-close-out). It is gated on stage PACKAGED exactly — the old
+  // `currentStage == null` read-model-lag case is gone because finalizeBagAction
+  // rejects every stage but PACKAGED.
+  it("Finalize bag button survives only for PACKAGED-not-finalized bags", () => {
     expect(src).toMatch(/Finalize bag/);
     expect(src).toMatch(/finalizeBagAction/);
-    expect(src).toMatch(/canFinalize/);
+    expect(src).toMatch(
+      /const canFinalize =\s*STATIONS_THAT_FINALIZE\.has\(stationKind\) && currentStage === "PACKAGED";/,
+    );
+    expect(src).not.toMatch(/currentStage == null \|\| currentStage === "PACKAGED"/);
   });
 
   it("packaging close-out form gated on packagingReady including partial BLISTERED", () => {

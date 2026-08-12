@@ -1317,13 +1317,16 @@ function BagAdvancedBanner({
       PACKAGED: "packaged",
       FINALIZED: "finalized",
     }[currentStage] ?? currentStage.toLowerCase();
+  // P2-AUTO-ADVANCE-1: the manual release button is gone — a completed stage
+  // releases the bag on its own, and the card stays attached either way, so the
+  // hint now points at the next station's scan instead of a button to tap here.
   const nextHint =
     currentStage === "BLISTERED"
-      ? "Tap Release to sealing queue below. The card stays attached and the sealing station scans the same card to claim the bag."
+      ? "Nothing to tap here. The card stays attached and the sealing station scans the same card to claim the bag."
       : currentStage === "SEALED"
-        ? "Tap Release to packaging queue below. The card stays attached and the packaging station scans the same card to claim the bag."
+        ? "Nothing to tap here. The card stays attached and the packaging station scans the same card to claim the bag."
         : currentStage === "PACKAGED"
-          ? "Tap Finalize bag below at the packaging station to close the production cycle and release the card."
+          ? "Packaging close-out closes the production cycle on its own. If this bag is still packaged at the packaging station, tap Finalize bag below."
           : `Bag is at ${stageWord}; this station has no further forward action.`;
   return (
     <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900 space-y-0.5">
