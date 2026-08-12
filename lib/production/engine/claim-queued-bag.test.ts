@@ -22,7 +22,12 @@ const HELD_UPSTREAM = {
   claimedByStationKind: "BLISTER",
 };
 
-const BASE = { isPaused: false, isFinalized: false, isOnHold: false };
+const BASE = {
+  stationId: "sealer-1",
+  isPaused: false,
+  isFinalized: false,
+  isOnHold: false,
+};
 
 describe("checkClaimGuards", () => {
   it("allows an eligible unclaimed READY bag", () => {
@@ -104,6 +109,80 @@ describe("checkClaimGuards", () => {
       bagStage: "BLISTERED",
     });
     expect(b?.code).toBe("OPERATION_UNRESOLVED");
+  });
+
+  it("tells the race loser a colleague got there first, not that they are at the wrong station", () => {
+    // The shape a losing claim actually sees. A peer's BAG_PICKED_UP is a
+    // WORKING transition, so the projector REWRITES the row to the
+    // winner's downstream destination — SEALING_QUEUE becomes
+    // PACKAGING_QUEUE and eligible_station_kinds becomes ["PACKAGING"] —
+    // and holds it for the winner. Nothing is deleted. Without the
+    // foreign-holder rule this reads as OPERATION_UNRESOLVED: "This bag
+    // does not belong at this station", plus a supervisor call, for a
+    // sealer standing at the right machine.
+    const b = checkClaimGuards({
+      ...BASE,
+      stationId: "sealer-1",
+      stationKind: "SEALING",
+      queueRow: {
+        eligibleStationKinds: ["PACKAGING"],
+        claimedByStationId: "sealer-2",
+        claimedByStationKind: "SEALING",
+        readyState: "UPSTREAM_RUNNING",
+      },
+      bagStage: "BLISTERED",
+    });
+    expect(b?.code).toBe("BAG_ALREADY_CLAIMED");
+    expect(b?.operatorSentence).toBe(
+      "Another station is already working on this bag.",
+    );
+  });
+
+  it("still calls a genuine routing mistake a routing mistake", () => {
+    // Ineligible AND nobody holding it: no race happened, the bag really
+    // is at the wrong station. The foreign holder is the distinguishing
+    // fact, not the ineligibility.
+    expect(
+      checkClaimGuards({
+        ...BASE,
+        stationKind: "PACKAGING",
+        queueRow: ROW,
+        bagStage: "BLISTERED",
+      })?.code,
+    ).toBe("OPERATION_UNRESOLVED");
+  });
+
+  it("does not call this station's own hold a race", () => {
+    // The row is held by ME (double tap, refreshed tablet). "Another
+    // station is already working on this bag" would be a lie.
+    const b = checkClaimGuards({
+      ...BASE,
+      stationId: "sealer-1",
+      stationKind: "SEALING",
+      queueRow: {
+        eligibleStationKinds: ["PACKAGING"],
+        claimedByStationId: "sealer-1",
+        claimedByStationKind: "SEALING",
+        readyState: "UPSTREAM_RUNNING",
+      },
+      bagStage: "BLISTERED",
+    });
+    expect(b?.code).toBe("OPERATION_UNRESOLVED");
+  });
+
+  it("reports a finished bag whose queue row is gone as finished", () => {
+    // BAG_FINALIZED is the ONLY event that deletes a queue row, so a
+    // missing row on a finalized bag is not a mystery — say so instead of
+    // "not recognized" or inventing a competing station.
+    expect(
+      checkClaimGuards({
+        ...BASE,
+        isFinalized: true,
+        stationKind: "SEALING",
+        queueRow: null,
+        bagStage: "PACKAGED",
+      })?.code,
+    ).toBe("BAG_FINALIZED");
   });
 
   it("rejects a stage the pickup table does not allow", () => {

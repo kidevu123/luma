@@ -31,6 +31,9 @@ import type { Blocker } from "./types";
 type Reader = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 
 export type ClaimGuardInput = {
+  /** The claiming station. Needed to tell "someone else holds this" from
+   *  "I already hold this" when the row is no longer mine to take. */
+  stationId: string;
   stationKind: string;
   queueRow: {
     eligibleStationKinds: readonly string[];
@@ -65,18 +68,37 @@ export type ClaimGuardInput = {
  *  before whose it is (wrong station, peer-claimed) before how far along
  *  it is (stage). */
 export function checkClaimGuards(input: ClaimGuardInput): Blocker | null {
+  // Finished first, ahead of the unknown-row check: BAG_FINALIZED is the
+  // ONLY event that deletes a queue row (the projector's REMOVE), so a
+  // finished bag legitimately has no row and "this bag is already
+  // finished" beats "not recognized".
+  if (input.isFinalized) return blockerFor("BAG_FINALIZED");
   // No queue row, or a queue row the bag-state projector has not caught
   // up with. Either way Luma cannot say what this bag is, and a claim
   // would fire BAG_PICKED_UP from an unknown stage.
   if (!input.queueRow || input.bagStage == null) {
     return blockerFor("BAG_UNRECOGNIZED");
   }
-  if (input.isFinalized) return blockerFor("BAG_FINALIZED");
   if (input.isOnHold) return blockerFor("BAG_ON_HOLD");
   if (input.isPaused) return blockerFor("BAG_PAUSED");
 
   if (!input.queueRow.eligibleStationKinds.includes(input.stationKind)) {
-    return blockerFor("OPERATION_UNRESOLVED");
+    // Losing a race looks exactly like this. A peer's claim does not
+    // delete the row, it REWRITES it: the winner's BAG_PICKED_UP is a
+    // WORKING transition, so the destination advances (SEALING_QUEUE ->
+    // PACKAGING_QUEUE) and eligible_station_kinds becomes the NEXT
+    // station's. The loser then finds a row it is no longer eligible for
+    // — which is not "you brought this to the wrong machine", it is
+    // "your colleague got there first".
+    //
+    // The distinguishing fact is a foreign holder. Ineligible with
+    // nobody holding it is a genuine routing mistake and keeps
+    // OPERATION_UNRESOLVED. (This also catches scanning a bag that is
+    // still upstream — where "another station is working on this bag" is
+    // both true and gentler than a supervisor call.)
+    return isHeldByAnotherStation(input.stationId, input.queueRow)
+      ? blockerFor("BAG_ALREADY_CLAIMED")
+      : blockerFor("OPERATION_UNRESOLVED");
   }
   if (isHeldByDestinationPeer(input.queueRow)) {
     return blockerFor("BAG_ALREADY_CLAIMED");
@@ -103,6 +125,15 @@ export function checkClaimGuards(input: ClaimGuardInput): Blocker | null {
  *  FK is ON DELETE SET NULL so this should be unreachable; if it ever
  *  happens, refusing a claim is recoverable and double-claiming a bag is
  *  not. */
+/** True when some OTHER station holds the bag. Holding it myself (a
+ *  double-tap, a refreshed tablet) is not a race. */
+function isHeldByAnotherStation(
+  stationId: string,
+  row: { claimedByStationId: string | null },
+): boolean {
+  return row.claimedByStationId != null && row.claimedByStationId !== stationId;
+}
+
 function isHeldByDestinationPeer(row: {
   eligibleStationKinds: readonly string[];
   claimedByStationId: string | null;
@@ -131,6 +162,18 @@ async function loadClaimGuardInput(
     .where(eq(readBagQueue.workflowBagId, args.workflowBagId));
   // FOR UPDATE cannot be applied across the nullable side of an outer
   // join, so the holder's kind is a second read rather than a join.
+  //
+  // LOCK-ORDER INVERSION, knowingly tolerated. This transaction locks
+  // read_bag_queue first and then writes read_bag_state (via
+  // projectEvent); a projector transaction for the same bag writes them
+  // in the opposite order. Two of those overlapping on ONE bag is a
+  // deadlock window: Postgres detects it and aborts a victim, which
+  // surfaces through advanceBag's catch as ADVANCE_FAILED. That is
+  // acceptable because the abort is clean (nothing partially applied)
+  // and the retry is idempotent — the same clientEventId either lands
+  // once or is swallowed by the partial unique index. Ordering the two
+  // consistently is a projector-wide refactor; it belongs to the phase
+  // that gives claims a real UI caller, not to this one.
   const [queueRow] = await (lockQueueRow ? queueSelect.for("update") : queueSelect);
 
   let claimedByStationKind: string | null = null;
@@ -153,6 +196,7 @@ async function loadClaimGuardInput(
     .where(eq(readBagState.workflowBagId, args.workflowBagId));
 
   return {
+    stationId: args.stationId,
     stationKind: args.stationKind,
     queueRow: queueRow ? { ...queueRow, claimedByStationKind } : null,
     bagStage: state?.stage ?? null,
@@ -196,13 +240,18 @@ export async function claimQueuedBag(input: {
   if (preBlocker) return { ok: false, blocker: preBlocker };
 
   return db.transaction(async (tx) => {
+    // The authoritative check. A claim that lost the race does NOT find
+    // the row missing — the projector never deletes on a peer claim, it
+    // REWRITES the row to the winner's downstream destination (only
+    // BAG_FINALIZED deletes). The loser therefore sees a row it is no
+    // longer eligible for, held by a foreign station, and
+    // checkClaimGuards turns that into BAG_ALREADY_CLAIMED. A row that
+    // genuinely vanished under the lock means the bag was finalized (or
+    // the read model is mid-rebuild), which the same guard reports as
+    // BAG_FINALIZED / BAG_UNRECOGNIZED from read_bag_state — no
+    // special-casing here, and no guessing about a claim that never
+    // happened.
     const locked = await loadClaimGuardInput(tx, loadArgs, true);
-    if (!locked.queueRow) {
-      // The row existed a moment ago and is gone now: a peer claimed it
-      // and the projector's WORKING transition advanced it out of this
-      // queue. That is the race, not a missing bag.
-      return { ok: false as const, blocker: blockerFor("BAG_ALREADY_CLAIMED") };
-    }
     const blocker = checkClaimGuards(locked);
     if (blocker) return { ok: false as const, blocker };
 
