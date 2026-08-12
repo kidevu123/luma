@@ -39,3 +39,4 @@ export type { ClaimGuardInput } from "./claim-queued-bag";
 export { medianCycleMinutes, etaMinutes } from "./eta";
 export { deriveQueueTransition, queueAfterWorkAt, queueRank } from "./queue-transitions";
 export type { QueueDestination, QueueTransition } from "./queue-transitions";
+export { resolveStationByToken, isStationTokenShape } from "../station-token";

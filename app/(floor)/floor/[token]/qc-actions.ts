@@ -37,6 +37,7 @@ import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
 import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
+import { resolveStationByToken } from "@/lib/production/engine";
 import {
   validateQcPayload,
   type PackagingDamageReturnPayload,
@@ -52,12 +53,7 @@ const UUID_RE =
 type StationRow = typeof stations.$inferSelect;
 
 async function resolveStation(token: string): Promise<StationRow | null> {
-  if (!UUID_RE.test(token)) return null;
-  const [row] = await db
-    .select()
-    .from(stations)
-    .where(eq(stations.scanToken, token));
-  return row ?? null;
+  return resolveStationByToken(token);
 }
 
 async function authStation(
