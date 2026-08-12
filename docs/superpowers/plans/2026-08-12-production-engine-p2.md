@@ -818,11 +818,22 @@ export async function applyBagQueueTransition(
     .where(eq(workflowBags.id, ev.workflowBagId));
   if (!bagRow) return;
 
+  // Bounded to events at or before THIS event so replay sees exactly
+  // what live saw: during rebuild the table is already fully populated,
+  // and an unbounded query would leak future events into past
+  // decisions, silently diverging replay from live. (Same-timestamp
+  // siblings are included either way — a legacy-import tie; the replay
+  // ordering below makes that deterministic even if not historical.)
   const priorEventTypes = (
     await tx
       .select({ eventType: workflowEvents.eventType })
       .from(workflowEvents)
-      .where(eq(workflowEvents.workflowBagId, ev.workflowBagId))
+      .where(
+        and(
+          eq(workflowEvents.workflowBagId, ev.workflowBagId),
+          lte(workflowEvents.occurredAt, occurredAt),
+        ),
+      )
   ).map((r) => r.eventType);
 
   // The existing row is an input to the decision — the stale-echo guard
@@ -925,8 +936,11 @@ export async function applyBagQueueTransition(
     });
 }
 
-/** Full rebuild: wipe and replay every non-finalized bag's events in
- *  order through the same transition logic. */
+/** Full rebuild: wipe, then replay the entire workflow_events table in
+ *  order through the same transition logic (finalized bags REMOVE their
+ *  own rows during the replay). Secondary sort on id: occurred_at ties
+ *  exist in legacy imports and queue transitions are order-sensitive,
+ *  so replay must at least be deterministic across runs. */
 export async function rebuildBagQueue(tx: Tx): Promise<{ rows: number }> {
   await tx.execute(sql`DELETE FROM read_bag_queue;`);
   const events = await tx
@@ -937,7 +951,7 @@ export async function rebuildBagQueue(tx: Tx): Promise<{ rows: number }> {
       occurredAt: workflowEvents.occurredAt,
     })
     .from(workflowEvents)
-    .orderBy(workflowEvents.occurredAt);
+    .orderBy(workflowEvents.occurredAt, workflowEvents.id);
   for (const ev of events) {
     await applyBagQueueTransition(tx, ev, ev.occurredAt);
   }
