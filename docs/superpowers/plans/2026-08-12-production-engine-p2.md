@@ -1431,21 +1431,31 @@ export function etaMinutes(args: {
 
 `advance.ts` — `intentToEventType(intent, operationCode, stationKind)`: inside the `COMPLETE` branch, before the operation-code table, `if (stationKind === "HANDPACK_BLISTER") return "HANDPACK_BLISTER_COMPLETE";`. In `advanceBagInner`, the `CLAIM` intent short-circuits to `claimQueuedBag` before `recordStageEvent` (return its blocker or the refreshed view). `buildRecordStageEventInput` adds `...(args.inputs.counterPresses != null ? { counterPresses: args.inputs.counterPresses } : {})`. Shrink the preconditions block comment to what genuinely remains (packaging three-way counts and damaged; the dropped partial-close fields — Phase 4).
 
-`station-view.ts` — `getStationView` additionally loads, for the station's kind:
+`station-view.ts` — `getStationView` additionally loads, for the station's kind. **Semantics that both consumers must respect:** `claimedByStationId` is the station currently HOLDING the bag — which, for a row still in this station's queue, is almost always the UPSTREAM station working it (a destination-kind peer's claim advances the row out of this queue). An upstream holder must NOT hide the row (that is exactly the overlap-scanning case) — only a holder whose kind is itself in `eligibleStationKinds` (multi-sealer peer) blocks it:
 
 ```ts
+  const holder = alias(stations, "holder");
   const queueRows = await db
-    .select()
+    .select({
+      row: readBagQueue,
+      holderKind: holder.kind,
+    })
     .from(readBagQueue)
+    .leftJoin(holder, eq(holder.id, readBagQueue.claimedByStationId))
     .where(
       and(
         sql`${stationRow.station.kind} = ANY(${readBagQueue.eligibleStationKinds})`,
-        isNull(readBagQueue.claimedByStationId),
+        or(
+          isNull(readBagQueue.claimedByStationId),
+          sql`NOT (${holder.kind} = ANY(${readBagQueue.eligibleStationKinds}))`,
+        ),
       ),
     )
     .orderBy(sql`${readBagQueue.readyState} = 'READY' DESC`, readBagQueue.readyAt)
     .limit(5);
 ```
+
+**ETA honesty rule:** an ETA is only computable while an upstream station is ACTIVELY holding the bag (`claimedByStationId` non-null on an `UPSTREAM_RUNNING` row). A bag released mid-work (sealing handoff) is `UPSTREAM_RUNNING` with a null holder and a stale `upstreamStartedAt` — its ETA is unknown, and the mapper must return `etaMinutes: null` rather than clamping to zero ("arriving any moment" for a bag sitting on a cart). `mapQueueRowsToUpNext` therefore receives each row's `claimedByStationId` and gates the ETA on it.
 
 plus a median-cycle loader: recent completed cycles for (productId, stationKind) measured as `occurredAt(*_COMPLETE) - occurredAt(BAG_PICKED_UP | CARD_ASSIGNED | BAG_CLAIMED)` per bag over the last 20 bags — write it as one SQL statement, and keep every decision (ordering, null ETA, mapping to `UpNextBag`) in a new pure `mapQueueRowsToUpNext(rows, medianByProduct, now)` that `assembleStationView` consumes via a widened `StationViewRows.upNext` input. Test the pure mapper in `station-view.test.ts` (READY sorts before UPSTREAM_RUNNING; ETA only on UPSTREAM_RUNNING rows with data; `expected` = first row for `SCAN_TO_CLAIM`).
 
