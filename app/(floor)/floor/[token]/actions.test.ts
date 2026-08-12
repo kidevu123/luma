@@ -208,8 +208,12 @@ describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
   });
 
   it("does not auto-release on COMBINED SEALING_COMPLETE", () => {
+    // P2-QUEUE-1 added bottle station OR-clauses to the same else-if
+    // block, widening the gap between the SEALING condition and the
+    // call below it — window widened to still require both inside one
+    // contiguous block, not just anywhere in the file.
     const match = actionsSrc.match(
-      /isSealingFinal && station\.kind === "SEALING"[\s\S]{0,80}maybeAutoReleaseAfterComplete/,
+      /isSealingFinal && station\.kind === "SEALING"[\s\S]{0,300}maybeAutoReleaseAfterComplete/,
     );
     expect(match?.[0]).toBeTruthy();
   });

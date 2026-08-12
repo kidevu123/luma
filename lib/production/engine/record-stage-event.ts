@@ -495,7 +495,10 @@ export async function recordStageEvent(
       } else if (
         eventType === "HANDPACK_BLISTER_COMPLETE" ||
         (eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER") ||
-        (isSealingFinal && station.kind === "SEALING")
+        (isSealingFinal && station.kind === "SEALING") ||
+        eventType === "BOTTLE_HANDPACK_COMPLETE" ||
+        eventType === "BOTTLE_CAP_SEAL_COMPLETE" ||
+        eventType === "BOTTLE_STICKER_COMPLETE"
       ) {
         await maybeAutoReleaseAfterComplete(tx, {
           workflowBagId,
@@ -541,11 +544,19 @@ export async function projectBagReleasedEvent(
   });
 }
 
-/** Stations that auto-release on complete — no second operator tap. */
+/** Stations that auto-release on complete — no second operator tap.
+ *  P2-QUEUE-1 completes the set: bottle fill and both finishing
+ *  stations now release automatically too. STATION_RELEASE_FROM_STAGE
+ *  supplies the stage each kind releases at, and the stage guard in
+ *  maybeAutoReleaseAfterComplete keeps a first finishing step from
+ *  releasing before the bag actually reached SEALED. */
 const AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS = new Set([
   "BLISTER",
   "HANDPACK_BLISTER",
   "SEALING",
+  "BOTTLE_HANDPACK",
+  "BOTTLE_CAP_SEAL",
+  "BOTTLE_STICKER",
 ]);
 
 /** Partial sealing close-out: release at BLISTERED so packaging can pick up. */
