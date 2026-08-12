@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { assembleStationView, buildNextAction } from "./station-view";
-import type { StationViewRows } from "./station-view";
+import {
+  assembleStationView,
+  buildNextAction,
+  mapQueueRowsToUpNext,
+} from "./station-view";
+import type { QueueRowForUpNext, StationViewRows } from "./station-view";
 import { evaluateChecks } from "./resolve-exceptions";
 import type { RouteOperationView } from "@/lib/production/routes";
-import type { CurrentWork } from "./types";
+import type { CurrentWork, UpNextBag } from "./types";
 
 const OP: RouteOperationView = {
   routeCode: "CARD_BLISTER",
@@ -20,6 +24,7 @@ const OP: RouteOperationView = {
   requiresCounter: true,
   requiresTimer: true,
   outputUnit: "cards",
+  orderIndependentGroup: null,
 };
 
 const CURRENT: CurrentWork = {
@@ -141,6 +146,22 @@ function rows(over: Partial<StationViewRows> = {}): StationViewRows {
       isOnHold: false,
     },
     operation: OP,
+    upNext: [],
+    ...over,
+  };
+}
+
+const NOW = new Date("2026-08-12T12:10:00Z");
+
+function queueRow(over: Partial<QueueRowForUpNext> = {}): QueueRowForUpNext {
+  return {
+    workflowBagId: "bag-2",
+    bagLabel: "PO 1234 - Chocolate Brown - Bag 13",
+    productId: "prod-1",
+    productName: "Chocolate Brown",
+    readyState: "READY",
+    claimedByStationId: null,
+    upstreamStartedAt: null,
     ...over,
   };
 }
@@ -205,10 +226,54 @@ describe("assembleStationView", () => {
     expect(view.capabilities.canPause).toBe(false);
   });
 
-  it("leaves upNext empty and supervisor null in phase 1", () => {
+  it("passes the mapped queue through and leaves supervisor null", () => {
     const view = assembleStationView(rows());
     expect(view.upNext).toEqual([]);
     expect(view.supervisor).toBeNull();
+  });
+
+  it("carries the up-next list the loader mapped, unchanged", () => {
+    const upNext: UpNextBag[] = [
+      {
+        workflowBagId: "bag-2",
+        bagLabel: "PO 1234 - Chocolate Brown - Bag 13",
+        productName: "Chocolate Brown",
+        readyState: "READY",
+        etaMinutes: null,
+      },
+    ];
+    expect(assembleStationView(rows({ upNext })).upNext).toEqual(upNext);
+  });
+
+  it("offers the first queued bag as the expected scan when idle", () => {
+    const upNext: UpNextBag[] = [
+      {
+        workflowBagId: "bag-2",
+        bagLabel: "Bag 13",
+        productName: "Chocolate Brown",
+        readyState: "READY",
+        etaMinutes: null,
+      },
+      {
+        workflowBagId: "bag-3",
+        bagLabel: "Bag 14",
+        productName: "Chocolate Brown",
+        readyState: "UPSTREAM_RUNNING",
+        etaMinutes: 6,
+      },
+    ];
+    const view = assembleStationView(rows({ current: null, operation: null, upNext }));
+    expect(view.nextAction.kind).toBe("SCAN_TO_CLAIM");
+    if (view.nextAction.kind === "SCAN_TO_CLAIM") {
+      expect(view.nextAction.expected?.workflowBagId).toBe("bag-2");
+    }
+  });
+
+  it("expects nothing when the queue is empty", () => {
+    const view = assembleStationView(rows({ current: null, operation: null }));
+    if (view.nextAction.kind === "SCAN_TO_CLAIM") {
+      expect(view.nextAction.expected).toBeNull();
+    }
   });
 
   it("carries both label lines so the rewire cannot drop the subline", () => {
@@ -226,5 +291,152 @@ describe("assembleStationView", () => {
       rows({ current: base.current ? { ...base.current, bagSubLabel: null } : null }),
     );
     expect(view.current?.bagSubLabel).toBeNull();
+  });
+});
+
+describe("mapQueueRowsToUpNext", () => {
+  it("sorts ready bags ahead of ones whose upstream is still running", () => {
+    const out = mapQueueRowsToUpNext(
+      [
+        queueRow({
+          workflowBagId: "running",
+          readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: "blister-1",
+          upstreamStartedAt: new Date("2026-08-12T12:00:00Z"),
+        }),
+        queueRow({ workflowBagId: "ready" }),
+      ],
+      new Map([["prod-1", 14]]),
+      NOW,
+    );
+    expect(out.map((b) => b.workflowBagId)).toEqual(["ready", "running"]);
+  });
+
+  it("keeps the loader's order within a ready state", () => {
+    // The SQL orders READY rows by ready_at. The mapper must not
+    // re-shuffle them — a stable partition is the whole contract.
+    const out = mapQueueRowsToUpNext(
+      [
+        queueRow({ workflowBagId: "first" }),
+        queueRow({ workflowBagId: "second" }),
+        queueRow({ workflowBagId: "third" }),
+      ],
+      new Map(),
+      NOW,
+    );
+    expect(out.map((b) => b.workflowBagId)).toEqual(["first", "second", "third"]);
+  });
+
+  it("gives an ETA to a bag an upstream station is actively holding", () => {
+    const out = mapQueueRowsToUpNext(
+      [
+        queueRow({
+          workflowBagId: "running",
+          readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: "blister-1",
+          upstreamStartedAt: new Date("2026-08-12T12:00:00Z"),
+        }),
+      ],
+      new Map([["prod-1", 14]]),
+      NOW,
+    );
+    expect(out[0]?.etaMinutes).toBe(4);
+  });
+
+  it("says nothing for a bag released mid-work, rather than counting down to zero", () => {
+    // A sealing handoff fires BAG_RELEASED, which UNCLAIMs the row but
+    // leaves ready_state UPSTREAM_RUNNING and a stale upstream_started_at.
+    // Nobody is working this bag; the elapsed clock is meaningless, and
+    // the clamp would otherwise announce "any moment now" for a bag on a
+    // cart.
+    const out = mapQueueRowsToUpNext(
+      [
+        queueRow({
+          workflowBagId: "released",
+          readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: null,
+          upstreamStartedAt: new Date("2026-08-12T11:00:00Z"),
+        }),
+      ],
+      new Map([["prod-1", 14]]),
+      NOW,
+    );
+    expect(out[0]?.readyState).toBe("UPSTREAM_RUNNING");
+    expect(out[0]?.etaMinutes).toBeNull();
+  });
+
+  it("says nothing rather than guessing when the product has no median", () => {
+    const out = mapQueueRowsToUpNext(
+      [
+        queueRow({
+          workflowBagId: "running",
+          readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: "blister-1",
+          upstreamStartedAt: new Date("2026-08-12T12:00:00Z"),
+        }),
+      ],
+      new Map(),
+      NOW,
+    );
+    expect(out[0]?.etaMinutes).toBeNull();
+  });
+
+  it("says nothing when the bag has no product to match a median against", () => {
+    const out = mapQueueRowsToUpNext(
+      [
+        queueRow({
+          workflowBagId: "running",
+          productId: null,
+          readyState: "UPSTREAM_RUNNING",
+          claimedByStationId: "blister-1",
+          upstreamStartedAt: new Date("2026-08-12T12:00:00Z"),
+        }),
+      ],
+      new Map([["prod-1", 14]]),
+      NOW,
+    );
+    expect(out[0]?.etaMinutes).toBeNull();
+  });
+
+  it("never puts an ETA on a bag that is already ready", () => {
+    // A READY bag is waiting on an operator, not on upstream. An ETA
+    // there would read as "not yet available", which is false.
+    const out = mapQueueRowsToUpNext(
+      [queueRow({ upstreamStartedAt: new Date("2026-08-12T12:00:00Z") })],
+      new Map([["prod-1", 14]]),
+      NOW,
+    );
+    expect(out[0]?.readyState).toBe("READY");
+    expect(out[0]?.etaMinutes).toBeNull();
+  });
+
+  it("treats an unknown ready_state as upstream running, not ready", () => {
+    // Fail toward "not yours to grab yet" if the read model ever grows a
+    // third state — the alternative invites a claim that will be refused.
+    const out = mapQueueRowsToUpNext(
+      [queueRow({ readyState: "SOMETHING_NEW" })],
+      new Map(),
+      NOW,
+    );
+    expect(out[0]?.readyState).toBe("UPSTREAM_RUNNING");
+  });
+
+  it("carries the label and product name the queue row already resolved", () => {
+    const out = mapQueueRowsToUpNext([queueRow()], new Map(), NOW);
+    expect(out[0]?.bagLabel).toBe("PO 1234 - Chocolate Brown - Bag 13");
+    expect(out[0]?.productName).toBe("Chocolate Brown");
+  });
+
+  it("does not mutate the rows it was handed", () => {
+    const input = [
+      queueRow({
+        workflowBagId: "running",
+        readyState: "UPSTREAM_RUNNING",
+        claimedByStationId: "blister-1",
+      }),
+      queueRow({ workflowBagId: "ready" }),
+    ];
+    mapQueueRowsToUpNext(input, new Map(), NOW);
+    expect(input.map((r) => r.workflowBagId)).toEqual(["running", "ready"]);
   });
 });

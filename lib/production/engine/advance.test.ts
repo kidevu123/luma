@@ -4,32 +4,62 @@ import type { StationRow } from "./record-stage-event";
 
 describe("intentToEventType", () => {
   it("maps COMPLETE at blister to BLISTER_COMPLETE", () => {
-    expect(intentToEventType("COMPLETE", "BLISTER")).toBe("BLISTER_COMPLETE");
+    expect(intentToEventType("COMPLETE", "BLISTER", "BLISTER")).toBe("BLISTER_COMPLETE");
   });
 
   it("maps COMPLETE at heat seal to a segment, not a bag close", () => {
-    expect(intentToEventType("COMPLETE", "HEAT_SEAL")).toBe("SEALING_SEGMENT_COMPLETE");
+    expect(intentToEventType("COMPLETE", "HEAT_SEAL", "SEALING")).toBe(
+      "SEALING_SEGMENT_COMPLETE",
+    );
   });
 
   it("maps CONFIRM_BAG_EMPTY at heat seal to the bag-level close", () => {
-    expect(intentToEventType("CONFIRM_BAG_EMPTY", "HEAT_SEAL")).toBe("SEALING_COMPLETE");
+    expect(intentToEventType("CONFIRM_BAG_EMPTY", "HEAT_SEAL", "SEALING")).toBe(
+      "SEALING_COMPLETE",
+    );
   });
 
   it("maps COMPLETE at packaging to PACKAGING_COMPLETE", () => {
-    expect(intentToEventType("COMPLETE", "PACKAGING")).toBe("PACKAGING_COMPLETE");
+    expect(intentToEventType("COMPLETE", "PACKAGING", "PACKAGING")).toBe(
+      "PACKAGING_COMPLETE",
+    );
   });
 
   it("maps COMPLETE at bottle fill to BOTTLE_HANDPACK_COMPLETE", () => {
-    expect(intentToEventType("COMPLETE", "BOTTLE_FILL")).toBe("BOTTLE_HANDPACK_COMPLETE");
+    expect(intentToEventType("COMPLETE", "BOTTLE_FILL", "BOTTLE_HANDPACK")).toBe(
+      "BOTTLE_HANDPACK_COMPLETE",
+    );
   });
 
   it("maps CLAIM to BAG_PICKED_UP regardless of operation", () => {
-    expect(intentToEventType("CLAIM", "HEAT_SEAL")).toBe("BAG_PICKED_UP");
-    expect(intentToEventType("CLAIM", "PACKAGING")).toBe("BAG_PICKED_UP");
+    expect(intentToEventType("CLAIM", "HEAT_SEAL", "SEALING")).toBe("BAG_PICKED_UP");
+    expect(intentToEventType("CLAIM", "PACKAGING", "PACKAGING")).toBe("BAG_PICKED_UP");
   });
 
   it("returns null for an operation with no event mapping", () => {
-    expect(intentToEventType("COMPLETE", "POST_BLISTER_STAGING")).toBeNull();
+    expect(intentToEventType("COMPLETE", "POST_BLISTER_STAGING", "BLISTER")).toBeNull();
+  });
+
+  it("maps COMPLETE at a handpack-blister station to its own event, not the alias's", () => {
+    expect(intentToEventType("COMPLETE", "BLISTER", "HANDPACK_BLISTER")).toBe(
+      "HANDPACK_BLISTER_COMPLETE",
+    );
+  });
+
+  it("leaves a COMBINED station on the aliased blister event", () => {
+    // COMBINED also aliases to the BLISTER operation, but
+    // ALLOWED_EVENTS_BY_KIND.COMBINED permits BLISTER_COMPLETE — only
+    // HANDPACK_BLISTER needed the station-kind override.
+    expect(intentToEventType("COMPLETE", "BLISTER", "COMBINED")).toBe("BLISTER_COMPLETE");
+  });
+
+  it("does not let the handpack override hijack a non-blister operation", () => {
+    // A HANDPACK_BLISTER station can only resolve to the blister
+    // operation today, but the override must not fabricate a blister
+    // event for some other operation if that ever changes.
+    expect(intentToEventType("COMPLETE", "PACKAGING", "HANDPACK_BLISTER")).toBe(
+      "PACKAGING_COMPLETE",
+    );
   });
 });
 
@@ -89,6 +119,45 @@ describe("buildRecordStageEventInput", () => {
       clientEventId: "cid-abc",
     });
     expect(out.clientEventId).toBe("cid-abc");
+  });
+
+  it("carries counterPresses through to the record input", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counterPresses: 8 },
+      clientEventId: "cid-1",
+    });
+    expect(out.counterPresses).toBe(8);
+  });
+
+  it("omits counterPresses entirely when the operator supplied none", () => {
+    // recordStageEvent distinguishes `undefined` (refuse the seal) from a
+    // number. Under exactOptionalPropertyTypes the key must be absent,
+    // not present-and-undefined, so a non-sealing event never carries it.
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "PACKAGING_COMPLETE",
+      inputs: { cases: 3 },
+      clientEventId: "cid-1",
+    });
+    expect("counterPresses" in out).toBe(false);
+  });
+
+  it("keeps a zero press count rather than dropping it as falsy", () => {
+    // Zero presses is a real reading (nothing sealed this segment); a
+    // truthiness check here would turn it into "no counter supplied" and
+    // the seal would be refused.
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counterPresses: 0 },
+      clientEventId: "cid-1",
+    });
+    expect(out.counterPresses).toBe(0);
   });
 
   it("does not silently invent a sealing product", () => {

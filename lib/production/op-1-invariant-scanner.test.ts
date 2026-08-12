@@ -30,6 +30,10 @@ const LIVE_EMISSION_FILES: ReadonlyArray<string> = [
   // transaction body live here now; it emits BLISTER_COMPLETE,
   // SEALING_COMPLETE, BAG_RELEASED and friends.
   "lib/production/engine/record-stage-event.ts",
+  // P2-QUEUE-1: the CLAIM intent's write half. Emits BAG_PICKED_UP
+  // through projectEvent directly (a claim is not a stage event), so it
+  // needs the same accountability wiring as every other emission.
+  "lib/production/engine/claim-queued-bag.ts",
   "app/(floor)/floor/[token]/roll-actions.ts",
   "app/(floor)/floor/[token]/bag-allocation-actions.ts",
   "app/(admin)/inbound/packaging-materials/actions.ts",

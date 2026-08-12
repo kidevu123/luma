@@ -115,6 +115,20 @@ const NON_CHECKLIST_BLOCKERS: readonly Blocker[] = [
     supervisorDetail: "No stations row matched the stationId on this request.",
     suggestedAction: "NOTIFY_SUPERVISOR",
   },
+  {
+    // P2-QUEUE-1: two stations raced for the same queued bag and this one
+    // lost. Distinct from BAG_ON_HOLD (a supervisor decision) and from
+    // OPERATION_UNRESOLVED (wrong station for this bag) — the bag is fine
+    // and this station is eligible; someone else simply got there first.
+    // Not a checklist row: the operator cannot inspect "is another
+    // station holding it?" on the tablet, and the answer changes without
+    // them doing anything.
+    code: "BAG_ALREADY_CLAIMED",
+    operatorSentence: "Another station is already working on this bag.",
+    supervisorDetail:
+      "read_bag_queue.claimed_by_station_id is set to a different station.",
+    suggestedAction: "SCAN_AGAIN",
+  },
 ];
 
 const BLOCKER_CATALOGUE: ReadonlyMap<string, Blocker> = new Map([

@@ -75,16 +75,29 @@ three are documented in a block comment above the function:
 
 1. `buildRecordStageEventInput` never sets `counterPresses`, so any
    SEALING or COMBINED segment returns `SEALING_COUNTER_PRESS_ERROR`.
+   **Resolved in P2** — `counterPresses` now passes through on
+   presence, not truthiness (`057b95f`).
 2. `intentToEventType("CLAIM")` yields `BAG_PICKED_UP`, which is absent
    from `ALLOWED_EVENTS_BY_KIND` and is rejected.
+   **Resolved in P2** — `CLAIM` short-circuits at the top of
+   `advanceBagInner`, before `resolveOperation`, and is handled by the
+   new `claimQueuedBag` path (`057b95f`, locked/idempotent as of
+   `8584025`, race-loser blocker code corrected in `4030fd9`).
 3. `STATION_KIND_ALIAS` maps `HANDPACK_BLISTER` to `BLISTER`, producing
    `BLISTER_COMPLETE`, which that station kind disallows.
+   **Resolved in P2** — `intentToEventType` takes station kind as a
+   third parameter and a `COMPLETE_EVENT_FOR_STATION_KIND` override
+   table maps `HANDPACK_BLISTER` to `HANDPACK_BLISTER_COMPLETE`
+   (`057b95f`). Still uncorroborated at the route-operation layer; see
+   Task 7's note that the real fix remains a `HANDPACK_BLISTER` route
+   operation.
 
 It also drops `overrideEmployeeCode`, `sealingCloseMode`,
 `partialCloseReason`, `partialCloseReasonNote`, `packsRemaining`, and
 `cardsReopened`. Packaging's three counts collapse into one `countTotal`
 and `damaged` is discarded, so `advanceBag` is not yet a substitute for
-`packagingCompleteAction`.
+`packagingCompleteAction`. **These remain Phase 4 work** — not touched
+in P2.
 
 **The bottle route conflict is real and unresolved.** Migration
 `0013_route_operation_compat.sql` seeds `STICKERING` at sequence 3 and
@@ -94,6 +107,10 @@ Two passing tests in `station-event-mapping.test.ts` pin the
 contradiction; delete them when Phase 2 resolves it. Note the route half
 reads only `0013` — resolving it via a NEW migration would leave that
 half passing, though the `stage-progression` half would still fail.
+**Resolved in P2** — `order_independent_group` on `route_operations`
+(migration 0071) expresses the divergence in data instead of code
+(`cc60a3b`, `630df4d`); the two contradiction-pinning tests were
+replaced per their own instructions.
 
 **A throw after a committed write returns `ADVANCE_FAILED`.**
 `advanceBag`'s catch also covers `getStationView`, so a failure after
@@ -126,3 +143,49 @@ Five failures in
 `app/(admin)/finished-lots/[id]/zoho-production-output-preview-actions.test.ts`
 predate this branch — verified by running that file at the pre-branch
 commit. They are not caused by this work and were failing on `main`.
+
+## Phase 2 outcomes
+
+Branch `feat/production-engine-p2`. Three short notes for whoever reads
+`read_bag_queue` or `upNext` next:
+
+- **`claimed_by_station_id` means "the station holding the bag," not "a
+  peer's reservation."** A holder blocks visibility and claiming only
+  when the holder's own kind appears in the row's
+  `eligible_station_kinds` — a true destination peer (second sealer, the
+  other bottle finishing station). A holder of any other kind is
+  upstream: it neither hides the row from a downstream station's queue
+  nor blocks that station's claim. That asymmetry is the overlap scan,
+  and it is deliberate, not a gap.
+- **A missing ETA is the honest answer, not a bug.** `upNext` computes
+  `etaMinutes` only when the row is `UPSTREAM_RUNNING` with a live
+  holder; a released-but-still-`UPSTREAM_RUNNING` row (stale
+  `upstream_started_at`, no holder) and a product with fewer than five
+  recent samples both get `null` rather than a guess clamped to zero.
+  READY rows never carry an ETA at all — they are waiting on an
+  operator, not on upstream.
+- **Partial sealing close deliberately does not clear sibling pins.**
+  The stale-sibling-release added in P2 only fires on the final sealing
+  close (`isSealingFinal && !isPartialSealingClose`); a partial close
+  leaves other sealers' pins in place because the bag is still sealable
+  at those stations. Scoped out on purpose, not an oversight — see Task
+  5's concerns section for the argument that it may deserve revisiting
+  once the bag also auto-releases at BLISTERED on a partial close.
+
+### Phase 2 deferred minors (final-review triaged, none floor-reachable)
+
+- Sibling-release payload marker shipped (`auto_release_reason`); the
+  repair-path events (`CARD_FORCE_RELEASED`, `SUBMISSION_CORRECTED`) remain
+  outside `FLOW_EVENTS` — a void-repaired bag regains its queue row on next
+  pickup or rebuild. Revisit when claims gain a UI caller.
+- Same-bag deadlock window between the claim lock and projector write order:
+  documented at the `.for("update")` site; consistent-ordering refactor
+  belongs to the phase that wires claims to the UI (P4).
+- The finishing re-claim guard (`P2-FINISHING-RECLAIM-1`) has no contract
+  test; the staging checklist covers it. A `STICKER_ONLY` bag re-scanned at
+  its sticker station gets a slightly wrong "waiting for cap-sealing"
+  message — inherited gate pattern, P4 copy pass.
+- Smaller: STICKER_ONLY end-to-end transition coverage; rank-guard fail-open
+  comment; unfiltered qrCards join (shared with station-view);
+  `resolveRouteCodeForQueue` null-product fallback test; migration-text
+  assertions unbound; scanner slice bound; `actions.ts:2589` copy.

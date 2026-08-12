@@ -2200,6 +2200,10 @@ export const routeOperations = pgTable(
      *  enum migration. */
     allowedStationKind: text("allowed_station_kind"),
     allowedMachineKind: text("allowed_machine_kind"),
+    /** P2-BOTTLE-FLEX-1 — operations sharing a non-null group run in any
+     *  order among themselves (BOTTLE_FINISHING: stickering + induction
+     *  seal). Sequence remains the display/default order. */
+    orderIndependentGroup: text("order_independent_group"),
     requiresScan: boolean("requires_scan").notNull().default(true),
     requiresCounter: boolean("requires_counter").notNull().default(false),
     requiresTimer: boolean("requires_timer").notNull().default(false),
@@ -2811,6 +2815,42 @@ export const readStationLive = pgTable("read_station_live", {
     .notNull()
     .defaultNow(),
 });
+
+/** P2-QUEUE-1 — per-bag queue. One row per active workflow bag: where
+ *  it goes next and whether it is ready. Maintained exclusively by the
+ *  projector (lib/projector/bag-queue.ts). Not to be confused with
+ *  read_queue_state, the per-stage aggregate. */
+export const readBagQueue = pgTable(
+  "read_bag_queue",
+  {
+    workflowBagId: uuid("workflow_bag_id")
+      .primaryKey()
+      .references(() => workflowBags.id, { onDelete: "cascade" }),
+    queueStageKey: text("queue_stage_key").notNull(),
+    eligibleStationKinds: text("eligible_station_kinds").array().notNull(),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    productName: text("product_name"),
+    bagLabel: text("bag_label").notNull(),
+    readyState: text("ready_state").notNull(), // READY | UPSTREAM_RUNNING
+    claimedByStationId: uuid("claimed_by_station_id").references(
+      () => stations.id,
+      { onDelete: "set null" },
+    ),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    upstreamStartedAt: timestamp("upstream_started_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("read_bag_queue_stage_idx").on(t.queueStageKey, t.readyState),
+    index("read_bag_queue_claimed_idx")
+      .on(t.claimedByStationId)
+      .where(sql`claimed_by_station_id IS NOT NULL`),
+  ],
+);
 
 /** Per-bag rollup. Drives the "bags in flight" lists. */
 export const readBagState = pgTable(

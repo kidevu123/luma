@@ -32,7 +32,11 @@ import { eq, and, or, inArray, isNotNull, isNull, sql, desc, asc } from "drizzle
 import { ScanCardForm } from "./scan-card-form";
 import { StageActionButtons } from "./stage-action-buttons";
 import { BottleSealingRecoveryPanel } from "./bottle-sealing-recovery-panel";
-import { STATION_PICKUP_FROM_STAGE, STATION_STARTED_RESUME_FROM_STAGE } from "@/lib/production/stage-progression";
+import {
+  STATION_PICKUP_FROM_STAGE,
+  STATION_STARTED_RESUME_FROM_STAGE,
+  STATIONS_THAT_FINALIZE,
+} from "@/lib/production/stage-progression";
 import {
   resolveSealingCardsPerPress,
   stationUsesSealingCounter,
@@ -1317,13 +1321,22 @@ function BagAdvancedBanner({
       PACKAGED: "packaged",
       FINALIZED: "finalized",
     }[currentStage] ?? currentStage.toLowerCase();
+  // P2-AUTO-ADVANCE-1: the manual release button is gone — a completed stage
+  // releases the bag on its own, and the card stays attached either way, so the
+  // hint now points at the next station's scan instead of a button to tap here.
   const nextHint =
     currentStage === "BLISTERED"
-      ? "Tap Release to sealing queue below. The card stays attached and the sealing station scans the same card to claim the bag."
+      ? "Nothing to tap here. The card stays attached and the sealing station scans the same card to claim the bag."
       : currentStage === "SEALED"
-        ? "Tap Release to packaging queue below. The card stays attached and the packaging station scans the same card to claim the bag."
+        ? "Nothing to tap here. The card stays attached and the packaging station scans the same card to claim the bag."
         : currentStage === "PACKAGED"
-          ? "Tap Finalize bag below at the packaging station to close the production cycle and release the card."
+          ? // Only promise the Finalize button where it can actually render.
+            // A SEALING station can hold a PACKAGED bag (partial-packaging
+            // resume), and StageActionButtons shows Finalize only on stations
+            // in STATIONS_THAT_FINALIZE.
+            STATIONS_THAT_FINALIZE.has(stationKind)
+            ? "Packaging close-out normally closes this bag on its own. It is still open, so tap Finalize bag below."
+            : "Packaging will close out this bag."
           : `Bag is at ${stageWord}; this station has no further forward action.`;
   return (
     <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900 space-y-0.5">

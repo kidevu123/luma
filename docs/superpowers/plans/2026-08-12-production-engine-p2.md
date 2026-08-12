@@ -220,7 +220,14 @@ export function deriveQueueTransition(args: {
   stationKind: string | null;
   routeCode: string | null;
   priorEventTypes: readonly string[];
+  /** The bag's existing queue row, or null. Required to reject stale
+   *  upstream echoes: with overlap scanning, BLISTER_COMPLETE can land
+   *  AFTER sealing already picked the bag up, and must not clobber the
+   *  downstream claim. */
+  currentRow: { queueStageKey: string; claimedByStationId: string | null } | null;
 }): QueueTransition;
+
+export function queueRank(routeCode: string, queueStageKey: string): number | null;
 ```
 
 - [ ] **Step 1: Write the failing tests**
@@ -323,6 +330,28 @@ describe("queueAfterWorkAt", () => {
       queueAfterWorkAt({ ...CARD, stationKind: "NOT_A_KIND", priorEventTypes: [] }),
     ).toBeNull();
   });
+
+  it("never lists the working finishing station as eligible for its own output", () => {
+    const dest = queueAfterWorkAt({
+      routeCode: "BOTTLE",
+      stationKind: "BOTTLE_CAP_SEAL",
+      priorEventTypes: ["BOTTLE_HANDPACK_COMPLETE"], // picked up, not yet complete
+    });
+    // Working at cap-seal: after MY step the bag needs stickering.
+    expect(dest).toEqual({
+      queueStageKey: "BOTTLE_STICKER_QUEUE",
+      eligibleStationKinds: ["BOTTLE_STICKER"],
+    });
+  });
+
+  it("covers the sticker-only route end to end", () => {
+    expect(
+      queueAfterWorkAt({ routeCode: "STICKER_ONLY", stationKind: "BOTTLE_STICKER", priorEventTypes: [] }),
+    ).toEqual({ queueStageKey: "PACKAGING_QUEUE", eligibleStationKinds: ["PACKAGING"] });
+    expect(
+      queueAfterWorkAt({ routeCode: "STICKER_ONLY", stationKind: "PACKAGING", priorEventTypes: [] }),
+    ).toEqual({ queueStageKey: "FINISHED_GOODS_QUEUE", eligibleStationKinds: [] });
+  });
 });
 
 describe("deriveQueueTransition", () => {
@@ -331,6 +360,7 @@ describe("deriveQueueTransition", () => {
     stationKind: "BLISTER",
     routeCode: "CARD_BLISTER",
     priorEventTypes: [] as string[],
+    currentRow: null,
   };
 
   it("starts tracking when a bag is claimed at a first-op station", () => {
@@ -397,11 +427,59 @@ describe("deriveQueueTransition", () => {
       routeCode: "BOTTLE",
       eventType: "BOTTLE_CAP_SEAL_COMPLETE",
       priorEventTypes: ["BOTTLE_HANDPACK_COMPLETE", "BOTTLE_CAP_SEAL_COMPLETE"],
+      currentRow: null,
     });
     expect(afterFirst.kind).toBe("READY");
     if (afterFirst.kind === "READY") {
       expect(afterFirst.destination.queueStageKey).toBe("BOTTLE_STICKER_QUEUE");
     }
+  });
+
+  it("ignores a stale upstream completion after a downstream pickup (overlap clobber)", () => {
+    // Sealing overlap-claimed a STARTED bag; the row already points at
+    // PACKAGING_QUEUE. Blister's completion then lands. Applying it
+    // would clobber the sealing claim and regress the destination.
+    const t = deriveQueueTransition({
+      ...base,
+      eventType: "BLISTER_COMPLETE",
+      currentRow: { queueStageKey: "PACKAGING_QUEUE", claimedByStationId: "sealing-1" },
+    });
+    expect(t).toEqual({ kind: "NONE" });
+  });
+
+  it("applies a completion whose destination matches the current queue rank", () => {
+    // Normal case: sealing completes the bag it claimed; destination
+    // PACKAGING_QUEUE equals the row's queue. READY must go through.
+    const t = deriveQueueTransition({
+      ...base,
+      stationKind: "SEALING",
+      eventType: "SEALING_COMPLETE",
+      priorEventTypes: ["CARD_ASSIGNED", "BLISTER_COMPLETE", "BAG_PICKED_UP", "SEALING_COMPLETE"],
+      currentRow: { queueStageKey: "PACKAGING_QUEUE", claimedByStationId: "st-1" },
+    });
+    expect(t.kind).toBe("READY");
+  });
+
+  it("still applies a normal in-order completion when a row exists", () => {
+    // Blister completes with the row still pointing at SEALING_QUEUE
+    // (no overlap). Equal rank: apply.
+    const t = deriveQueueTransition({
+      ...base,
+      eventType: "BLISTER_COMPLETE",
+      currentRow: { queueStageKey: "SEALING_QUEUE", claimedByStationId: "st-1" },
+    });
+    expect(t.kind).toBe("READY");
+  });
+});
+
+describe("queueRank", () => {
+  it("ranks queues downstream-increasing per route, finishing queues tied", () => {
+    expect(queueRank("CARD_BLISTER", "SEALING_QUEUE")).toBe(1);
+    expect(queueRank("CARD_BLISTER", "PACKAGING_QUEUE")).toBe(2);
+    expect(queueRank("BOTTLE", "BOTTLE_STICKER_QUEUE")).toBe(
+      queueRank("BOTTLE", "BOTTLE_INDUCTION_QUEUE"),
+    );
+    expect(queueRank("NOT_A_ROUTE", "SEALING_QUEUE")).toBeNull();
   });
 });
 ```
@@ -454,6 +532,32 @@ const COMPLETION_EVENTS = new Set([
 
 const BOTTLE_FINISHING_KINDS = ["BOTTLE_STICKER", "BOTTLE_CAP_SEAL"] as const;
 
+/** Rank of each queue along a route — higher is further downstream.
+ *  Used to reject stale upstream echoes: a transition whose computed
+ *  destination ranks BELOW the row's current queue is an out-of-order
+ *  arrival (overlap scanning) and must not clobber the row. The two
+ *  bottle finishing queues share a rank because the steps are
+ *  order-independent (P2-BOTTLE-FLEX-1). */
+const QUEUE_RANK: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+  CARD_BLISTER: { SEALING_QUEUE: 1, PACKAGING_QUEUE: 2, FINISHED_GOODS_QUEUE: 3 },
+  BOTTLE: {
+    BOTTLE_STICKER_QUEUE: 1,
+    BOTTLE_INDUCTION_QUEUE: 1,
+    PACKAGING_QUEUE: 2,
+    FINISHED_GOODS_QUEUE: 3,
+  },
+  STICKER_ONLY: { PACKAGING_QUEUE: 1, FINISHED_GOODS_QUEUE: 2 },
+};
+
+export function queueRank(routeCode: string, queueStageKey: string): number | null {
+  return QUEUE_RANK[routeCode]?.[queueStageKey] ?? null;
+}
+
+const FINISHING_COMPLETION_FOR_KIND: Readonly<Record<string, string>> = {
+  BOTTLE_STICKER: "BOTTLE_STICKER_COMPLETE",
+  BOTTLE_CAP_SEAL: "BOTTLE_CAP_SEAL_COMPLETE",
+};
+
 function bottleFinishingDestination(
   priorEventTypes: readonly string[],
 ): QueueDestination {
@@ -500,7 +604,17 @@ export function queueAfterWorkAt(args: {
       return bottleFinishingDestination(args.priorEventTypes);
     }
     if (stationKind === "BOTTLE_STICKER" || stationKind === "BOTTLE_CAP_SEAL") {
-      return bottleFinishingDestination(args.priorEventTypes);
+      // The destination is where the bag goes AFTER this station's own
+      // step — so treat that step as done even when computing at pickup
+      // time (before its completion event exists). Keeps the row from
+      // listing the working station as eligible for its own output, and
+      // makes pickup-time and completion-time destinations agree.
+      const implied = FINISHING_COMPLETION_FOR_KIND[stationKind];
+      const effective =
+        implied && !args.priorEventTypes.includes(implied)
+          ? [...args.priorEventTypes, implied]
+          : args.priorEventTypes;
+      return bottleFinishingDestination(effective);
     }
     if (stationKind === "PACKAGING") {
       return { queueStageKey: "FINISHED_GOODS_QUEUE", eligibleStationKinds: [] };
@@ -525,6 +639,7 @@ export function deriveQueueTransition(args: {
   stationKind: string | null;
   routeCode: string | null;
   priorEventTypes: readonly string[];
+  currentRow: { queueStageKey: string; claimedByStationId: string | null } | null;
 }): QueueTransition {
   const { eventType } = args;
 
@@ -550,6 +665,18 @@ export function deriveQueueTransition(args: {
       priorEventTypes: args.priorEventTypes,
     });
     if (!destination) return { kind: "NONE" };
+    // Stale-echo guard: with overlap scanning, an upstream completion
+    // (BLISTER_COMPLETE) can arrive AFTER a downstream station already
+    // picked the bag up. If the computed destination ranks below the
+    // row's current queue, this event is out of date for queue purposes
+    // — applying it would clobber the downstream claim.
+    if (args.currentRow) {
+      const currentRank = queueRank(args.routeCode, args.currentRow.queueStageKey);
+      const nextRank = queueRank(args.routeCode, destination.queueStageKey);
+      if (currentRank != null && nextRank != null && nextRank < currentRank) {
+        return { kind: "NONE" };
+      }
+    }
     return { kind: "READY", destination };
   }
 
@@ -560,14 +687,14 @@ export function deriveQueueTransition(args: {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run lib/production/engine/queue-transitions.test.ts`
-Expected: PASS, 15 tests.
+Expected: PASS, 21 tests.
 
 - [ ] **Step 5: Export, verify the suite, commit**
 
 Add to `lib/production/engine/index.ts`:
 
 ```ts
-export { deriveQueueTransition, queueAfterWorkAt } from "./queue-transitions";
+export { deriveQueueTransition, queueAfterWorkAt, queueRank } from "./queue-transitions";
 export type { QueueDestination, QueueTransition } from "./queue-transitions";
 ```
 
@@ -691,12 +818,33 @@ export async function applyBagQueueTransition(
     .where(eq(workflowBags.id, ev.workflowBagId));
   if (!bagRow) return;
 
+  // Bounded to events at or before THIS event so replay sees exactly
+  // what live saw: during rebuild the table is already fully populated,
+  // and an unbounded query would leak future events into past
+  // decisions, silently diverging replay from live. (Same-timestamp
+  // siblings are included either way — a legacy-import tie; the replay
+  // ordering below makes that deterministic even if not historical.)
   const priorEventTypes = (
     await tx
       .select({ eventType: workflowEvents.eventType })
       .from(workflowEvents)
-      .where(eq(workflowEvents.workflowBagId, ev.workflowBagId))
+      .where(
+        and(
+          eq(workflowEvents.workflowBagId, ev.workflowBagId),
+          lte(workflowEvents.occurredAt, occurredAt),
+        ),
+      )
   ).map((r) => r.eventType);
+
+  // The existing row is an input to the decision — the stale-echo guard
+  // (overlap scanning) needs to know how far downstream the bag already is.
+  const [currentRow] = await tx
+    .select({
+      queueStageKey: readBagQueue.queueStageKey,
+      claimedByStationId: readBagQueue.claimedByStationId,
+    })
+    .from(readBagQueue)
+    .where(eq(readBagQueue.workflowBagId, ev.workflowBagId));
 
   const transition = deriveQueueTransition({
     eventType: ev.eventType,
@@ -707,6 +855,7 @@ export async function applyBagQueueTransition(
       stationKind,
     }),
     priorEventTypes,
+    currentRow: currentRow ?? null,
   });
 
   if (transition.kind === "NONE") return;
@@ -787,8 +936,11 @@ export async function applyBagQueueTransition(
     });
 }
 
-/** Full rebuild: wipe and replay every non-finalized bag's events in
- *  order through the same transition logic. */
+/** Full rebuild: wipe, then replay the entire workflow_events table in
+ *  order through the same transition logic (finalized bags REMOVE their
+ *  own rows during the replay). Secondary sort on id: occurred_at ties
+ *  exist in legacy imports and queue transitions are order-sensitive,
+ *  so replay must at least be deterministic across runs. */
 export async function rebuildBagQueue(tx: Tx): Promise<{ rows: number }> {
   await tx.execute(sql`DELETE FROM read_bag_queue;`);
   const events = await tx
@@ -799,7 +951,7 @@ export async function rebuildBagQueue(tx: Tx): Promise<{ rows: number }> {
       occurredAt: workflowEvents.occurredAt,
     })
     .from(workflowEvents)
-    .orderBy(workflowEvents.occurredAt);
+    .orderBy(workflowEvents.occurredAt, workflowEvents.id);
   for (const ev of events) {
     await applyBagQueueTransition(tx, ev, ev.occurredAt);
   }
@@ -1279,21 +1431,31 @@ export function etaMinutes(args: {
 
 `advance.ts` — `intentToEventType(intent, operationCode, stationKind)`: inside the `COMPLETE` branch, before the operation-code table, `if (stationKind === "HANDPACK_BLISTER") return "HANDPACK_BLISTER_COMPLETE";`. In `advanceBagInner`, the `CLAIM` intent short-circuits to `claimQueuedBag` before `recordStageEvent` (return its blocker or the refreshed view). `buildRecordStageEventInput` adds `...(args.inputs.counterPresses != null ? { counterPresses: args.inputs.counterPresses } : {})`. Shrink the preconditions block comment to what genuinely remains (packaging three-way counts and damaged; the dropped partial-close fields — Phase 4).
 
-`station-view.ts` — `getStationView` additionally loads, for the station's kind:
+`station-view.ts` — `getStationView` additionally loads, for the station's kind. **Semantics that both consumers must respect:** `claimedByStationId` is the station currently HOLDING the bag — which, for a row still in this station's queue, is almost always the UPSTREAM station working it (a destination-kind peer's claim advances the row out of this queue). An upstream holder must NOT hide the row (that is exactly the overlap-scanning case) — only a holder whose kind is itself in `eligibleStationKinds` (multi-sealer peer) blocks it:
 
 ```ts
+  const holder = alias(stations, "holder");
   const queueRows = await db
-    .select()
+    .select({
+      row: readBagQueue,
+      holderKind: holder.kind,
+    })
     .from(readBagQueue)
+    .leftJoin(holder, eq(holder.id, readBagQueue.claimedByStationId))
     .where(
       and(
         sql`${stationRow.station.kind} = ANY(${readBagQueue.eligibleStationKinds})`,
-        isNull(readBagQueue.claimedByStationId),
+        or(
+          isNull(readBagQueue.claimedByStationId),
+          sql`NOT (${holder.kind} = ANY(${readBagQueue.eligibleStationKinds}))`,
+        ),
       ),
     )
     .orderBy(sql`${readBagQueue.readyState} = 'READY' DESC`, readBagQueue.readyAt)
     .limit(5);
 ```
+
+**ETA honesty rule:** an ETA is only computable while an upstream station is ACTIVELY holding the bag (`claimedByStationId` non-null on an `UPSTREAM_RUNNING` row). A bag released mid-work (sealing handoff) is `UPSTREAM_RUNNING` with a null holder and a stale `upstreamStartedAt` — its ETA is unknown, and the mapper must return `etaMinutes: null` rather than clamping to zero ("arriving any moment" for a bag sitting on a cart). `mapQueueRowsToUpNext` therefore receives each row's `claimedByStationId` and gates the ETA on it.
 
 plus a median-cycle loader: recent completed cycles for (productId, stationKind) measured as `occurredAt(*_COMPLETE) - occurredAt(BAG_PICKED_UP | CARD_ASSIGNED | BAG_CLAIMED)` per bag over the last 20 bags — write it as one SQL statement, and keep every decision (ordering, null ETA, mapping to `UpNextBag`) in a new pure `mapQueueRowsToUpNext(rows, medianByProduct, now)` that `assembleStationView` consumes via a widened `StationViewRows.upNext` input. Test the pure mapper in `station-view.test.ts` (READY sorts before UPSTREAM_RUNNING; ETA only on UPSTREAM_RUNNING rows with data; `expected` = first row for `SCAN_TO_CLAIM`).
 

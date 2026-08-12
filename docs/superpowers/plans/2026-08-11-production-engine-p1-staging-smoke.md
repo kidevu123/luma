@@ -48,3 +48,80 @@ cannot reach.
 If any behaviour check fails, revert the branch. The extraction in
 Task 7 is the highest-risk change: record-stage-event.ts holds logic
 that previously lived inside fireStageEventAction.
+
+## Phase 2 (v1.31.0) — queue and auto-advance
+
+Run these two FIRST, in order, before any floor behaviour check.
+
+- [ ] **Migration landed the finishing group.** Immediately after the
+      migration runs:
+      `SELECT count(*) FROM route_operations WHERE order_independent_group = 'BOTTLE_FINISHING';`
+      must return exactly `2`, and both rows must be on the BOTTLE route:
+      `SELECT r.code, o.code FROM route_operations ro JOIN production_routes r
+      ON r.id = ro.route_id JOIN operation_types o ON o.id =
+      ro.operation_type_id WHERE ro.order_independent_group =
+      'BOTTLE_FINISHING';` -> exactly two rows, both `BOTTLE`, one
+      `STICKERING` and one `INDUCTION_SEAL`. Any other count means the
+      order-independent finishing pair is wrong and bottle bags will queue
+      to the wrong station — stop and fix before letting the floor scan.
+- [ ] **Backfill the queue once, post-deploy.** Run
+      `npm run rebuild:read-models` ONE time after the deploy. Bags already
+      in flight when the deploy landed have no `read_bag_queue` row and will
+      never appear in any station's `upNext` without it. Record the wall
+      time of the run here: `________`. It replays only in-flight bags, so
+      it should finish in seconds to well under two minutes; if it exceeds
+      ~2 minutes, abort the smoke and investigate (a runtime that long means
+      the in-flight scope is not being applied and the rebuild is walking
+      finished history).
+
+- [ ] Complete a blister bag: NO release button appears; the bag shows on a
+      sealing tablet's queue as READY without any operator action.
+- [ ] Scan-claim while upstream still runs (overlap): sealing can claim a
+      STARTED bag; Complete stays blocked until blister finishes.
+- [ ] Bottle fill complete: bag auto-releases; BOTH finishing stations see it
+      queued. After one finishing step, only the other station sees it.
+- [ ] Packaging complete on a pinned bag: finalizes with no button; the
+      queue row disappears.
+- [ ] The not-pinned finalize fallback still renders for a PACKAGED bag that
+      is no longer current at the station.
+- [ ] Sealing handoff button still present mid-bag (multi-sealer flow).
+- [ ] `npm run rebuild:read-models` repopulates read_bag_queue to the same
+      rows (spot-check one bag before/after).
+- [ ] claimQueuedBag double-tap: same clientEventId twice -> one BAG_PICKED_UP.
+- [ ] Two stations claim the same queued bag: one wins, the loser gets
+      "Another station is already working on this bag."
+- [ ] **Median-cycle SQL sanity.** For a product with 5+ recent bags at a
+      station kind, `loadMedianCycleMinutesByProduct` returns a plausible
+      number of minutes (not null, not negative, not absurdly large); a
+      product with fewer than 5 recent bags gets `etaMinutes: null`.
+- [ ] **Upstream-holder queue visibility.** A bag still being blistered
+      (held by the blister station, whose kind is NOT in the sealing row's
+      `eligible_station_kinds`) appears in the sealing station's `upNext`.
+      A bag already claimed by a second SEALING station (a true destination
+      peer) does NOT appear in the first sealing station's `upNext`.
+- [ ] **Concurrent same-kind claim.** Two stations of the SAME kind claim
+      one queued bag at once. The loser's response carries blocker code
+      `BAG_ALREADY_CLAIMED` ("Another station is already working on this
+      bag.") — assert the code, not that the queue row is gone. The
+      winner's claim REWRITES the row to the winner's downstream
+      destination rather than deleting it; only `BAG_FINALIZED` deletes a
+      queue row.
+- [ ] **Two-sealer overlap, final close.** Sealer B overlap-claims a bag
+      still being sealed on sealer A. Sealer A fires the final sealing
+      close. Sealer B's station returns to the scan form immediately
+      (stale sibling pin auto-released) rather than staying stuck showing
+      the now-finished bag. The sibling's `BAG_RELEASED` payload carries
+      `auto_release_reason: "STALE_SIBLING_SEALING_PIN"` — check the event
+      row, so the audit does not read as sealer A's operator releasing
+      sealer B's bag.
+- [ ] **Finishing re-claim is refused, station stays free.** Take a bottle
+      bag whose sticker step has already run (bag at SEALED, waiting on
+      cap-seal or packaging) and scan its card at the SAME sticker station.
+      The pickup is REFUSED with a message naming what remains — "This bag
+      has already been stickered here — it is waiting for cap-sealing."
+      (or "...waiting for packaging." once both finishing steps are done).
+      The station is NOT pinned: it returns to the scan form and can
+      immediately claim the next bag. Repeat at a cap-seal station whose
+      cap-seal already fired. Before the fix this pinned the station with
+      no exit — complete refused, no release or finalize button — until
+      packaging finalized the bag.

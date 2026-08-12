@@ -109,6 +109,21 @@ const FRESH_BAG_STATION_KINDS: ReadonlySet<string> = new Set([
   "COMBINED",
 ]);
 
+// P2-FINISHING-RECLAIM-1: the completion event each bottle finishing
+// station fires, plus the operator-facing past tense for it.
+const FINISHING_COMPLETE_EVENT_BY_STATION_KIND: Readonly<
+  Record<string, string | undefined>
+> = {
+  BOTTLE_STICKER: "BOTTLE_STICKER_COMPLETE",
+  BOTTLE_CAP_SEAL: "BOTTLE_CAP_SEAL_COMPLETE",
+};
+const FINISHING_DONE_LABEL_BY_STATION_KIND: Readonly<
+  Record<string, string | undefined>
+> = {
+  BOTTLE_STICKER: "stickered",
+  BOTTLE_CAP_SEAL: "cap-sealed",
+};
+
 // Floor PWA actions are anonymous (no admin login). Authorization is
 // the station's scan_token, which lives in the URL. Every action MUST
 // take the token, look up the station, and then refuse if the
@@ -891,6 +906,30 @@ export async function scanCardAction(
           eventType: row.eventType,
           payload: (row.payload as Record<string, unknown> | null) ?? null,
         }));
+        // P2-FINISHING-RECLAIM-1: a finishing station may claim a bag at
+        // SEALED that the OTHER finishing station handled, but never one
+        // whose own step already fired. Such a pin is a dead end: complete
+        // is refused server-side (bottleFinishingAlreadyFired), the manual
+        // release/finalize buttons are gone (P2-AUTO-ADVANCE-1), and the
+        // scan form does not render while the station holds a bag — the
+        // machine would sit blocked until packaging finalized the bag.
+        // Refuse the pickup instead, naming what the bag is actually
+        // waiting on.
+        const ownFinishingEvent =
+          FINISHING_COMPLETE_EVENT_BY_STATION_KIND[station.kind];
+        if (ownFinishingEvent) {
+          const finishingPriorTypes = bagEventSlices.map((e) => e.eventType);
+          if (finishingPriorTypes.some((t) => t === ownFinishingEvent)) {
+            const stillMissing = missingBottleFinishingSteps(finishingPriorTypes);
+            const waitingFor =
+              stillMissing.length > 0 ? stillMissing.join(" and ") : "packaging";
+            throw new Error(
+              `This bag has already been ${
+                FINISHING_DONE_LABEL_BY_STATION_KIND[station.kind] ?? "finished"
+              } here — it is waiting for ${waitingFor}.`,
+            );
+          }
+        }
         const partialPackagingResume =
           station.kind === "SEALING" &&
           isWorkflowBagResumableAtSealingAfterPartialPackaging(bagEventSlices, {

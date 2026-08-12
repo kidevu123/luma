@@ -11,7 +11,7 @@
 // FormData parse, authStation, and the trailing revalidatePath() calls
 // (Next.js concerns, not domain logic).
 
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   machines,
@@ -495,12 +495,27 @@ export async function recordStageEvent(
       } else if (
         eventType === "HANDPACK_BLISTER_COMPLETE" ||
         (eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER") ||
-        (isSealingFinal && station.kind === "SEALING")
+        (isSealingFinal && station.kind === "SEALING") ||
+        eventType === "BOTTLE_HANDPACK_COMPLETE" ||
+        eventType === "BOTTLE_CAP_SEAL_COMPLETE" ||
+        eventType === "BOTTLE_STICKER_COMPLETE"
       ) {
         await maybeAutoReleaseAfterComplete(tx, {
           workflowBagId,
           stationId,
           stationKind: station.kind,
+          clientEventId: clientEventId ?? null,
+          accountability,
+        });
+      }
+      // MULTI-SEALING-SAME-BAG-1: the final sealing close is the moment the
+      // bag physically leaves the sealing line, so every OTHER sealing
+      // station that overlap-claimed it is now holding a stale pin — the bag
+      // is not on that machine any more. Clear those pins here.
+      if (isSealingFinal && !isPartialSealingClose) {
+        await releaseStaleSiblingSealingPins(tx, {
+          workflowBagId,
+          firingStationId: stationId,
           clientEventId: clientEventId ?? null,
           accountability,
         });
@@ -522,6 +537,10 @@ export async function projectBagReleasedEvent(
     releasedAtStage: string;
     accountability: StationAccountability;
     clientEventId?: string | null | undefined;
+    /** Extra payload keys for system-initiated releases (e.g. the
+     *  auto_release_reason marker on stale sibling pin clearing). Merged
+     *  after the base keys; callers must not shadow them. */
+    payloadExtra?: Record<string, unknown> | undefined;
   },
 ): Promise<void> {
   await projectEvent(tx, {
@@ -531,6 +550,7 @@ export async function projectBagReleasedEvent(
     payload: {
       station_kind: args.stationKind,
       released_at_stage: args.releasedAtStage,
+      ...(args.payloadExtra ?? {}),
     },
     ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
     enteredByUserId: args.accountability.enteredByUserId,
@@ -541,11 +561,19 @@ export async function projectBagReleasedEvent(
   });
 }
 
-/** Stations that auto-release on complete — no second operator tap. */
+/** Stations that auto-release on complete — no second operator tap.
+ *  P2-QUEUE-1 completes the set: bottle fill and both finishing
+ *  stations now release automatically too. STATION_RELEASE_FROM_STAGE
+ *  supplies the stage each kind releases at, and the stage guard in
+ *  maybeAutoReleaseAfterComplete keeps a first finishing step from
+ *  releasing before the bag actually reached SEALED. */
 const AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS = new Set([
   "BLISTER",
   "HANDPACK_BLISTER",
   "SEALING",
+  "BOTTLE_HANDPACK",
+  "BOTTLE_CAP_SEAL",
+  "BOTTLE_STICKER",
 ]);
 
 /** Partial sealing close-out: release at BLISTERED so packaging can pick up. */
@@ -584,7 +612,72 @@ async function maybeAutoReleaseAfterPartialSealingClose(
   });
 }
 
-/** BLISTER + HANDPACK_BLISTER + SEALING: complete also releases when still pinned. */
+/** MULTI-SEALING-SAME-BAG-1 — clear stale sibling sealing pins on final close.
+ *
+ *  Sealer B can overlap-claim a bag while sealer A is still working it (the
+ *  sealing pickup stages allow it). If B never taps the handoff before A
+ *  submits the FINAL SEALING_COMPLETE, B is left pinned to a bag that has
+ *  physically left its machine: the handoff action requires stage BLISTERED,
+ *  the floor scan form only renders when the station has no current bag, and
+ *  the manual Release button no longer exists (P2-AUTO-ADVANCE-1). B would be
+ *  stuck until packaging finalized the bag — minutes to hours of a blocked
+ *  sealing machine.
+ *
+ *  The old manual Release button papered over this by making the operator
+ *  clear their own stale pin. The system already knows the truth at final
+ *  close, so it records it: one real BAG_RELEASED per stale sibling, through
+ *  the same projection as every other release, so the event log says WHY the
+ *  pin cleared and the projector clears the slot exactly as it always does.
+ *  No direct read-model write.
+ *
+ *  Scoped to kind SEALING only. A packaging station that overlap-claimed the
+ *  bag keeps its pin — the bag is on its way TO that station, not away from it.
+ *  Deterministic station ordering keeps the derived clientEventId suffixes
+ *  stable so a retried submit stays idempotent. */
+async function releaseStaleSiblingSealingPins(
+  tx: DbTx,
+  args: {
+    workflowBagId: string;
+    firingStationId: string;
+    clientEventId?: string | null | undefined;
+    accountability: StationAccountability;
+  },
+): Promise<void> {
+  const siblings = await tx
+    .select({ stationId: readStationLive.stationId })
+    .from(readStationLive)
+    .innerJoin(stations, eq(stations.id, readStationLive.stationId))
+    .where(
+      and(
+        eq(readStationLive.currentWorkflowBagId, args.workflowBagId),
+        eq(stations.kind, "SEALING"),
+        ne(readStationLive.stationId, args.firingStationId),
+      ),
+    )
+    .orderBy(readStationLive.stationId);
+
+  for (const [index, sibling] of siblings.entries()) {
+    const siblingClientEventId = args.clientEventId
+      ? `${args.clientEventId}-auto-release-sibling-${index}`
+      : undefined;
+    await projectBagReleasedEvent(tx, {
+      workflowBagId: args.workflowBagId,
+      stationId: sibling.stationId,
+      stationKind: "SEALING",
+      releasedAtStage: "SEALED",
+      accountability: args.accountability,
+      // The accountability carried here is the FIRING station's operator —
+      // the sibling's operator did nothing. Without this marker the audit
+      // trail reads as station A's operator releasing station B's bag.
+      // The marker says the system cleared a stale pin, not a person.
+      payloadExtra: { auto_release_reason: "STALE_SIBLING_SEALING_PIN" },
+      ...(siblingClientEventId ? { clientEventId: siblingClientEventId } : {}),
+    });
+  }
+}
+
+/** BLISTER + HANDPACK_BLISTER + SEALING + BOTTLE_HANDPACK + BOTTLE_CAP_SEAL
+ *  + BOTTLE_STICKER: complete also releases when still pinned. */
 async function maybeAutoReleaseAfterComplete(
   tx: DbTx,
   args: {
