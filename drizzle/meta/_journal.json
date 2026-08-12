@@ -491,6 +491,13 @@
       "when": 1784900000000,
       "tag": "0070_tablet_type_zoho_batch_tracked",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1785000000000,
+      "tag": "0071_read_bag_queue_and_bottle_flex",
+      "breakpoints": true
     }
   ]
 }
