@@ -6,9 +6,15 @@ const materialSrc = readFileSync(
   join(__dirname, "handpack-seal-material.ts"),
   "utf8",
 );
+// STAGE-EVENT-EXTRACT-1: fireStageEventAction's body moved verbatim to
+// lib/production/engine/record-stage-event.ts. Stitch it back in where it
+// used to sit so these scanners keep covering the whole stage-event path.
 const actionsSrc = readFileSync(
   join(__dirname, "../../app/(floor)/floor/[token]/actions.ts"),
   "utf8",
+).replace(
+  "// ── pause / resume",
+  `${readFileSync(join(__dirname, "engine/record-stage-event.ts"), "utf8")}\n// ── pause / resume`,
 );
 const pageSrc = readFileSync(
   join(__dirname, "../../app/(floor)/floor/[token]/page.tsx"),

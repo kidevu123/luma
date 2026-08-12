@@ -88,15 +88,46 @@ describe("bagStageToQueueStageKey", () => {
 
 describe("queueStageKeyToBagStage", () => {
   it("maps the sealing queue back to the bag stage that enters it", () => {
-    expect(queueStageKeyToBagStage("SEALING_QUEUE")).toBe("BLISTERED");
+    expect(queueStageKeyToBagStage("SEALING_QUEUE", "CARD_BLISTER")).toBe("BLISTERED");
   });
 
   it("maps the finished-goods queue to FINALIZED", () => {
-    expect(queueStageKeyToBagStage("FINISHED_GOODS_QUEUE")).toBe("FINALIZED");
+    expect(queueStageKeyToBagStage("FINISHED_GOODS_QUEUE", "CARD_BLISTER")).toBe(
+      "FINALIZED",
+    );
   });
 
   it("returns null for staging keys that have no bag-stage equivalent", () => {
-    expect(queueStageKeyToBagStage("POST_BLISTER_STAGING")).toBeNull();
+    expect(queueStageKeyToBagStage("POST_BLISTER_STAGING", "CARD_BLISTER")).toBeNull();
+  });
+
+  it("resolves the sticker queue differently per route", () => {
+    // Fill happens first on BOTTLE, so a bag reaching the sticker queue
+    // is already BLISTERED. On STICKER_ONLY stickering IS the first
+    // operation, so the same queue is entered at STARTED. A flat
+    // (non-route-parameterized) table cannot express both.
+    expect(queueStageKeyToBagStage("BOTTLE_STICKER_QUEUE", "BOTTLE")).toBe("BLISTERED");
+    expect(queueStageKeyToBagStage("BOTTLE_STICKER_QUEUE", "STICKER_ONLY")).toBe(
+      "STARTED",
+    );
+  });
+
+  it("returns null without a route rather than guessing", () => {
+    expect(queueStageKeyToBagStage("SEALING_QUEUE", null)).toBeNull();
+  });
+
+  it("is the inverse of bagStageToQueueStageKey for every mid-route stage", () => {
+    for (const [routeCode, stages] of [
+      ["CARD_BLISTER", ["STARTED", "BLISTERED", "SEALED"]],
+      ["BOTTLE", ["STARTED", "BLISTERED", "SEALED"]],
+      ["STICKER_ONLY", ["STARTED", "SEALED"]],
+    ] as const) {
+      for (const stage of stages) {
+        const queue = bagStageToQueueStageKey(stage, routeCode);
+        expect(queue).not.toBeNull();
+        expect(queueStageKeyToBagStage(queue, routeCode)).toBe(stage);
+      }
+    }
   });
 });
 ```
@@ -150,19 +181,6 @@ const QUEUE_FOR_BAG_STAGE: Readonly<
   },
 };
 
-/** Queue stage key → the bag stage that puts a bag into it. Staging
- *  keys (POST_*_STAGING) have no bag-stage equivalent and return null. */
-const BAG_STAGE_FOR_QUEUE: Readonly<Record<string, string>> = {
-  RECEIVING_QUEUE: "STARTED",
-  BLISTER_QUEUE: "STARTED",
-  SEALING_QUEUE: "BLISTERED",
-  BOTTLE_FILL_QUEUE: "STARTED",
-  BOTTLE_STICKER_QUEUE: "BLISTERED",
-  BOTTLE_INDUCTION_QUEUE: "BLISTERED",
-  PACKAGING_QUEUE: "SEALED",
-  FINISHED_GOODS_QUEUE: "FINALIZED",
-};
-
 export function bagStageToQueueStageKey(
   bagStage: string | null | undefined,
   routeCode: string | null | undefined,
@@ -173,11 +191,35 @@ export function bagStageToQueueStageKey(
   return table[bagStage] ?? null;
 }
 
+/** Queue stage key → the bag stage that puts a bag into it, within a
+ *  route.
+ *
+ *  Route-parameterized because the same queue key means different
+ *  things on different routes: BOTTLE_STICKER_QUEUE is entered at
+ *  BLISTERED on the BOTTLE route (fill happens first) but at STARTED on
+ *  STICKER_ONLY (stickering IS the first operation). Both routes are
+ *  seeded in drizzle/0013_route_operation_compat.sql. A flat table
+ *  would silently return the wrong stage for one of them.
+ *
+ *  Derived by inverting QUEUE_FOR_BAG_STAGE so the two directions
+ *  cannot drift apart. Staging keys (POST_*_STAGING) appear in no
+ *  forward table and correctly return null.
+ *
+ *  Note the deliberate asymmetry at the end of a route: the forward
+ *  table sends a PACKAGED bag to FINISHED_GOODS_QUEUE, and this
+ *  function maps that key back to FINALIZED, not PACKAGED. Entering
+ *  the finished-goods queue is what finalizes a bag, so the pair is
+ *  not a round-trip identity there. */
 export function queueStageKeyToBagStage(
   queueStageKey: string | null | undefined,
+  routeCode: string | null | undefined,
 ): string | null {
-  if (!queueStageKey) return null;
-  return BAG_STAGE_FOR_QUEUE[queueStageKey] ?? null;
+  if (!queueStageKey || !routeCode) return null;
+  if (queueStageKey === "FINISHED_GOODS_QUEUE") return "FINALIZED";
+  const table = QUEUE_FOR_BAG_STAGE[routeCode];
+  if (!table) return null;
+  const match = Object.entries(table).find(([, queue]) => queue === queueStageKey);
+  return match?.[0] ?? null;
 }
 ```
 
@@ -222,7 +264,12 @@ export type CompletionInput = {
 
 export type CurrentWork = {
   workflowBagId: string;
+  /** buildCurrentBagDisplayLabel().primary — e.g. "PO 1234 - Chocolate Brown - Bag 12". */
   bagLabel: string;
+  /** buildCurrentBagDisplayLabel().secondary — the raw QR card label, shown as
+   *  a subline beneath bagLabel. page.tsx renders this today; dropping it
+   *  would be a visible change, which Phase 1 forbids. */
+  bagSubLabel: string | null;
   productName: string | null;
   /** Operator-facing status, e.g. "Ready to seal". Never a stage name. */
   statusLine: string;
@@ -561,9 +608,29 @@ describe("resolveCompletionInputs", () => {
   });
 
   it("labels inputs in plain language with no stage or event names", () => {
-    for (const input of resolveCompletionInputs(op({}))) {
+    const inputs = resolveCompletionInputs(op({}));
+    // Guard: without this the loop below would pass vacuously if the
+    // function ever regressed to returning an empty array.
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const input of inputs) {
       expect(input.label).not.toMatch(/_COMPLETE|QUEUE|STAGE/);
     }
+  });
+
+  it("leaves the damaged count unitless at packaging", () => {
+    // Packaging counts cases, displays and loose units; a single unit
+    // label on "damaged" would be wrong for two of the three.
+    const inputs = resolveCompletionInputs(
+      op({ operationCode: "PACKAGING", allowedStationKind: "PACKAGING", outputUnit: "cases" }),
+    );
+    expect(inputs.find((i) => i.key === "damaged")?.unit).toBeNull();
+  });
+
+  it("omits damaged entirely for an operation with no output", () => {
+    const inputs = resolveCompletionInputs(
+      op({ operationCode: "POST_BLISTER_STAGING", requiresCounter: false, outputUnit: null }),
+    );
+    expect(inputs).toEqual([]);
   });
 });
 ```
@@ -612,9 +679,20 @@ export function resolveCompletionInputs(
   }
 
   // Physical damage is a human observation at every operation that
-  // produces output, and is always optional.
-  if (inputs.length > 0) {
-    inputs.push({ key: "damaged", label: "Damaged", unit: op.outputUnit, required: false });
+  // produces output, and is always optional. Gate on outputUnit rather
+  // than on inputs.length: "produces output" is the actual rule, and an
+  // operation could gain a derived count without requiresCounter.
+  if (op.outputUnit != null) {
+    inputs.push({
+      key: "damaged",
+      label: "Damaged",
+      // Packaging reports three different units (cases, displays, loose
+      // units), so a single outputUnit would mislabel two of them.
+      // Deliberately unitless until Phase 4 confirms with the floor
+      // which granularity operators actually count damage in.
+      unit: PACKAGING_OPERATIONS.has(op.operationCode) ? null : op.outputUnit,
+      required: false,
+    });
   }
 
   return inputs;
@@ -754,6 +832,25 @@ describe("evaluateChecks", () => {
     const blockers = blockersFromChecks(evaluateChecks(facts({ operationResolved: false })));
     expect(blockers[0]?.supervisorDetail).toContain("route");
   });
+
+  // The three inverted checks each pass when their fact is FALSE. Setting
+  // them one at a time is what catches a cross-wired inversion — e.g. the
+  // paused check reading bagOnHold. A test that leaves all three at the
+  // same default cannot distinguish them.
+  it.each([
+    ["bagOnHold", "hold", "BAG_ON_HOLD"],
+    ["bagPaused", "paused", "BAG_PAUSED"],
+    ["bagFinalized", "finalized", "BAG_FINALIZED"],
+  ] as const)(
+    "fails only the %s check when that fact alone is true",
+    (factKey, checkId, code) => {
+      const checks = evaluateChecks(facts({ [factKey]: true }));
+      const failed = checks.filter((c) => !c.passed);
+      expect(failed).toHaveLength(1);
+      expect(failed[0]?.id).toBe(checkId);
+      expect(failed[0]?.blocker?.code).toBe(code);
+    },
+  );
 });
 ```
 
@@ -1219,39 +1316,301 @@ Expected: PASS, 5 tests
 
 - [ ] **Step 5: Add the DB-backed `getStationView`**
 
-Append to `lib/production/engine/station-view.ts`. Move the current-work query from `app/(floor)/floor/[token]/page.tsx:92-156` verbatim, reuse `getActiveStationSession` from `lib/production/station-operator-session.ts` and `buildCurrentBagDisplayLabel` from `lib/production/current-bag-display-label.ts`, then assemble:
+Append to `lib/production/engine/station-view.ts`. The current-work query is moved verbatim from `app/(floor)/floor/[token]/page.tsx:125-145` — do not redesign it.
 
 ```ts
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import {
+  inventoryBags,
+  machines,
+  products,
+  purchaseOrders,
+  qrCards,
+  readBagState,
+  readStationLive,
+  receives,
+  smallBoxes,
+  stations,
+  tabletTypes,
+  workflowBags,
+} from "@/lib/db/schema";
+import { getActiveStationSession } from "@/lib/production/station-operator-session";
+import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
+import { resolveOperation } from "./resolve-operation";
+import { evaluateChecks } from "./resolve-exceptions";
+import type { StationView } from "./types";
+
 export async function getStationView(stationId: string): Promise<StationView> {
-  // 1. station row + machine (stations join machines on stations.machineId)
-  // 2. active operator session  -> getActiveStationSession(db, stationId)
-  // 3. current bag at station   -> the read_station_live query from page.tsx:125-145
-  // 4. operation                -> resolveOperation({ productId, stationKind })
-  // 5. facts                    -> from read_bag_state (isPaused, isFinalized,
-  //                                isOnHold) plus resolveOperation's result
-  // 6. checks                   -> evaluateChecks(facts)
-  // 7. nextAction               -> buildNextAction({...})
-  //
-  // upNext is [] in Phase 1. read_bag_queue arrives in Phase 2.
+  const [stationRow] = await db
+    .select({ station: stations, machine: machines })
+    .from(stations)
+    .leftJoin(machines, eq(stations.machineId, machines.id))
+    .where(eq(stations.id, stationId));
+  if (!stationRow) throw new Error("Station not found.");
+
+  const session = await getActiveStationSession(db, stationId);
+
+  const [currentAtStation] = await db
+    .select({
+      bag: workflowBags,
+      card: qrCards,
+      state: readBagState,
+      product: products,
+      inventoryBagNumber: inventoryBags.bagNumber,
+      tabletTypeName: tabletTypes.name,
+      poNumber: purchaseOrders.poNumber,
+    })
+    .from(readStationLive)
+    .innerJoin(workflowBags, eq(readStationLive.currentWorkflowBagId, workflowBags.id))
+    .leftJoin(qrCards, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
+    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
+    .leftJoin(products, eq(products.id, workflowBags.productId))
+    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
+    .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
+    .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
+    .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
+    .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
+    .where(eq(readStationLive.stationId, stationId));
+
+  const resolved = currentAtStation
+    ? await resolveOperation({
+        productId: currentAtStation.bag.productId,
+        stationKind: stationRow.station.kind,
+      })
+    : null;
+
+  return assembleStationView({
+    station: {
+      id: stationRow.station.id,
+      label: stationRow.station.label,
+      kind: stationRow.station.kind,
+      machineName: stationRow.machine?.name ?? null,
+    },
+    session: session
+      ? { id: session.id, employeeNameSnapshot: session.employeeNameSnapshot }
+      : null,
+    current: currentAtStation
+      ? {
+          workflowBagId: currentAtStation.bag.id,
+          // buildCurrentBagDisplayLabel returns
+          // { primary, secondary, hasReceivedContext } — NOT a string.
+          // page.tsx:980-984 renders primary as the heading and secondary
+          // as a subline, so both must survive into StationView or the
+          // rewire in Task 8 would visibly change the screen.
+          ...(() => {
+            const label = buildCurrentBagDisplayLabel({
+              cardLabel: currentAtStation.card?.label ?? null,
+              poNumber: currentAtStation.poNumber,
+              tabletTypeName: currentAtStation.tabletTypeName,
+              productName: currentAtStation.product?.name ?? null,
+              inventoryBagNumber: currentAtStation.inventoryBagNumber,
+              workflowBagNumber: currentAtStation.bag.bagNumber,
+            });
+            return { bagLabel: label.primary, bagSubLabel: label.secondary };
+          })(),
+          productName: currentAtStation.product?.name ?? null,
+          productId: currentAtStation.bag.productId,
+          stage: currentAtStation.state?.stage ?? null,
+          isPaused: currentAtStation.state?.isPaused ?? false,
+          isFinalized: currentAtStation.state?.isFinalized ?? false,
+          isOnHold: currentAtStation.state?.isOnHold ?? false,
+        }
+      : null,
+    operation: resolved?.operation ?? null,
+  });
 }
 ```
 
-Fill in each numbered step with the real query. Every value is available from the sources named above; add no new tables.
-
-- [ ] **Step 6: Write an integration test for `getStationView`**
-
-Add to `lib/production/engine/station-view.test.ts`, following the DB-test setup used by `lib/production/bag-allocation.test.ts` (read it first for the harness pattern):
+This repo runs no database in its test suite — `vitest.config.ts` excludes DB access by design, and DB behaviour is verified on staging by deploy smoke. So `getStationView` above is deliberately kept to fetching and delegating: **every decision it makes lives in the pure `assembleStationView` below**, which is what the tests exercise.
 
 ```ts
-describe("getStationView", () => {
-  it("returns OPEN_SHIFT for an active station with no operator session", async () => {
-    const view = await getStationView(seededStationId);
+export type StationViewRows = {
+  station: { id: string; label: string; kind: string; machineName: string | null };
+  session: { id: string; employeeNameSnapshot: string | null } | null;
+  current: {
+    workflowBagId: string;
+    bagLabel: string;
+    bagSubLabel: string | null;
+    productName: string | null;
+    productId: string | null;
+    stage: string | null;
+    isPaused: boolean;
+    isFinalized: boolean;
+    isOnHold: boolean;
+  } | null;
+  operation: RouteOperationView | null;
+};
+
+/** Pure: rows in, StationView out. No DB, no clock, no I/O. */
+export function assembleStationView(rows: StationViewRows): StationView {
+  const current: CurrentWork | null = rows.current
+    ? {
+        workflowBagId: rows.current.workflowBagId,
+        bagLabel: rows.current.bagLabel,
+        bagSubLabel: rows.current.bagSubLabel,
+        productName: rows.current.productName,
+        statusLine: rows.operation
+          ? `Ready to ${operationVerb(rows.operation.operationCode).toLowerCase()}`
+          : "Waiting",
+        progress: null,
+      }
+    : null;
+
+  const checks = evaluateChecks({
+    bagRecognized: rows.current != null,
+    productResolved: rows.current?.productId != null,
+    operationResolved: rows.operation != null,
+    // Phase 1 does not evaluate material availability; resolve-materials
+    // lands in Phase 2 with the queue read model.
+    materialsAvailable: true,
+    upstreamStageComplete: true,
+    bagPaused: rows.current?.isPaused ?? false,
+    bagFinalized: rows.current?.isFinalized ?? false,
+    bagOnHold: rows.current?.isOnHold ?? false,
+    waitingForLabel: null,
+  });
+
+  return {
+    station: rows.station,
+    operator: rows.session
+      ? {
+          sessionId: rows.session.id,
+          name: rows.session.employeeNameSnapshot ?? "Operator",
+        }
+      : null,
+    // Supervisor sessions arrive in Phase 5.
+    supervisor: null,
+    current,
+    // read_bag_queue arrives in Phase 2.
+    upNext: [],
+    nextAction: buildNextAction({
+      hasOperatorSession: rows.session != null,
+      current,
+      operation: rows.operation,
+      checks,
+      bagStage: rows.current?.stage ?? null,
+      expected: null,
+    }),
+    capabilities: { canPause: current != null, canReportProblem: true },
+  };
+}
+```
+
+Note: `machines.name` — confirm the column name against `lib/db/schema.ts` before writing; if it differs, use the actual column and keep the `machineName` field name.
+
+Note the checks marked `materialsAvailable: true` and `upstreamStageComplete: true`. Those are hardcoded passes in Phase 1, not evaluations — Phase 2 supplies the real facts. That is why `getStationView` cannot yet be the sole gate on a Complete button, and why Phase 1 leaves the existing floor guards in place.
+
+- [ ] **Step 6: Test `assembleStationView` exhaustively**
+
+There is no database in this repo's test suite (`vitest.config.ts` excludes it by design; DB behaviour is verified on staging by deploy smoke). `getStationView` is therefore untested in-repo by intent — it only fetches and delegates. All of its decisions live in `assembleStationView`, which is pure and gets full coverage.
+
+Add to `lib/production/engine/station-view.test.ts`:
+
+```ts
+function rows(over: Partial<StationViewRows> = {}): StationViewRows {
+  return {
+    station: { id: "s1", label: "Sealing 2", kind: "SEALING", machineName: "Sealer 2" },
+    session: { id: "sess1", employeeNameSnapshot: "Ana R." },
+    current: {
+      workflowBagId: "bag-1",
+      bagLabel: "PO 1234 - Chocolate Brown - Bag 12",
+      bagSubLabel: "1042",
+      productName: "Chocolate Brown",
+      productId: "prod-1",
+      stage: "BLISTERED",
+      isPaused: false,
+      isFinalized: false,
+      isOnHold: false,
+    },
+    operation: OP,
+    ...over,
+  };
+}
+
+describe("assembleStationView", () => {
+  it("passes the station through unchanged", () => {
+    expect(assembleStationView(rows()).station).toEqual({
+      id: "s1",
+      label: "Sealing 2",
+      kind: "SEALING",
+      machineName: "Sealer 2",
+    });
+  });
+
+  it("reports OPEN_SHIFT and a null operator when no session is open", () => {
+    const view = assembleStationView(rows({ session: null }));
+    expect(view.operator).toBeNull();
     expect(view.nextAction.kind).toBe("OPEN_SHIFT");
-    expect(view.station.kind).toBe("SEALING");
+  });
+
+  it("falls back to a generic operator name when the snapshot is missing", () => {
+    const view = assembleStationView(
+      rows({ session: { id: "sess1", employeeNameSnapshot: null } }),
+    );
+    expect(view.operator?.name).toBe("Operator");
+  });
+
+  it("builds an operator-facing status line with no stage or event names", () => {
+    const view = assembleStationView(rows());
+    expect(view.current?.statusLine).toBe("Ready to sealing");
+    expect(view.current?.statusLine).not.toMatch(/BLISTERED|SEALED|_COMPLETE|QUEUE/);
+  });
+
+  it("says Waiting when no operation resolves for this station", () => {
+    const view = assembleStationView(rows({ operation: null }));
+    expect(view.current?.statusLine).toBe("Waiting");
+  });
+
+  it("blocks on a paused bag and surfaces the paused blocker", () => {
+    const view = assembleStationView(
+      rows({ current: { ...rows().current!, isPaused: true } }),
+    );
+    expect(view.nextAction.kind).toBe("BLOCKED");
+    if (view.nextAction.kind === "BLOCKED") {
+      expect(view.nextAction.blockers.map((b) => b.code)).toContain("BAG_PAUSED");
+    }
+  });
+
+  it("blocks when the bag has no product mapping", () => {
+    const view = assembleStationView(
+      rows({ current: { ...rows().current!, productId: null } }),
+    );
+    expect(view.nextAction.kind).toBe("BLOCKED");
+  });
+
+  it("asks the operator to scan when no bag is at the station", () => {
+    const view = assembleStationView(rows({ current: null, operation: null }));
+    expect(view.current).toBeNull();
+    expect(view.nextAction.kind).toBe("SCAN_TO_CLAIM");
+    expect(view.capabilities.canPause).toBe(false);
+  });
+
+  it("leaves upNext empty and supervisor null in phase 1", () => {
+    const view = assembleStationView(rows());
     expect(view.upNext).toEqual([]);
+    expect(view.supervisor).toBeNull();
+  });
+
+  it("carries both label lines so the rewire cannot drop the subline", () => {
+    // page.tsx:980-984 renders primary as the heading and secondary as a
+    // subline. Task 8 feeds that JSX from StationView, so losing either
+    // here would be a visible change — which Phase 1 forbids.
+    const view = assembleStationView(rows());
+    expect(view.current?.bagLabel).toBe("PO 1234 - Chocolate Brown - Bag 12");
+    expect(view.current?.bagSubLabel).toBe("1042");
+  });
+
+  it("tolerates a bag with no subline", () => {
+    const view = assembleStationView(
+      rows({ current: { ...baseCurrent, bagSubLabel: null } }),
+    );
+    expect(view.current?.bagSubLabel).toBeNull();
   });
 });
 ```
+
+Note the fourth test asserts the literal string `"Ready to sealing"`. If `operationVerb` renders that awkwardly for some operation codes, fix the verb table rather than the assertion, and say so in your report.
 
 - [ ] **Step 7: Run the suite and typecheck**
 
@@ -1260,7 +1619,17 @@ Expected: all clean
 
 - [ ] **Step 8: Export and commit**
 
-Add `export { getStationView, buildNextAction, operationVerb } from "./station-view";` to `lib/production/engine/index.ts`.
+Add to `lib/production/engine/index.ts`:
+
+```ts
+export {
+  getStationView,
+  assembleStationView,
+  buildNextAction,
+  operationVerb,
+} from "./station-view";
+export type { NextActionInput, StationViewRows } from "./station-view";
+```
 
 ```bash
 git add lib/production/engine/station-view.ts \
@@ -1385,88 +1754,277 @@ export function intentToEventType(
 Run: `npx vitest run lib/production/engine/advance.test.ts`
 Expected: PASS, 7 tests
 
-- [ ] **Step 5: Add the transactional `advanceBag`**
+- [ ] **Step 5: Extract `fireStageEventAction`'s body — do not reimplement it**
 
-Append to `lib/production/engine/advance.ts`. Reproduce the guard order from `fireStageEventAction`, converting each early `return { error }` into a `Blocker` rather than a string:
+`fireStageEventAction` is not a thin guard sequence. Its transaction also issues handpack blister card material (`issueHandpackBlisterCardMaterial`, `emitHandpackBlisterEstimatedMaterial`), handles partial-sealing close-out (`maybeAutoReleaseAfterPartialSealingClose`), and auto-releases on complete (`maybeAutoReleaseAfterComplete`). Reimplementing that in the engine would be a behavioural rewrite, which Phase 1 explicitly is not.
+
+Instead, **move the body verbatim** into a shared lib module. `actions.ts` is a `"use server"` file, so every export there must be a server action — the shared function cannot live in it.
+
+Create `lib/production/engine/record-stage-event.ts`:
 
 ```ts
-export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
-  // 1. load station + assertStationActiveForFloorActions
-  // 2. resolveOperation({ productId, stationKind }) -> operation
-  //    -> no operation: Blocker OPERATION_UNRESOLVED
-  // 3. intentToEventType(intent, operation.operationCode)
-  //    -> null: Blocker OPERATION_UNRESOLVED
-  // 4. read_bag_state guards: isPaused / isFinalized / isOnHold
-  // 5. checkStageProgression({ eventType, currentStage, isPaused, isFinalized })
-  //    -> not allowed: Blocker UPSTREAM_INCOMPLETE, supervisorDetail = reason
-  // 6. bottle finishing duplicate guard:
-  //    isBottleFinishingEvent + bottleFinishingAlreadyFired
-  // 7. db.transaction:
-  //      resolveStationAccountability(tx, { stationId, ... })
-  //      projectEvent(tx, { ...event, clientEventId })
-  //      writeAudit(tx, ...)
-  // 8. return { ok: true, view: await getStationView(input.stationId) }
-  //
-  // Every failure path returns { ok: false, blocker } — never throws to
-  // the caller, and never returns a raw error string.
+// Moved verbatim from app/(floor)/floor/[token]/actions.ts
+// (fireStageEventAction, guard sequence + transaction body).
+//
+// This is a pure relocation. Do not change behaviour, ordering, error
+// strings, or payload shapes — the parity gate in Task 8 depends on
+// this being bit-identical.
+
+export type RecordStageEventInput = {
+  station: StationRow;
+  workflowBagId: string;
+  eventType: string;
+  countTotal: number;
+  counterPresses?: number | undefined;
+  packsRemaining: number;
+  cardsReopened: number;
+  clientEventId?: string | undefined;
+  overrideEmployeeCode?: string | undefined;
+  pickedSealingProductId: string | null;
+  sealingCloseMode?: string | undefined;
+  partialCloseReason?: string | undefined;
+  partialCloseReasonNote?: string | undefined;
+};
+
+export async function recordStageEvent(
+  input: RecordStageEventInput,
+): Promise<{ ok: true } | { error: string }> {
+  // Body moved from actions.ts:1594-1950 unchanged, with `station`,
+  // `workflowBagId`, `eventType` etc. read from `input` instead of the
+  // parsed FormData, and the trailing revalidatePath() calls left
+  // behind in the action (they are Next.js concerns, not domain logic).
 }
 ```
 
-Idempotency comes from passing `input.clientEventId` through to `projectEvent`; confirm the convention in `lib/production/client-event-id-rule.test.ts` before wiring it.
+Then `fireStageEventAction` becomes:
 
-- [ ] **Step 6: Write the transaction tests**
+```ts
+const station = await authStation(token, stationId);
+const result = await recordStageEvent({
+  station,
+  workflowBagId,
+  eventType,
+  countTotal,
+  counterPresses,
+  packsRemaining,
+  cardsReopened,
+  clientEventId,
+  overrideEmployeeCode,
+  pickedSealingProductId,
+  sealingCloseMode: parsed.data.sealingCloseMode,
+  partialCloseReason: parsed.data.partialCloseReason,
+  partialCloseReasonNote: parsed.data.partialCloseReasonNote,
+});
+if ("error" in result) return { error: result.error };
+revalidatePath(`/floor/${token}`);
+revalidatePath(`/floor-board`);
+return { ok: true };
+```
+
+**Run `npx vitest run` after this move and before writing `advanceBag`.** A verbatim relocation must leave every existing test green. If any fail, the move was not verbatim — fix it before continuing.
+
+- [ ] **Step 6: Add `advanceBag` as a thin adapter over `recordStageEvent`**
+
+The spec requires that `advanceBag` never throws to the UI — every failure path returns a structured `Blocker`. The database reads and `getStationView` can all throw, so the whole body is wrapped:
+
+```ts
+export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
+  try {
+    return await advanceBagInner(input);
+  } catch (err) {
+    // A throw here is a database or projector failure, not an operator
+    // mistake. Surface it as a blocker so the tablet shows a sentence
+    // instead of a stack trace.
+    return {
+      ok: false,
+      blocker: {
+        code: "ADVANCE_FAILED",
+        operatorSentence: "Something went wrong recording this. Ask a supervisor.",
+        supervisorDetail: err instanceof Error ? err.message : String(err),
+        suggestedAction: "NOTIFY_SUPERVISOR",
+      },
+    };
+  }
+}
+
+async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
+  const [stationRow] = await db
+    .select()
+    .from(stations)
+    .where(eq(stations.id, input.stationId));
+  if (!stationRow) {
+    return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
+  }
+
+  const [bag] = await db
+    .select({ productId: workflowBags.productId })
+    .from(workflowBags)
+    .where(eq(workflowBags.id, input.workflowBagId));
+
+  const resolved = await resolveOperation({
+    productId: bag?.productId ?? null,
+    stationKind: stationRow.kind,
+  });
+  if (!resolved) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
+
+  const eventType = intentToEventType(input.intent, resolved.operation.operationCode);
+  if (!eventType) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
+
+  const result = await recordStageEvent(
+    buildRecordStageEventInput({
+      station: stationRow,
+      workflowBagId: input.workflowBagId,
+      eventType,
+      inputs: input.inputs,
+      clientEventId: input.clientEventId,
+    }),
+  );
+
+  if ("error" in result) {
+    return {
+      ok: false,
+      blocker: {
+        code: "ADVANCE_REJECTED",
+        operatorSentence: "This step could not be recorded. Ask a supervisor.",
+        supervisorDetail: result.error,
+        suggestedAction: "NOTIFY_SUPERVISOR",
+      },
+    };
+  }
+
+  return { ok: true, view: await getStationView(input.stationId) };
+}
+```
+
+`blockerFor` is a small local helper returning the matching `Blocker` from the catalogue in `resolve-exceptions.ts`; add it there and export it so both modules share one definition rather than duplicating literals.
+
+Idempotency is inherited: `recordStageEvent` passes `clientEventId` to `projectEvent`, which swallows the duplicate-insert conflict on the partial unique index `(workflow_bag_id, event_type, client_event_id)`. Confirm against `lib/production/client-event-id-rule.test.ts`.
+
+- [ ] **Step 7: Extract and test the input mapping**
+
+This repo runs no database in its test suite, so `advanceBag`'s transaction cannot be tested in-repo — idempotency depends on a partial unique index swallowing a duplicate insert, which is a database behaviour a mock can only pretend to reproduce. It is verified on staging instead (Task 8 adds the smoke checklist).
+
+What *can* be tested is the mapping, which is where a silent unit error would live. Pull it out of `advanceBag` into a pure function and cover it:
+
+```ts
+/** Pure: the AdvanceInput -> RecordStageEventInput mapping.
+ *  Separated from advanceBag so the count routing is testable without
+ *  a database. */
+export function buildRecordStageEventInput(args: {
+  station: StationRow;
+  workflowBagId: string;
+  eventType: string;
+  inputs: AdvanceInput["inputs"];
+  clientEventId: string;
+}): RecordStageEventInput {
+  return {
+    station: args.station,
+    workflowBagId: args.workflowBagId,
+    eventType: args.eventType,
+    countTotal: args.inputs.counter ?? args.inputs.cases ?? 0,
+    packsRemaining: 0,
+    cardsReopened: 0,
+    ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
+    pickedSealingProductId: null,
+  };
+}
+```
+
+`advanceBag` then calls `buildRecordStageEventInput(...)` instead of inlining the object literal.
 
 Add to `lib/production/engine/advance.test.ts`:
 
 ```ts
-describe("advanceBag", () => {
-  it("is idempotent under a repeated clientEventId", async () => {
-    const input = { /* seeded bag at BLISTERED, SEALING station */ };
-    const first = await advanceBag(input);
-    const second = await advanceBag(input);
-    expect(first.ok).toBe(true);
-    expect(second.ok).toBe(true);
-    const events = await countWorkflowEvents(input.workflowBagId, "SEALING_SEGMENT_COMPLETE");
-    expect(events).toBe(1);
+const STATION = { id: "s1", label: "Sealing 2", kind: "SEALING" } as StationRow;
+
+describe("buildRecordStageEventInput", () => {
+  it("routes a counter reading to countTotal", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counter: 52 },
+      clientEventId: "cid-1",
+    });
+    expect(out.countTotal).toBe(52);
   });
 
-  it("returns a blocker instead of throwing when the bag is paused", async () => {
-    const result = await advanceBag({ /* paused bag */ });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.blocker.code).toBe("BAG_PAUSED");
-      expect(result.blocker.operatorSentence).not.toMatch(/read_bag_state/);
-    }
+  it("falls back to the packaging case count when there is no counter", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "PACKAGING_COMPLETE",
+      inputs: { cases: 7 },
+      clientEventId: "cid-1",
+    });
+    expect(out.countTotal).toBe(7);
   });
 
-  it("returns a blocker when a second station claims an already-claimed bag", async () => {
-    await advanceBag({ /* station A, intent CLAIM */ });
-    const result = await advanceBag({ /* station B, same bag, intent CLAIM */ });
-    expect(result.ok).toBe(false);
+  it("prefers the counter over cases when both are present", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counter: 52, cases: 7 },
+      clientEventId: "cid-1",
+    });
+    expect(out.countTotal).toBe(52);
   });
 
-  it("returns the refreshed station view on success", async () => {
-    const result = await advanceBag({ /* valid complete */ });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.view.station.id).toBeDefined();
+  it("sends zero rather than undefined when no count is supplied", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "BAG_PICKED_UP",
+      inputs: {},
+      clientEventId: "cid-1",
+    });
+    expect(out.countTotal).toBe(0);
+  });
+
+  it("carries the clientEventId through so the DB can dedupe a retry", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counter: 1 },
+      clientEventId: "cid-abc",
+    });
+    expect(out.clientEventId).toBe("cid-abc");
+  });
+
+  it("does not silently invent a sealing product", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counter: 1 },
+      clientEventId: "cid-1",
+    });
+    expect(out.pickedSealingProductId).toBeNull();
   });
 });
 ```
 
-- [ ] **Step 7: Run everything**
+**Known Phase 1 limitation, record it in your report:** `countTotal` collapses the packaging station's three separate counts (cases, displays, loose) into one number, and `damaged` is discarded entirely. `advanceBag` is therefore not yet a complete substitute for `packagingCompleteAction`. That is acceptable because nothing calls `advanceBag` for packaging in Phase 1 — the floor still uses the existing action — but Phase 4 must widen `RecordStageEventInput` before the new screen can complete a packaging bag.
 
-Run: `npx vitest run lib/production/engine && npm run typecheck && npm run lint`
-Expected: all clean
+- [ ] **Step 8: Run everything**
 
-- [ ] **Step 8: Export and commit**
+Run: `npx vitest run && npm run typecheck && npm run lint`
 
-Add `export { advanceBag, intentToEventType } from "./advance";` to `lib/production/engine/index.ts`.
+Expected: all clean, including the full existing suite — the extraction in Step 5 touched a live production path, so the whole suite is the gate here, not just `lib/production/engine`.
+
+- [ ] **Step 9: Export and commit**
+
+Add `export { advanceBag, intentToEventType } from "./advance";` and `export { recordStageEvent } from "./record-stage-event";` to `lib/production/engine/index.ts`.
 
 ```bash
 git add lib/production/engine/advance.ts \
         lib/production/engine/advance.test.ts \
-        lib/production/engine/index.ts
-git commit -m "feat(engine): advanceBag single write with blocker results"
+        lib/production/engine/record-stage-event.ts \
+        lib/production/engine/index.ts \
+        app/\(floor\)/floor/\[token\]/actions.ts
+git commit -m "feat(engine): extract stage-event recording and add advanceBag"
 ```
 
 ---
@@ -1487,83 +2045,175 @@ The phase gate. Prove the engine decides what the legacy path decides, then rout
 - Consumes: everything above.
 - Produces: no new exports. `fireStageEventAction` keeps its exact current signature `(formData: FormData) => Promise<{ error?: string; ok?: true } | void>` so no caller changes.
 
-- [ ] **Step 1: Write the parity test**
+- [ ] **Step 1: Write the parity test against a transcribed fixture**
+
+There is no database in this repo's test suite, so parity cannot be checked by querying real routes. Instead, transcribe the seeded rows from `drizzle/0013_route_operation_compat.sql:168-215` into a fixture and assert the engine's decisions against the legacy tables. This still catches the failure that matters — engine and legacy disagreeing about which event a station fires — and it fails loudly if someone edits the migration without updating the engine.
 
 Create `lib/production/engine/parity.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pickOperationForStationKind } from "./resolve-operation";
 import { intentToEventType } from "./advance";
-import { getRouteOperations, getRouteForProduct } from "@/lib/production/routes";
 import { EVENT_STAGE_PREREQ } from "@/lib/production/stage-progression";
+import type { RouteOperationView } from "@/lib/production/routes";
 
-// Every station kind the legacy tables know about, with the event it
-// fires. If the engine and the legacy tables ever disagree, this fails.
-const LEGACY_STATION_EVENT: ReadonlyArray<[string, string]> = [
-  ["BLISTER", "BLISTER_COMPLETE"],
-  ["SEALING", "SEALING_SEGMENT_COMPLETE"],
-  ["PACKAGING", "PACKAGING_COMPLETE"],
-  ["BOTTLE_HANDPACK", "BOTTLE_HANDPACK_COMPLETE"],
-  ["BOTTLE_STICKER", "BOTTLE_STICKER_COMPLETE"],
-  ["BOTTLE_CAP_SEAL", "BOTTLE_CAP_SEAL_COMPLETE"],
+function op(
+  sequence: number,
+  operationCode: string,
+  allowedStationKind: string | null,
+): RouteOperationView {
+  return {
+    routeCode: "FIXTURE",
+    routeName: "Fixture",
+    sequence,
+    operationCode,
+    operationName: operationCode,
+    stageKey: "FIXTURE_QUEUE",
+    nextStageKey: null,
+    reworkStageKey: null,
+    allowedStationKind,
+    allowedMachineKind: allowedStationKind,
+    requiresScan: true,
+    requiresCounter: true,
+    requiresTimer: false,
+    outputUnit: "cards",
+  };
+}
+
+// Transcribed from drizzle/0013_route_operation_compat.sql:168-215.
+// Step 2 asserts this transcription still matches the migration.
+const SEEDED_ROUTES: Readonly<Record<string, RouteOperationView[]>> = {
+  CARD_BLISTER: [
+    op(1, "RECEIVING", null),
+    op(2, "BLISTER", "BLISTER"),
+    op(3, "POST_BLISTER_STAGING", null),
+    op(4, "HEAT_SEAL", "SEALING"),
+    op(5, "POST_SEAL_STAGING", null),
+    op(6, "PACKAGING", "PACKAGING"),
+    op(7, "FINISHED_GOODS", null),
+  ],
+  BOTTLE: [
+    op(1, "RECEIVING", null),
+    op(2, "BOTTLE_FILL", "BOTTLE_HANDPACK"),
+    op(3, "STICKERING", "BOTTLE_STICKER"),
+    op(4, "INDUCTION_SEAL", "BOTTLE_CAP_SEAL"),
+    op(5, "PACKAGING", "PACKAGING"),
+    op(6, "FINISHED_GOODS", null),
+  ],
+  STICKER_ONLY: [
+    op(1, "RECEIVING", null),
+    op(2, "STICKERING", "BOTTLE_STICKER"),
+    op(3, "PACKAGING", "PACKAGING"),
+    op(4, "FINISHED_GOODS", null),
+  ],
+};
+
+// The event each station kind fires today, per ALLOWED_EVENTS_BY_KIND in
+// app/(floor)/floor/[token]/actions.ts and STAGE_FOR_EVENT in
+// lib/projector/index.ts.
+const LEGACY_STATION_EVENT: ReadonlyArray<[string, string, string]> = [
+  ["BLISTER", "CARD_BLISTER", "BLISTER_COMPLETE"],
+  ["SEALING", "CARD_BLISTER", "SEALING_SEGMENT_COMPLETE"],
+  ["PACKAGING", "CARD_BLISTER", "PACKAGING_COMPLETE"],
+  ["BOTTLE_HANDPACK", "BOTTLE", "BOTTLE_HANDPACK_COMPLETE"],
+  ["BOTTLE_STICKER", "BOTTLE", "BOTTLE_STICKER_COMPLETE"],
+  ["BOTTLE_CAP_SEAL", "BOTTLE", "BOTTLE_CAP_SEAL_COMPLETE"],
 ];
 
 describe("engine/legacy parity", () => {
   it.each(LEGACY_STATION_EVENT)(
     "engine fires the legacy event for a %s station",
-    async (stationKind, expectedEvent) => {
-      const routeCode = stationKind.startsWith("BOTTLE") ? "BOTTLE" : "CARD_BLISTER";
-      const route = await getRouteForProduct(seededProductIdForRoute(routeCode));
-      const ops = await getRouteOperations(route!.routeId);
-      const op = pickOperationForStationKind(ops, stationKind);
-      expect(op).not.toBeNull();
-      expect(intentToEventType("COMPLETE", op!.operationCode)).toBe(expectedEvent);
+    (stationKind, routeCode, expectedEvent) => {
+      const ops = SEEDED_ROUTES[routeCode];
+      expect(ops).toBeDefined();
+      const resolved = pickOperationForStationKind(ops!, stationKind);
+      expect(resolved).not.toBeNull();
+      expect(intentToEventType("COMPLETE", resolved!.operationCode)).toBe(expectedEvent);
     },
   );
 
-  it("every event the engine can fire is known to the legacy prereq table", async () => {
-    for (const [stationKind] of LEGACY_STATION_EVENT) {
-      const routeCode = stationKind.startsWith("BOTTLE") ? "BOTTLE" : "CARD_BLISTER";
-      const route = await getRouteForProduct(seededProductIdForRoute(routeCode));
-      const ops = await getRouteOperations(route!.routeId);
-      const op = pickOperationForStationKind(ops, stationKind);
-      const event = intentToEventType("COMPLETE", op!.operationCode);
+  it("every event the engine can fire is known to the legacy prereq table", () => {
+    for (const [stationKind, routeCode] of LEGACY_STATION_EVENT) {
+      const resolved = pickOperationForStationKind(SEEDED_ROUTES[routeCode]!, stationKind);
+      const event = intentToEventType("COMPLETE", resolved!.operationCode);
       expect(Object.keys(EVENT_STAGE_PREREQ)).toContain(event);
+    }
+  });
+
+  it("resolves a station kind that appears on two routes without ambiguity", () => {
+    // BOTTLE_STICKER performs STICKERING on both BOTTLE and STICKER_ONLY.
+    for (const routeCode of ["BOTTLE", "STICKER_ONLY"]) {
+      const resolved = pickOperationForStationKind(
+        SEEDED_ROUTES[routeCode]!,
+        "BOTTLE_STICKER",
+      );
+      expect(resolved?.operationCode).toBe("STICKERING");
+    }
+  });
+
+  it("the transcribed fixture still matches the migration", () => {
+    const sql = readFileSync(
+      join(process.cwd(), "drizzle", "0013_route_operation_compat.sql"),
+      "utf8",
+    );
+    // A guard, not a parser: if someone edits the seeded operations, this
+    // fails and forces the fixture above to be re-checked by hand.
+    for (const ops of Object.values(SEEDED_ROUTES)) {
+      for (const o of ops) {
+        expect(sql).toContain(`'${o.operationCode}'`);
+      }
     }
   });
 });
 ```
 
-Define `seededProductIdForRoute` in the test file using the DB-test harness pattern from `lib/production/bag-allocation.test.ts`.
-
 - [ ] **Step 2: Run the parity test**
 
 Run: `npx vitest run lib/production/engine/parity.test.ts`
-Expected: **This may legitimately fail on the BOTTLE route.** The spec records that `0013_route_operation_compat.sql` seeds `STICKERING` before `INDUCTION_SEAL`, while `BOTTLE-ORDER-FLEX-1` treats them as order-independent. If it fails only on bottle ordering, that is the known data conflict — do not paper over it. Stop and report; resolving it is a Phase 2 decision recorded in the spec's "Data reconciliation" section.
 
-- [ ] **Step 3: Rewire `fireStageEventAction` as a wrapper**
+Expected: **the BOTTLE route may legitimately fail.** The spec records that `0013_route_operation_compat.sql` seeds `STICKERING` at sequence 3 and `INDUCTION_SEAL` at sequence 4, while `BOTTLE-ORDER-FLEX-1` in `lib/production/stage-progression.ts` treats the two as order-independent. If the only failures are on bottle ordering, that is the known data conflict — **do not paper over it.** Stop and report; resolving it is a Phase 2 decision already recorded in the spec's "Data reconciliation" section.
 
-In `app/(floor)/floor/[token]/actions.ts:1553`, keep the `zod` parse and `authStation` call, then delegate. `authStation` returns the station row, not a session — get the session separately via `getActiveStationSession` from `lib/production/station-operator-session.ts`, which is already imported in this file via `resolveStationAccountability`:
+- [ ] **Step 3: Prove the engine path and the legacy path agree**
+
+Task 7 already made `fireStageEventAction` a thin wrapper over the shared `recordStageEvent`. Do **not** additionally route the action through `advanceBag` — the action accepts inputs `advanceBag` has no place for (`sealingCloseMode`, `partialCloseReason`, `pickedSealingProductId`), and forcing them through the narrower contract would lose fidelity. Phase 4 retires the action once the new screen no longer submits those fields.
+
+Both callers already share one code path — `recordStageEvent` — so there is no second implementation to diverge. What Phase 1 must prove is that the *inputs* they hand it agree. That is pure and testable. Add to `lib/production/engine/parity.test.ts`:
 
 ```ts
-const session = await getActiveStationSession(db, stationId);
-if (!session) return { error: "Open a shift before recording production." };
+it("the engine hands recordStageEvent the same shape the action does", () => {
+  // The action's own call site, transcribed from
+  // app/(floor)/floor/[token]/actions.ts (fireStageEventAction), for a
+  // plain sealing segment with no partial-close fields.
+  const viaAction = {
+    workflowBagId: "bag-1",
+    eventType: "SEALING_SEGMENT_COMPLETE",
+    countTotal: 52,
+    packsRemaining: 0,
+    cardsReopened: 0,
+    clientEventId: "cid-1",
+    pickedSealingProductId: null,
+  };
 
-const result = await advanceBag({
-  stationId,
-  workflowBagId,
-  operatorSessionId: session.id,
-  intent: eventType === "SEALING_COMPLETE" ? "CONFIRM_BAG_EMPTY" : "COMPLETE",
-  inputs: { counter: countTotal, damaged: 0 },
-  clientEventId,
+  const viaEngine = buildRecordStageEventInput({
+    station: STATION,
+    workflowBagId: "bag-1",
+    eventType: "SEALING_SEGMENT_COMPLETE",
+    inputs: { counter: 52 },
+    clientEventId: "cid-1",
+  });
+
+  for (const key of Object.keys(viaAction) as (keyof typeof viaAction)[]) {
+    expect(viaEngine[key]).toEqual(viaAction[key]);
+  }
 });
-if (!result.ok) return { error: result.blocker.operatorSentence };
-revalidatePath(`/floor/${token}`);
-return { ok: true };
 ```
 
-The signature and return shape are unchanged, so `stage-action-buttons.tsx` needs no edit.
+Import `buildRecordStageEventInput` and the `STATION` fixture from the Task 7 test setup, or redeclare `STATION` locally — do not export test fixtures from production modules.
+
+Everything the engine cannot yet express — `sealingCloseMode`, `partialCloseReason`, `partialCloseReasonNote`, `counterPresses`, `overrideEmployeeCode`, and packaging's three-way counts — is deliberately absent from `advanceBag` in Phase 1 and is why the action still owns those flows. Record that list in your report as Phase 4 work.
 
 - [ ] **Step 4: Run the full suite**
 
@@ -1579,14 +2229,113 @@ Replace the current-work query at `app/(floor)/floor/[token]/page.tsx:92-156` wi
 Run: `npm run build && npm run dev`
 Open a station URL. The screen must be pixel-identical to before this task. If anything moved, the rewire is wrong.
 
-- [ ] **Step 7: Restore the boundary to error**
+- [ ] **Step 7: Ratchet the boundary instead of restoring it to error**
 
-In `eslint.config.mjs`, change the `no-restricted-imports` severity from `"warn"` back to `"error"`.
+The original plan said to restore the rule to `"error"` here. **That is not achievable in Phase 1 and the instruction is withdrawn.** Task 5 measured 82 violations across 15 files under `app/(floor)/floor/[token]/`. Phase 1 only rewires the current-work query in `page.tsx` and the body of `fireStageEventAction`; the rest — `stage-action-buttons.tsx`, `scan-card-form.tsx`, the roll and QC panels — keep their direct imports until the Phase 4 screen rewrite. Setting `"error"` now would leave `npm run lint` failing, which violates a Global Constraint of this plan and the repo's own "never push without lint clean" rule.
+
+Leave the severity at `"warn"` and enforce a ratchet instead: the count may fall, never rise. Replace the contents of `lib/production/engine/boundary.test.ts` with a test that actually lints rather than string-matching the config (the existing test would pass even if the glob or the negation were wrong):
+
+```ts
+import { describe, it, expect } from "vitest";
+import { ESLint } from "eslint";
+
+// Baseline measured at Task 5. Phase 4 drives this to zero and flips the
+// rule to "error"; until then the only rule is that it must not grow.
+const BASELINE_VIOLATIONS = 82;
+
+describe("floor import boundary", () => {
+  it("blocks a non-engine lib/production import from floor code", async () => {
+    const eslint = new ESLint({ cwd: process.cwd() });
+    const [result] = await eslint.lintText(
+      `import { loadPartialReuseContext } from "@/lib/production/partial-bags";\n` +
+        `export const x = loadPartialReuseContext;\n`,
+      { filePath: "app/(floor)/floor/[token]/boundary-probe.ts" },
+    );
+    const restricted = (result?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-imports",
+    );
+    expect(restricted).toHaveLength(1);
+  });
+
+  it("permits importing the engine barrel from floor code", async () => {
+    const eslint = new ESLint({ cwd: process.cwd() });
+    const [result] = await eslint.lintText(
+      `import { resolveOperation } from "@/lib/production/engine";\n` +
+        `export const x = resolveOperation;\n`,
+      { filePath: "app/(floor)/floor/[token]/boundary-probe.ts" },
+    );
+    const restricted = (result?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-imports",
+    );
+    expect(restricted).toHaveLength(0);
+  });
+
+  it("does not let the floor violation count grow", async () => {
+    const eslint = new ESLint({ cwd: process.cwd() });
+    const results = await eslint.lintFiles(["app/(floor)/**/*.{ts,tsx}"]);
+    const count = results
+      .flatMap((r) => r.messages)
+      .filter((m) => m.ruleId === "no-restricted-imports").length;
+    expect(count).toBeLessThanOrEqual(BASELINE_VIOLATIONS);
+  });
+});
+```
+
+Run: `npx vitest run lib/production/engine/boundary.test.ts`
+Expected: PASS, 3 tests. If the third fails, Phase 1 added a new direct floor import — find it and route it through the barrel rather than raising the baseline.
 
 Run: `npm run lint`
-Expected: clean. If violations remain, they are floor imports Phase 1 did not remove — list them in the commit body as Phase 4 work rather than suppressing them.
+Expected: clean, warnings only. Record the current violation count in your report so Phase 4 can compare.
 
-- [ ] **Step 8: Version and CHANGELOG**
+- [ ] **Step 8: Write the staging smoke checklist**
+
+Because this repo runs no database in its test suite, the DB-dependent guarantees of Phase 1 are verified on staging, not in CI. Write that down so it actually happens.
+
+Create `docs/superpowers/plans/2026-08-11-production-engine-p1-staging-smoke.md`:
+
+```markdown
+# Production Engine Phase 1 — staging smoke checklist
+
+Run on LXC 122 after deploying the Phase 1 branch. Phase 1 ships zero
+operator-visible change, so every item below is a "nothing moved" check
+except the last two, which verify the DB behaviours the test suite
+cannot reach.
+
+## Zero-change checks
+- [ ] Open a BLISTER station URL. The screen is identical to the
+      pre-deploy screenshot: same panels, same order, same wording.
+- [ ] Open a SEALING station URL. Same.
+- [ ] Open a PACKAGING station URL. Same.
+- [ ] A station with no open shift still shows the operator picker.
+
+## Behaviour checks
+- [ ] Complete a blister bag. The event lands, the count is right, the
+      bag advances to BLISTERED.
+- [ ] Seal a segment on a bag. Count and lane state unchanged from
+      pre-deploy behaviour.
+- [ ] Complete packaging on a bag. Cases/displays/loose all record, and
+      packaging material consumption fires as before.
+- [ ] A handpack blister completion still issues blister card material
+      (this path moved into record-stage-event.ts — confirm it did not
+      regress).
+- [ ] A partial-sealing close-out still auto-releases.
+
+## DB behaviours the test suite cannot verify
+- [ ] **Idempotency.** Submit the same completion twice with the same
+      clientEventId (double-tap the button, or replay the request).
+      Exactly one workflow_event row exists. This depends on the partial
+      unique index on (workflow_bag_id, event_type, client_event_id).
+- [ ] **Concurrent claim.** Two stations scan the same queued bag at
+      once. One wins; the other gets a clear message and no duplicate
+      read_station_live row.
+
+## Rollback
+If any behaviour check fails, revert the branch. The extraction in
+Task 7 is the highest-risk change: record-stage-event.ts holds logic
+that previously lived inside fireStageEventAction.
+```
+
+- [ ] **Step 9: Version and CHANGELOG**
 
 Bump `package.json` to `1.30.0`. Prepend to `CHANGELOG.md`:
 
@@ -1596,12 +2345,13 @@ Bump `package.json` to `1.30.0`. Prepend to `CHANGELOG.md`:
 - Production Engine phase 1: `getStationView()` and `advanceBag()` land behind the existing floor UI. Route decisions now resolve from `route_operations` with legacy fallback. No operator-visible change.
 ```
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add lib/production/engine app/\(floor\)/floor/\[token\]/actions.ts \
         app/\(floor\)/floor/\[token\]/page.tsx eslint.config.mjs \
-        package.json CHANGELOG.md
+        package.json CHANGELOG.md \
+        docs/superpowers/plans/2026-08-11-production-engine-p1-staging-smoke.md
 git commit -m "feat(engine): route floor through advanceBag and getStationView (v1.30.0)"
 ```
 
@@ -1610,10 +2360,22 @@ git commit -m "feat(engine): route floor through advanceBag and getStationView (
 ## Phase 1 exit criteria
 
 - [ ] `npx vitest run` — all 5,000+ tests green
-- [ ] `npm run typecheck && npm run lint` — clean, boundary rule at `"error"`
+- [ ] `npm run typecheck && npm run lint` — clean; boundary rule at `"warn"` with the floor violation count at or below the 82 measured in Task 5 (it reaches `"error"` in Phase 4, not here)
 - [ ] A station page is pixel-identical to pre-Phase-1
-- [ ] `fireStageEventAction` delegates to `advanceBag`
+- [ ] `fireStageEventAction` delegates to the shared `recordStageEvent`, and `advanceBag` calls the same function
 - [ ] The bottle route-ordering conflict is either resolved or explicitly recorded as a Phase 2 blocker
+- [ ] The staging smoke checklist exists and is committed
+
+## What Phase 1 does NOT verify
+
+Recorded plainly so nobody mistakes a green suite for a proven phase. This repo runs no database in its test suite by design (`vitest.config.ts`), and DB behaviour is verified on staging by deploy smoke. Consequently these Phase 1 claims rest on the staging checklist, not on CI:
+
+- **Idempotency under a repeated `clientEventId`.** Depends on a partial unique index swallowing a duplicate insert — a database behaviour a mock can only simulate.
+- **Concurrent claim of the same bag by two stations.**
+- **That `getStationView`'s SQL returns what `assembleStationView` expects.** The assembler is fully tested; the queries feeding it are not.
+- **That the `recordStageEvent` extraction is byte-identical in effect.** The existing 5,000+ tests are the guard, but they too are pure — none of them execute the transaction.
+
+Anyone reading a green Phase 1 CI run should understand it proves the decision logic, not the database behaviour.
 
 ## Deferred to later phases
 

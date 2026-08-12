@@ -2,7 +2,22 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
+// STAGE-EVENT-EXTRACT-1: fireStageEventAction's guard sequence and
+// transaction body moved verbatim to
+// lib/production/engine/record-stage-event.ts (actions.ts is "use server",
+// so the shared implementation cannot be exported from it). The scanners
+// below assert on the floor stage-event path as a whole, so the extracted
+// module is stitched back in where the body used to sit — every assertion
+// is unchanged from before the extraction.
+const actionsFileSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
+const recordStageEventSrc = readFileSync(
+  join(__dirname, "../../../../lib/production/engine/record-stage-event.ts"),
+  "utf8",
+);
+const actionsSrc = actionsFileSrc.replace(
+  "// ── pause / resume",
+  `${recordStageEventSrc}\n// ── pause / resume`,
+);
 const projectorSrc = readFileSync(
   join(__dirname, "../../../../lib/projector/index.ts"),
   "utf8",
@@ -257,8 +272,16 @@ describe("MULTI-SEALING-SAME-BAG-1 · segment vs final sealing", () => {
     const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
     const pauseIdx = actionsSrc.indexOf("export async function pauseBagAction");
     const block = actionsSrc.slice(fireIdx, pauseIdx);
-    const partialValIdx = block.indexOf("validateSealingPartialCloseInput");
-    const counterIdx = block.indexOf("SEALING_COUNTER_PRESS_ERROR");
+    // Anchored on the CALL SITES, not the bare identifiers: the stage-event
+    // source now carries its own import list, and a bare needle would match
+    // the import line instead — leaving this ordering assertion vacuous.
+    const partialValNeedle =
+      "const partialValidation = validateSealingPartialCloseInput";
+    const counterNeedle = "return { error: SEALING_COUNTER_PRESS_ERROR };";
+    expect(block.split(partialValNeedle).length - 1).toBe(1);
+    expect(block.split(counterNeedle).length - 1).toBe(1);
+    const partialValIdx = block.indexOf(partialValNeedle);
+    const counterIdx = block.indexOf(counterNeedle);
     expect(partialValIdx).toBeGreaterThan(-1);
     expect(counterIdx).toBeGreaterThan(partialValIdx);
   });

@@ -109,6 +109,11 @@ type LotRow = {
     zohoItemIdCase: string | null;
     // WAREHOUSE-RESOLUTION-v1.3.0 — per-product override.
     zohoDefaultWarehouseId: string | null;
+    // v1.29.8 — selected by the action (see
+    // zoho-production-output-preview-actions.ts, product.displaysPerCase).
+    // Required to count case-embedded displays; the payload builder fails
+    // closed without it whenever cases are produced.
+    displaysPerCase: number | null;
   };
   metrics: {
     damagedPackaging: number | null;
@@ -137,6 +142,9 @@ const LOT_ROW: LotRow = {
     zohoItemIdDisplay: null,
     zohoItemIdCase: null,
     zohoDefaultWarehouseId: null,
+    // This fixture produces no cases, so the v1.29.8 fail-closed check
+    // does not apply and null is the honest value.
+    displaysPerCase: null,
   },
   metrics: {
     damagedPackaging: 0,
@@ -173,6 +181,10 @@ const BLUERAZ_LOT_ROW: LotRow = {
     zohoItemIdDisplay: "5254962000002477047",
     zohoItemIdCase: "5254962000002477064",
     zohoDefaultWarehouseId: null,
+    // v1.29.8 fails closed when cases are produced but displaysPerCase is
+    // unknown, since the case-embedded displays cannot then be counted.
+    // This fixture produces 9 cases, so the field is required.
+    displaysPerCase: 20,
   },
   metrics: {
     damagedPackaging: 3,
@@ -714,7 +726,10 @@ describe("previewZohoProductionOutputAction", () => {
 
     // All three assembly quantities > 0.
     expect(payload.unit_assembly_quantity).toBe(4021);
-    expect(payload.display_assembly_quantity).toBe(21);
+    // v1.29.8: display_assembly_quantity is loose displays PLUS the
+    // displays embedded in cases — 21 loose + (9 cases x 20 per case).
+    // Before v1.29.8 this was 21, which under-reported Zoho display stock.
+    expect(payload.display_assembly_quantity).toBe(201);
     expect(payload.case_assembly_quantity).toBe(9);
 
     // All three composite item IDs present in the payload.
@@ -775,7 +790,8 @@ describe("previewZohoProductionOutputAction", () => {
           display_composite_item_id: "5254962000002477047",
           case_composite_item_id: "5254962000002477064",
           unit_assembly_quantity: 4021,
-          display_assembly_quantity: 21,
+          // v1.29.8: 21 loose displays + 9 cases x 20 displays per case.
+          display_assembly_quantity: 201,
           case_assembly_quantity: 9,
         }),
         // v1.4.0 capability audit fields.

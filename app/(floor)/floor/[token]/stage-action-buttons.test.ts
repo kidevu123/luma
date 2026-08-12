@@ -3,7 +3,18 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const src = readFileSync(join(__dirname, "stage-action-buttons.tsx"), "utf8");
-const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
+// STAGE-EVENT-EXTRACT-1: fireStageEventAction's body moved verbatim to
+// lib/production/engine/record-stage-event.ts. Stitch it back in where it
+// used to sit so these scanners keep covering the whole stage-event path.
+const actionsFileSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
+const recordStageEventSrc = readFileSync(
+  join(__dirname, "../../../../lib/production/engine/record-stage-event.ts"),
+  "utf8",
+);
+const actionsSrc = actionsFileSrc.replace(
+  "// ── pause / resume",
+  `${recordStageEventSrc}\n// ── pause / resume`,
+);
 
 describe("STATION-HANDPACK-1 · HANDPACK_BLISTER timed-only completion", () => {
   it("maps HANDPACK_BLISTER to HANDPACK_BLISTER_COMPLETE event", () => {

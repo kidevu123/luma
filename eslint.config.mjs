@@ -61,4 +61,31 @@ export default [
       ...nextPlugin.configs["core-web-vitals"].rules,
     },
   },
+  {
+    files: ["app/(floor)/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "warn",
+        {
+          patterns: [
+            {
+              // Three entries, all required. "@/lib/production/*" catches
+              // siblings of the engine; "@/lib/production/*/**" catches DEEP
+              // paths (a lone "*" does not cross "/", so without this line
+              // "@/lib/production/engine/record-stage-event" — and every
+              // other deep path — was silently unrestricted). The negation
+              // re-permits the barrel and ONLY the barrel.
+              group: [
+                "@/lib/production/*",
+                "@/lib/production/*/**",
+                "!@/lib/production/engine",
+              ],
+              message:
+                "Floor code must go through lib/production/engine. See docs/superpowers/specs/2026-08-11-production-engine-operator-experience-design.md",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
