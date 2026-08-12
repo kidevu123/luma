@@ -2,20 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-// STAGE-ENGINE-P1: the current-bag display label derivation moved out of
-// page.tsx into lib/production/engine/station-view.ts (getStationView).
-// These are source-text scanners, so the engine module's text is appended
-// to the page's text to reconstitute the pre-move surface they were
-// written against. Appending, not splicing, is safe here: no ordering
-// assertion in this file involves the moved code. Not one assertion was
-// changed.
-const pageSrc =
-  readFileSync(join(__dirname, "page.tsx"), "utf8") +
-  "\n" +
-  readFileSync(
-    join(__dirname, "../../../../lib/production/engine/station-view.ts"),
-    "utf8",
-  );
+const pageSrc = readFileSync(join(__dirname, "page.tsx"), "utf8");
 const layoutSrc = readFileSync(join(__dirname, "layout.tsx"), "utf8");
 
 describe("STATION-MOBILE-UX-1 · floor station page layout", () => {
