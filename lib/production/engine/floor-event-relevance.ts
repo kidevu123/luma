@@ -9,7 +9,10 @@ const QUEUE_KEYS_BY_STATION_KIND: Record<string, readonly string[]> = {
   HANDPACK_BLISTER: [],
   COMBINED: [],
   SEALING: ["SEALING_QUEUE"],
-  PACKAGING: ["PACKAGING_QUEUE"],
+  // Packaging may overlap-claim at BLISTERED (STATION_PICKUP_FROM_STAGE.PACKAGING),
+  // and a just-BLISTERED bag parks under the sealing queue key — mirror of
+  // STATION_PICKUP_FROM_STAGE, remove when P4 drives the page from read_bag_queue.
+  PACKAGING: ["SEALING_QUEUE", "PACKAGING_QUEUE"],
   BOTTLE_STICKER: ["BOTTLE_STICKER_QUEUE"],
   // Order-flex: a bag eligible for either finishing queue parks under
   // the sticker key, so cap-seal must watch both to see it arrive.

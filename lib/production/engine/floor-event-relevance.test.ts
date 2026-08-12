@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { floorEventRelevantToStation, queueKeysForStationKind } from "./floor-event-relevance";
 
 const SEALING = { id: "st-seal-1", kind: "SEALING" };
+const PACKAGING = { id: "st-pack-1", kind: "PACKAGING" };
 
 describe("floorEventRelevantToStation", () => {
   it("always cares about its own events", () => {
@@ -35,6 +36,14 @@ describe("floorEventRelevantToStation", () => {
         SEALING,
       ),
     ).toBe(false);
+  });
+  it("BLISTER_COMPLETE parked under SEALING_QUEUE is relevant to packaging (overlap-claim at BLISTERED)", () => {
+    expect(
+      floorEventRelevantToStation(
+        { stationId: "st-blister-1", stationKind: "BLISTER", queueStageKey: "SEALING_QUEUE" },
+        PACKAGING,
+      ),
+    ).toBe(true);
   });
   it("nulls never match", () => {
     expect(

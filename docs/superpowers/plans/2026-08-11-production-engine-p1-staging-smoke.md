@@ -141,3 +141,8 @@ Run these two FIRST, in order, before any floor behaviour check.
       pg_stat_activity WHERE query LIKE '%LISTEN%'` stays at 1 (one bus
       connection per process, not per tablet).
 - [ ] Inactive-station page does not self-recover when re-activated (pre-existing; reload the tablet manually after re-activating a station).
+- [ ] Two sealers + one bag: pickup at sealer A clears the bag from sealer
+      B's pickup list within ~2s (the same-kind arm's payoff).
+- [ ] Pause a STARTED bag at blister; the sealing tablet's pickup list does
+      NOT update (known Phase 3 gap — non-flow events carry stationKind
+      null; fix lands in Phase 4). Reload shows truth.

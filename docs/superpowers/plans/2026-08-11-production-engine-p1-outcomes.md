@@ -201,3 +201,19 @@ What CI cannot verify: the stream route end-to-end (staging smoke); EventSource 
   comment; unfiltered qrCards join (shared with station-view);
   `resolveRouteCodeForQueue` null-product fallback test; migration-text
   assertions unbound; scanner slice bound; `actions.ts:2589` copy.
+
+### Known Phase 3 gaps (P4 work)
+
+- Non-flow events (`BAG_PAUSED`, `BAG_RESUMED`, etc.) carry `stationKind:
+  null`, so same-kind tablets miss pause/resume updates — a paused bag's
+  peers only learn the truth on next reload. The fix is an in-process
+  stationId-to-kind cache in the projector, stamping every event
+  (flow and non-flow alike) with its originating station's kind.
+- Events with both `stationId: null` AND non-flow type match no tablet
+  at all under the current relevance rule — no station refreshes.
+- The inactive-station page does not mount the refresher, so
+  re-activating a station does not self-recover the tablet; a one-line
+  mount in that branch would make it self-recover within 60s via the
+  existing 404-then-poll path.
+- Consider a `subscribers.size` gauge on the notify bus for observability
+  into live SSE connection counts per process.
