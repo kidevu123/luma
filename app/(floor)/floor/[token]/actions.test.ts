@@ -209,11 +209,15 @@ describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
 
   it("does not auto-release on COMBINED SEALING_COMPLETE", () => {
     // P2-QUEUE-1 added bottle station OR-clauses to the same else-if
-    // block, widening the gap between the SEALING condition and the
-    // call below it — window widened to still require both inside one
-    // contiguous block, not just anywhere in the file.
+    // condition list, so a fixed-width proximity window is no longer a
+    // safe check (a future edit could close the block early and insert
+    // an unconditional call within a loose window and still pass).
+    // Anchor structurally instead: match unbounded across the OR-clause
+    // list up to the block's closing "?) {" and then require the call
+    // within a TIGHT window of that brace, so it must be the block's
+    // first statement regardless of how many OR-clauses precede it.
     const match = actionsSrc.match(
-      /isSealingFinal && station\.kind === "SEALING"[\s\S]{0,300}maybeAutoReleaseAfterComplete/,
+      /\(isSealingFinal && station\.kind === "SEALING"\)[\s\S]*?\)\s*\{\s{0,20}await maybeAutoReleaseAfterComplete/,
     );
     expect(match?.[0]).toBeTruthy();
   });

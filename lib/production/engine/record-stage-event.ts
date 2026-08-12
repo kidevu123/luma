@@ -595,7 +595,8 @@ async function maybeAutoReleaseAfterPartialSealingClose(
   });
 }
 
-/** BLISTER + HANDPACK_BLISTER + SEALING: complete also releases when still pinned. */
+/** BLISTER + HANDPACK_BLISTER + SEALING + BOTTLE_HANDPACK + BOTTLE_CAP_SEAL
+ *  + BOTTLE_STICKER: complete also releases when still pinned. */
 async function maybeAutoReleaseAfterComplete(
   tx: DbTx,
   args: {
