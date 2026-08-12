@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveQueueTransition, queueAfterWorkAt } from "./queue-transitions";
+import { deriveQueueTransition, queueAfterWorkAt, queueRank } from "./queue-transitions";
 
 const CARD = { routeCode: "CARD_BLISTER" } as const;
 
@@ -93,6 +93,28 @@ describe("queueAfterWorkAt", () => {
       queueAfterWorkAt({ ...CARD, stationKind: "NOT_A_KIND", priorEventTypes: [] }),
     ).toBeNull();
   });
+
+  it("never lists the working finishing station as eligible for its own output", () => {
+    const dest = queueAfterWorkAt({
+      routeCode: "BOTTLE",
+      stationKind: "BOTTLE_CAP_SEAL",
+      priorEventTypes: ["BOTTLE_HANDPACK_COMPLETE"], // picked up, not yet complete
+    });
+    // Working at cap-seal: after MY step the bag needs stickering.
+    expect(dest).toEqual({
+      queueStageKey: "BOTTLE_STICKER_QUEUE",
+      eligibleStationKinds: ["BOTTLE_STICKER"],
+    });
+  });
+
+  it("covers the sticker-only route end to end", () => {
+    expect(
+      queueAfterWorkAt({ routeCode: "STICKER_ONLY", stationKind: "BOTTLE_STICKER", priorEventTypes: [] }),
+    ).toEqual({ queueStageKey: "PACKAGING_QUEUE", eligibleStationKinds: ["PACKAGING"] });
+    expect(
+      queueAfterWorkAt({ routeCode: "STICKER_ONLY", stationKind: "PACKAGING", priorEventTypes: [] }),
+    ).toEqual({ queueStageKey: "FINISHED_GOODS_QUEUE", eligibleStationKinds: [] });
+  });
 });
 
 describe("deriveQueueTransition", () => {
@@ -101,6 +123,7 @@ describe("deriveQueueTransition", () => {
     stationKind: "BLISTER",
     routeCode: "CARD_BLISTER",
     priorEventTypes: [] as string[],
+    currentRow: null,
   };
 
   it("starts tracking when a bag is claimed at a first-op station", () => {
@@ -167,10 +190,58 @@ describe("deriveQueueTransition", () => {
       routeCode: "BOTTLE",
       eventType: "BOTTLE_CAP_SEAL_COMPLETE",
       priorEventTypes: ["BOTTLE_HANDPACK_COMPLETE", "BOTTLE_CAP_SEAL_COMPLETE"],
+      currentRow: null,
     });
     expect(afterFirst.kind).toBe("READY");
     if (afterFirst.kind === "READY") {
       expect(afterFirst.destination.queueStageKey).toBe("BOTTLE_STICKER_QUEUE");
     }
+  });
+
+  it("ignores a stale upstream completion after a downstream pickup (overlap clobber)", () => {
+    // Sealing overlap-claimed a STARTED bag; the row already points at
+    // PACKAGING_QUEUE. Blister's completion then lands. Applying it
+    // would clobber the sealing claim and regress the destination.
+    const t = deriveQueueTransition({
+      ...base,
+      eventType: "BLISTER_COMPLETE",
+      currentRow: { queueStageKey: "PACKAGING_QUEUE", claimedByStationId: "sealing-1" },
+    });
+    expect(t).toEqual({ kind: "NONE" });
+  });
+
+  it("applies a completion whose destination matches the current queue rank", () => {
+    // Normal case: sealing completes the bag it claimed; destination
+    // PACKAGING_QUEUE equals the row's queue. READY must go through.
+    const t = deriveQueueTransition({
+      ...base,
+      stationKind: "SEALING",
+      eventType: "SEALING_COMPLETE",
+      priorEventTypes: ["CARD_ASSIGNED", "BLISTER_COMPLETE", "BAG_PICKED_UP", "SEALING_COMPLETE"],
+      currentRow: { queueStageKey: "PACKAGING_QUEUE", claimedByStationId: "st-1" },
+    });
+    expect(t.kind).toBe("READY");
+  });
+
+  it("still applies a normal in-order completion when a row exists", () => {
+    // Blister completes with the row still pointing at SEALING_QUEUE
+    // (no overlap). Equal rank: apply.
+    const t = deriveQueueTransition({
+      ...base,
+      eventType: "BLISTER_COMPLETE",
+      currentRow: { queueStageKey: "SEALING_QUEUE", claimedByStationId: "st-1" },
+    });
+    expect(t.kind).toBe("READY");
+  });
+});
+
+describe("queueRank", () => {
+  it("ranks queues downstream-increasing per route, finishing queues tied", () => {
+    expect(queueRank("CARD_BLISTER", "SEALING_QUEUE")).toBe(1);
+    expect(queueRank("CARD_BLISTER", "PACKAGING_QUEUE")).toBe(2);
+    expect(queueRank("BOTTLE", "BOTTLE_STICKER_QUEUE")).toBe(
+      queueRank("BOTTLE", "BOTTLE_INDUCTION_QUEUE"),
+    );
+    expect(queueRank("NOT_A_ROUTE", "SEALING_QUEUE")).toBeNull();
   });
 });

@@ -36,6 +36,32 @@ const COMPLETION_EVENTS = new Set([
 
 const BOTTLE_FINISHING_KINDS = ["BOTTLE_STICKER", "BOTTLE_CAP_SEAL"] as const;
 
+/** Rank of each queue along a route — higher is further downstream.
+ *  Used to reject stale upstream echoes: a transition whose computed
+ *  destination ranks BELOW the row's current queue is an out-of-order
+ *  arrival (overlap scanning) and must not clobber the row. The two
+ *  bottle finishing queues share a rank because the steps are
+ *  order-independent (P2-BOTTLE-FLEX-1). */
+const QUEUE_RANK: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+  CARD_BLISTER: { SEALING_QUEUE: 1, PACKAGING_QUEUE: 2, FINISHED_GOODS_QUEUE: 3 },
+  BOTTLE: {
+    BOTTLE_STICKER_QUEUE: 1,
+    BOTTLE_INDUCTION_QUEUE: 1,
+    PACKAGING_QUEUE: 2,
+    FINISHED_GOODS_QUEUE: 3,
+  },
+  STICKER_ONLY: { PACKAGING_QUEUE: 1, FINISHED_GOODS_QUEUE: 2 },
+};
+
+export function queueRank(routeCode: string, queueStageKey: string): number | null {
+  return QUEUE_RANK[routeCode]?.[queueStageKey] ?? null;
+}
+
+const FINISHING_COMPLETION_FOR_KIND: Readonly<Record<string, string>> = {
+  BOTTLE_STICKER: "BOTTLE_STICKER_COMPLETE",
+  BOTTLE_CAP_SEAL: "BOTTLE_CAP_SEAL_COMPLETE",
+};
+
 function bottleFinishingDestination(
   priorEventTypes: readonly string[],
 ): QueueDestination {
@@ -82,7 +108,17 @@ export function queueAfterWorkAt(args: {
       return bottleFinishingDestination(args.priorEventTypes);
     }
     if (stationKind === "BOTTLE_STICKER" || stationKind === "BOTTLE_CAP_SEAL") {
-      return bottleFinishingDestination(args.priorEventTypes);
+      // The destination is where the bag goes AFTER this station's own
+      // step — so treat that step as done even when computing at pickup
+      // time (before its completion event exists). Keeps the row from
+      // listing the working station as eligible for its own output, and
+      // makes pickup-time and completion-time destinations agree.
+      const implied = FINISHING_COMPLETION_FOR_KIND[stationKind];
+      const effective =
+        implied && !args.priorEventTypes.includes(implied)
+          ? [...args.priorEventTypes, implied]
+          : args.priorEventTypes;
+      return bottleFinishingDestination(effective);
     }
     if (stationKind === "PACKAGING") {
       return { queueStageKey: "FINISHED_GOODS_QUEUE", eligibleStationKinds: [] };
@@ -107,6 +143,7 @@ export function deriveQueueTransition(args: {
   stationKind: string | null;
   routeCode: string | null;
   priorEventTypes: readonly string[];
+  currentRow: { queueStageKey: string; claimedByStationId: string | null } | null;
 }): QueueTransition {
   const { eventType } = args;
 
@@ -132,6 +169,18 @@ export function deriveQueueTransition(args: {
       priorEventTypes: args.priorEventTypes,
     });
     if (!destination) return { kind: "NONE" };
+    // Stale-echo guard: with overlap scanning, an upstream completion
+    // (BLISTER_COMPLETE) can arrive AFTER a downstream station already
+    // picked the bag up. If the computed destination ranks below the
+    // row's current queue, this event is out of date for queue purposes
+    // — applying it would clobber the downstream claim.
+    if (args.currentRow) {
+      const currentRank = queueRank(args.routeCode, args.currentRow.queueStageKey);
+      const nextRank = queueRank(args.routeCode, destination.queueStageKey);
+      if (currentRank != null && nextRank != null && nextRank < currentRank) {
+        return { kind: "NONE" };
+      }
+    }
     return { kind: "READY", destination };
   }
 
