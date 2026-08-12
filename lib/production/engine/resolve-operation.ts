@@ -18,9 +18,20 @@ export type ResolvedOperation = {
 };
 
 /** Station kinds that are not themselves route operations but behave
- *  as another kind. COMBINED and HANDPACK_BLISTER both perform the
- *  blister operation; see LEGACY_MACHINE_KIND_TO_OPERATION in
- *  lib/production/routes.ts, which makes the same choice. */
+ *  as another kind. Both perform the blister operation, but only ONE of
+ *  them is corroborated elsewhere:
+ *
+ *    COMBINED -> BLISTER matches LEGACY_MACHINE_KIND_TO_OPERATION in
+ *    lib/production/routes.ts:58-69.
+ *
+ *    HANDPACK_BLISTER -> BLISTER is this module's own choice. That table
+ *    has NO HANDPACK_BLISTER key at all, so nothing corroborates it.
+ *
+ *  The HANDPACK_BLISTER entry is the live cause of blocker 3 in the
+ *  Phase 2 preconditions on advanceBag (lib/production/engine/advance.ts):
+ *  aliasing to BLISTER yields BLISTER_COMPLETE, which
+ *  ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER rejects. Do not treat this
+ *  alias as settled. */
 const STATION_KIND_ALIAS: Readonly<Record<string, string>> = {
   COMBINED: "BLISTER",
   HANDPACK_BLISTER: "BLISTER",

@@ -100,8 +100,26 @@ export function evaluateChecks(facts: EngineFacts): CheckResult[] {
  *  (advanceBag) raise the same Blocker the ? Help screen shows instead of
  *  duplicating the literals. Facts are all-false here — every check
  *  produces its blocker, and we pick by code. */
-const BLOCKER_CATALOGUE: ReadonlyMap<string, Blocker> = new Map(
-  evaluateChecks({
+/** Blockers that are NOT checklist rows. The ? Help screen lists things
+ *  the operator can reason about ("is the bag on hold?"); these are
+ *  Luma-side failures that only advanceBag can hit, so they live in the
+ *  catalogue without appearing on the checklist. */
+const NON_CHECKLIST_BLOCKERS: readonly Blocker[] = [
+  {
+    // Distinct from OPERATION_UNRESOLVED ("this bag does not belong at
+    // this station"), which is an operator-actionable routing mistake.
+    // This one means the stations row itself was not found by id — the
+    // station is misconfigured, nothing about the bag is wrong.
+    code: "STATION_UNRESOLVED",
+    operatorSentence: "Luma does not recognize this station. Ask a supervisor.",
+    supervisorDetail: "No stations row matched the stationId on this request.",
+    suggestedAction: "NOTIFY_SUPERVISOR",
+  },
+];
+
+const BLOCKER_CATALOGUE: ReadonlyMap<string, Blocker> = new Map([
+  ...NON_CHECKLIST_BLOCKERS.map((b) => [b.code, b] as const),
+  ...evaluateChecks({
     bagRecognized: false,
     productResolved: false,
     operationResolved: false,
@@ -113,8 +131,8 @@ const BLOCKER_CATALOGUE: ReadonlyMap<string, Blocker> = new Map(
     waitingForLabel: null,
   })
     .filter((c): c is CheckResult & { blocker: Blocker } => c.blocker !== null)
-    .map((c) => [c.blocker.code, c.blocker]),
-);
+    .map((c) => [c.blocker.code, c.blocker] as const),
+]);
 
 /** Look up a Blocker by its stable code. Unknown codes fall back to a
  *  generic supervisor prompt rather than throwing — a missing catalogue

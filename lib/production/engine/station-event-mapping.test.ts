@@ -150,7 +150,22 @@ describe("station kind to workflow event mapping", () => {
     }
   });
 
-  it("the engine hands recordStageEvent the same shape the action does", () => {
+  it("the mapped fields it covers agree with the action's call site", () => {
+    // NOT a shape-equality proof. Three limitations, all deliberate —
+    // read them before treating a green run as parity:
+    //
+    //   1. The right-hand side is a hand-typed literal transcribed from
+    //      fireStageEventAction, not a value read from the action. If the
+    //      action's real call site changes, this keeps passing.
+    //   2. The pinned call is a SEALING segment with NO counterPresses —
+    //      a shape the action never sends and that recordStageEvent would
+    //      reject outright (SEALING_COUNTER_PRESS_ERROR; see blocker 1 in
+    //      the Phase 2 preconditions on advance.ts). It pins the mapping,
+    //      not a call that could succeed.
+    //   3. It iterates Object.keys(viaAction) only, so a field the engine
+    //      FAILS to set (and the action does not list here) or an EXTRA
+    //      field the engine adds are both invisible to it.
+    //
     // The action's own call site, transcribed from
     // app/(floor)/floor/[token]/actions.ts (fireStageEventAction), for a
     // plain sealing segment with no partial-close fields.

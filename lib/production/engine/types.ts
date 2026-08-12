@@ -82,6 +82,11 @@ export type AdvanceIntent =
 export type AdvanceInput = {
   stationId: string;
   workflowBagId: string;
+  /** Currently UNREAD. advanceBag() does not look at this field — the
+   *  accountable employee is resolved inside recordStageEvent from the
+   *  station's active session. Kept because Phase 2 needs it to attribute
+   *  the write to the session that actually made the gesture (and to carry
+   *  an overrideEmployeeCode); see the Phase 2 preconditions on advanceBag. */
   operatorSessionId: string;
   intent: AdvanceIntent;
   inputs: {

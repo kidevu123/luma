@@ -74,6 +74,57 @@ export function buildRecordStageEventInput(args: {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// PHASE 2 PRECONDITIONS — advanceBag is NOT yet usable from the floor.
+//
+// advanceBag has no production caller. It is unreachable from
+// app/(floor)/ today, and that is deliberate: wiring a caller now would
+// break three station kinds outright and silently drop six fields.
+// Everything below must be resolved BEFORE a caller is added, not after.
+//
+// HARD BLOCKERS — these station kinds cannot succeed at all today:
+//
+//   1. SEALING and COMBINED — no counterPresses.
+//      buildRecordStageEventInput() never sets `counterPresses`. Any
+//      SEALING_SEGMENT_COMPLETE (or SEALING_COMPLETE on a COMBINED
+//      station) therefore reaches the guard at
+//      record-stage-event.ts:282-284 with counterPresses === undefined
+//      and returns SEALING_COUNTER_PRESS_ERROR. The operator sees
+//      "This step could not be recorded." on every seal.
+//      Fix: carry the press count through AdvanceInput.inputs and map it.
+//
+//   2. Every kind, for intent "CLAIM" — unrecognised event type.
+//      intentToEventType("CLAIM", …) returns "BAG_PICKED_UP", which does
+//      not appear in ALLOWED_EVENTS_BY_KIND (record-stage-event.ts:89-104)
+//      under ANY station kind, so recordStageEvent rejects it.
+//      Fix: claim is not a stage event — route it to the pickup path
+//      instead of recordStageEvent, or add the kind entries.
+//
+//   3. HANDPACK_BLISTER — wrong event via the alias.
+//      STATION_KIND_ALIAS maps HANDPACK_BLISTER -> BLISTER
+//      (resolve-operation.ts:26), so the resolved operation is BLISTER and
+//      intentToEventType yields "BLISTER_COMPLETE". But
+//      ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER permits only
+//      "HANDPACK_BLISTER_COMPLETE", so it is rejected.
+//      Fix: resolve the event from the STATION kind, not the aliased
+//      operation, or give HANDPACK_BLISTER its own route operation.
+//
+// SILENTLY DROPPED FIELDS — buildRecordStageEventInput() does not carry
+// these, and each one changes recorded behaviour when it is missing:
+//
+//   overrideEmployeeCode     — per-form accountability override; without
+//                              it a first-op count with no open shift
+//                              throws (record-stage-event.ts:344-351)
+//                              even when the operator supplied a code.
+//   sealingCloseMode         — full vs partial sealing close-out.
+//   partialCloseReason       — required to justify a partial close.
+//   partialCloseReasonNote   — the free-text detail for the above.
+//   packsRemaining           — hard-coded to 0 here.
+//   cardsReopened            — hard-coded to 0 here.
+//
+// Until every item above is addressed, the floor's own
+// fireStageEventAction remains the only correct write path.
+// ─────────────────────────────────────────────────────────────────────
 export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
   try {
     return await advanceBagInner(input);
@@ -99,7 +150,9 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
     .from(stations)
     .where(eq(stations.id, input.stationId));
   if (!stationRow) {
-    return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
+    // Not OPERATION_UNRESOLVED: nothing is wrong with the bag's routing,
+    // the stations row itself was not found. See NON_CHECKLIST_BLOCKERS.
+    return { ok: false, blocker: blockerFor("STATION_UNRESOLVED") };
   }
 
   const [bag] = await db

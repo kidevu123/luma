@@ -91,10 +91,12 @@ import {
 } from "@/lib/production/blister-counter-snapshot";
 import { recordBlisterCounterRollSegment } from "@/lib/production/blister-roll-segments";
 import { assertCounterSnapshotAllowed } from "@/lib/production/counter-snapshot-guard-loader";
+// The engine barrel is the ONLY permitted entry point from app/(floor)/
+// into lib/production — deep paths are restricted too (eslint.config.mjs).
 import {
   recordStageEvent,
   projectBagReleasedEvent,
-} from "@/lib/production/engine/record-stage-event";
+} from "@/lib/production/engine";
 
 // Canonical source: lib/production/first-op-product.ts FIRST_OP_STATION_KINDS.
 // Intentionally duplicated here for floor-action isolation — do NOT

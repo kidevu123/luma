@@ -23,6 +23,17 @@ cannot reach.
       (this path moved into record-stage-event.ts — confirm it did not
       regress).
 - [ ] A partial-sealing close-out still auto-releases.
+- [ ] **Bottle finishing fires exactly once each.** On a bottle bag, fire
+      cap-seal, then sticker (both succeed). Now re-fire either one: it
+      must REFUSE with "This bag has already been cap-sealed." /
+      "This bag has already been stickered." Guard moved to
+      lib/production/engine/record-stage-event.ts:190-205; no CI test
+      reaches it because it reads prior workflow_events.
+- [ ] **First count needs an operator on shift.** With no shift open on a
+      BLISTER station (and no employee override on the form), submit a
+      first blister count. It must REFUSE with "No operator on shift...".
+      Accountability throw moved to
+      lib/production/engine/record-stage-event.ts:344-351.
 
 ## DB behaviours the test suite cannot verify
 - [ ] **Idempotency.** Submit the same completion twice with the same
