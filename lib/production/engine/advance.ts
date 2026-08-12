@@ -75,6 +75,25 @@ export function buildRecordStageEventInput(args: {
 }
 
 export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
+  try {
+    return await advanceBagInner(input);
+  } catch (err) {
+    // A throw here is a database or projector failure, not an operator
+    // mistake. Surface it as a blocker so the tablet shows a sentence
+    // instead of a stack trace.
+    return {
+      ok: false,
+      blocker: {
+        code: "ADVANCE_FAILED",
+        operatorSentence: "Something went wrong recording this. Ask a supervisor.",
+        supervisorDetail: err instanceof Error ? err.message : String(err),
+        suggestedAction: "NOTIFY_SUPERVISOR",
+      },
+    };
+  }
+}
+
+async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
   const [stationRow] = await db
     .select()
     .from(stations)

@@ -30,16 +30,6 @@ import {
 } from "@/lib/production/stage-progression";
 import { checkStageProgression } from "@/lib/production/stage-progression";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
-import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
-// Imported ahead of sealing-counter on purpose: the source scanners in
-// actions.test.ts assert that the partial close-out validation is reached
-// before the counter-press check, and they read this module as one blob.
-import {
-  SEALING_PARTIAL_CLOSE_REASONS,
-  buildPartialSealingClosePayload,
-  hasPartialSealingCloseout,
-  validateSealingPartialCloseInput,
-} from "@/lib/production/sealing-partial-closeout";
 import {
   computeSealedCountFromCounter,
   resolveSealingCardsPerPress,
@@ -47,6 +37,13 @@ import {
   SEALING_COUNTER_PRESS_ERROR,
   stationUsesSealingCounter,
 } from "@/lib/production/sealing-counter";
+import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
+import {
+  SEALING_PARTIAL_CLOSE_REASONS,
+  buildPartialSealingClosePayload,
+  hasPartialSealingCloseout,
+  validateSealingPartialCloseInput,
+} from "@/lib/production/sealing-partial-closeout";
 import {
   SEALING_STATION_KINDS,
   SEALING_PRODUCT_ALREADY_SAVED_ERROR,
@@ -122,6 +119,17 @@ export type RecordStageEventInput = {
   partialCloseReasonNote?: string | undefined;
 };
 
+/** Record one stage event: the guard sequence and transaction moved out of
+ *  fireStageEventAction.
+ *
+ *  PRECONDITION — callers MUST have authenticated the station first. This
+ *  function performs NO station auth of its own: it trusts `input.station`
+ *  and derives `stationId` from `station.id`. On the floor path that
+ *  guarantee comes from `authStation(token, stationId)`, which validates the
+ *  URL scan token, refuses a station/form mismatch, and rejects inactive
+ *  stations. Any new caller (Phase 2 onward) must establish the same
+ *  guarantee before calling — do not expose this over an unauthenticated
+ *  route. */
 export async function recordStageEvent(
   input: RecordStageEventInput,
 ): Promise<{ ok: true } | { error: string }> {
