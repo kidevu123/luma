@@ -171,3 +171,21 @@ Branch `feat/production-engine-p2`. Three short notes for whoever reads
   at those stations. Scoped out on purpose, not an oversight — see Task
   5's concerns section for the argument that it may deserve revisiting
   once the bag also auto-releases at BLISTERED on a partial close.
+
+### Phase 2 deferred minors (final-review triaged, none floor-reachable)
+
+- Sibling-release payload marker shipped (`auto_release_reason`); the
+  repair-path events (`CARD_FORCE_RELEASED`, `SUBMISSION_CORRECTED`) remain
+  outside `FLOW_EVENTS` — a void-repaired bag regains its queue row on next
+  pickup or rebuild. Revisit when claims gain a UI caller.
+- Same-bag deadlock window between the claim lock and projector write order:
+  documented at the `.for("update")` site; consistent-ordering refactor
+  belongs to the phase that wires claims to the UI (P4).
+- The finishing re-claim guard (`P2-FINISHING-RECLAIM-1`) has no contract
+  test; the staging checklist covers it. A `STICKER_ONLY` bag re-scanned at
+  its sticker station gets a slightly wrong "waiting for cap-sealing"
+  message — inherited gate pattern, P4 copy pass.
+- Smaller: STICKER_ONLY end-to-end transition coverage; rank-guard fail-open
+  comment; unfiltered qrCards join (shared with station-view);
+  `resolveRouteCodeForQueue` null-product fallback test; migration-text
+  assertions unbound; scanner slice bound; `actions.ts:2589` copy.
