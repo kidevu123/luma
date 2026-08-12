@@ -102,7 +102,8 @@ export function buildRecordStageEventInput(args: {
 //
 //   3. HANDPACK_BLISTER — wrong event via the alias.
 //      STATION_KIND_ALIAS maps HANDPACK_BLISTER -> BLISTER
-//      (resolve-operation.ts:26), so the resolved operation is BLISTER and
+//      (see STATION_KIND_ALIAS in resolve-operation.ts), so the resolved
+//      operation is BLISTER and
 //      intentToEventType yields "BLISTER_COMPLETE". But
 //      ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER permits only
 //      "HANDPACK_BLISTER_COMPLETE", so it is rejected.
