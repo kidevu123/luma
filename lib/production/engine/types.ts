@@ -49,6 +49,15 @@ export type UpNextBag = {
   etaMinutes: number | null;
 };
 
+/** One finished product the operator may map this bag to. Shape is the
+ *  engine's own, not a products-table row: id is `productId` so a caller
+ *  cannot confuse it with a bag or card id. */
+export type ProductOption = {
+  productId: string;
+  name: string;
+  sku: string;
+};
+
 export type NextAction =
   | { kind: "OPEN_SHIFT" }
   | { kind: "SCAN_TO_CLAIM"; expected: UpNextBag | null }
@@ -56,6 +65,12 @@ export type NextAction =
   | { kind: "COMPLETE"; label: string; inputs: CompletionInput[] }
   | { kind: "CONFIRM_BAG_EMPTY" }
   | { kind: "RESOLVE_PARTIAL"; estimate: number | null; needsEntry: boolean }
+  /** Shown only when the bag's tablet type maps to 2+ ACTIVE products of a
+   *  kind this station may make. Exactly one compatible product
+   *  auto-resolves (no pick — see resolveProductChoice), and zero leaves
+   *  the bag BLOCKED with PRODUCT_UNRESOLVED: an operator cannot invent a
+   *  product that master data does not have. */
+  | { kind: "PICK_PRODUCT"; options: ProductOption[] }
   | { kind: "BLOCKED"; blockers: Blocker[] };
 
 export type StationView = {
@@ -89,6 +104,35 @@ export type AdvanceInput = {
    *  an overrideEmployeeCode); see the Phase 2 preconditions on advanceBag. */
   operatorSessionId: string;
   intent: AdvanceIntent;
+  /** Sealing's bag-level close mode: "whole" (default) or "partial". Read
+   *  only when the intent/operation pair resolves to SEALING_COMPLETE on a
+   *  pure SEALING station; ignored everywhere else. */
+  sealingCloseMode?: string;
+  /** Required alongside sealingCloseMode === "partial" — validated inside
+   *  recordStageEvent, not here. */
+  partialCloseReason?: string;
+  partialCloseReasonNote?: string;
+  /** Per-form accountability override: lets an operator with no open shift
+   *  supply a code instead of throwing. Passed to both recordStageEvent
+   *  (overrideEmployeeCode) and recordPackagingComplete (operatorCode). */
+  overrideEmployeeCode?: string;
+  /** Packaging-only: the operator explicitly keeping a bottle bag as a
+   *  partial rather than confirming it empty. Absent/false is today's
+   *  default — a bag closed through advanceBag finalizes as fully empty. */
+  keepBagPartial?: boolean;
+  /** The product the operator picked from a PICK_PRODUCT next action (or
+   *  the one resolveProductChoice auto-resolved). Read on the sealing
+   *  path only, where it becomes recordStageEvent's
+   *  `pickedSealingProductId` — the guard that refuses a segment whose
+   *  product disagrees with the one already saved on the bag. It does NOT
+   *  itself write workflow_bags.product_id: assigning a product to an
+   *  unmapped bag is still saveSealingProductAction's transaction (see
+   *  the note above advanceBag). */
+  productId?: string;
+  /** Packaging-only: an operator-entered estimate of tablets remaining in
+   *  a kept-partial bag. An estimate, never the confirmed allocation
+   *  balance — see luma-data-honesty. */
+  partialRemainingEstimate?: number;
   inputs: {
     counter?: number;
     /** Sealing counter presses. Distinct from `counter`: recordStageEvent
@@ -96,6 +140,11 @@ export type AdvanceInput = {
      *  sealed count, and REFUSES a sealing segment without it
      *  (SEALING_COUNTER_PRESS_ERROR). */
     counterPresses?: number;
+    /** Loose units damaged during this operation — cards ripped, bottles
+     *  cracked, etc. (2026-08-13 decision). At packaging this maps to
+     *  `rippedCards`, not `damagedPackaging`: packaging-MATERIAL damage
+     *  (foil, cases, labels) is a separate exception-flow concern, not an
+     *  operator count. */
     damaged?: number;
     cases?: number;
     displays?: number;

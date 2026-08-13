@@ -13,12 +13,13 @@
 // exercise. `new Date()` appears exactly once, in getStationView; the
 // pure side always takes `now` as a parameter.
 
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
   inventoryBags,
   machines,
+  productAllowedTablets,
   products,
   purchaseOrders,
   qrCards,
@@ -31,14 +32,22 @@ import {
   tabletTypes,
   workflowBags,
 } from "@/lib/db/schema";
+import { STATION_KIND_TO_PRODUCT_KINDS } from "@/lib/production/first-op-product";
 import type { RouteOperationView } from "@/lib/production/routes";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
 import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
 import { resolveOperation } from "./resolve-operation";
 import { resolveCompletionInputs } from "./resolve-completion";
+import { resolveProductChoice, type ProductChoice } from "./resolve-product-choice";
 import { etaMinutes, medianCycleMinutes } from "./eta";
 import { evaluateChecks, blockersFromChecks, type CheckResult } from "./resolve-exceptions";
-import type { CurrentWork, NextAction, StationView, UpNextBag } from "./types";
+import type {
+  CurrentWork,
+  NextAction,
+  ProductOption,
+  StationView,
+  UpNextBag,
+} from "./types";
 
 export type NextActionInput = {
   hasOperatorSession: boolean;
@@ -47,6 +56,10 @@ export type NextActionInput = {
   checks: CheckResult[];
   bagStage: string | null;
   expected: UpNextBag | null;
+  /** What resolveProductChoice made of the bag's compatible products.
+   *  NONE for a bag that already has one — the choice is only asked for
+   *  an unmapped bag. */
+  productChoice: ProductChoice;
 };
 
 /** Operator-facing verb for an operation. Never an event name. */
@@ -142,6 +155,20 @@ export function buildNextAction(input: NextActionInput): NextAction {
   }
 
   const blockers = blockersFromChecks(input.checks);
+  // A pickable product outranks the PRODUCT_UNRESOLVED blocker: the bag
+  // is not broken, it just has not been told which SKU it is making, and
+  // the operator standing at the station is the one who knows. It does
+  // NOT outrank any other blocker — a paused, held or finalized bag has
+  // something wrong with it that picking a product would not fix, so
+  // those still block. AUTO deliberately shows no pick: one compatible
+  // product is master data's answer, not an operator question.
+  if (
+    input.productChoice.kind === "PICK" &&
+    blockers.length > 0 &&
+    blockers.every((b) => b.code === "PRODUCT_UNRESOLVED")
+  ) {
+    return { kind: "PICK_PRODUCT", options: input.productChoice.options };
+  }
   if (blockers.length > 0) return { kind: "BLOCKED", blockers };
 
   if (!input.operation) {
@@ -242,6 +269,49 @@ async function loadMedianCycleMinutesByProduct(
   return medians;
 }
 
+/** The finished products this bag's tablet type may legally become at
+ *  this station kind, active only.
+ *
+ *  Same query shape the floor page has used since the first-op picker
+ *  landed (app/(floor)/floor/[token]/page.tsx:184-201 for the
+ *  productAllowedTablets x products join, :241-258 for the active +
+ *  allowed-kind filter) — narrowed to ONE tablet type, because here the
+ *  bag is already in hand, so the compatible set is the answer rather
+ *  than a client-side filter over every product at the station.
+ *
+ *  Empty when the station kind has no product-kind mapping: a station
+ *  that is not supposed to decide product identity must not offer a
+ *  pick. */
+async function loadCompatibleProducts(args: {
+  tabletTypeId: string;
+  stationKind: string;
+}): Promise<ProductOption[]> {
+  const allowedProductKinds = STATION_KIND_TO_PRODUCT_KINDS[args.stationKind] ?? [];
+  if (allowedProductKinds.length === 0) return [];
+  const rows = await db
+    .selectDistinct({
+      productId: products.id,
+      name: products.name,
+      sku: products.sku,
+    })
+    .from(productAllowedTablets)
+    .innerJoin(products, eq(products.id, productAllowedTablets.productId))
+    .where(
+      and(
+        eq(productAllowedTablets.tabletTypeId, args.tabletTypeId),
+        eq(products.isActive, true),
+        // The cast mirrors page.tsx: STATION_KIND_TO_PRODUCT_KINDS is
+        // typed as strings, the column is the product_kind enum.
+        inArray(
+          products.kind,
+          allowedProductKinds as ("CARD" | "BOTTLE" | "VARIETY")[],
+        ),
+      ),
+    )
+    .orderBy(products.name);
+  return rows;
+}
+
 export async function getStationView(stationId: string): Promise<StationView> {
   const [stationRow] = await db
     .select({ station: stations, machine: machines })
@@ -262,6 +332,9 @@ export async function getStationView(stationId: string): Promise<StationView> {
       product: products,
       inventoryBagNumber: inventoryBags.bagNumber,
       tabletTypeName: tabletTypes.name,
+      // Added in P4a for the product-choice load below; the joins and
+      // every other selected column are unchanged.
+      tabletTypeId: inventoryBags.tabletTypeId,
       poNumber: purchaseOrders.poNumber,
     })
     .from(readStationLive)
@@ -321,6 +394,18 @@ export async function getStationView(stationId: string): Promise<StationView> {
       ? await loadMedianCycleMinutesByProduct(stationRow.station.kind)
       : new Map<string, number>();
 
+  // Only an UNMAPPED bag asks the product question. A bag that already
+  // carries a product_id is settled — re-offering a pick there would
+  // invite a silent identity change, which is what
+  // SEALING_PRODUCT_ALREADY_SAVED_ERROR exists to refuse.
+  const compatibleProducts =
+    currentAtStation && !currentAtStation.bag.productId && currentAtStation.tabletTypeId
+      ? await loadCompatibleProducts({
+          tabletTypeId: currentAtStation.tabletTypeId,
+          stationKind: stationRow.station.kind,
+        })
+      : [];
+
   const currentBagLabel = currentAtStation
     ? buildCurrentBagDisplayLabel({
         cardLabel: currentAtStation.card?.label ?? null,
@@ -361,6 +446,8 @@ export async function getStationView(stationId: string): Promise<StationView> {
         }
       : null,
     operation: resolved?.operation ?? null,
+    // Data, not a decision: resolveProductChoice runs in the pure half.
+    compatibleProducts,
     // The clock enters the engine HERE and nowhere else — every function
     // below this line takes `now` as a parameter.
     upNext: mapQueueRowsToUpNext(queueRows, medianByProduct, new Date()),
@@ -382,6 +469,12 @@ export type StationViewRows = {
     isOnHold: boolean;
   } | null;
   operation: RouteOperationView | null;
+  /** Active products this bag's tablet type may become at this station,
+   *  loaded ONLY when the bag has no product_id (see getStationView).
+   *  Empty otherwise — assembleStationView reads it through
+   *  resolveProductChoice, so an empty list means "no pick to offer",
+   *  never "no product". */
+  compatibleProducts: ProductOption[];
   /** Already mapped by mapQueueRowsToUpNext — assembleStationView stays
    *  pure, so the ETA arithmetic (which needs a clock) happens in the
    *  loader, not here. */
@@ -434,6 +527,7 @@ export function assembleStationView(rows: StationViewRows): StationView {
       current,
       operation: rows.operation,
       checks,
+      productChoice: resolveProductChoice(rows.compatibleProducts),
       bagStage: rows.current?.stage ?? null,
       // The bag the operator should scan next is the head of the same
       // list the screen shows — never a second, differently-ordered pick.

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { intentToEventType, buildRecordStageEventInput } from "./advance";
+import {
+  intentToEventType,
+  buildRecordStageEventInput,
+  buildRecordPackagingCompleteInput,
+} from "./advance";
 import type { StationRow } from "./record-stage-event";
 
 describe("intentToEventType", () => {
@@ -169,5 +173,197 @@ describe("buildRecordStageEventInput", () => {
       clientEventId: "cid-1",
     });
     expect(out.pickedSealingProductId).toBeNull();
+  });
+
+  it("carries the picked product through as the sealing product guard", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counterPresses: 4 },
+      clientEventId: "cid-1",
+      productId: "prod-1",
+    });
+    expect(out.pickedSealingProductId).toBe("prod-1");
+  });
+
+  it("nulls the sealing product guard rather than dropping the key", () => {
+    // recordStageEvent destructures pickedSealingProductId and compares
+    // it to the bag's saved product; the field is required, not optional,
+    // so an absent pick must arrive as an explicit null.
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "BLISTER_COMPLETE",
+      inputs: { counter: 12 },
+      clientEventId: "cid-1",
+    });
+    expect("pickedSealingProductId" in out).toBe(true);
+    expect(out.pickedSealingProductId).toBeNull();
+  });
+
+  it("carries sealingCloseMode, partialCloseReason, partialCloseReasonNote, and overrideEmployeeCode through when supplied", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_COMPLETE",
+      inputs: {},
+      clientEventId: "cid-1",
+      sealingCloseMode: "partial",
+      partialCloseReason: "END_OF_SHIFT",
+      partialCloseReasonNote: "line stopped early",
+      overrideEmployeeCode: "EMP-42",
+    });
+    expect(out.sealingCloseMode).toBe("partial");
+    expect(out.partialCloseReason).toBe("END_OF_SHIFT");
+    expect(out.partialCloseReasonNote).toBe("line stopped early");
+    expect(out.overrideEmployeeCode).toBe("EMP-42");
+  });
+
+  it("omits sealingCloseMode, partialCloseReason, partialCloseReasonNote, and overrideEmployeeCode when absent", () => {
+    // exactOptionalPropertyTypes discipline, per the counterPresses
+    // precedent: the key must not materialize as present-and-undefined.
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counter: 1 },
+      clientEventId: "cid-1",
+    });
+    expect("sealingCloseMode" in out).toBe(false);
+    expect("partialCloseReason" in out).toBe(false);
+    expect("partialCloseReasonNote" in out).toBe(false);
+    expect("overrideEmployeeCode" in out).toBe(false);
+  });
+});
+
+const PACKAGING_STATION = { id: "s2", label: "Packaging 1", kind: "PACKAGING" } as StationRow;
+
+describe("buildRecordPackagingCompleteInput", () => {
+  it("routes cases to masterCases", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 4 },
+      clientEventId: "cid-1",
+    });
+    expect(out.masterCases).toBe(4);
+  });
+
+  it("routes displays to displaysMade", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { displays: 9 },
+      clientEventId: "cid-1",
+    });
+    expect(out.displaysMade).toBe(9);
+  });
+
+  it("routes loose to looseCards", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { loose: 12 },
+      clientEventId: "cid-1",
+    });
+    expect(out.looseCards).toBe(12);
+  });
+
+  it("routes the operator's damaged count to rippedCards, not damagedPackaging", () => {
+    // 2026-08-13 decision: operator-counted damage is loose units (ripped
+    // cards). Packaging-material damage is a separate exception-flow
+    // concern this mapping never populates.
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { damaged: 3 },
+      clientEventId: "cid-1",
+    });
+    expect(out.rippedCards).toBe(3);
+  });
+
+  it("always sends damagedPackaging as zero regardless of input", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { damaged: 3, cases: 1, displays: 2, loose: 5 },
+      clientEventId: "cid-1",
+    });
+    expect(out.damagedPackaging).toBe(0);
+  });
+
+  it("zero-defaults every count when the operator supplied none", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: {},
+      clientEventId: "cid-1",
+    });
+    expect(out.masterCases).toBe(0);
+    expect(out.displaysMade).toBe(0);
+    expect(out.looseCards).toBe(0);
+    expect(out.rippedCards).toBe(0);
+    expect(out.damagedPackaging).toBe(0);
+  });
+
+  it("carries the clientEventId through so the DB can dedupe a retry", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-pkg-1",
+    });
+    expect(out.clientEventId).toBe("cid-pkg-1");
+  });
+
+  it("defaults keepBagPartial to false and partialRemainingEstimate to null when absent", () => {
+    // REPLACES the Task 2 pin "does not yet carry a partial-close request":
+    // Task 3 threads AdvanceInput.keepBagPartial / partialRemainingEstimate
+    // through this mapper, so the gap that test pinned no longer exists —
+    // this test now pins the unchanged DEFAULT when the caller supplies
+    // neither field, not an inability to carry them.
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-1",
+    });
+    expect(out.keepBagPartial).toBe(false);
+    expect(out.partialRemainingEstimate).toBeNull();
+  });
+
+  it("carries keepBagPartial and partialRemainingEstimate through when supplied", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-1",
+      keepBagPartial: true,
+      partialRemainingEstimate: 25,
+    });
+    expect(out.keepBagPartial).toBe(true);
+    expect(out.partialRemainingEstimate).toBe(25);
+  });
+
+  it("carries overrideEmployeeCode through as operatorCode when supplied", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-1",
+      overrideEmployeeCode: "EMP-42",
+    });
+    expect(out.operatorCode).toBe("EMP-42");
+  });
+
+  it("omits operatorCode when overrideEmployeeCode is absent", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-1",
+    });
+    expect("operatorCode" in out).toBe(false);
   });
 });

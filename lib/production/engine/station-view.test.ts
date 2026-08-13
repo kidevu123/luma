@@ -7,7 +7,7 @@ import {
 import type { QueueRowForUpNext, StationViewRows } from "./station-view";
 import { evaluateChecks } from "./resolve-exceptions";
 import type { RouteOperationView } from "@/lib/production/routes";
-import type { CurrentWork, UpNextBag } from "./types";
+import type { CurrentWork, ProductOption, UpNextBag } from "./types";
 
 const OP: RouteOperationView = {
   routeCode: "CARD_BLISTER",
@@ -57,6 +57,7 @@ describe("buildNextAction", () => {
       checks: ALL_PASS,
       bagStage: "BLISTERED",
       expected: null,
+      productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("OPEN_SHIFT");
   });
@@ -69,6 +70,7 @@ describe("buildNextAction", () => {
       checks: ALL_PASS,
       bagStage: null,
       expected: null,
+      productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("SCAN_TO_CLAIM");
   });
@@ -92,6 +94,7 @@ describe("buildNextAction", () => {
       checks,
       bagStage: "STARTED",
       expected: null,
+      productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("BLOCKED");
     if (action.kind === "BLOCKED") {
@@ -107,6 +110,7 @@ describe("buildNextAction", () => {
       checks: ALL_PASS,
       bagStage: "BLISTERED",
       expected: null,
+      productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("COMPLETE");
     if (action.kind === "COMPLETE") {
@@ -123,10 +127,135 @@ describe("buildNextAction", () => {
       checks: ALL_PASS,
       bagStage: "BLISTERED",
       expected: null,
+      productChoice: { kind: "NONE" },
     });
     if (action.kind === "COMPLETE" || action.kind === "START") {
       expect(action.label).not.toMatch(/BLISTERED|SEALED|QUEUE|_COMPLETE/);
     }
+  });
+});
+
+describe("buildNextAction · product picking", () => {
+  const UNMAPPED = evaluateChecks({
+    bagRecognized: true,
+    productResolved: false,
+    operationResolved: true,
+    materialsAvailable: true,
+    upstreamStageComplete: true,
+    bagPaused: false,
+    bagFinalized: false,
+    bagOnHold: false,
+    waitingForLabel: null,
+  });
+  const UNMAPPED_AND_PAUSED = evaluateChecks({
+    bagRecognized: true,
+    productResolved: false,
+    operationResolved: true,
+    materialsAvailable: true,
+    upstreamStageComplete: true,
+    bagPaused: true,
+    bagFinalized: false,
+    bagOnHold: false,
+    waitingForLabel: null,
+  });
+  const OPTIONS: ProductOption[] = [
+    { productId: "prod-1", name: "Chocolate Brown 30ct", sku: "CB-30" },
+    { productId: "prod-2", name: "Chocolate Brown 60ct", sku: "CB-60" },
+  ];
+
+  it("asks for a pick instead of blocking when the bag's product is unresolved but pickable", () => {
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: UNMAPPED,
+      bagStage: "BLISTERED",
+      expected: null,
+      productChoice: { kind: "PICK", options: OPTIONS },
+    });
+    expect(action.kind).toBe("PICK_PRODUCT");
+    if (action.kind === "PICK_PRODUCT") {
+      expect(action.options.map((o) => o.sku)).toEqual(["CB-30", "CB-60"]);
+    }
+  });
+
+  it("still blocks when something OTHER than the product is wrong", () => {
+    // Picking a product does not un-pause a bag, so the pause wins.
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: UNMAPPED_AND_PAUSED,
+      bagStage: "BLISTERED",
+      expected: null,
+      productChoice: { kind: "PICK", options: OPTIONS },
+    });
+    expect(action.kind).toBe("BLOCKED");
+    if (action.kind === "BLOCKED") {
+      expect(action.blockers.map((b) => b.code)).toContain("BAG_PAUSED");
+    }
+  });
+
+  it("shows no pick when exactly one product is compatible", () => {
+    // AUTO is master data's answer, not an operator question.
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: UNMAPPED,
+      bagStage: "BLISTERED",
+      expected: null,
+      productChoice: { kind: "AUTO", productId: "prod-1" },
+    });
+    expect(action.kind).toBe("BLOCKED");
+    if (action.kind === "BLOCKED") {
+      expect(action.blockers.map((b) => b.code)).toContain("PRODUCT_UNRESOLVED");
+    }
+  });
+
+  it("blocks with PRODUCT_UNRESOLVED when nothing is compatible", () => {
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: UNMAPPED,
+      bagStage: "BLISTERED",
+      expected: null,
+      productChoice: { kind: "NONE" },
+    });
+    expect(action.kind).toBe("BLOCKED");
+    if (action.kind === "BLOCKED") {
+      expect(action.blockers.map((b) => b.code)).toContain("PRODUCT_UNRESOLVED");
+    }
+  });
+
+  it("asks for a shift before asking for a product", () => {
+    const action = buildNextAction({
+      hasOperatorSession: false,
+      current: CURRENT,
+      operation: OP,
+      checks: UNMAPPED,
+      bagStage: "BLISTERED",
+      expected: null,
+      productChoice: { kind: "PICK", options: OPTIONS },
+    });
+    expect(action.kind).toBe("OPEN_SHIFT");
+  });
+
+  it("never offers a pick for a bag whose product is already settled", () => {
+    // Defensive: options with no PRODUCT_UNRESOLVED blocker would be a
+    // silent identity change, which SEALING_PRODUCT_ALREADY_SAVED_ERROR
+    // exists to refuse.
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: ALL_PASS,
+      bagStage: "BLISTERED",
+      expected: null,
+      productChoice: { kind: "PICK", options: OPTIONS },
+    });
+    expect(action.kind).toBe("COMPLETE");
   });
 });
 
@@ -146,6 +275,7 @@ function rows(over: Partial<StationViewRows> = {}): StationViewRows {
       isOnHold: false,
     },
     operation: OP,
+    compatibleProducts: [],
     upNext: [],
     ...over,
   };
@@ -217,6 +347,44 @@ describe("assembleStationView", () => {
       rows({ current: base.current ? { ...base.current, productId: null } : null }),
     );
     expect(view.nextAction.kind).toBe("BLOCKED");
+  });
+
+  it("offers the compatible products when the bag has no product mapping", () => {
+    const base = rows();
+    const view = assembleStationView(
+      rows({
+        current: base.current ? { ...base.current, productId: null } : null,
+        compatibleProducts: [
+          { productId: "prod-1", name: "Chocolate Brown 30ct", sku: "CB-30" },
+          { productId: "prod-2", name: "Chocolate Brown 60ct", sku: "CB-60" },
+        ],
+      }),
+    );
+    expect(view.nextAction.kind).toBe("PICK_PRODUCT");
+    if (view.nextAction.kind === "PICK_PRODUCT") {
+      expect(view.nextAction.options.map((o) => o.productId)).toEqual([
+        "prod-1",
+        "prod-2",
+      ]);
+    }
+  });
+
+  it("keeps blocking an unmapped bag when only one product is compatible", () => {
+    const base = rows();
+    const view = assembleStationView(
+      rows({
+        current: base.current ? { ...base.current, productId: null } : null,
+        compatibleProducts: [
+          { productId: "prod-1", name: "Chocolate Brown 30ct", sku: "CB-30" },
+        ],
+      }),
+    );
+    expect(view.nextAction.kind).toBe("BLOCKED");
+  });
+
+  it("does not offer a pick for a bag that already has a product", () => {
+    const view = assembleStationView(rows());
+    expect(view.nextAction.kind).toBe("COMPLETE");
   });
 
   it("asks the operator to scan when no bag is at the station", () => {

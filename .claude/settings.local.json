@@ -165,7 +165,28 @@
       "Bash(scp -q /Users/sahilkhatri/Projects/Work/luma/scripts/correct-352176-second-packaging-session.ts root@192.168.1.190:/tmp/correct-352176.ts)",
       "Bash(perl -0pi -e 's/\\(      revalidatePath\\\\\\(`\\\\/po-closeout\\\\/\\\\$\\\\{poId\\\\}`\\\\\\);\\\\n\\)/$1      revalidatePath\\(\"\\\\/po-closeout\"\\);\\\\n/g' \"app/\\(admin\\)/po-closeout/actions.ts\")",
       "Bash(perl -0pi -e 's/import \\\\{\\\\nimport \\\\{ AutoRefreshOnFocus \\\\} from \"\\\\@\\\\/components\\\\/admin\\\\/auto-refresh-on-focus\";\\\\n  loadActiveRunsMissingAllocation,/import \\\\{ AutoRefreshOnFocus \\\\} from \"\\\\@\\\\/components\\\\/admin\\\\/auto-refresh-on-focus\";\\\\nimport \\\\{\\\\n  loadActiveRunsMissingAllocation,/' \"app/\\(admin\\)/partial-bags/page.tsx\")",
-      "Bash(perl -pi -e 's/expect\\\\\\(navSrc\\\\\\)\\\\.toMatch\\\\\\(\\\\/href: \"\\\\\\\\\\\\/po-closeout\", label: \"PO closeout\"\\\\/\\\\\\);/expect\\(navSrc\\).toMatch\\(\\\\/href: \"\\\\\\\\\\\\/po-closeout\", label: \"Close out POs\"\\\\/\\);/' \"app/\\(admin\\)/po-closeout/po-closeout-structural.test.ts\")"
+      "Bash(perl -pi -e 's/expect\\\\\\(navSrc\\\\\\)\\\\.toMatch\\\\\\(\\\\/href: \"\\\\\\\\\\\\/po-closeout\", label: \"PO closeout\"\\\\/\\\\\\);/expect\\(navSrc\\).toMatch\\(\\\\/href: \"\\\\\\\\\\\\/po-closeout\", label: \"Close out POs\"\\\\/\\);/' \"app/\\(admin\\)/po-closeout/po-closeout-structural.test.ts\")",
+      "Bash(/Users/sahilkhatri/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/scripts/sdd-workspace docs/superpowers/plans/2026-08-04-closeout-zoho-receiving-shipments.md)",
+      "Bash($SKILL/scripts/review-package *)",
+      "Bash(xxd /Users/sahilkhatri/Projects/Work/luma/drizzle/meta/_journal.json)",
+      "Bash(awk 'NR==1064,NR==1100' /Users/sahilkhatri/Projects/Work/luma/lib/db/queries/zoho-production-output-consolidated.ts)",
+      "Bash(/Users/sahilkhatri/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/scripts/sdd-workspace *)",
+      "Bash(/Users/sahilkhatri/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-08-11-production-engine-p1.md 1)",
+      "Bash(/Users/sahilkhatri/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/scripts/review-package *)",
+      "Bash(/Users/sahilkhatri/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-08-11-production-engine-p1.md 2)",
+      "Bash(/Users/sahilkhatri/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/scripts/task-brief *)",
+      "Bash(npx --prefix /Users/sahilkhatri/Work/luma eslint -c /tmp/eslint-boundary-test/eslint.config.mjs a.ts)",
+      "Bash(cat)",
+      "Bash(npx --prefix /Users/sahilkhatri/Work/luma eslint -c /tmp/eslint-boundary-test/eslint.config.mjs b.ts)",
+      "Bash(awk -F: '$1>1553 && $1<2000')",
+      "Bash(echo \"=== exit: $? ===\")",
+      "Bash(echo \"curl exit: $?\")",
+      "Bash(npx tsx *)",
+      "Bash(awk 'NR<=1588 && /^export const [a-zA-Z]+ = pgTable/ {l=NR\": \"$0} END{}' lib/db/schema.ts)",
+      "Bash(perl -i -ne 'print unless $. >= 2067 && $. <= 2308' \"app/\\(floor\\)/floor/[token]/actions.ts\")",
+      "Bash(perl -i -ne 'print unless \\($. >= 2549 && $. <= 2681\\) || \\($. >= 2459 && $. <= 2504\\)' \"app/\\(floor\\)/floor/[token]/actions.ts\")",
+      "Bash(sed -n '2702,2879p' base-actions.ts)",
+      "Bash(sed -n '373,549p' new-mod.ts)"
     ]
   }
 }

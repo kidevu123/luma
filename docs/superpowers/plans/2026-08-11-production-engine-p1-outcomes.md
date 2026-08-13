@@ -204,11 +204,16 @@ What CI cannot verify: the stream route end-to-end (staging smoke); EventSource 
 
 ### Known Phase 3 gaps (P4 work)
 
-- Non-flow events (`BAG_PAUSED`, `BAG_RESUMED`, etc.) carry `stationKind:
-  null`, so same-kind tablets miss pause/resume updates — a paused bag's
-  peers only learn the truth on next reload. The fix is an in-process
-  stationId-to-kind cache in the projector, stamping every event
-  (flow and non-flow alike) with its originating station's kind.
+- **(a) CLOSED — P4a Task 5**, commit `feat(sse): every stationed notify
+  carries stationKind via process cache`. Non-flow events (`BAG_PAUSED`,
+  `BAG_RESUMED`, etc.) used to carry `stationKind: null`, so same-kind
+  tablets missed pause/resume updates — a paused bag's peers only
+  learned the truth on next reload. Fixed with an in-process
+  stationId-to-kind cache (`lib/projector/station-kind-cache.ts`);
+  `projectEvent`'s notify block now falls back to the cache whenever
+  `queueInfo.stationKind` is null but the event carries a `stationId`,
+  so every stationed notify (flow and non-flow alike) is stamped with
+  its originating station's kind.
 - Events with both `stationId: null` AND non-flow type match no tablet
   at all under the current relevance rule — no station refreshes.
 - The inactive-station page does not mount the refresher, so
@@ -217,3 +222,14 @@ What CI cannot verify: the stream route end-to-end (staging smoke); EventSource 
   existing 404-then-poll path.
 - Consider a `subscribers.size` gauge on the notify bus for observability
   into live SSE connection counts per process.
+
+## Phase 4a outcomes
+
+Branch `feat/production-engine-p4a`. Full fidelity: `advanceBag` now handles all normal-floor workflows without legacy-action fallback.
+
+**Decisions recorded:**
+
+- **Packaging damage granularity:** loose units (operator-counted ripped/damaged loose cards). Mapped to `damaged` field in `AdvanceInput` with `unit: "units"` semantics; routed as `rippedCards` to `recordPackagingComplete`.
+- **Ambiguous product resolution:** operator pick from filtered list (2–3 compatible products auto-filtered by station kind). `PICK_PRODUCT` `NextAction` variant; unambiguous cases auto-resolve.
+
+**Gap (a) closure:** Non-flow events (`BAG_PAUSED`, `BAG_RESUMED`, etc.) now carry `stationKind` via in-process memoization (`lib/projector/station-kind-cache.ts`), so same-kind tablets refresh on pause/resume without reload.

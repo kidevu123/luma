@@ -18,6 +18,10 @@ import {
   type RecordStageEventInput,
   type StationRow,
 } from "./record-stage-event";
+import {
+  recordPackagingComplete,
+  type RecordPackagingCompleteInput,
+} from "./record-packaging-complete";
 
 /** Operation code -> the completion event it fires. Mirrors
  *  LEGACY_EVENT_TYPE_TO_OPERATION in lib/production/routes.ts, inverted. */
@@ -78,6 +82,11 @@ export function buildRecordStageEventInput(args: {
   eventType: string;
   inputs: AdvanceInput["inputs"];
   clientEventId: string;
+  sealingCloseMode?: AdvanceInput["sealingCloseMode"];
+  partialCloseReason?: AdvanceInput["partialCloseReason"];
+  partialCloseReasonNote?: AdvanceInput["partialCloseReasonNote"];
+  overrideEmployeeCode?: AdvanceInput["overrideEmployeeCode"];
+  productId?: AdvanceInput["productId"];
 }): RecordStageEventInput {
   return {
     station: args.station,
@@ -87,49 +96,96 @@ export function buildRecordStageEventInput(args: {
     // Presence, not truthiness: recordStageEvent treats `undefined` as
     // "no counter supplied" and refuses the seal, so a real reading of 0
     // must survive. Under exactOptionalPropertyTypes the key must be
-    // absent rather than present-and-undefined when there is none.
+    // absent rather than present-and-undefined when there is none. The
+    // same discipline applies to every field below: absent stays absent.
     ...(args.inputs.counterPresses != null
       ? { counterPresses: args.inputs.counterPresses }
       : {}),
     packsRemaining: 0,
     cardsReopened: 0,
     ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
-    pickedSealingProductId: null,
+    // The product the operator picked (PICK_PRODUCT) or that
+    // resolveProductChoice auto-resolved. recordStageEvent uses it as a
+    // GUARD — it refuses a sealing segment whose picked product
+    // disagrees with the one already saved on the bag — and never as an
+    // assignment. Null when the gesture carried no product, which is
+    // every non-sealing operation.
+    pickedSealingProductId: args.productId ?? null,
+    ...(args.sealingCloseMode != null
+      ? { sealingCloseMode: args.sealingCloseMode }
+      : {}),
+    ...(args.partialCloseReason != null
+      ? { partialCloseReason: args.partialCloseReason }
+      : {}),
+    ...(args.partialCloseReasonNote != null
+      ? { partialCloseReasonNote: args.partialCloseReasonNote }
+      : {}),
+    ...(args.overrideEmployeeCode != null
+      ? { overrideEmployeeCode: args.overrideEmployeeCode }
+      : {}),
+  };
+}
+
+/** Pure: the AdvanceInput -> RecordPackagingCompleteInput mapping.
+ *  Separated from advanceBag so the count routing is testable without a
+ *  database, mirroring buildRecordStageEventInput. */
+export function buildRecordPackagingCompleteInput(args: {
+  station: StationRow;
+  workflowBagId: string;
+  inputs: AdvanceInput["inputs"];
+  clientEventId: string;
+  keepBagPartial?: AdvanceInput["keepBagPartial"];
+  partialRemainingEstimate?: AdvanceInput["partialRemainingEstimate"];
+  overrideEmployeeCode?: AdvanceInput["overrideEmployeeCode"];
+}): RecordPackagingCompleteInput {
+  return {
+    station: args.station,
+    workflowBagId: args.workflowBagId,
+    masterCases: args.inputs.cases ?? 0,
+    displaysMade: args.inputs.displays ?? 0,
+    looseCards: args.inputs.loose ?? 0,
+    // Operator-counted damage (AdvanceInput.inputs.damaged) is loose
+    // units — ripped cards — per the 2026-08-13 decision, so it maps to
+    // rippedCards. damagedPackaging is packaging-MATERIAL damage (foil,
+    // cases, labels), which stays an exception-flow concern raised by a
+    // supervisor, not something this operator gesture reports; always 0
+    // through this path.
+    damagedPackaging: 0,
+    rippedCards: args.inputs.damaged ?? 0,
+    // Partial-close fields: absent AdvanceInput.keepBagPartial /
+    // partialRemainingEstimate keeps today's default — a bottle bag
+    // closed through advanceBag finalizes as fully empty.
+    keepBagPartial: args.keepBagPartial ?? false,
+    partialRemainingEstimate: args.partialRemainingEstimate ?? null,
+    ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
+    ...(args.overrideEmployeeCode != null
+      ? { operatorCode: args.overrideEmployeeCode }
+      : {}),
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// REMAINING LIMITATIONS — what advanceBag still cannot express.
+// Full fidelity as of P4a; the legacy actions remain only for the old
+// UI (P4b retires them).
 //
-// Task 7 closed the three hard blockers Phase 1 recorded here: sealing
-// carries counterPresses, CLAIM routes to claimQueuedBag instead of
-// recordStageEvent, and HANDPACK_BLISTER resolves its event from the
-// station kind. What is left is not a broken station kind — it is work
-// this contract does not model yet, all of it Phase 4:
-//
-//   PACKAGING multi-counts. AdvanceInput.inputs carries damaged,
-//   displays and loose, and buildRecordStageEventInput reads NEITHER —
-//   countTotal takes `counter ?? cases ?? 0` and the rest are dropped.
-//   A packaging station that counts cases + displays + loose separately,
-//   or reports damage, records only its case count through this path.
-//   PACKAGING_SNAPSHOT is not reachable at all (no intent maps to it).
-//
-//   Partial sealing close-out. Four fields recordStageEvent accepts and
-//   this mapping does not supply:
-//     sealingCloseMode       — full vs partial close; defaults to "whole",
-//                              so a partial close cannot be requested.
-//     partialCloseReason     — required to justify a partial close.
-//     partialCloseReasonNote — the free-text detail for the above.
-//     packsRemaining / cardsReopened — hard-coded to 0 here.
-//
-//   overrideEmployeeCode. No AdvanceInput field carries a per-form
-//   accountability override, so a first-op count with no open shift
-//   throws even when the operator supplied a code. AdvanceInput
-//   .operatorSessionId is still unread for the same reason.
-//
-// Consequence: the floor's fireStageEventAction remains the write path
-// for packaging counts and partial sealing close-outs. A caller wired to
-// advanceBag today must not offer those gestures.
+// One product boundary is deliberate rather than missing. advanceBag
+// CARRIES a product (AdvanceInput.productId -> pickedSealingProductId)
+// but does not ASSIGN one:
+//   - Sealing. Saving a finished SKU onto an unmapped bag is
+//     saveSealingProductAction's transaction (update workflow_bags +
+//     PRODUCT_MAPPED + ensureOpenRawBagAllocationSessionForWorkflowBag +
+//     audit). It is a separate operator gesture with its own
+//     idempotency, so the pick and the work stay two calls. P4b's screen
+//     makes both; extracting that body into an engine assignBagProduct()
+//     (the P1 Task 7 verbatim-relocation playbook) is P4b's to do, and
+//     must keep the allocation-session step or the raw-bag ledger silently
+//     stops opening.
+//   - First operation. The product lands in the workflow_bags INSERT
+//     inside scanCardAction (actions.ts:397-403) — the same statement
+//     that creates the bag — so there is nothing for recordStageEvent to
+//     carry. advanceBag never creates bags: CLAIM takes an already-queued
+//     one through claimQueuedBag. Fresh-card scanning is P4b's scan-first
+//     UX.
 // ─────────────────────────────────────────────────────────────────────
 export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
   try {
@@ -193,6 +249,37 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
   );
   if (!eventType) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
 
+  // PACKAGING's COMPLETE carries three counts plus damage and drives
+  // finished-lot auto-creation — recordStageEvent's single countTotal
+  // cannot express that, so this intent/operation pair routes to its own
+  // recording function instead. Every other intent and operation still
+  // goes through recordStageEvent below.
+  if (input.intent === "COMPLETE" && resolved.operation.operationCode === "PACKAGING") {
+    const packagingResult = await recordPackagingComplete(
+      buildRecordPackagingCompleteInput({
+        station: stationRow,
+        workflowBagId: input.workflowBagId,
+        inputs: input.inputs,
+        clientEventId: input.clientEventId,
+        keepBagPartial: input.keepBagPartial,
+        partialRemainingEstimate: input.partialRemainingEstimate,
+        overrideEmployeeCode: input.overrideEmployeeCode,
+      }),
+    );
+    if ("error" in packagingResult) {
+      return {
+        ok: false,
+        blocker: {
+          code: "ADVANCE_REJECTED",
+          operatorSentence: "This step could not be recorded. Ask a supervisor.",
+          supervisorDetail: packagingResult.error,
+          suggestedAction: "NOTIFY_SUPERVISOR",
+        },
+      };
+    }
+    return { ok: true, view: await getStationView(input.stationId) };
+  }
+
   const result = await recordStageEvent(
     buildRecordStageEventInput({
       station: stationRow,
@@ -200,6 +287,11 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
       eventType,
       inputs: input.inputs,
       clientEventId: input.clientEventId,
+      sealingCloseMode: input.sealingCloseMode,
+      partialCloseReason: input.partialCloseReason,
+      partialCloseReasonNote: input.partialCloseReasonNote,
+      overrideEmployeeCode: input.overrideEmployeeCode,
+      productId: input.productId,
     }),
   );
 

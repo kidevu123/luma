@@ -11,7 +11,15 @@ const repo = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const closeActionsSrc = repo("app/(floor)/floor/[token]/bag-allocation-actions.ts");
 const adminCorrectionsSrc = repo("lib/production/partial-bag-admin-corrections.ts");
 const lifecycleSrc = repo("lib/production/raw-bag-allocation-lifecycle.ts");
-const packagingActionsSrc = repo("app/(floor)/floor/[token]/actions.ts");
+// PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's body and
+// resolveDeferredQrReleaseAfterPackaging moved verbatim to
+// lib/production/engine/record-packaging-complete.ts (actions.ts is
+// "use server"). Stitched back in where the body used to sit so this
+// scanner keeps covering the whole packaging QR-release path unchanged.
+const packagingActionsSrc = repo("app/(floor)/floor/[token]/actions.ts").replace(
+  "// ── lookup card by scan token",
+  `${repo("lib/production/engine/record-packaging-complete.ts")}\n// ── lookup card by scan token`,
+);
 const varietyActionsSrc = repo("app/(floor)/floor/[token]/variety-run-actions.ts");
 const bagEditsSrc = repo("lib/db/queries/bag-edits.ts");
 const partialBagsSrc = repo("lib/production/partial-bags.ts");

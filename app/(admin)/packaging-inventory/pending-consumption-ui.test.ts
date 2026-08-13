@@ -16,10 +16,18 @@ const outputPageSrc = readFileSync(
 const actionsSrc = readFileSync(
   join(import.meta.dirname, "../../(floor)/floor/[token]/actions.ts"),
   "utf8",
-).replace(
-  "// ── pause / resume",
-  `${readFileSync(join(import.meta.dirname, "../../../lib/production/engine/record-stage-event.ts"), "utf8")}\n// ── pause / resume`,
-);
+)
+  .replace(
+    "// ── pause / resume",
+    `${readFileSync(join(import.meta.dirname, "../../../lib/production/engine/record-stage-event.ts"), "utf8")}\n// ── pause / resume`,
+  )
+  // PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's body moved
+  // verbatim to lib/production/engine/record-packaging-complete.ts. Same
+  // treatment — stitched back in where it used to sit.
+  .replace(
+    "// ── lookup card by scan token",
+    `${readFileSync(join(import.meta.dirname, "../../../lib/production/engine/record-packaging-complete.ts"), "utf8")}\n// ── lookup card by scan token`,
+  );
 const materialSrc = readFileSync(
   join(import.meta.dirname, "../../../lib/production/handpack-seal-material.ts"),
   "utf8",

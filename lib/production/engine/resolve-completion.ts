@@ -39,11 +39,12 @@ export function resolveCompletionInputs(
     inputs.push({
       key: "damaged",
       label: "Damaged",
-      // Packaging reports three different units (cases, displays, loose
-      // units), so a single outputUnit would mislabel two of them.
-      // Deliberately unitless until Phase 4 confirms with the floor
-      // which granularity operators actually count damage in.
-      unit: PACKAGING_OPERATIONS.has(op.operationCode) ? null : op.outputUnit,
+      // 2026-08-13 decision: packaging damage is counted in loose
+      // cards/units regardless of which of the three packaging counts
+      // (cases, displays, loose) the operator is otherwise reporting —
+      // one field, unit "units". Non-packaging operations keep the
+      // operation's own outputUnit.
+      unit: PACKAGING_OPERATIONS.has(op.operationCode) ? "units" : op.outputUnit,
       required: false,
     });
   }
