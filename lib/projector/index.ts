@@ -63,6 +63,7 @@ import {
 import { reprojectBagMetricsForWorkflowBag } from "./reproject-bag-metrics";
 import { projectWorkflowRecoveryEvent } from "./workflow-recovery-projection";
 import type { WorkflowRecoveryPayload } from "@/lib/production/workflow-recovery";
+import { getStationKind } from "./station-kind-cache";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -745,11 +746,21 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
   //    client. Payload is intentionally small: clients re-fetch the
   //    affected rows from the read models. Postgres NOTIFY has an 8KB
   //    payload limit, so we never embed the full event here.
+  // P4a Task 5 — queueInfo.stationKind is only populated for
+  // FLOW_EVENTS (bag-queue.ts's pre-filter); non-flow events like
+  // BAG_PAUSED/BAG_RESUMED left it null even when the event carries
+  // a stationId, so same-kind tablets never learned about pauses
+  // (P3 gap A). The process cache makes every stationed notify
+  // carry stationKind without adding a query on the common path
+  // (FLOW_EVENTS already resolved it above; this only fires for the
+  // rest).
   const notifyPayload = {
     eventType: ev.eventType,
     workflowBagId: ev.workflowBagId,
     stationId: ev.stationId ?? null,
-    stationKind: queueInfo.stationKind,
+    stationKind:
+      queueInfo.stationKind ??
+      (ev.stationId ? await getStationKind(tx, ev.stationId) : null),
     queueStageKey: queueInfo.queueStageKey,
     occurredAt: occurredAt.toISOString(),
   };

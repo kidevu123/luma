@@ -12,7 +12,6 @@ import {
   readBagQueue,
   receives,
   smallBoxes,
-  stations,
   tabletTypes,
   workflowBags,
   workflowEvents,
@@ -20,6 +19,7 @@ import {
 import { deriveQueueTransition } from "@/lib/production/engine/queue-transitions";
 import { legacyProductKindToRoute } from "@/lib/production/routes";
 import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
+import { getStationKind } from "./station-kind-cache";
 
 type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
 
@@ -66,14 +66,9 @@ export async function applyBagQueueTransition(
     return { stationKind: null, queueStageKey: null };
   }
 
-  const stationKind = ev.stationId
-    ? (
-        await tx
-          .select({ kind: stations.kind })
-          .from(stations)
-          .where(eq(stations.id, ev.stationId))
-      )[0]?.kind ?? null
-    : null;
+  // P4a Task 5 — routed through the process-wide cache (station kind
+  // is a floor-layout fact, not a runtime one); no behaviour change.
+  const stationKind = ev.stationId ? await getStationKind(tx, ev.stationId) : null;
 
   const [bagRow] = await tx
     .select({

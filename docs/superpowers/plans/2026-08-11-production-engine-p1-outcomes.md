@@ -204,11 +204,16 @@ What CI cannot verify: the stream route end-to-end (staging smoke); EventSource 
 
 ### Known Phase 3 gaps (P4 work)
 
-- Non-flow events (`BAG_PAUSED`, `BAG_RESUMED`, etc.) carry `stationKind:
-  null`, so same-kind tablets miss pause/resume updates — a paused bag's
-  peers only learn the truth on next reload. The fix is an in-process
-  stationId-to-kind cache in the projector, stamping every event
-  (flow and non-flow alike) with its originating station's kind.
+- **(a) CLOSED — P4a Task 5**, commit `feat(sse): every stationed notify
+  carries stationKind via process cache`. Non-flow events (`BAG_PAUSED`,
+  `BAG_RESUMED`, etc.) used to carry `stationKind: null`, so same-kind
+  tablets missed pause/resume updates — a paused bag's peers only
+  learned the truth on next reload. Fixed with an in-process
+  stationId-to-kind cache (`lib/projector/station-kind-cache.ts`);
+  `projectEvent`'s notify block now falls back to the cache whenever
+  `queueInfo.stationKind` is null but the event carries a `stationId`,
+  so every stationed notify (flow and non-flow alike) is stamped with
+  its originating station's kind.
 - Events with both `stationId: null` AND non-flow type match no tablet
   at all under the current relevance rule — no station refreshes.
 - The inactive-station page does not mount the refresher, so
