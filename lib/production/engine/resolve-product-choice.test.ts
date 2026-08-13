@@ -44,6 +44,7 @@ describe("resolveProductChoice", () => {
     // Two callers must never show the same operator two different button
     // orders for the same bag.
     const out = resolveProductChoice([CHOCOLATE_TRIAL, CHOCOLATE, CHOCOLATE_60]);
+    expect(out.kind).toBe("PICK");
     if (out.kind === "PICK") {
       expect(out.options.map((o) => o.sku)).toEqual(["CB-TRIAL", "CB-30", "CB-60"]);
     }
@@ -51,6 +52,7 @@ describe("resolveProductChoice", () => {
 
   it("carries name and sku so the operator reads words, not ids", () => {
     const out = resolveProductChoice([CHOCOLATE, CHOCOLATE_60]);
+    expect(out.kind).toBe("PICK");
     if (out.kind === "PICK") {
       expect(out.options[0]).toEqual({
         productId: "prod-1",
@@ -65,6 +67,7 @@ describe("resolveProductChoice", () => {
     // the row data the view was built from.
     const input = [CHOCOLATE, CHOCOLATE_60];
     const out = resolveProductChoice(input);
+    expect(out.kind).toBe("PICK");
     if (out.kind === "PICK") {
       expect(out.options).not.toBe(input);
       expect(out.options).toEqual(input);
