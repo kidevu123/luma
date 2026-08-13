@@ -175,6 +175,33 @@ describe("buildRecordStageEventInput", () => {
     expect(out.pickedSealingProductId).toBeNull();
   });
 
+  it("carries the picked product through as the sealing product guard", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counterPresses: 4 },
+      clientEventId: "cid-1",
+      productId: "prod-1",
+    });
+    expect(out.pickedSealingProductId).toBe("prod-1");
+  });
+
+  it("nulls the sealing product guard rather than dropping the key", () => {
+    // recordStageEvent destructures pickedSealingProductId and compares
+    // it to the bag's saved product; the field is required, not optional,
+    // so an absent pick must arrive as an explicit null.
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "BLISTER_COMPLETE",
+      inputs: { counter: 12 },
+      clientEventId: "cid-1",
+    });
+    expect("pickedSealingProductId" in out).toBe(true);
+    expect(out.pickedSealingProductId).toBeNull();
+  });
+
   it("carries sealingCloseMode, partialCloseReason, partialCloseReasonNote, and overrideEmployeeCode through when supplied", () => {
     const out = buildRecordStageEventInput({
       station: STATION,

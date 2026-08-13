@@ -86,6 +86,7 @@ export function buildRecordStageEventInput(args: {
   partialCloseReason?: AdvanceInput["partialCloseReason"];
   partialCloseReasonNote?: AdvanceInput["partialCloseReasonNote"];
   overrideEmployeeCode?: AdvanceInput["overrideEmployeeCode"];
+  productId?: AdvanceInput["productId"];
 }): RecordStageEventInput {
   return {
     station: args.station,
@@ -103,7 +104,13 @@ export function buildRecordStageEventInput(args: {
     packsRemaining: 0,
     cardsReopened: 0,
     ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
-    pickedSealingProductId: null,
+    // The product the operator picked (PICK_PRODUCT) or that
+    // resolveProductChoice auto-resolved. recordStageEvent uses it as a
+    // GUARD — it refuses a sealing segment whose picked product
+    // disagrees with the one already saved on the bag — and never as an
+    // assignment. Null when the gesture carried no product, which is
+    // every non-sealing operation.
+    pickedSealingProductId: args.productId ?? null,
     ...(args.sealingCloseMode != null
       ? { sealingCloseMode: args.sealingCloseMode }
       : {}),
@@ -161,9 +168,24 @@ export function buildRecordPackagingCompleteInput(args: {
 // Full fidelity as of P4a; the legacy actions remain only for the old
 // UI (P4b retires them).
 //
-//   Sealing / first-op product selection. pickedSealingProductId is
-//   hard-coded null and PRODUCT_MAPPED is unreachable through this path.
-//   Task 4 closes this.
+// One product boundary is deliberate rather than missing. advanceBag
+// CARRIES a product (AdvanceInput.productId -> pickedSealingProductId)
+// but does not ASSIGN one:
+//   - Sealing. Saving a finished SKU onto an unmapped bag is
+//     saveSealingProductAction's transaction (update workflow_bags +
+//     PRODUCT_MAPPED + ensureOpenRawBagAllocationSessionForWorkflowBag +
+//     audit). It is a separate operator gesture with its own
+//     idempotency, so the pick and the work stay two calls. P4b's screen
+//     makes both; extracting that body into an engine assignBagProduct()
+//     (the P1 Task 7 verbatim-relocation playbook) is P4b's to do, and
+//     must keep the allocation-session step or the raw-bag ledger silently
+//     stops opening.
+//   - First operation. The product lands in the workflow_bags INSERT
+//     inside scanCardAction (actions.ts:397-403) — the same statement
+//     that creates the bag — so there is nothing for recordStageEvent to
+//     carry. advanceBag never creates bags: CLAIM takes an already-queued
+//     one through claimQueuedBag. Fresh-card scanning is P4b's scan-first
+//     UX.
 // ─────────────────────────────────────────────────────────────────────
 export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
   try {
@@ -269,6 +291,7 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
       partialCloseReason: input.partialCloseReason,
       partialCloseReasonNote: input.partialCloseReasonNote,
       overrideEmployeeCode: input.overrideEmployeeCode,
+      productId: input.productId,
     }),
   );
 

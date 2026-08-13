@@ -9,6 +9,7 @@ export type {
   CompletionInput,
   CurrentWork,
   NextAction,
+  ProductOption,
   StationView,
   UpNextBag,
 } from "./types";
@@ -30,6 +31,8 @@ export type { RecordPackagingCompleteInput } from "./record-packaging-complete";
 export { evaluateChecks, blockersFromChecks, blockerFor } from "./resolve-exceptions";
 export type { CheckResult, EngineFacts } from "./resolve-exceptions";
 export { resolveCompletionInputs } from "./resolve-completion";
+export { resolveProductChoice } from "./resolve-product-choice";
+export type { ProductChoice } from "./resolve-product-choice";
 export { resolveOperation, pickOperationForStationKind } from "./resolve-operation";
 export type { ResolvedOperation } from "./resolve-operation";
 export { bagStageToQueueStageKey, queueStageKeyToBagStage } from "./stage-lexicon";
