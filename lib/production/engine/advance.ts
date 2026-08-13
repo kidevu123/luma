@@ -8,7 +8,6 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { stations, workflowBags } from "@/lib/db/schema";
 import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
-import { SEALING_STATION_KINDS } from "@/lib/production/sealing-product";
 import type { AdvanceInput, AdvanceIntent, AdvanceResult } from "./types";
 import { assignBagProduct } from "./assign-bag-product";
 import { claimQueuedBag } from "./claim-queued-bag";
@@ -52,6 +51,25 @@ const SEALING_EVENTS_REQUIRING_SAVED_PRODUCT: ReadonlySet<string> = new Set([
   SEALING_SEGMENT_EVENT,
   "SEALING_COMPLETE",
 ]);
+
+/** Pure: does this gesture have to assign the product BEFORE the work is
+ *  recorded? True only for an unmapped bag whose gesture carries an
+ *  operator pick at one of the two events recordStageEvent refuses on an
+ *  unmapped bag. Separated from advanceBag so reachability is testable
+ *  without a database — the ordering of the calls in the source says
+ *  nothing about whether the branch can be entered. */
+export function shouldAssignProductFirst(args: {
+  bagProductId: string | null | undefined;
+  inputProductId: string | null | undefined;
+  eventType: string;
+}): boolean {
+  // Already mapped: never re-map here. A disagreeing pick must travel on
+  // to recordStageEvent's guard and be rejected, which is what makes
+  // product identity a one-way lock.
+  if (args.bagProductId) return false;
+  if (args.inputProductId == null) return false;
+  return SEALING_EVENTS_REQUIRING_SAVED_PRODUCT.has(args.eventType);
+}
 
 /** Station kinds whose completion event is NOT the one their aliased
  *  operation implies. resolve-operation aliases HANDPACK_BLISTER onto the
@@ -245,8 +263,17 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
     .from(workflowBags)
     .where(eq(workflowBags.id, input.workflowBagId));
 
+  // ASSIGN-PRODUCT-EXTRACT-1 — resolve the operation for the product that
+  // is ABOUT TO BE USED, not only the one already on the bag. An unmapped
+  // bag has no route (resolveOperation returns null on a null productId),
+  // so resolving on `bag.productId` alone would return OPERATION_UNRESOLVED
+  // for precisely the case the assign step exists to serve — an unmapped
+  // bag plus an operator product pick — and the assignment below would be
+  // unreachable. The bag's own product still WINS when it has one: a pick
+  // that disagrees must reach recordStageEvent's guard and be rejected
+  // (SEALING_PRODUCT_ALREADY_SAVED_ERROR), never silently re-route the bag.
   const resolved = await resolveOperation({
-    productId: bag?.productId ?? null,
+    productId: bag?.productId ?? input.productId ?? null,
     stationKind: stationRow.kind,
   });
   if (!resolved) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
@@ -292,29 +319,35 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
   // ASSIGN-PRODUCT-EXTRACT-1 — the old UI made TWO calls at sealing: save
   // the product (saveSealingProductAction), then record the work. The
   // operator screen makes one gesture, so advanceBag runs the same
-  // sequence in the same order. The condition is deliberately the mirror
-  // of recordStageEvent's guard (a sealing segment/close at a
-  // sealing-capable station refuses an unmapped bag): assign writes
-  // workflow_bags.product_id, and the guard below then MATCHES the id the
-  // gesture carried instead of rejecting it. A bag that already carries a
-  // product is never touched here — re-mapping stays a rejection
-  // (SEALING_PRODUCT_ALREADY_SAVED_ERROR), which is what makes product
-  // identity a one-way lock.
+  // sequence in the same order: validate the operation, assign, record.
+  // Two sequential transactions, exactly as the two-gesture UI produced —
+  // the assign COMMITS before the record starts. If the record then fails,
+  // the resulting state (product mapped, work not recorded) is the same
+  // state the legacy save-then-failed-complete left behind, and the same
+  // retry fixes it. There is deliberately no outer transaction: adding one
+  // would change the legacy semantics this task is relocating, not
+  // preserving.
+  //
+  // The condition mirrors recordStageEvent's guard (a sealing segment or
+  // close refuses an unmapped bag): assign writes workflow_bags.product_id
+  // from the SAME id the gesture carried, and the guard then MATCHES it
+  // instead of rejecting.
   if (
-    input.intent === "COMPLETE" &&
-    input.productId &&
-    !bag?.productId &&
-    SEALING_EVENTS_REQUIRING_SAVED_PRODUCT.has(eventType) &&
-    SEALING_STATION_KINDS.has(stationRow.kind)
+    shouldAssignProductFirst({
+      bagProductId: bag?.productId,
+      inputProductId: input.productId,
+      eventType,
+    })
   ) {
     const assigned = await assignBagProduct({
       station: stationRow,
       workflowBagId: input.workflowBagId,
-      productId: input.productId,
-      // One gesture, two events. They cannot share an idempotency key —
-      // the partial unique index is per client_event_id — so the product
-      // map gets a derived suffix, exactly as the packaging auto-finalize
-      // does with "-auto-finalize".
+      // shouldAssignProductFirst returned true, so this is non-null.
+      productId: input.productId as string,
+      // One gesture, two events. The idempotency index is
+      // (workflow_bag_id, event_type, client_event_id), so the two events
+      // would not collide even on a shared key — the suffix is defensive
+      // clarity in the audit trail, not a correctness requirement.
       ...(input.clientEventId
         ? { clientEventId: `${input.clientEventId}-product` }
         : {}),
