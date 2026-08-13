@@ -51,6 +51,29 @@ export type {
   RaiseProductionExceptionResult,
 } from "./raise-production-exception";
 export { resolveCompletionInputs } from "./resolve-completion";
+export {
+  assembleCompletionInputs,
+  autoProductSubmission,
+  completionFieldLabel,
+  helpChecklistForView,
+  operatorMaterialLinks,
+  operatorPauseModel,
+  partialScreenFor,
+  pauseCounterSnapshotCopy,
+  pauseNeedsCounterSnapshot,
+  primaryBlockerSentence,
+  progressPercent,
+  shouldSubmitAutoProduct,
+  upNextSummary,
+} from "./operator-screen-model";
+export type {
+  AutoProductSubmission,
+  CompletionAssembly,
+  FloorSupervisorToolLink,
+  OperatorPauseModel,
+  PartialScreen,
+  PauseReason,
+} from "./operator-screen-model";
 export { resolveProductChoice } from "./resolve-product-choice";
 export type { ProductChoice } from "./resolve-product-choice";
 export { resolveOperation, pickOperationForStationKind } from "./resolve-operation";
@@ -74,4 +97,14 @@ export { medianCycleMinutes, etaMinutes } from "./eta";
 export { deriveQueueTransition, queueAfterWorkAt, queueRank } from "./queue-transitions";
 export type { QueueDestination, QueueTransition } from "./queue-transitions";
 export { resolveStationByToken, isStationTokenShape } from "../station-token";
+// Floor auth, re-exported for the same reason resolveStationByToken is:
+// every engine write documents "the caller MUST have authenticated the
+// station" as a precondition, and a floor action cannot satisfy it
+// without the active-station check that authStation performs. Without
+// this the new operator actions would either reach across the boundary
+// or re-implement the refusal with their own message.
+export {
+  assertStationActiveForFloorActions,
+  STATION_INACTIVE_FLOOR_MESSAGE,
+} from "../station-management";
 export { floorEventRelevantToStation, queueKeysForStationKind } from "./floor-event-relevance";
