@@ -4,6 +4,9 @@ import {
   autoProductSubmission,
   completionFieldLabel,
   helpChecklistForView,
+  helpIdleNote,
+  helpNotifyDetail,
+  EXCEPTION_DETAIL_MAX_LENGTH,
   operatorMaterialLinks,
   operatorPauseModel,
   partialScreenFor,
@@ -251,15 +254,62 @@ describe("helpChecklistForView", () => {
     expect(checks.find((c) => c.id === "product")?.passed).toBe(false);
   });
 
-  it("mirrors the engine's own facts when no bag is in hand", () => {
-    const checks = helpChecklistForView(
-      view({ current: null, nextAction: { kind: "SCAN_TO_CLAIM", expected: null } }),
+  it("claims nothing is wrong on a healthy idle station", () => {
+    const idle = view({
+      current: null,
+      nextAction: { kind: "SCAN_TO_CLAIM", expected: null },
+    });
+    const checks = helpChecklistForView(idle);
+    // The three bag-in-hand rows are dropped, not shown failing.
+    expect(checks.map((c) => c.id)).toEqual([
+      "materials",
+      "upstream",
+      "hold",
+      "paused",
+      "finalized",
+    ]);
+    expect(checks.every((c) => c.passed)).toBe(true);
+    expect(helpIdleNote(idle)).toBe("No bag at this station yet.");
+  });
+
+  it("has no idle note once a bag is in hand", () => {
+    expect(helpIdleNote(view())).toBeNull();
+  });
+});
+
+describe("helpNotifyDetail", () => {
+  it("falls back to a plain request when nothing is failing", () => {
+    expect(helpNotifyDetail(helpChecklistForView(view()))).toBe(
+      "Operator asked for help from the station screen.",
     );
-    const byId = new Map(checks.map((c) => [c.id, c.passed]));
-    expect(byId.get("bag")).toBe(false);
-    expect(byId.get("product")).toBe(false);
-    expect(byId.get("operation")).toBe(false);
-    expect(byId.get("paused")).toBe(true);
+  });
+
+  it("sends the engine's own sentences for the open items", () => {
+    const detail = helpNotifyDetail(
+      helpChecklistForView(
+        view({ nextAction: { kind: "BLOCKED", blockers: [blockerFor("BAG_ON_HOLD")] } }),
+      ),
+    );
+    expect(detail).toBe(blockerFor("BAG_ON_HOLD").operatorSentence);
+  });
+
+  it("caps the detail at what the action will accept", () => {
+    const long: Parameters<typeof helpNotifyDetail>[0] = Array.from(
+      { length: 40 },
+      (_unused, i) => ({
+        id: `row-${i}`,
+        label: `Row ${i}`,
+        passed: false,
+        blocker: {
+          code: `CODE_${i}`,
+          operatorSentence: "This bag is on hold. Ask a supervisor.",
+          supervisorDetail: "",
+          suggestedAction: "NOTIFY_SUPERVISOR" as const,
+        },
+      }),
+    );
+    const detail = helpNotifyDetail(long);
+    expect(detail.length).toBeLessThanOrEqual(EXCEPTION_DETAIL_MAX_LENGTH);
   });
 });
 

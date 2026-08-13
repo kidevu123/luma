@@ -198,11 +198,14 @@ export function partialScreenFor(action: NextAction): PartialScreen | null {
  *  function, not from a copy in the UI.
  *
  *  Two view shapes need care:
- *    - No current bag (SCAN_TO_CLAIM / OPEN_SHIFT). assembleStationView
- *      evaluates bagRecognized/productResolved/operationResolved as false
- *      in exactly this case — buildNextAction just returns before
- *      consulting the blockers — so the checklist mirrors that instead of
- *      claiming everything is fine.
+ *    - No current bag (SCAN_TO_CLAIM / OPEN_SHIFT). The three rows that
+ *      describe a bag IN HAND — recognized, product, station — are
+ *      DROPPED rather than shown failing. assembleStationView does
+ *      evaluate them as false in this case, but buildNextAction never
+ *      consults them (it returns SCAN_TO_CLAIM first), so rendering three
+ *      red crosses on a perfectly healthy idle station would tell the
+ *      operator something is wrong when nothing is. helpIdleNote() says
+ *      what is actually true instead.
  *    - PICK_PRODUCT. The product check DID fail (that is why there is a
  *      pick); buildNextAction promotes it over the blocker because the
  *      operator can answer it. Help still shows it as the open item. */
@@ -216,10 +219,10 @@ export function helpChecklistForView(view: StationView): CheckResult[] {
         : [],
   );
   const hasBag = view.current != null;
-  return evaluateChecks({
-    bagRecognized: hasBag && !codes.has("BAG_UNRECOGNIZED"),
-    productResolved: hasBag && !codes.has("PRODUCT_UNRESOLVED"),
-    operationResolved: hasBag && !codes.has("OPERATION_UNRESOLVED"),
+  const rows = evaluateChecks({
+    bagRecognized: !codes.has("BAG_UNRECOGNIZED"),
+    productResolved: !codes.has("PRODUCT_UNRESOLVED"),
+    operationResolved: !codes.has("OPERATION_UNRESOLVED"),
     materialsAvailable: !codes.has("MATERIALS_UNAVAILABLE"),
     upstreamStageComplete: !codes.has("UPSTREAM_INCOMPLETE"),
     bagPaused: codes.has("BAG_PAUSED"),
@@ -230,6 +233,40 @@ export function helpChecklistForView(view: StationView): CheckResult[] {
     // station name the view does not know.
     waitingForLabel: null,
   });
+  if (hasBag) return rows;
+  return rows.filter((row) => !BAG_IN_HAND_CHECK_IDS.has(row.id));
+}
+
+/** The rows that only mean anything once a bag is at the station. */
+const BAG_IN_HAND_CHECK_IDS: ReadonlySet<string> = new Set([
+  "bag",
+  "product",
+  "operation",
+]);
+
+/** What ? Help says INSTEAD of the dropped rows: the neutral truth about
+ *  an idle station, never a fault. Null once a bag is in hand. */
+export function helpIdleNote(view: StationView): string | null {
+  return view.current == null ? "No bag at this station yet." : null;
+}
+
+/** raiseProductionException's detail column, as the action's zod schema
+ *  bounds it. Kept next to the builder so the two cannot drift. */
+export const EXCEPTION_DETAIL_MAX_LENGTH = 500;
+
+/** The note [ Notify supervisor ] sends: every open item, in the
+ *  engine's own words, truncated to what the action will accept. A long
+ *  checklist must not turn a supervisor call into a validation error the
+ *  operator cannot act on. */
+export function helpNotifyDetail(checks: readonly CheckResult[]): string {
+  const sentences = checks
+    .filter((c) => !c.passed && c.blocker != null)
+    .map((c) => c.blocker?.operatorSentence ?? "")
+    .filter((s) => s !== "");
+  const text =
+    sentences.join(" ") || "Operator asked for help from the station screen.";
+  if (text.length <= EXCEPTION_DETAIL_MAX_LENGTH) return text;
+  return `${text.slice(0, EXCEPTION_DETAIL_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
 /** The sentence the ? Help footer explains, or null when nothing is

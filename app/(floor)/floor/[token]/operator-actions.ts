@@ -107,6 +107,14 @@ function optionalField(formData: FormData, key: string): string | undefined {
  *  advanceBag's decision, from the bag's route — this action does not
  *  know and must not guess.
  *
+ *  advanceBag returns the POST-WRITE StationView on success and this
+ *  action discards it, answering { ok: true } and letting revalidatePath
+ *  re-render the page: the screen is a server-rendered `view` prop, so a
+ *  returned view would have to be held in client state and would then
+ *  compete with the SSE/revalidate refresh for which one is current —
+ *  two sources of truth for the same screen. Task 5 owns that call once
+ *  the component is mounted and the refresh path is visible.
+ *
  *  RESOLVE_PARTIAL is accepted and forwarded even though the engine
  *  currently REFUSES it (intentToEventType returns null for that intent,
  *  so advanceBag answers with a blocker). That is deliberate: the screen

@@ -44,6 +44,8 @@ import {
   autoProductSubmission,
   completionFieldLabel,
   helpChecklistForView,
+  helpIdleNote,
+  helpNotifyDetail,
   operatorMaterialLinks,
   operatorPauseModel,
   partialScreenFor,
@@ -126,6 +128,18 @@ export function OperatorScreen({
   const { station, current, nextAction } = view;
   const stationId = station.id;
   const operatorSessionId = view.operator?.sessionId ?? null;
+  const currentBagId = current?.workflowBagId ?? null;
+
+  // Typed counts belong to ONE bag. A live refresh (SSE, revalidate,
+  // another station releasing work here) can swap the bag under the
+  // operator mid-entry, and carrying "52" over to the next bag would
+  // submit a count nobody made. Every per-bag entry resets with the id.
+  React.useEffect(() => {
+    setValues({});
+    setPartialQty("");
+    setKeepWorkingBag(false);
+    setError(null);
+  }, [currentBagId]);
 
   /** One place where an action is called, so pending/error handling
    *  cannot drift between the fifteen buttons on this screen. */
@@ -217,8 +231,8 @@ export function OperatorScreen({
   );
 
   const claim = React.useCallback(
-    async (args: { scanToken?: string; workflowBagId?: string }) => {
-      await run(async () => {
+    async (args: { scanToken?: string; workflowBagId?: string }): Promise<boolean> => {
+      return run(async () => {
         const fd = baseForm();
         if (args.scanToken) fd.set("scanToken", args.scanToken);
         if (args.workflowBagId) fd.set("workflowBagId", args.workflowBagId);
@@ -238,15 +252,7 @@ export function OperatorScreen({
       />
 
       <main className="flex-1 space-y-5 px-4 pb-28 pt-4">
-        {error ? (
-          <p
-            role="alert"
-            className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-base text-rose-900"
-          >
-            <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
-            <span>{error}</span>
-          </p>
-        ) : null}
+        <ErrorAlert message={error} />
 
         {nextAction.kind === "OPEN_SHIFT" ? (
           <OperatorSessionPanel
@@ -363,6 +369,12 @@ export function OperatorScreen({
               <CheckCircle2 className="h-6 w-6" />
               {nextAction.label}
             </button>
+            {/* The mock's "Scan next bag" line: a hint about what happens
+                after DONE, not a second camera. The claim screen (with
+                the real scanner) is what this station shows next. */}
+            <p className="text-center text-base text-text-muted">
+              Scan next bag when this one is done.
+            </p>
           </section>
         ) : null}
 
@@ -416,7 +428,14 @@ export function OperatorScreen({
           />
         ) : null}
 
-        {nextAction.kind === "PICK_PRODUCT" ? (
+        {nextAction.kind === "PICK_PRODUCT" && auto ? (
+          // The AUTO case: one compatible product is not a question, so
+          // the screen shows what it is doing instead of a chooser with
+          // a single button the operator would have to press.
+          <p className="text-center text-lg text-text-muted">Setting product…</p>
+        ) : null}
+
+        {nextAction.kind === "PICK_PRODUCT" && !auto ? (
           <section className="space-y-3">
             <p className="text-center text-xl font-semibold">
               Which product is this bag making?
@@ -483,13 +502,19 @@ export function OperatorScreen({
           view={view}
           token={token}
           pending={pending}
+          error={error}
           reportProblem={reportProblem}
           onClose={() => setSheet("none")}
           onPause={() => setSheet("pause")}
           onEnterCode={() => setSheet("code")}
           onResume={() =>
             void run(async () => {
-              if (!current) return;
+              // Silence here would look like a successful resume. The bag
+              // can vanish between the sheet opening and the press (a
+              // live refresh, another station taking it).
+              if (!current) {
+                return { error: "There is no bag at this station to resume." };
+              }
               const fd = baseForm();
               fd.set("workflowBagId", current.workflowBagId);
               return resumeBagAction(fd);
@@ -510,6 +535,7 @@ export function OperatorScreen({
         <PauseSheet
           stationKind={station.kind}
           pending={pending}
+          error={error}
           onClose={() => setSheet("none")}
           onSubmit={async (reason, counterSnapshot) => {
             const ok = await run(async () => {
@@ -527,10 +553,12 @@ export function OperatorScreen({
       {sheet === "code" ? (
         <TypedCodeSheet
           pending={pending}
+          error={error}
           onClose={() => setSheet("none")}
           onSubmit={async (code) => {
-            await claim({ scanToken: code });
-            setSheet("none");
+            // Stay open on a refusal — the sheet is where the operator
+            // can fix the code they typed.
+            if (await claim({ scanToken: code })) setSheet("none");
           }}
         />
       ) : null}
@@ -539,6 +567,7 @@ export function OperatorScreen({
         <HelpSheet
           view={view}
           pending={pending}
+          error={error}
           onClose={() => setSheet("none")}
           onNotify={async (detail) => {
             const ok = await run(async () => {
@@ -641,12 +670,31 @@ function Progress({
   );
 }
 
+/** The only error surface on this screen. Rendered in main AND inside
+ *  every sheet: a sheet covers main, so an error raised by a button the
+ *  operator pressed IN a sheet would otherwise land behind it and read
+ *  as "nothing happened". */
+function ErrorAlert({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <p
+      role="alert"
+      className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-base text-rose-900"
+    >
+      <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+      <span>{message}</span>
+    </p>
+  );
+}
+
 function Sheet({
   title,
+  error,
   onClose,
   children,
 }: {
   title: string;
+  error: string | null;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -664,6 +712,7 @@ function Sheet({
             <X className="h-5 w-5" />
           </button>
         </div>
+        <ErrorAlert message={error} />
         {children}
       </div>
     </div>
@@ -674,6 +723,7 @@ function MoreSheet({
   view,
   token,
   pending,
+  error,
   reportProblem,
   onClose,
   onPause,
@@ -684,6 +734,7 @@ function MoreSheet({
   view: StationView;
   token: string;
   pending: boolean;
+  error: string | null;
   reportProblem?: React.ReactNode;
   onClose: () => void;
   onPause: () => void;
@@ -697,7 +748,7 @@ function MoreSheet({
   const materialLinks = operatorMaterialLinks(token, view.station.kind);
 
   return (
-    <Sheet title="More" onClose={onClose}>
+    <Sheet title="More" error={error} onClose={onClose}>
       {view.capabilities.canPause ? (
         isPaused ? (
           <button type="button" className={SHEET_ITEM} disabled={pending} onClick={onResume}>
@@ -752,11 +803,13 @@ function MoreSheet({
 function PauseSheet({
   stationKind,
   pending,
+  error,
   onClose,
   onSubmit,
 }: {
   stationKind: string;
   pending: boolean;
+  error: string | null;
   onClose: () => void;
   onSubmit: (reason: string, counterSnapshot: string | null) => void;
 }) {
@@ -767,7 +820,7 @@ function PauseSheet({
   const copy = pauseCounterSnapshotCopy(reason);
 
   return (
-    <Sheet title="Pause" onClose={onClose}>
+    <Sheet title="Pause" error={error} onClose={onClose}>
       <div className="space-y-2">
         {model.reasons.map((r) => (
           <button
@@ -818,16 +871,18 @@ function PauseSheet({
 
 function TypedCodeSheet({
   pending,
+  error,
   onClose,
   onSubmit,
 }: {
   pending: boolean;
+  error: string | null;
   onClose: () => void;
   onSubmit: (code: string) => void;
 }) {
   const [code, setCode] = React.useState("");
   return (
-    <Sheet title="Enter code manually" onClose={onClose}>
+    <Sheet title="Enter code manually" error={error} onClose={onClose}>
       <p className="text-sm text-text-muted">
         Type the code printed under the bag QR.
       </p>
@@ -854,24 +909,33 @@ function TypedCodeSheet({
 function HelpSheet({
   view,
   pending,
+  error,
   onClose,
   onNotify,
 }: {
   view: StationView;
   pending: boolean;
+  error: string | null;
   onClose: () => void;
   onNotify: (detail: string) => void;
 }) {
   // The SAME evaluateChecks() that produced the view's blockers — the
-  // checklist cannot disagree with why the button is disabled.
+  // checklist cannot disagree with why the button is disabled. On an
+  // idle station the bag-in-hand rows are dropped and the note below
+  // says why, rather than showing three crosses for a bag nobody has
+  // scanned yet.
   const checks = helpChecklistForView(view);
+  const idleNote = helpIdleNote(view);
   const failed = checks.filter((c) => !c.passed);
-  const detail =
-    failed.map((c) => c.blocker?.operatorSentence).filter(Boolean).join(" ") ||
-    "Operator asked for help from the station screen.";
+  const detail = helpNotifyDetail(checks);
 
   return (
-    <Sheet title="Why can't I continue?" onClose={onClose}>
+    <Sheet title="Why can't I continue?" error={error} onClose={onClose}>
+      {idleNote ? (
+        <p className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text-muted">
+          {idleNote}
+        </p>
+      ) : null}
       <ul className="space-y-2">
         {checks.map((check) => (
           <li
