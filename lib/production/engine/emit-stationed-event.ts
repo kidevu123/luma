@@ -29,7 +29,15 @@ import type { Blocker } from "./types";
 export type StationedExceptionEventType =
   | "PRODUCTION_EXCEPTION_RAISED"
   | "DOWNTIME_STARTED"
-  | "QA_HOLD_STARTED";
+  | "QA_HOLD_STARTED"
+  // Fix round 2 (N1) — the release half of QA_HOLD_STARTED. Without
+  // it, a QUALITY report was a one-way latch: nothing anywhere emitted
+  // QA_HOLD_RELEASED, so claim-queued-bag's BAG_ON_HOLD blocker,
+  // station-view's bagOnHold fact, and finished-lot-release-
+  // eligibility's isOnHold check all stayed permanently tripped once
+  // round 1 wired QA_HOLD_STARTED to read_bag_state.is_on_hold — worse
+  // than a pause, which has Resume. See raise-qa-hold-release.ts.
+  | "QA_HOLD_RELEASED";
 
 export type EmitStationedEventInput = {
   stationId: string;

@@ -13,6 +13,21 @@
 // All work is done in pure SQL via db.execute(sql`...`) for speed —
 // 591+ events imported, plus future live data, would be slow to
 // iterate row-by-row. Each phase runs in well under a second.
+//
+// P4b Task 4 fix round 2 (N2) — read_bag_state.is_on_hold is now
+// derived here too (last_qa_hold_started/last_qa_hold_released CTEs
+// in the read_bag_state INSERT below), the same latest-event-wins
+// shape as is_paused's last_pause/last_resume. Before this, a replay
+// after any legacy import silently cleared every active QA hold: the
+// INSERT didn't carry the column at all, so DELETE+INSERT left it at
+// the schema default (false) no matter what workflow_events recorded.
+// This module has NO test harness — every DB-touching function here
+// is exercised only by hitting a real Postgres instance (staging
+// smoke), not vitest (repo convention: no DB in tests) — so the fix
+// is pinned by this comment plus the SQL's structural mirror of
+// is_paused, not by an automated test. lib/projector/qa-hold-
+// projection.test.ts pins the LIVE write path (projectEvent); this
+// is the REPLAY path, and the two must keep agreeing by inspection.
 
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -64,11 +79,36 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
       ) r ON r.occurred_at IS NOT NULL
       WHERE p.event_type::text = 'BAG_PAUSED'
       GROUP BY p.workflow_bag_id
+    ),
+    -- P4b Task 4 fix round 2 (N2) — QA_HOLD_STARTED / QA_HOLD_RELEASED
+    -- derive is_on_hold the same way last_pause/last_resume derive
+    -- is_paused above: latest-event-wins between the two, per bag.
+    -- Before this, a replay (this function runs after every legacy
+    -- import) silently dropped every active hold — the INSERT below
+    -- didn't even carry the column, so onConflict/DELETE+INSERT left
+    -- read_bag_state.is_on_hold at its schema default (false)
+    -- regardless of what workflow_events actually said.
+    last_qa_hold_started AS (
+      SELECT DISTINCT ON (workflow_bag_id)
+        workflow_bag_id,
+        occurred_at AS qa_hold_started_at
+      FROM workflow_events
+      WHERE event_type::text = 'QA_HOLD_STARTED'
+      ORDER BY workflow_bag_id, occurred_at DESC, id DESC
+    ),
+    last_qa_hold_released AS (
+      SELECT DISTINCT ON (workflow_bag_id)
+        workflow_bag_id,
+        occurred_at AS qa_hold_released_at
+      FROM workflow_events
+      WHERE event_type::text = 'QA_HOLD_RELEASED'
+      ORDER BY workflow_bag_id, occurred_at DESC, id DESC
     )
     INSERT INTO read_bag_state (
       workflow_bag_id, stage, product_id, product_name,
       inventory_bag_batch_id, receipt_number,
       is_finalized, is_paused, paused_at, paused_seconds_accum,
+      is_on_hold,
       last_event_at, updated_at
     )
     SELECT
@@ -156,6 +196,16 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
         ELSE NULL
       END AS paused_at,
       COALESCE(pt.sec, 0) AS paused_seconds_accum,
+      -- is_on_hold: same latest-event-wins shape as is_paused above,
+      -- against QA_HOLD_STARTED / QA_HOLD_RELEASED instead of
+      -- BAG_PAUSED / BAG_RESUMED. Deliberately NOT gated on
+      -- finalized_at — the live projector's QA_HOLD_STARTED/
+      -- QA_HOLD_RELEASED branch (lib/projector/index.ts) isn't
+      -- either, and replay must match live behavior exactly.
+      (
+        lqhs.qa_hold_started_at IS NOT NULL
+        AND (lqhr.qa_hold_released_at IS NULL OR lqhs.qa_hold_started_at > lqhr.qa_hold_released_at)
+      ) AS is_on_hold,
       COALESCE(
         (SELECT MAX(occurred_at) FROM workflow_events WHERE workflow_bag_id = wb.id),
         wb.started_at
@@ -167,6 +217,8 @@ export async function synthesizeReadModelsFromEvents(): Promise<SynthesisResult>
     LEFT JOIN last_pause lp ON lp.workflow_bag_id = wb.id
     LEFT JOIN last_resume lr ON lr.workflow_bag_id = wb.id
     LEFT JOIN paused_total pt ON pt.workflow_bag_id = wb.id
+    LEFT JOIN last_qa_hold_started lqhs ON lqhs.workflow_bag_id = wb.id
+    LEFT JOIN last_qa_hold_released lqhr ON lqhr.workflow_bag_id = wb.id
   `);
 
   // ── 2. read_bag_metrics ─────────────────────────────────────────

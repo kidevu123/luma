@@ -1141,6 +1141,7 @@ export default async function FloorStationPage({
                 currentOperatorName={activeSession?.employeeNameSnapshot ?? null}
                 accountabilitySource={activeSession?.accountabilitySource ?? null}
                 pendingRework={await loadPendingRework(currentAtStation.bag.id)}
+                isOnHold={currentAtStation.state?.isOnHold ?? false}
               />
             ) : null}
           </div>

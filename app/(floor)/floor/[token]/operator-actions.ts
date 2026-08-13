@@ -29,6 +29,7 @@ import {
   claimQueuedBag,
   raiseDowntimeStarted,
   raiseProductionException,
+  raiseQaHoldRelease,
   raiseQaHoldStarted,
   resolveStationByToken,
   PRODUCTION_EXCEPTION_CATEGORIES,
@@ -405,6 +406,56 @@ export async function raiseQaHoldAction(
     if (!result.ok) return fail(result.blocker);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not send this." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
+// P4b Task 4 fix round 2 (N1) — the release half. workflowBagId is
+// REQUIRED (unlike reportDetailSchema's optional one): this action is
+// reached only from qc-panel.tsx, which already knows the bag it is
+// rendered for and has no "release whatever is pinned" use case the
+// way Report Problem's other categories do. detail stays optional —
+// see raise-qa-hold-release.ts's header for why: releasing must be at
+// least as easy as raising was hard to leave in place.
+const releaseQaHoldSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  workflowBagId: z.string().uuid(),
+  detail: z.string().max(500).optional(),
+  clientEventId: z.string().regex(UUID_RE, "Invalid client event id."),
+});
+
+/** qc-panel.tsx's [ Release hold ] — the only place this is reachable
+ *  from, shown only when the current bag's read_bag_state.is_on_hold
+ *  is true. */
+export async function releaseQaHoldAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = releaseQaHoldSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    workflowBagId: formData.get("workflowBagId"),
+    detail: optionalField(formData, "detail"),
+    clientEventId: formData.get("clientEventId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    const result = await raiseQaHoldRelease({
+      stationId: d.stationId,
+      workflowBagId: d.workflowBagId,
+      clientEventId: d.clientEventId,
+      ...(d.detail != null ? { detail: d.detail } : {}),
+    });
+    if (!result.ok) return fail(result.blocker);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not release this." };
   }
 
   revalidateFloor(d.token);

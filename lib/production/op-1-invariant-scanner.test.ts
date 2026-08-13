@@ -61,6 +61,9 @@ const LIVE_EMISSION_FILES: ReadonlyArray<string> = [
   "lib/production/engine/raise-production-exception.ts",
   "lib/production/engine/raise-downtime.ts",
   "lib/production/engine/raise-qa-hold.ts",
+  // Fix round 2 (N1): the release half. Same coverage-only reasoning
+  // as its three siblings above.
+  "lib/production/engine/raise-qa-hold-release.ts",
   "app/(floor)/floor/[token]/roll-actions.ts",
   "app/(floor)/floor/[token]/bag-allocation-actions.ts",
   "app/(admin)/inbound/packaging-materials/actions.ts",
@@ -98,6 +101,7 @@ const ACCOUNTABLE_EVENTS: ReadonlyArray<string> = [
   "PRODUCTION_EXCEPTION_RAISED",
   "DOWNTIME_STARTED",
   "QA_HOLD_STARTED",
+  "QA_HOLD_RELEASED",
   // material_inventory_events
   "MATERIAL_RECEIVED",
   "ROLL_MOUNTED",

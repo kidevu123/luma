@@ -91,4 +91,32 @@ describe("projectEvent — QA_HOLD_STARTED / QA_HOLD_RELEASED pin read_bag_state
     expect(readBagStateUpdates).toHaveLength(1);
     expect(readBagStateUpdates[0]).toMatchObject({ isOnHold: false });
   });
+
+  // P4b Task 4 fix round 2 (N1) — the full lifecycle a real bag goes
+  // through: raiseQaHoldStarted's QA_HOLD_STARTED blocks it (claim-
+  // queued-bag's BAG_ON_HOLD, station-view's bagOnHold, finished-lot-
+  // release-eligibility's isOnHold check all read this SAME column),
+  // then qc-panel.tsx's [ Release hold ] fires QA_HOLD_RELEASED and
+  // clears it. Before N1, nothing emitted the second event anywhere —
+  // this pins that the round-trip is a round-trip, not a one-way latch.
+  it("started -> blocked, released -> clear: two events against one bag pin true then false, in order", async () => {
+    const { tx, readBagStateUpdates } = buildTxStub();
+
+    await projectEvent(tx, {
+      workflowBagId: WORKFLOW_BAG_ID,
+      stationId: STATION_ID,
+      eventType: "QA_HOLD_STARTED",
+      payload: { detail: "Suspect foil seal on this run." },
+    });
+    await projectEvent(tx, {
+      workflowBagId: WORKFLOW_BAG_ID,
+      stationId: STATION_ID,
+      eventType: "QA_HOLD_RELEASED",
+      payload: { detail: "Re-inspected, seal is fine." },
+    });
+
+    expect(readBagStateUpdates).toHaveLength(2);
+    expect(readBagStateUpdates[0]).toMatchObject({ isOnHold: true });
+    expect(readBagStateUpdates[1]).toMatchObject({ isOnHold: false });
+  });
 });

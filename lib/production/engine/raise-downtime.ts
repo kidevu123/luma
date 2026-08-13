@@ -60,12 +60,23 @@ export async function raiseDowntimeStarted(
   // machine_id set (or a station row emit-stationed-event.ts is about
   // to reject as unresolved anyway) still gets the detail recorded —
   // this just omits machine_id/machine_name from the payload rather
-  // than failing the report.
-  const [machineRow] = await db
-    .select({ machineId: stations.machineId, machineName: machines.name })
-    .from(stations)
-    .leftJoin(machines, eq(stations.machineId, machines.id))
-    .where(eq(stations.id, input.stationId));
+  // than failing the report. Fix round 2 (nit): the lookup itself is
+  // now inside the try/catch too — a DB blip here must not make this
+  // function throw, or the "total function, every failure is a
+  // Blocker" contract this file's header claims stops being true.
+  let machineRow: { machineId: string | null; machineName: string | null } | undefined;
+  try {
+    [machineRow] = await db
+      .select({ machineId: stations.machineId, machineName: machines.name })
+      .from(stations)
+      .leftJoin(machines, eq(stations.machineId, machines.id))
+      .where(eq(stations.id, input.stationId));
+  } catch {
+    // Swallow: machine context is best-effort. emitStationedExceptionEvent
+    // below still does its own real station-existence check and will
+    // surface a proper Blocker if the station itself is the problem.
+    machineRow = undefined;
+  }
 
   return emitStationedExceptionEvent({
     stationId: input.stationId,

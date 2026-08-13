@@ -23,6 +23,11 @@ type Captured = { events: Array<Record<string, unknown>> };
 const captured: Captured = { events: [] };
 
 let selectQueue: unknown[][] = [];
+// Fix round 2 (nit) — lets one test make the machine lookup (the only
+// caller of .leftJoin() in this file) reject, to prove
+// raiseDowntimeStarted's own try/catch around it holds the total-
+// function contract instead of rejecting the whole call.
+let machineLookupShouldThrow = false;
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -30,7 +35,12 @@ vi.mock("@/lib/db", () => ({
       from: () => ({
         where: () => Promise.resolve(selectQueue.shift() ?? []),
         leftJoin: () => ({
-          where: () => Promise.resolve(selectQueue.shift() ?? []),
+          where: () => {
+            if (machineLookupShouldThrow) {
+              return Promise.reject(new Error("connection reset"));
+            }
+            return Promise.resolve(selectQueue.shift() ?? []);
+          },
         }),
       }),
     }),
@@ -70,6 +80,7 @@ function queueCurrentBag(workflowBagId: string | null): void {
 beforeEach(() => {
   selectQueue = [];
   captured.events = [];
+  machineLookupShouldThrow = false;
   vi.clearAllMocks();
 });
 
@@ -121,6 +132,22 @@ describe("raiseDowntimeStarted", () => {
     expect(result.ok).toBe(true);
     expect(captured.events[0]?.payload).toEqual({
       detail: "No machine assigned but reporting anyway.",
+    });
+  });
+
+  it("does not reject when the machine lookup itself throws — total-function contract holds, report still records", async () => {
+    machineLookupShouldThrow = true;
+    queueStationExists();
+    queueCurrentBag(CURRENT_BAG_ID);
+
+    const result = await raiseDowntimeStarted({
+      stationId: STATION_ID,
+      detail: "Machine down, and the lookup for its name also failed.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(captured.events[0]?.payload).toEqual({
+      detail: "Machine down, and the lookup for its name also failed.",
     });
   });
 

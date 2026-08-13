@@ -54,6 +54,11 @@ export { raiseDowntimeStarted } from "./raise-downtime";
 export type { RaiseDowntimeInput, RaiseDowntimeResult } from "./raise-downtime";
 export { raiseQaHoldStarted } from "./raise-qa-hold";
 export type { RaiseQaHoldInput, RaiseQaHoldResult } from "./raise-qa-hold";
+export { raiseQaHoldRelease } from "./raise-qa-hold-release";
+export type {
+  RaiseQaHoldReleaseInput,
+  RaiseQaHoldReleaseResult,
+} from "./raise-qa-hold-release";
 export { resolveCompletionInputs } from "./resolve-completion";
 export {
   assembleCompletionInputs,

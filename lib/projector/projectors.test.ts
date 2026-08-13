@@ -141,7 +141,7 @@ describe("PRODUCTION_EXCEPTION_RAISED — non-progression", () => {
 // branch, added alongside this test — that's a deliberate, separate
 // write pinned in qa-hold-projection.test.ts, not a stage/throughput/
 // queue effect, so it does not contradict the assertions below.
-describe.each(["DOWNTIME_STARTED", "QA_HOLD_STARTED"] as const)(
+describe.each(["DOWNTIME_STARTED", "QA_HOLD_STARTED", "QA_HOLD_RELEASED"] as const)(
   "%s — non-progression (stage / throughput / queue)",
   (eventType) => {
     it("has no STAGE_FOR_EVENT entry — resolveStageForWorkflowEvent returns undefined", () => {
