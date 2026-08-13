@@ -78,7 +78,16 @@ export function shouldAssignProductFirst(args: {
  *  COMBINED station resolves PACKAGING instead of its default blister
  *  alias (pickOperationForStationKind's COMBINED-AT-PACKAGING-1 branch).
  *  A non-COMBINED station ignores the preference entirely (see that
- *  function's guard), so this is safe to compute unconditionally. */
+ *  function's guard), so this is safe to compute unconditionally.
+ *
+ *  cases/displays/loose read as unambiguously "packaging" only because
+ *  resolve-completion.ts's PACKAGING_OPERATIONS scoping is the sole
+ *  place those CompletionInput keys get emitted today — the COMBINED-
+ *  only preference guard in pickOperationForStationKind and that
+ *  emission scoping are BOTH load-bearing, not this presence check
+ *  alone. A caller that populated `cases` outside that scoping would
+ *  divert a COMBINED station into PACKAGING regardless of the actual
+ *  gesture. */
 export function isPackagingShapedComplete(
   intent: AdvanceIntent,
   inputs: AdvanceInput["inputs"],
@@ -250,7 +259,12 @@ export function buildRecordPackagingCompleteInput(args: {
 //     sealing gesture's only positive signal is `counterPresses`
 //     (buildRecordStageEventInput), and `counter` doubles as the blister
 //     count, so the two shapes are not reliably distinguishable from
-//     AdvanceInput alone the way cases/displays/loose are for packaging.
+//     AdvanceInput alone. cases/displays/loose are unambiguous for
+//     packaging only because resolve-completion.ts's PACKAGING_OPERATIONS
+//     scoping is the ONLY place those CompletionInput keys are emitted
+//     today — the COMBINED-only preference guard and that emission
+//     scoping are BOTH load-bearing together, not a property of the
+//     fields themselves.
 //     A COMBINED station's sealing-shaped gesture therefore still
 //     resolves to the blister operation and fires BLISTER_COMPLETE
 //     (which ALLOWED_EVENTS_BY_KIND.COMBINED does accept, so nothing

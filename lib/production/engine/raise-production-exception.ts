@@ -5,9 +5,19 @@
 // BAG_PAUSED for bag) and falls through to this function for the three
 // categories with no current equivalent: material, product, other.
 // PRODUCTION_EXCEPTION_RAISED (migration 0072) is deliberately
-// non-progressing — see lib/projector/index.ts's STAGE_FOR_EVENT /
-// THROUGHPUT_COLUMN and bag-queue.ts's FLOW_EVENTS, none of which
-// reference it.
+// non-progressing in the stage/throughput/queue sense — see
+// lib/projector/index.ts's STAGE_FOR_EVENT / THROUGHPUT_COLUMN and
+// bag-queue.ts's FLOW_EVENTS, none of which reference it.
+//
+// It is NOT read-station-live-inert, though: projectEvent's
+// read_station_live upsert (lib/projector/index.ts:402-424) re-pins
+// current_workflow_bag_id for ANY stationed event that is not
+// BAG_FINALIZED/BAG_RELEASED, and this is no exception — by design, an
+// exception IS about this station's current work. What this module
+// guards is the OTHER direction: it must never let a caller-supplied
+// workflowBagId that disagrees with the station's actual current bag
+// silently re-pin it out from under the operator screen. See the
+// PRODUCTION_EXCEPTION_WRONG_BAG branch below.
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -42,7 +52,12 @@ export type RaiseProductionExceptionInput = {
    *  (read_station_live.current_workflow_bag_id). workflow_events.
    *  workflow_bag_id is NOT NULL, so when neither is available the call
    *  returns the PRODUCTION_EXCEPTION_NO_BAG blocker rather than
-   *  throwing — see the total-function contract below. */
+   *  throwing — see the total-function contract below. When SUPPLIED and
+   *  the station already has a DIFFERENT current bag pinned, the call
+   *  returns PRODUCTION_EXCEPTION_WRONG_BAG instead of emitting —
+   *  projectEvent's read_station_live upsert would otherwise silently
+   *  re-pin the station onto this bag, hijacking the operator screen's
+   *  current work out from under whoever is actually working it. */
   workflowBagId?: string | undefined;
   category: ProductionExceptionCategory;
   detail: string;
@@ -75,13 +90,38 @@ export async function raiseProductionException(
       return { ok: false, blocker: blockerFor("STATION_UNRESOLVED") };
     }
 
-    let workflowBagId = input.workflowBagId ?? null;
-    if (!workflowBagId) {
-      const [live] = await db
-        .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
-        .from(readStationLive)
-        .where(eq(readStationLive.stationId, input.stationId));
-      workflowBagId = live?.currentWorkflowBagId ?? null;
+    const [live] = await db
+      .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
+      .from(readStationLive)
+      .where(eq(readStationLive.stationId, input.stationId));
+    const currentWorkflowBagId = live?.currentWorkflowBagId ?? null;
+
+    let workflowBagId: string | null;
+    if (input.workflowBagId) {
+      // WRONG-BAG-GUARD-1 — projectEvent's read_station_live upsert
+      // re-pins current_workflow_bag_id to whatever workflowBagId this
+      // event carries (any stationed event that isn't BAG_FINALIZED /
+      // BAG_RELEASED does this — lib/projector/index.ts:402-424). A
+      // caller naming a DIFFERENT bag than the one actually pinned here
+      // would silently hijack the station's current-work pin, so refuse
+      // instead of emitting. A station with NO current bag pinned is
+      // fine — there is nothing to hijack, and pinning it now is exactly
+      // what "this event is about this station's current work" means.
+      if (currentWorkflowBagId && currentWorkflowBagId !== input.workflowBagId) {
+        return {
+          ok: false,
+          blocker: {
+            code: "PRODUCTION_EXCEPTION_WRONG_BAG",
+            operatorSentence:
+              "Report the bag currently at this station, or clear it first.",
+            supervisorDetail: `Supplied workflowBagId ${input.workflowBagId} does not match this station's read_station_live.current_workflow_bag_id ${currentWorkflowBagId}.`,
+            suggestedAction: "NOTIFY_SUPERVISOR",
+          },
+        };
+      }
+      workflowBagId = input.workflowBagId;
+    } else {
+      workflowBagId = currentWorkflowBagId;
     }
     if (!workflowBagId) {
       return { ok: false, blocker: blockerFor("PRODUCTION_EXCEPTION_NO_BAG") };

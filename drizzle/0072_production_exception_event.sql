@@ -13,6 +13,6 @@
 -- Projector: PRODUCTION_EXCEPTION_RAISED is deliberately absent from
 -- STAGE_FOR_EVENT, THROUGHPUT_COLUMN, and bag-queue.ts's FLOW_EVENTS —
 -- it records an exception without advancing stage, throughput, or queue
--- state. See lib/projector/index.test.ts's non-progression pin.
+-- state. See lib/projector/projectors.test.ts's non-progression pin.
 
 ALTER TYPE "workflow_event_type" ADD VALUE IF NOT EXISTS 'PRODUCTION_EXCEPTION_RAISED';
