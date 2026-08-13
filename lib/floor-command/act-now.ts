@@ -26,6 +26,10 @@ export type ActNowItem = {
   href?: string;
 };
 
+/** Report Problem (P4b Task 4) rows admitted into one Act Now build —
+ *  see the fix-round-1 comment at the push site below. */
+const EXCEPTION_ROWS_MAX = 3;
+
 function bottleneckLabel(intelligence: FloorProductionIntelligence): string {
   const b = intelligence.bottleneck.stageKey;
   if (b.confidence === "MISSING") return b.label ?? "—";
@@ -127,6 +131,16 @@ export function buildActNowPanel(
       // raised — crit, same bar as a bag on hold. PRODUCTION_EXCEPTION_
       // RAISED is the catch-all (material/product/other) — warn, same
       // bar as any other reported-but-not-yet-triaged item.
+      //
+      // Fix round 1 (MED 2): capped at EXCEPTION_ROWS_MAX. There is no
+      // dismissal path yet (P5 — the supervisor inbox/badge the spec
+      // describes), so exception rows age off the rail purely by
+      // falling outside floor-command.ts's recency window; without a
+      // cap, two crit reports could fill most of the 6-slot rail
+      // (`.slice(0, 6)` below) for up to 4 hours, starving the
+      // waiting-bag / bottleneck / material-runway rows that matter
+      // just as much.
+      if (exceptionSeq >= EXCEPTION_ROWS_MAX) continue;
       exceptionSeq += 1;
       items.push({
         id: `exception-${exceptionSeq}-${a.label}`,

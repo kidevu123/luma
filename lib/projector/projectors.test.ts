@@ -133,6 +133,38 @@ describe("PRODUCTION_EXCEPTION_RAISED — non-progression", () => {
   });
 });
 
+// ─── P4b Task 4 fix round 1 (LOW) — DOWNTIME_STARTED / QA_HOLD_STARTED
+// are non-progressing in the same stage/throughput/queue sense as
+// PRODUCTION_EXCEPTION_RAISED, pinned the same way. Neither is
+// "fully inert" though: QA_HOLD_STARTED (and QA_HOLD_RELEASED) DO
+// write read_bag_state.is_on_hold — projector/index.ts's own QA_HOLD
+// branch, added alongside this test — that's a deliberate, separate
+// write pinned in qa-hold-projection.test.ts, not a stage/throughput/
+// queue effect, so it does not contradict the assertions below.
+describe.each(["DOWNTIME_STARTED", "QA_HOLD_STARTED"] as const)(
+  "%s — non-progression (stage / throughput / queue)",
+  (eventType) => {
+    it("has no STAGE_FOR_EVENT entry — resolveStageForWorkflowEvent returns undefined", () => {
+      expect(resolveStageForWorkflowEvent(eventType, {})).toBeUndefined();
+      expect(resolveStageForWorkflowEvent(eventType, null)).toBeUndefined();
+    });
+
+    it("has no THROUGHPUT_COLUMN entry — buildThroughputProjection returns null", () => {
+      expect(buildThroughputProjection(eventType, {}, null)).toBeNull();
+    });
+
+    it("is not in QUEUE_REFRESH_EVENTS — does not refresh read_queue_state", () => {
+      expect(QUEUE_REFRESH_EVENTS.has(eventType)).toBe(false);
+    });
+
+    it("is not referenced by bag-queue.ts's FLOW_EVENTS — read_bag_queue is untouched", () => {
+      const path = join(process.cwd(), "lib", "projector", "bag-queue.ts");
+      const src = readFileSync(path, "utf8");
+      expect(src.includes(eventType)).toBe(false);
+    });
+  },
+);
+
 describe("floorThroughputDayKey", () => {
   it("buckets throughput by the Luma Eastern production day", () => {
     expect(floorThroughputDayKey(new Date("2026-06-05T02:30:00.000Z"))).toBe(

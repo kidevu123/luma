@@ -16,7 +16,19 @@
 // Same total-function contract, same bag resolution and
 // wrong-bag guard as raiseProductionException — see
 // emit-stationed-event.ts's header for why both are shared.
+//
+// P4b Task 4 fix round 1 (MED 3) — "which machine" answers itself:
+// station <-> machine is 1:1 on this floor (stations.machine_id, set
+// once at machine setup — see station-kind-cache.ts's comment on why
+// that relationship is treated as effectively static), so the
+// station this report was filed from already names the machine. No
+// picker needed; the payload just carries machine_id (and the name,
+// since one extra cheap join beats a second lookup for whoever reads
+// this event later) alongside the operator's detail.
 
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { machines, stations } from "@/lib/db/schema";
 import { blockerFor } from "./resolve-exceptions";
 import { emitStationedExceptionEvent } from "./emit-stationed-event";
 import type { Blocker } from "./types";
@@ -44,10 +56,25 @@ export async function raiseDowntimeStarted(
     return { ok: false, blocker: blockerFor("PRODUCTION_EXCEPTION_DETAIL_REQUIRED") };
   }
 
+  // Best-effort context, not a precondition: a station with no
+  // machine_id set (or a station row emit-stationed-event.ts is about
+  // to reject as unresolved anyway) still gets the detail recorded —
+  // this just omits machine_id/machine_name from the payload rather
+  // than failing the report.
+  const [machineRow] = await db
+    .select({ machineId: stations.machineId, machineName: machines.name })
+    .from(stations)
+    .leftJoin(machines, eq(stations.machineId, machines.id))
+    .where(eq(stations.id, input.stationId));
+
   return emitStationedExceptionEvent({
     stationId: input.stationId,
     eventType: "DOWNTIME_STARTED",
-    payload: { detail },
+    payload: {
+      detail,
+      ...(machineRow?.machineId ? { machine_id: machineRow.machineId } : {}),
+      ...(machineRow?.machineName ? { machine_name: machineRow.machineName } : {}),
+    },
     ...(input.workflowBagId != null ? { workflowBagId: input.workflowBagId } : {}),
     ...(input.clientEventId != null ? { clientEventId: input.clientEventId } : {}),
     ...(input.overrideEmployeeCode != null

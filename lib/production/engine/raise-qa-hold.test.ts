@@ -1,8 +1,11 @@
-// P4b Task 4 — raiseQaHoldStarted. See raise-downtime.test.ts's header:
-// the shared bag-resolution/wrong-bag-guard body is covered directly in
-// emit-stationed-event.ts's own tests (exercised there via
-// raise-production-exception.test.ts's WRONG-BAG-GUARD-1 suite); this
-// file only exercises what is specific to this wrapper.
+// P4b Task 4 — raiseQaHoldStarted. See raise-downtime.test.ts's header
+// (fix round 1 correction): the shared bag-resolution/wrong-bag-guard
+// body in emit-stationed-event.ts has no dedicated test file of its
+// own — it is exercised indirectly, through
+// raise-production-exception.test.ts's WRONG-BAG-GUARD-1 suite (which
+// calls raiseProductionException, a thin wrapper over the same shared
+// function). This file only exercises what is specific to this
+// wrapper.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 

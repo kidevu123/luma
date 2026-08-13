@@ -41,9 +41,26 @@ const LIVE_EMISSION_FILES: ReadonlyArray<string> = [
   // through projectEvent directly (a claim is not a stage event), so it
   // needs the same accountability wiring as every other emission.
   "lib/production/engine/claim-queued-bag.ts",
-  // P4b Task 2: the single exception workflow's catch-all write path.
-  // Emits PRODUCTION_EXCEPTION_RAISED through projectEvent directly.
+  // P4b Task 2/4: the single exception workflow's shared write path.
+  // raiseProductionException / raiseDowntimeStarted / raiseQaHoldStarted
+  // all delegate here rather than calling projectEvent directly — this
+  // is the actual accountability-wired call site the scanner must
+  // exercise (fix-round-1: the old entry, raise-production-exception.ts,
+  // has zero projectEvent calls post-extraction and was silently
+  // skipped by the `argsList.length === 0` guard below — a vacuous
+  // pass, not a real check).
+  "lib/production/engine/emit-stationed-event.ts",
+  // Kept for event-type COVERAGE only (the describe block below that
+  // greps for each ACCOUNTABLE_EVENTS literal) — these three carry the
+  // literal `eventType: "X"` strings as arguments to
+  // emitStationedExceptionEvent, not to projectEvent, so they add zero
+  // rows to the projectEvent-call-site checks (correctly skipped by the
+  // same `argsList.length === 0` guard) but are still where
+  // PRODUCTION_EXCEPTION_RAISED / DOWNTIME_STARTED / QA_HOLD_STARTED
+  // are spelled out as string literals.
   "lib/production/engine/raise-production-exception.ts",
+  "lib/production/engine/raise-downtime.ts",
+  "lib/production/engine/raise-qa-hold.ts",
   "app/(floor)/floor/[token]/roll-actions.ts",
   "app/(floor)/floor/[token]/bag-allocation-actions.ts",
   "app/(admin)/inbound/packaging-materials/actions.ts",
@@ -79,6 +96,8 @@ const ACCOUNTABLE_EVENTS: ReadonlyArray<string> = [
   "BAG_FINALIZED",
   "OPERATOR_CHANGE",
   "PRODUCTION_EXCEPTION_RAISED",
+  "DOWNTIME_STARTED",
+  "QA_HOLD_STARTED",
   // material_inventory_events
   "MATERIAL_RECEIVED",
   "ROLL_MOUNTED",

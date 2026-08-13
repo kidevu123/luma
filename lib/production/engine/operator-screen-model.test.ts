@@ -420,13 +420,9 @@ describe("report problem (P4b Task 4)", () => {
     }
   });
 
-  it("disables EXCEPTION and PAUSE without a bag — both require one to attach to", () => {
-    expect(reportProblemCategoryDisabled("EXCEPTION", false)).toBe(true);
-    expect(reportProblemCategoryDisabled("PAUSE", false)).toBe(true);
-  });
-
-  it("leaves PAUSE_AND_DOWNTIME and QA_HOLD enabled without a bag — a machine or quality concern can predate one", () => {
-    expect(reportProblemCategoryDisabled("PAUSE_AND_DOWNTIME", false)).toBe(false);
-    expect(reportProblemCategoryDisabled("QA_HOLD", false)).toBe(false);
+  it("disables every route without a bag (fix round 1, MED 4) — no route has a bagless recording path yet", () => {
+    for (const route of ["PAUSE_AND_DOWNTIME", "QA_HOLD", "PAUSE", "EXCEPTION"] as const) {
+      expect(reportProblemCategoryDisabled(route, false)).toBe(true);
+    }
   });
 });

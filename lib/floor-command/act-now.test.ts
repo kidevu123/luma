@@ -122,4 +122,22 @@ describe("buildActNowPanel", () => {
     });
     expect(exceptions[2]).toMatchObject({ severity: "warn", title: "BLISTER 3" });
   });
+
+  it("caps production_exception rows at 3 (MED 2, fix round 1) — no dismissal path yet, must not monopolize the 6-slot rail", () => {
+    const attention = Array.from({ length: 6 }, (_, i) => ({
+      type: "production_exception" as const,
+      label: `STATION ${i}`,
+      detail: "Machine down.",
+      exceptionEventType: "DOWNTIME_STARTED" as const,
+      receiptNumber: null,
+    }));
+    const items = buildActNowPanel(minimalSnapshot([]), attention, emptyIntel);
+    const exceptions = items.filter((i) => i.id.startsWith("exception-"));
+    expect(exceptions).toHaveLength(3);
+    expect(exceptions.map((i) => i.title)).toEqual([
+      "STATION 0",
+      "STATION 1",
+      "STATION 2",
+    ]);
+  });
 });

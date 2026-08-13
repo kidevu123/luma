@@ -369,32 +369,27 @@ export function reportProblemRouteFor(
 /** Should this category's button be disabled when no bag is pinned at
  *  the station?
  *
- *  EXCEPTION (material/product/other) goes through raiseProductionException,
- *  which requires a bag to attach to (workflow_events.workflow_bag_id is
- *  NOT NULL) and has no better fallback than the station's current pin —
- *  with neither, there is nothing to report about, so the button is
- *  disabled rather than inviting a submission that can only fail.
- *
- *  PAUSE (bag) is disabled for the same concrete reason: pauseBagAction's
- *  workflowBagId is a required field with no "use the station's current
- *  bag" fallback, and a bag problem with no bag at the station is not a
- *  report Luma can attach anywhere.
- *
- *  PAUSE_AND_DOWNTIME (machine) and QA_HOLD (quality) stay enabled
- *  without a bag: a machine can be down, or a quality concern can be
- *  raised, before any bag has reached the station. Both still resolve
- *  through emitStationedExceptionEvent's own bag fallback/guard, so a
- *  truly bagless station surfaces PRODUCTION_EXCEPTION_NO_BAG as a
- *  Blocker instead of failing silently — see raise-downtime.ts /
- *  raise-qa-hold.ts. Bagless MACHINE/QUALITY reports that reach a
- *  station with NO bag ever pinned are P5 scope for a friendlier
- *  station-only message; today they get that same blocker's sentence. */
+ *  Fix round 1 (MED 4): uniform across all four routes, not just
+ *  EXCEPTION (material/product/other) and PAUSE (bag). The original
+ *  version left PAUSE_AND_DOWNTIME (machine) and QA_HOLD (quality)
+ *  enabled on the theory that a machine or quality concern can predate
+ *  any bag reaching the station — true in principle, but Report
+ *  Problem's every write today (pauseBagAction, and both of
+ *  emitStationedExceptionEvent's bag-resolution paths) still resolves
+ *  through THIS station's current bag: there is no station-only,
+ *  bagless recording path anywhere in the engine yet. A report an
+ *  operator files with no bag pinned would either fail outright (BAG)
+ *  or land as PRODUCTION_EXCEPTION_NO_BAG's blocker (MACHINE/QUALITY)
+ *  — neither is "recorded automatically" the way the spec's one
+ *  follow-up promises. Bagless MACHINE/QUALITY reporting is P5 scope,
+ *  same as the rest — see report-problem.tsx's visible "Scan the bag
+ *  this is about first." helper text for how the UI explains the gap
+ *  today rather than papering over it. */
 export function reportProblemCategoryDisabled(
-  route: ReportProblemRoute,
+  _route: ReportProblemRoute,
   hasBag: boolean,
 ): boolean {
-  if (hasBag) return false;
-  return route === "EXCEPTION" || route === "PAUSE";
+  return !hasBag;
 }
 
 // ── small display helpers ─────────────────────────────────────────────

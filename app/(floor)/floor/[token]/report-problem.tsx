@@ -97,9 +97,10 @@ export function ReportProblem({
   token: string;
   stationId: string;
   /** The bag currently pinned at this station (view.current?.workflowBagId),
-   *  or null. Bagless MATERIAL/PRODUCT/OTHER/BAG reports are disabled —
-   *  see reportProblemCategoryDisabled's own comment for why MACHINE and
-   *  QUALITY stay enabled: a bagless report is P5 scope. */
+   *  or null. Every category is disabled without one — see
+   *  reportProblemCategoryDisabled's own comment (fix round 1): no
+   *  route has a bagless recording path today, so a bagless report is
+   *  P5 scope across the board, not just MATERIAL/PRODUCT/OTHER/BAG. */
   workflowBagId: string | null;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -151,7 +152,12 @@ export function ReportProblem({
           pauseFd.set("workflowBagId", workflowBagId);
           pauseFd.set("reason", "other");
           pauseFd.set("notes", trimmed);
-          void pauseBagAction(pauseFd);
+          // Fire-and-forget, and the .catch is not decorative: a
+          // rejected promise with nothing observing it is an unhandled
+          // rejection (pauseBagAction's own try/catch turns failures
+          // into a returned `{ error }`, but a thrown non-Error, e.g.
+          // a client-side network failure, would still reject here).
+          void pauseBagAction(pauseFd).catch(() => {});
         }
         const fd = baseForm();
         if (workflowBagId) fd.set("workflowBagId", workflowBagId);
@@ -233,25 +239,35 @@ export function ReportProblem({
                 Recorded. A supervisor can see this on the floor board.
               </p>
             ) : category == null ? (
-              <div className="grid grid-cols-3 gap-3">
-                {REPORT_PROBLEM_CATEGORY_LAYOUT.map((c) => {
-                  const disabled = reportProblemCategoryDisabled(
-                    reportProblemRouteFor(c),
-                    workflowBagId != null,
-                  );
-                  return (
-                    <button
-                      key={c}
-                      type="button"
-                      className={CATEGORY_BUTTON}
-                      disabled={disabled}
-                      title={disabled ? "Scan the bag this is about first." : undefined}
-                      onClick={() => setCategory(c)}
-                    >
-                      {CATEGORY_LABEL[c]}
-                    </button>
-                  );
-                })}
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  {REPORT_PROBLEM_CATEGORY_LAYOUT.map((c) => {
+                    const disabled = reportProblemCategoryDisabled(
+                      reportProblemRouteFor(c),
+                      workflowBagId != null,
+                    );
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        className={CATEGORY_BUTTON}
+                        disabled={disabled}
+                        onClick={() => setCategory(c)}
+                      >
+                        {CATEGORY_LABEL[c]}
+                      </button>
+                    );
+                  })}
+                </div>
+                {workflowBagId == null ? (
+                  // Fix round 1 (MED 4 + LOW copy): a `title` attribute
+                  // is a hover tooltip — invisible on a touchscreen,
+                  // where every operator interaction is a tap. Visible
+                  // text under the grid instead.
+                  <p className="text-center text-sm text-text-muted">
+                    Scan the bag this is about first.
+                  </p>
+                ) : null}
               </div>
             ) : (
               <div className="space-y-4">
