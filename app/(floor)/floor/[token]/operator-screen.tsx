@@ -16,8 +16,10 @@
 // with their own tests; nothing here decides anything a test would need a
 // DOM to observe.
 //
-// NOT MOUNTED. page.tsx is untouched until the Task 5 cutover — the old
-// and new screens must not coexist.
+// MOUNTED as of the Task 5 cutover: page.tsx's main render path is now
+// resolve station -> getStationView -> <FloorLiveRefresh> + this
+// component. The legacy panels are gone from that path; the old and new
+// screens do not coexist.
 //
 // Imports from lib/production go through the engine barrel ONLY (the
 // app/(floor) boundary rule); anything else the screen needs is wrapped
@@ -31,7 +33,6 @@ import {
   HelpCircle,
   Keyboard,
   Layers,
-  LogOut,
   MoreVertical,
   PauseCircle,
   PlayCircle,
@@ -57,11 +58,11 @@ import {
   upNextSummary,
   type CompletionInput,
   type StationView,
-} from "@/lib/production/engine";
+} from "@/lib/production/engine/client";
+import { BottleSealingRecoveryPanel } from "./bottle-sealing-recovery-panel";
 import { CameraScanner } from "./camera-scanner";
-import { OperatorSessionPanel } from "./operator-session-form";
+import { OperatorSessionPanel, type ActiveSession } from "./operator-session-form";
 import { pauseBagAction, resumeBagAction, saveSealingProductAction } from "./actions";
-import { endOperatorSessionAction } from "./operator-session-actions";
 import {
   advanceBagAction,
   claimScannedBagAction,
@@ -104,16 +105,35 @@ export function OperatorScreen({
   view,
   token,
   employeeOptions,
+  activeSession,
   reportProblem,
+  qcPanel,
 }: {
   view: StationView;
   token: string;
   /** For the OPEN_SHIFT picker — the same list the existing session
    *  panel takes, loaded by the page. */
   employeeOptions: EmployeeOption[];
+  /** The open station_operator_sessions row, or null. StationView's
+   *  `operator` carries only an id and a name; the End-shift flow needs
+   *  the row itself, because BLISTER-PAUSE-COUNT-SNAPSHOT-1 refuses to
+   *  end a shift on a running counting station without a counter
+   *  reading, and that guard lives in OperatorSessionPanel. */
+  activeSession: ActiveSession | null;
   /** Task 4's Report problem flow. A ReactNode slot rather than a
-   *  callback so the page (a server component) can pass it down. */
-  reportProblem?: React.ReactNode;
+   *  callback so the page (a server component) can pass it down.
+   *
+   *  REQUIRED as of the Task 5 cutover: an optional slot is a silently
+   *  forgettable one, and `Report problem` is the ONLY exception path
+   *  the operator screen offers. A station that mounted this component
+   *  without it would strand every operator whose problem is not a
+   *  blocker Luma already knows about. */
+  reportProblem: React.ReactNode;
+  /** QC-3's panel, rendered under More for the station kinds that get
+   *  it (shouldRenderQcPanel) and only while a bag is in hand. Also
+   *  hosts [ Release hold ], the only escape from a QA hold — P5 moves
+   *  the whole panel behind supervisor unlock. */
+  qcPanel?: React.ReactNode;
 }) {
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -123,7 +143,21 @@ export function OperatorScreen({
   const [scannerOpen, setScannerOpen] = React.useState(false);
   const [values, setValues] = React.useState<Record<string, string>>({});
   const [partialQty, setPartialQty] = React.useState("");
+  const [leadCode, setLeadCode] = React.useState("");
   const [keepWorkingBag, setKeepWorkingBag] = React.useState(false);
+  // SCAN-FIRST-1 — a scan can come back asking for one more answer
+  // before the bag can start: which product (BOTTLE_HANDPACK) or "yes,
+  // this partial is the bag I mean". Both are re-submissions of the SAME
+  // scan, so the token is held alongside them.
+  const [startScan, setStartScan] = React.useState<{
+    scanToken: string;
+    needsProduct?: { options: { productId: string; name: string; sku: string }[] };
+    partialReuse?: {
+      estimate: number | null;
+      confidence: string | null;
+      previousProductName: string | null;
+    };
+  } | null>(null);
 
   const { station, current, nextAction } = view;
   const stationId = station.id;
@@ -137,7 +171,9 @@ export function OperatorScreen({
   React.useEffect(() => {
     setValues({});
     setPartialQty("");
+    setLeadCode("");
     setKeepWorkingBag(false);
+    setStartScan(null);
     setError(null);
   }, [currentBagId]);
 
@@ -230,16 +266,77 @@ export function OperatorScreen({
     [baseForm, current, operatorSessionId, run],
   );
 
+  /** The DONE gesture, shared by COMPLETE and by "No, more to work"
+   *  (which records another sealing segment on the same bag). Only the
+   *  keys the ENGINE asked for are read — assembleCompletionInputs
+   *  drops anything else, which is load-bearing: the presence of
+   *  cases/displays/loose is what routes a COMBINED station's write to
+   *  packaging. */
+  const submitWork = React.useCallback(
+    (inputs: readonly CompletionInput[]) => {
+      const assembled = assembleCompletionInputs(inputs, values);
+      if (!assembled.ok) {
+        setError(assembled.message);
+        return;
+      }
+      const extra: Record<string, string> = {};
+      for (const [k, v] of Object.entries(assembled.inputs)) {
+        if (v != null) extra[k] = String(v);
+      }
+      void advance("COMPLETE", extra);
+    },
+    [advance, values],
+  );
+
   const claim = React.useCallback(
-    async (args: { scanToken?: string; workflowBagId?: string }): Promise<boolean> => {
-      return run(async () => {
+    async (args: {
+      scanToken?: string;
+      workflowBagId?: string;
+      productId?: string;
+      confirmPartialReuse?: boolean;
+      partialReuseSupervisorCode?: string;
+    }): Promise<boolean> => {
+      setPending(true);
+      setError(null);
+      try {
         const fd = baseForm();
         if (args.scanToken) fd.set("scanToken", args.scanToken);
         if (args.workflowBagId) fd.set("workflowBagId", args.workflowBagId);
-        return claimScannedBagAction(fd);
-      });
+        if (args.productId) fd.set("productId", args.productId);
+        if (args.confirmPartialReuse) fd.set("confirmPartialReuse", "true");
+        if (args.partialReuseSupervisorCode) {
+          fd.set("partialReuseSupervisorCode", args.partialReuseSupervisorCode);
+        }
+        const result = await claimScannedBagAction(fd);
+        if ("needsProduct" in result || "partialReuse" in result) {
+          // Not an error and not a success: the scan is mid-flight and
+          // the operator owes one answer. Keeping the token is what
+          // makes the follow-up a re-submission rather than a re-scan.
+          setStartScan({
+            scanToken: args.scanToken ?? "",
+            ...("needsProduct" in result
+              ? { needsProduct: result.needsProduct }
+              : {}),
+            ...("partialReuse" in result
+              ? { partialReuse: result.partialReuse }
+              : {}),
+          });
+          return false;
+        }
+        setStartScan(null);
+        if ("error" in result && result.error) {
+          setError(result.error);
+          return false;
+        }
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+        return false;
+      } finally {
+        setPending(false);
+      }
     },
-    [baseForm, run],
+    [baseForm],
   );
 
   return (
@@ -264,7 +361,52 @@ export function OperatorScreen({
           />
         ) : null}
 
-        {nextAction.kind === "SCAN_TO_CLAIM" ? (
+        {nextAction.kind === "SCAN_TO_CLAIM" && startScan?.needsProduct ? (
+          <section className="space-y-3">
+            <p className="text-center text-xl font-semibold">
+              Which product is this bag making?
+            </p>
+            {startScan.needsProduct.options.map((option) => (
+              <button
+                key={option.productId}
+                type="button"
+                className={SECONDARY_BUTTON}
+                disabled={pending}
+                onClick={() =>
+                  void claim({
+                    scanToken: startScan.scanToken,
+                    productId: option.productId,
+                  })
+                }
+              >
+                <span className="flex-1 text-left">
+                  <span className="block font-semibold">{option.name}</span>
+                  <span className="block text-sm text-text-muted">{option.sku}</span>
+                </span>
+                <ChevronRight className="h-5 w-5 text-text-muted" />
+              </button>
+            ))}
+          </section>
+        ) : null}
+
+        {nextAction.kind === "SCAN_TO_CLAIM" && startScan?.partialReuse ? (
+          <PartialReuseStart
+            reuse={startScan.partialReuse}
+            pending={pending}
+            leadCode={leadCode}
+            onLeadCodeChange={setLeadCode}
+            onConfirm={(supervisorCode) =>
+              void claim({
+                scanToken: startScan.scanToken,
+                confirmPartialReuse: true,
+                ...(supervisorCode ? { partialReuseSupervisorCode: supervisorCode } : {}),
+              })
+            }
+            onInvalid={setError}
+          />
+        ) : null}
+
+        {nextAction.kind === "SCAN_TO_CLAIM" && !startScan ? (
           <section className="space-y-5">
             {nextAction.expected ? (
               <div className="rounded-2xl border border-border bg-surface px-4 py-3">
@@ -305,14 +447,17 @@ export function OperatorScreen({
         ) : null}
 
         {nextAction.kind === "START" ? (
-          // Rendered for completeness: no AdvanceIntent corresponds to
-          // START and buildNextAction never returns it today, so there is
-          // no gesture to offer. Announcing the step without a live
-          // button is the honest shape until the engine can serve one.
+          // Claimed early — the overlap scan. There is no gesture to
+          // offer because no workflow event marks "operator started";
+          // buildNextAction flips this to COMPLETE on its own the moment
+          // the upstream station's completion lands, which is exactly
+          // what this copy promises.
           <section className="space-y-3">
             <p className="text-center text-2xl font-semibold">{nextAction.label}</p>
             <p className="text-center text-base text-text-muted">
-              Luma opens this step for you — nothing to do here yet.
+              This bag is still being worked on at the step before this one.
+              Luma opens {nextAction.label.toLowerCase()} here as soon as that
+              finishes — nothing to tap.
             </p>
           </section>
         ) : null}
@@ -326,45 +471,17 @@ export function OperatorScreen({
                 unit={current.progress.unit}
               />
             ) : null}
-            {nextAction.inputs.map((input: CompletionInput) => (
-              <label key={input.key} className="block space-y-1.5">
-                <span className="text-sm font-medium text-text-muted">
-                  {completionFieldLabel(input)}
-                  {input.required ? "" : " · optional"}
-                </span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={values[input.key] ?? ""}
-                  disabled={pending}
-                  onChange={(e) =>
-                    setValues((prev) => ({
-                      ...prev,
-                      [input.key]: e.target.value.replace(/\D/g, ""),
-                    }))
-                  }
-                  className={NUMERIC_INPUT}
-                  placeholder="0"
-                />
-              </label>
-            ))}
+            <CompletionFields
+              inputs={nextAction.inputs}
+              values={values}
+              pending={pending}
+              onChange={setValues}
+            />
             <button
               type="button"
               className={PRIMARY_BUTTON}
               disabled={pending}
-              onClick={() => {
-                const assembled = assembleCompletionInputs(nextAction.inputs, values);
-                if (!assembled.ok) {
-                  setError(assembled.message);
-                  return;
-                }
-                const extra: Record<string, string> = {};
-                for (const [k, v] of Object.entries(assembled.inputs)) {
-                  if (v != null) extra[k] = String(v);
-                }
-                void advance("COMPLETE", extra);
-              }}
+              onClick={() => submitWork(nextAction.inputs)}
             >
               <CheckCircle2 className="h-6 w-6" />
               {nextAction.label}
@@ -394,8 +511,13 @@ export function OperatorScreen({
               className={SECONDARY_BUTTON}
               disabled={pending}
               onClick={() => {
-                // Declining records nothing: "more to work" is the
-                // absence of a close, not an event of its own.
+                // Declining records no CLOSE — but it is not "nothing
+                // happens" either: the operator keeps sealing the same
+                // bag, and that work is another segment. Revealing the
+                // same completion form the COMPLETE case would have
+                // shown (nextAction.moreWork, the engine's own
+                // CompletionInput[]) is what stops the second answer
+                // from being a dead end.
                 setError(null);
                 setKeepWorkingBag(true);
               }}
@@ -403,9 +525,26 @@ export function OperatorScreen({
               No, more to work
             </button>
             {keepWorkingBag ? (
-              <p className="text-center text-base text-text-muted">
-                Keep working this bag. Come back when it is empty.
-              </p>
+              <div className="space-y-4 rounded-2xl border border-border bg-surface px-4 py-4">
+                <p className="text-base text-text-muted">
+                  Keep working this bag, then record what you just did.
+                </p>
+                <CompletionFields
+                  inputs={nextAction.moreWork.inputs}
+                  values={values}
+                  pending={pending}
+                  onChange={setValues}
+                />
+                <button
+                  type="button"
+                  className={PRIMARY_BUTTON}
+                  disabled={pending}
+                  onClick={() => submitWork(nextAction.moreWork.inputs)}
+                >
+                  <CheckCircle2 className="h-6 w-6" />
+                  {nextAction.moreWork.label}
+                </button>
+              </div>
             ) : null}
           </section>
         ) : null}
@@ -416,13 +555,19 @@ export function OperatorScreen({
             pending={pending}
             quantity={partialQty}
             onQuantityChange={setPartialQty}
+            leadCode={leadCode}
+            onLeadCodeChange={setLeadCode}
             onUseEstimate={(estimate) =>
               void advance("RESOLVE_PARTIAL", {
                 partialRemainingEstimate: String(estimate),
+                overrideEmployeeCode: leadCode.trim(),
               })
             }
             onContinue={(qty) =>
-              void advance("RESOLVE_PARTIAL", { physicalQty: qty })
+              void advance("RESOLVE_PARTIAL", {
+                physicalQty: qty,
+                overrideEmployeeCode: leadCode.trim(),
+              })
             }
             onInvalid={setError}
           />
@@ -504,6 +649,14 @@ export function OperatorScreen({
           pending={pending}
           error={error}
           reportProblem={reportProblem}
+          qcPanel={qcPanel}
+          activeSession={activeSession}
+          employeeOptions={employeeOptions}
+          currentWorkflowBagId={currentBagId}
+          currentBagIsPaused={
+            view.nextAction.kind === "BLOCKED" &&
+            view.nextAction.blockers.some((b) => b.code === "BAG_PAUSED")
+          }
           onClose={() => setSheet("none")}
           onPause={() => setSheet("pause")}
           onEnterCode={() => setSheet("code")}
@@ -518,14 +671,6 @@ export function OperatorScreen({
               const fd = baseForm();
               fd.set("workflowBagId", current.workflowBagId);
               return resumeBagAction(fd);
-            })
-          }
-          onEndShift={() =>
-            void run(async () => {
-              const fd = new FormData();
-              fd.set("token", token);
-              fd.set("stationId", stationId);
-              return endOperatorSessionAction(fd);
             })
           }
         />
@@ -639,6 +784,50 @@ function BagIdentity({
   );
 }
 
+/** The engine's CompletionInput[] as numeric fields. Rendered by the
+ *  COMPLETE case and again inside CONFIRM_BAG_EMPTY's "more to work"
+ *  branch, which records another segment on the same bag — one field
+ *  renderer so the two can never ask for different things. */
+function CompletionFields({
+  inputs,
+  values,
+  pending,
+  onChange,
+}: {
+  inputs: readonly CompletionInput[];
+  values: Record<string, string>;
+  pending: boolean;
+  onChange: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+}) {
+  return (
+    <>
+      {inputs.map((input) => (
+        <label key={input.key} className="block space-y-1.5">
+          <span className="text-sm font-medium text-text-muted">
+            {completionFieldLabel(input)}
+            {input.required ? "" : " · optional"}
+          </span>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={values[input.key] ?? ""}
+            disabled={pending}
+            onChange={(e) =>
+              onChange((prev) => ({
+                ...prev,
+                [input.key]: e.target.value.replace(/\D/g, ""),
+              }))
+            }
+            className={NUMERIC_INPUT}
+            placeholder="0"
+          />
+        </label>
+      ))}
+    </>
+  );
+}
+
 function Progress({
   done,
   expected,
@@ -725,27 +914,45 @@ function MoreSheet({
   pending,
   error,
   reportProblem,
+  qcPanel,
+  activeSession,
+  employeeOptions,
+  currentWorkflowBagId,
+  currentBagIsPaused,
   onClose,
   onPause,
   onResume,
   onEnterCode,
-  onEndShift,
 }: {
   view: StationView;
   token: string;
   pending: boolean;
   error: string | null;
-  reportProblem?: React.ReactNode;
+  reportProblem: React.ReactNode;
+  qcPanel?: React.ReactNode;
+  activeSession: ActiveSession | null;
+  employeeOptions: EmployeeOption[];
+  currentWorkflowBagId: string | null;
+  currentBagIsPaused: boolean;
   onClose: () => void;
   onPause: () => void;
   onResume: () => void;
   onEnterCode: () => void;
-  onEndShift: () => void;
 }) {
   const isPaused =
     view.nextAction.kind === "BLOCKED" &&
     view.nextAction.blockers.some((b) => b.code === "BAG_PAUSED");
   const materialLinks = operatorMaterialLinks(token, view.station.kind);
+  // BOTTLE-SEALING-RECOVERY-1 kept reachable after the cutover. The
+  // condition the legacy page computed inline (bottle product, stage
+  // BLISTERED, at packaging) is not on StationView, so the offer is
+  // widened to "a bag is here and this station cannot move it forward
+  // yet" — which is exactly the dead end the recovery exists for. The
+  // action itself re-checks product kind, stage, finalization and the
+  // lead badge server-side and refuses everything else by name, so a
+  // wider offer cannot become a wider effect.
+  const offerBottleRecovery =
+    currentWorkflowBagId != null && view.nextAction.kind === "START";
 
   return (
     <Sheet title="More" error={error} onClose={onClose}>
@@ -788,13 +995,35 @@ function MoreSheet({
         <ChevronRight className="h-5 w-5 text-text-muted" />
       </button>
 
-      {view.operator ? (
-        <button type="button" className={SHEET_ITEM} disabled={pending} onClick={onEndShift}>
-          <span className="flex items-center gap-3">
-            <LogOut className="h-5 w-5 text-text-muted" />
-            End shift
-          </span>
-        </button>
+      {offerBottleRecovery && currentWorkflowBagId ? (
+        <BottleSealingRecoveryPanel
+          token={token}
+          stationId={view.station.id}
+          workflowBagId={currentWorkflowBagId}
+        />
+      ) : null}
+
+      {qcPanel}
+
+      {/* End shift is the PANEL, not a bare button. BLISTER-PAUSE-COUNT-
+          SNAPSHOT-1 refuses to close a shift on a counting station whose
+          bag is still running until the operator records the machine
+          counter, and that guard lives inside ActiveSessionView. A
+          plain endOperatorSessionAction button here would let an
+          operator walk away from a running blister machine with no
+          reading — the exact hole the guard exists to close. */}
+      {activeSession ? (
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <OperatorSessionPanel
+            token={token}
+            stationId={view.station.id}
+            stationKind={view.station.kind}
+            activeSession={activeSession}
+            employeeOptions={employeeOptions}
+            currentWorkflowBagId={currentWorkflowBagId}
+            currentBagIsPaused={currentBagIsPaused}
+          />
+        </div>
       ) : null}
     </Sheet>
   );
@@ -970,11 +1199,127 @@ function HelpSheet({
   );
 }
 
+/** The lead badge both partial screens collect.
+ *
+ *  Closing a raw-bag allocation ledger has been lead-gated since
+ *  SPLIT-BAG-1 (resolveScannedBagAllocationAction resolves the code
+ *  through resolveStationAccountability with SUPERVISOR_OVERRIDE), and
+ *  resolvePartialAllocation keeps that gate. The spec replaces the typed
+ *  code with an inline supervisor PIN once station_supervisor_sessions
+ *  lands in P5; until then the badge is the honest ask — dropping it
+ *  would let any operator close a ledger they cannot see. */
+function LeadCodeField({
+  value,
+  pending,
+  onChange,
+}: {
+  value: string;
+  pending: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="text-sm font-medium text-text-muted">Lead badge code</span>
+      <input
+        type="text"
+        value={value}
+        disabled={pending}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-14 w-full rounded-xl border border-border bg-surface px-4 text-xl text-text"
+        placeholder="Badge code"
+      />
+    </label>
+  );
+}
+
+/** P1-PARTIAL at scan time — the spec's partial screens for a bag that
+ *  is being STARTED from an earlier run's leftovers, rather than for a
+ *  bag already at the station (that is PartialBag below, the
+ *  RESOLVE_PARTIAL case).
+ *
+ *  Same two shapes, same rule: HIGH/MEDIUM shows the conclusion and one
+ *  button; LOW requires a supervisor badge, which is the rule
+ *  lib/production/partial-bag-lifecycle.test.ts pins and scanCardAction
+ *  enforces. The estimate is shown as an estimate — it is the previous
+ *  run's closing balance, never a physical count (luma-data-honesty). */
+function PartialReuseStart({
+  reuse,
+  pending,
+  leadCode,
+  onLeadCodeChange,
+  onConfirm,
+  onInvalid,
+}: {
+  reuse: {
+    estimate: number | null;
+    confidence: string | null;
+    previousProductName: string | null;
+  };
+  pending: boolean;
+  leadCode: string;
+  onLeadCodeChange: (value: string) => void;
+  onConfirm: (supervisorCode: string | null) => void;
+  onInvalid: (message: string) => void;
+}) {
+  const needsSupervisor = reuse.confidence === "LOW" || reuse.estimate == null;
+  return (
+    <section className="space-y-4">
+      <div
+        className={
+          needsSupervisor
+            ? "rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4"
+            : "rounded-2xl border border-border bg-surface px-4 py-4 text-center"
+        }
+      >
+        <p
+          className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${
+            needsSupervisor ? "text-amber-900" : "text-text-muted"
+          }`}
+        >
+          {needsSupervisor ? "Check bag" : "Partial bag detected"}
+        </p>
+        {reuse.estimate != null ? (
+          <p className="mt-1 text-2xl font-bold tabular-nums">
+            Estimated remaining: {reuse.estimate.toLocaleString()} units
+          </p>
+        ) : (
+          <p className="mt-1 text-base text-amber-950">
+            System cannot confidently determine remaining quantity.
+          </p>
+        )}
+      </div>
+      {needsSupervisor ? (
+        <LeadCodeField
+          value={leadCode}
+          pending={pending}
+          onChange={onLeadCodeChange}
+        />
+      ) : null}
+      <button
+        type="button"
+        className={PRIMARY_BUTTON}
+        disabled={pending}
+        onClick={() => {
+          if (needsSupervisor && leadCode.trim() === "") {
+            onInvalid("A supervisor badge code is needed to use this bag.");
+            return;
+          }
+          onConfirm(needsSupervisor ? leadCode.trim() : null);
+        }}
+      >
+        Use bag
+      </button>
+    </section>
+  );
+}
+
 function PartialBag({
   action,
   pending,
   quantity,
   onQuantityChange,
+  leadCode,
+  onLeadCodeChange,
   onUseEstimate,
   onContinue,
   onInvalid,
@@ -983,6 +1328,8 @@ function PartialBag({
   pending: boolean;
   quantity: string;
   onQuantityChange: (value: string) => void;
+  leadCode: string;
+  onLeadCodeChange: (value: string) => void;
   onUseEstimate: (estimate: number) => void;
   onContinue: (quantity: string) => void;
   onInvalid: (message: string) => void;
@@ -1001,11 +1348,22 @@ function PartialBag({
             Estimated remaining: {screen.estimate.toLocaleString()} units
           </p>
         </div>
+        <LeadCodeField
+          value={leadCode}
+          pending={pending}
+          onChange={onLeadCodeChange}
+        />
         <button
           type="button"
           className={PRIMARY_BUTTON}
           disabled={pending}
-          onClick={() => onUseEstimate(screen.estimate)}
+          onClick={() => {
+            if (leadCode.trim() === "") {
+              onInvalid("Enter the lead badge code to use this bag.");
+              return;
+            }
+            onUseEstimate(screen.estimate);
+          }}
         >
           Use bag
         </button>
@@ -1038,6 +1396,11 @@ function PartialBag({
           placeholder="0"
         />
       </label>
+      <LeadCodeField
+        value={leadCode}
+        pending={pending}
+        onChange={onLeadCodeChange}
+      />
       <button
         type="button"
         className={PRIMARY_BUTTON}
@@ -1045,6 +1408,10 @@ function PartialBag({
         onClick={() => {
           if (quantity.trim() === "") {
             onInvalid("Enter the physical quantity before continuing.");
+            return;
+          }
+          if (leadCode.trim() === "") {
+            onInvalid("Enter the lead badge code to save this count.");
             return;
           }
           onContinue(quantity.trim());

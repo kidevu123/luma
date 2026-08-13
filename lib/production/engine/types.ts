@@ -21,7 +21,13 @@ export type Blocker = {
  *  operation. Derived from route_operations, never from a station-kind
  *  switch statement. */
 export type CompletionInput = {
-  key: "counter" | "damaged" | "cases" | "displays" | "loose";
+  /** `counterPresses` is the sealing machine's press count, NOT a card
+   *  count: recordStageEvent multiplies it by the machine's
+   *  cards-per-press and REFUSES a sealing segment without it
+   *  (SEALING_COUNTER_PRESS_ERROR). It replaces `counter` at HEAT_SEAL
+   *  on the station kinds that use the machine counter — see
+   *  resolve-completion.ts. */
+  key: "counter" | "counterPresses" | "damaged" | "cases" | "displays" | "loose";
   label: string;
   unit: string | null;
   required: boolean;
@@ -61,9 +67,29 @@ export type ProductOption = {
 export type NextAction =
   | { kind: "OPEN_SHIFT" }
   | { kind: "SCAN_TO_CLAIM"; expected: UpNextBag | null }
+  /** Claimed, but the work cannot begin yet: the bag was picked up
+   *  early (overlap scan) and has not reached the stage this operation
+   *  requires. There is deliberately NO gesture — no workflow event in
+   *  the enum marks "operator started", so offering a button would
+   *  record nothing. Luma flips this to COMPLETE on its own the moment
+   *  the upstream station's completion lands. `label` is the operation's
+   *  operator-facing verb, not an event name. */
   | { kind: "START"; label: string }
   | { kind: "COMPLETE"; label: string; inputs: CompletionInput[] }
-  | { kind: "CONFIRM_BAG_EMPTY" }
+  /** Sealing's bag-level close. `moreWork` carries the SAME completion
+   *  affordance the COMPLETE case would have offered, because "No, more
+   *  to seal" is not a dead end: the operator records another lane
+   *  segment on the same bag. Without it the screen would ask a question
+   *  whose second answer has no follow-through. */
+  | {
+      kind: "CONFIRM_BAG_EMPTY";
+      moreWork: { label: string; inputs: CompletionInput[] };
+    }
+  /** The physical bag still carries an OPEN allocation session from a
+   *  PREVIOUS run and cannot open a new one until it is closed.
+   *  `estimate` is system-derived from production output — never a
+   *  physical count; `needsEntry` means Luma cannot derive it and the
+   *  operator must count. See resolve-partial-allocation.ts. */
   | { kind: "RESOLVE_PARTIAL"; estimate: number | null; needsEntry: boolean }
   /** Shown only when the bag's tablet type maps to 2+ ACTIVE products of a
    *  kind this station may make. Exactly one compatible product
@@ -132,7 +158,11 @@ export type AdvanceInput = {
   productId?: string;
   /** Packaging-only: an operator-entered estimate of tablets remaining in
    *  a kept-partial bag. An estimate, never the confirmed allocation
-   *  balance — see luma-data-honesty. */
+   *  balance — see luma-data-honesty.
+   *
+   *  RESOLVE_PARTIAL reads it too: it is the estimate the HIGH/MEDIUM
+   *  partial screen SHOWED and the operator accepted, recorded as
+   *  provenance on the derived close (resolve-partial-allocation.ts). */
   partialRemainingEstimate?: number;
   inputs: {
     counter?: number;
@@ -150,6 +180,10 @@ export type AdvanceInput = {
     cases?: number;
     displays?: number;
     loose?: number;
+    /** RESOLVE_PARTIAL's operator count — tablets physically remaining
+     *  in a bag whose balance Luma cannot derive. Read by
+     *  resolvePartialAllocation, which closes the prior run's session
+     *  against it with MANUAL_ENTRY provenance. */
     physicalQty?: number;
   };
   /** Idempotency key — see lib/production/client-event-id-rule.test.ts. */

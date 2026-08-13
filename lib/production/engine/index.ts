@@ -60,6 +60,15 @@ export type {
   RaiseQaHoldReleaseResult,
 } from "./raise-qa-hold-release";
 export { resolveCompletionInputs } from "./resolve-completion";
+export { operationHasBagCloseGesture } from "./intent-events";
+export {
+  loadPartialAllocationFacts,
+  resolvePartialAllocation,
+} from "./resolve-partial-allocation";
+export type {
+  PartialAllocationFacts,
+  ResolvePartialAllocationInput,
+} from "./resolve-partial-allocation";
 export {
   assembleCompletionInputs,
   autoProductSubmission,
@@ -99,9 +108,12 @@ export {
   getStationView,
   assembleStationView,
   buildNextAction,
+  loadCompatibleProductsForStation,
   mapQueueRowsToUpNext,
   operationVerb,
 } from "./station-view";
+export { resolveFreshBagStart } from "./fresh-bag-start";
+export type { FreshBagStart } from "./fresh-bag-start";
 export type {
   NextActionInput,
   QueueRowForUpNext,

@@ -9,11 +9,18 @@ import { join } from "path";
 const repo = (p: string) =>
   readFileSync(join(__dirname, "..", "..", "..", "..", p), "utf8");
 
-const stageButtonsSrc = readFileSync(
-  join(__dirname, "stage-action-buttons.tsx"),
-  "utf8",
-);
-const scanFormSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
+// P4b Task 5 (THE CUTOVER) — stage-action-buttons.tsx and
+// scan-card-form.tsx are DELETED. The two describe blocks that scanned
+// their copy went with them; what those blocks protected is preserved
+// elsewhere:
+//   - the explicit empty-vs-partial close-out choice is now
+//     AdvanceInput.keepBagPartial / partialRemainingEstimate, carried by
+//     buildRecordPackagingCompleteInput (lib/production/engine/
+//     advance.test.ts) and refused-by-default there rather than by a
+//     radio group;
+//   - the operator-estimate-vs-system-remaining distinction it asserted
+//     in the scan form survives in partial-bags.ts, which the third test
+//     of that block already covered and which is KEPT below.
 // PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's body and the
 // deferred-QR helpers moved verbatim to
 // lib/production/engine/record-packaging-complete.ts (actions.ts is
@@ -33,47 +40,8 @@ const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8").replace(
 const partialBagsSrc = repo("lib/production/partial-bags.ts");
 const qrListSrc = repo("app/(admin)/qr-cards/qr-cards-list.tsx");
 
-describe("Floor close-out forces an explicit empty-vs-partial choice", () => {
-  it("offers both outcomes with clear copy", () => {
-    expect(stageButtonsSrc).toMatch(/Bag is empty — release QR/);
-    expect(stageButtonsSrc).toMatch(/Bag still has product — keep QR with this bag/);
-    // Radio group (a real either/or), not a single ambiguous checkbox.
-    expect(stageButtonsSrc).toMatch(/name="bottle-bag-outcome"/);
-    expect(stageButtonsSrc).toMatch(/bottlePartialChoice/);
-  });
-
-  it("does not let the run close until the bottle outcome is chosen", () => {
-    expect(stageButtonsSrc).toMatch(/bottleChoiceMissing/);
-    expect(stageButtonsSrc).toMatch(/disabled=\{pending \|\| bottleChoiceMissing\}/);
-    expect(stageButtonsSrc).toMatch(/closing the run does not assume\s*\n?\s*the bag is empty/);
-  });
-
-  it("ties keep-partial to the choice and still submits keepBagPartial", () => {
-    expect(stageButtonsSrc).toMatch(
-      /const keepBagPartial = bottlePartialChoice === "partial"/,
-    );
-    expect(stageButtonsSrc).toMatch(/fd\.set\("keepBagPartial", "true"\)/);
-    // Optional estimate still safely coerced (v1.9.1 regression preserved).
-    expect(stageButtonsSrc).toMatch(/coercePartialRemainingEstimate/);
-  });
-});
-
-describe("Scan/resume shows a held partial bottle bag clearly", () => {
-  it("bottle-aware header + 'QR stays on the physical bag' reuse guidance", () => {
-    expect(scanFormSrc).toMatch(/Partial bottle bag held for reuse/);
-    expect(scanFormSrc).toMatch(/still attached to a physical bag/i);
-    expect(scanFormSrc).toMatch(/different product than last time/i);
-    expect(scanFormSrc).toMatch(/Continue with this partial bag/);
-  });
-
-  it("shows system remaining and operator estimate as distinct rows", () => {
-    expect(scanFormSrc).toMatch(/System remaining/);
-    expect(scanFormSrc).toMatch(/Operator estimate/);
-    expect(scanFormSrc).toMatch(/operatorRemainingEstimate/);
-    expect(scanFormSrc).toMatch(/previousProductKind/);
-  });
-
-  it("partial reuse context now carries the operator estimate + product kind", () => {
+describe("Partial reuse context still separates operator estimate from system remaining", () => {
+  it("partial reuse context carries the operator estimate + product kind", () => {
     expect(partialBagsSrc).toMatch(/operatorRemainingEstimate: number \| null/);
     expect(partialBagsSrc).toMatch(/previousProductKind: string \| null/);
     // Read from the latest BAG_FINALIZED via the dedicated helper.

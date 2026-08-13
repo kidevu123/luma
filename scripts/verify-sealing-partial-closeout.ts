@@ -37,14 +37,10 @@ function runStaticContracts(): void {
   }
 
   const actions = read("app/(floor)/floor/[token]/actions.ts");
-  const buttons = read("app/(floor)/floor/[token]/stage-action-buttons.tsx");
   const projector = read("lib/projector/index.ts");
   const partial = read("lib/production/sealing-partial-closeout.ts");
   const progression = read("lib/production/stage-progression.ts");
 
-  assert(buttons.includes("Submit whole bag"), "Step 3 UI: Submit whole bag");
-  assert(buttons.includes("Submit partial bag"), "Step 3 UI: Submit partial bag");
-  assert(!buttons.includes("Confirm sealing complete"), "Step 3 UI: old confirm copy removed");
 
   assert(actions.includes("sealingCloseMode"), "actions: sealingCloseMode form field");
   assert(
@@ -54,7 +50,6 @@ function runStaticContracts(): void {
   assert(actions.includes("validateSealingPartialCloseInput"), "actions: partial validation");
   assert(actions.includes("maybeAutoReleaseAfterPartialSealingClose"), "actions: partial auto-release");
   assert(actions.includes("packagingPartialSealedReady"), "actions: packaging BLISTERED gate");
-  assert(buttons.includes("hasPartialSealingCloseout"), "UI: partial close-out prop wired");
 
   assert(projector.includes("resolveStageForWorkflowEvent"), "projector: stage resolver");
   assert(projector.includes("isPartialSealingClosePayload"), "projector: partial payload guard");

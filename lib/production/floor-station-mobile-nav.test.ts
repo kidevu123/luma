@@ -94,9 +94,22 @@ describe("STATION-NAV-CLEANUP-2 · floorSupervisorToolsForStation", () => {
 });
 
 describe("STATION-NAV-CLEANUP-2 · station page hides empty supervisor tools", () => {
-  it("SupervisorToolsPanel returns null when tools array is empty", () => {
-    expect(pageSrc).toMatch(/function SupervisorToolsPanel/);
-    expect(pageSrc).toMatch(/if \(tools\.length === 0\) return null/);
+  // P4b Task 5 (THE CUTOVER) — page.tsx no longer renders a
+  // SupervisorToolsPanel; the same links live in the operator screen's
+  // More sheet, sourced from the SAME floorSupervisorToolsForStation
+  // helper via operatorMaterialLinks. The behaviour this pinned — an
+  // empty tool list renders nothing rather than an empty disclosure —
+  // is now a property of mapping over the list, so it is asserted where
+  // the mapping happens.
+  it("an empty tool list renders no material links in the More sheet", () => {
+    const screenSrc = readFileSync(
+      join(__dirname, "../../app/(floor)/floor/[token]/operator-screen.tsx"),
+      "utf8",
+    );
+    expect(screenSrc).toMatch(/operatorMaterialLinks/);
+    expect(screenSrc).toMatch(/materialLinks\.map/);
+    // The helper is still the single source of which tools exist.
+    expect(floorSupervisorToolsForStation(TOKEN, "PACKAGING")).toEqual([]);
   });
 });
 
@@ -121,16 +134,22 @@ describe("STATION-NAV-CLEANUP-3 · station page nav scope", () => {
     expect(pageSrc).not.toMatch(/\/bag-allocation/);
   });
 
-  it("hard-stop scan/start files unchanged in this task (scope report)", () => {
-    const scanFormSrc = readFileSync(
-      join(__dirname, "../../app/(floor)/floor/[token]/scan-card-form.tsx"),
+  // P4b Task 5 (THE CUTOVER) — scan-card-form.tsx is DELETED. The scan
+  // path it fronted is not: scanCardAction still owns the fresh-bag
+  // start transaction, and operator-actions.ts's claim now routes an
+  // unassigned RAW_BAG card into it (SCAN-FIRST-1). The "unchanged in
+  // this task" scope note becomes an assertion that the start path is
+  // still reachable, which is what the original was really protecting.
+  it("the fresh-bag start path is still reachable from the floor scan", () => {
+    const operatorActionsSrc = readFileSync(
+      join(__dirname, "../../app/(floor)/floor/[token]/operator-actions.ts"),
       "utf8",
     );
     const actionsSrc = readFileSync(
       join(__dirname, "../../app/(floor)/floor/[token]/actions.ts"),
       "utf8",
     );
-    expect(scanFormSrc).toMatch(/scanCardAction/);
+    expect(operatorActionsSrc).toMatch(/scanCardAction/);
     expect(actionsSrc).toMatch(/export async function scanCardAction/);
     expect(actionsSrc).not.toMatch(/bag-allocation\/page/);
   });

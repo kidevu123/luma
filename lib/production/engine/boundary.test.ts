@@ -16,9 +16,16 @@ import { ESLint } from "eslint";
 // imports in actions.ts with no remaining reference, and they went with
 // the body. Re-pinned, because a stale 80 leaves exactly the slack this
 // comment warns about. Trail: 82 -> 80 -> (79, reverted) -> 80 -> 75.
-// Phase 4 drives this to zero and flips the rule to "error"; until then
+// P4b Task 5 (THE CUTOVER) took it to 48. Three things moved it:
+// page.tsx dropped from 22 imports to 2 (getStationView is the only read
+// left, and everything it used to resolve inline went with the panels);
+// stage-action-buttons.tsx (9) and scan-card-form.tsx (3) were DELETED
+// outright, since no route uses them after the cutover. Re-pinned,
+// because a stale 60 leaves exactly the slack this comment warns about.
+// Trail: 82 -> 80 -> (79, reverted) -> 80 -> 75 -> 48.
+// Task 6 drives this to zero and flips the rule to "error"; until then
 // the only rule is that it must not grow.
-const BASELINE_VIOLATIONS = 75;
+const BASELINE_VIOLATIONS = 48;
 
 describe("floor import boundary", () => {
   it("blocks a non-engine lib/production import from floor code", async () => {
@@ -39,6 +46,25 @@ describe("floor import boundary", () => {
     const [result] = await eslint.lintText(
       `import { resolveOperation } from "@/lib/production/engine";\n` +
         `export const x = resolveOperation;\n`,
+      { filePath: "app/(floor)/floor/[token]/boundary-probe.ts" },
+    );
+    const restricted = (result?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-imports",
+    );
+    expect(restricted).toHaveLength(0);
+  });
+
+  it("permits the CLIENT engine barrel from floor code", async () => {
+    // P4b Task 5: `"use client"` files cannot import the server barrel —
+    // it re-exports getStationView/advanceBag/station-token, every one of
+    // which imports @/lib/db, and the Next build fails on
+    // `Can't resolve 'perf_hooks'` when the Postgres driver lands in a
+    // browser bundle. engine/client.ts is the pure half, and it is the
+    // ONLY other permitted path.
+    const eslint = new ESLint({ cwd: process.cwd() });
+    const [result] = await eslint.lintText(
+      `import { partialScreenFor } from "@/lib/production/engine/client";\n` +
+        `export const x = partialScreenFor;\n`,
       { filePath: "app/(floor)/floor/[token]/boundary-probe.ts" },
     );
     const restricted = (result?.messages ?? []).filter(

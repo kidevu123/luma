@@ -11,8 +11,10 @@ import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
 import type { AdvanceInput, AdvanceIntent, AdvanceResult } from "./types";
 import { assignBagProduct } from "./assign-bag-product";
 import { claimQueuedBag } from "./claim-queued-bag";
+import { intentToEventType } from "./intent-events";
 import { blockerFor } from "./resolve-exceptions";
 import { resolveOperation } from "./resolve-operation";
+import { resolvePartialAllocation } from "./resolve-partial-allocation";
 import { getStationView } from "./station-view";
 import {
   recordStageEvent,
@@ -23,24 +25,6 @@ import {
   recordPackagingComplete,
   type RecordPackagingCompleteInput,
 } from "./record-packaging-complete";
-
-/** Operation code -> the completion event it fires. Mirrors
- *  LEGACY_EVENT_TYPE_TO_OPERATION in lib/production/routes.ts, inverted. */
-const COMPLETE_EVENT_FOR_OPERATION: Readonly<Record<string, string>> = {
-  BLISTER: "BLISTER_COMPLETE",
-  HEAT_SEAL: SEALING_SEGMENT_EVENT,
-  PACKAGING: "PACKAGING_COMPLETE",
-  BOTTLE_FILL: "BOTTLE_HANDPACK_COMPLETE",
-  STICKERING: "BOTTLE_STICKER_COMPLETE",
-  INDUCTION_SEAL: "BOTTLE_CAP_SEAL_COMPLETE",
-};
-
-/** Operations where a separate bag-level close exists. Sealing is the
- *  only one today: each station closes its lane with a segment, and the
- *  bag closes once when the operator confirms it is empty. */
-const BAG_CLOSE_EVENT_FOR_OPERATION: Readonly<Record<string, string>> = {
-  HEAT_SEAL: "SEALING_COMPLETE",
-};
 
 /** The events recordStageEvent refuses on an unmapped bag at a
  *  sealing-capable station (SEALING_SAVE_PRODUCT_FIRST_ERROR). Mirrors the
@@ -100,37 +84,11 @@ export function isPackagingShapedComplete(
   );
 }
 
-/** Station kinds whose completion event is NOT the one their aliased
- *  operation implies. resolve-operation aliases HANDPACK_BLISTER onto the
- *  BLISTER operation, so the operation code alone yields
- *  BLISTER_COMPLETE — which ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER
- *  rejects. The station kind is the tiebreaker, which is why this
- *  function takes one. COMBINED aliases onto BLISTER too and is NOT
- *  listed: BLISTER_COMPLETE is exactly what it fires. */
-const COMPLETE_EVENT_FOR_STATION_KIND: Readonly<
-  Record<string, Readonly<Record<string, string>>>
-> = {
-  HANDPACK_BLISTER: { BLISTER: "HANDPACK_BLISTER_COMPLETE" },
-};
-
-export function intentToEventType(
-  intent: AdvanceIntent,
-  operationCode: string,
-  stationKind: string,
-): string | null {
-  if (intent === "CLAIM") return "BAG_PICKED_UP";
-  if (intent === "CONFIRM_BAG_EMPTY") {
-    return BAG_CLOSE_EVENT_FOR_OPERATION[operationCode] ?? null;
-  }
-  if (intent === "COMPLETE") {
-    const byKind = COMPLETE_EVENT_FOR_STATION_KIND[stationKind]?.[operationCode];
-    if (byKind) return byKind;
-    return COMPLETE_EVENT_FOR_OPERATION[operationCode] ?? null;
-  }
-  // RESOLVE_PARTIAL does not fire a workflow event; it records an
-  // allocation resolution handled by the partial-bag modules.
-  return null;
-}
+// P4b Task 5 — intentToEventType and its three maps moved verbatim to
+// intent-events.ts (station-view.ts needs the completion event type and
+// this module already imports station-view; the leaf module breaks the
+// cycle). Re-exported so the barrel and advance.test.ts keep their path.
+export { intentToEventType } from "./intent-events";
 
 /** Pure: the AdvanceInput -> RecordStageEventInput mapping.
  *  Separated from advanceBag so the count routing is testable without
@@ -323,9 +281,43 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
   }
 
   const [bag] = await db
-    .select({ productId: workflowBags.productId })
+    .select({
+      productId: workflowBags.productId,
+      inventoryBagId: workflowBags.inventoryBagId,
+    })
     .from(workflowBags)
     .where(eq(workflowBags.id, input.workflowBagId));
+
+  // RESOLVE-PARTIAL-1 — the partial-bag screen's write. Not a stage
+  // event and not route-dependent: it closes the PRIOR run's still-OPEN
+  // raw-bag allocation session on this physical bag, which is the exact
+  // ledger the sealing product-assign path refuses on
+  // (OPEN_ALLOCATION_ON_BAG). Short-circuited before resolveOperation
+  // for the same reason CLAIM is — the operation governs the WORK, and
+  // there is none here. Before this task the intent fell through to
+  // intentToEventType, which answers null for it, so the operator's
+  // count was dropped and the screen showed OPERATION_UNRESOLVED.
+  if (input.intent === "RESOLVE_PARTIAL") {
+    if (!bag) return { ok: false, blocker: blockerFor("BAG_UNRECOGNIZED") };
+    const resolvedPartial = await resolvePartialAllocation({
+      stationId: input.stationId,
+      workflowBagId: input.workflowBagId,
+      inventoryBagId: bag.inventoryBagId,
+      ...(input.inputs.physicalQty != null
+        ? { physicalQty: input.inputs.physicalQty }
+        : {}),
+      ...(input.partialRemainingEstimate != null
+        ? { estimate: input.partialRemainingEstimate }
+        : {}),
+      ...(input.overrideEmployeeCode != null
+        ? { overrideEmployeeCode: input.overrideEmployeeCode }
+        : {}),
+    });
+    if (!resolvedPartial.ok) {
+      return { ok: false, blocker: resolvedPartial.blocker };
+    }
+    return { ok: true, view: await getStationView(input.stationId) };
+  }
 
   // ASSIGN-PRODUCT-EXTRACT-1 — resolve the operation for the product that
   // is ABOUT TO BE USED, not only the one already on the bag. An unmapped

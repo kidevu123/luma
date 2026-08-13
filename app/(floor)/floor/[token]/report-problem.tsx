@@ -36,7 +36,7 @@ import {
   reportProblemCategoryDisabled,
   reportProblemRouteFor,
   type ProductionExceptionCategory,
-} from "@/lib/production/engine";
+} from "@/lib/production/engine/client";
 import { pauseBagAction } from "./actions";
 import {
   raiseDowntimeAction,

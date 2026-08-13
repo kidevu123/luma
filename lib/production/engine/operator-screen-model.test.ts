@@ -426,3 +426,39 @@ describe("report problem (P4b Task 4)", () => {
     }
   });
 });
+
+describe("assembleCompletionInputs · the sealing counter reaches the engine (P4b Task 5)", () => {
+  it("routes counterPresses to AdvanceInput.inputs.counterPresses, not to counter", () => {
+    // The whole point of the distinct key: recordStageEvent multiplies
+    // presses by the machine's cards-per-press. Landing this in
+    // `counter` would put a press count into countTotal AND leave
+    // counterPresses absent, which the seal refuses outright.
+    const result = assembleCompletionInputs(
+      [
+        { key: "counterPresses", label: "Counter", unit: "presses", required: true },
+        { key: "damaged", label: "Damaged", unit: "cards", required: false },
+      ],
+      { counterPresses: "18", damaged: "2" },
+    );
+    expect(result).toEqual({
+      ok: true,
+      inputs: { counterPresses: 18, damaged: 2 },
+    });
+  });
+
+  it("refuses to finish a seal with no press reading rather than sending zero", () => {
+    const result = assembleCompletionInputs(
+      [{ key: "counterPresses", label: "Counter", unit: "presses", required: true }],
+      {},
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("keeps a real reading of 0 presses", () => {
+    const result = assembleCompletionInputs(
+      [{ key: "counterPresses", label: "Counter", unit: "presses", required: true }],
+      { counterPresses: "0" },
+    );
+    expect(result).toEqual({ ok: true, inputs: { counterPresses: 0 } });
+  });
+});

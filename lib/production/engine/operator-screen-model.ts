@@ -148,6 +148,14 @@ export function assembleCompletionInputs(
       case "counter":
         out.counter = parsed;
         break;
+      // Distinct from `counter` on purpose: recordStageEvent multiplies
+      // presses by the machine's cards-per-press and REFUSES a sealing
+      // segment whose counterPresses is absent. Routing this to
+      // `counter` would put a press count into countTotal and leave the
+      // seal refused (SEALING_COUNTER_PRESS_ERROR).
+      case "counterPresses":
+        out.counterPresses = parsed;
+        break;
       case "damaged":
         out.damaged = parsed;
         break;

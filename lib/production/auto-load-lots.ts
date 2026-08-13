@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { packagingLots, packagingMaterials } from "@/lib/db/schema";
 import { and, eq, asc } from "drizzle-orm";
+import { STATION_AUTO_MATERIAL_KINDS } from "./station-auto-material-kinds";
 
 export type AutoLoadedLot = {
   lotId: string;
@@ -14,11 +15,13 @@ export type AutoLoadedLot = {
 // Maps station kind to the material kinds it auto-loads.
 // Only unit-based materials are listed here — roll-based (PVC_ROLL, FOIL_ROLL)
 // require physical mounting with tare weight and are loaded manually.
-export const STATION_AUTO_MATERIAL_KINDS: Record<string, string[]> = {
-  HANDPACK_BLISTER: ["BLISTER_CARD"],
-  BOTTLE_HANDPACK: ["BOTTLE", "CAP"],
-  BOTTLE_CAP_SEAL: ["INDUCTION_SEAL"],
-};
+// P4b Task 5: the constant itself moved to
+// lib/production/station-auto-material-kinds.ts (a pure module) so that
+// pure consumers — floor-station-mobile-nav.ts, and through it the
+// operator screen's client bundle — stop pulling this file's `db`
+// import along. Re-exported here so every existing import path keeps
+// resolving to the same object.
+export { STATION_AUTO_MATERIAL_KINDS } from "./station-auto-material-kinds";
 
 export async function loadAutoLots(stationKind: string): Promise<AutoLoadedLot[]> {
   const kinds = STATION_AUTO_MATERIAL_KINDS[stationKind];

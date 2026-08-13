@@ -27,7 +27,7 @@ import {
   shiftEndCounterSnapshotMissingError,
 } from "@/lib/production/blister-counter-snapshot";
 
-type ActiveSession = {
+export type ActiveSession = {
   id: string;
   employeeId: string | null;
   employeeNameSnapshot: string;

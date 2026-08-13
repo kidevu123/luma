@@ -25,7 +25,14 @@ const floorActionsSrc = repo("app/(floor)/floor/[token]/actions.ts").replace(
   `${repo("lib/production/engine/assign-bag-product.ts")}\n// ── SPLIT-BAG-1 — floor "Use calculated remaining"`,
 );
 const floorPanelSrc = repo("app/(floor)/floor/[token]/open-allocation-calc-panel.tsx");
-const scanFormSrc = repo("app/(floor)/floor/[token]/scan-card-form.tsx");
+// P4b Task 5 (THE CUTOVER) — scan-card-form.tsx is DELETED. The
+// structured open-allocation block it rendered is now a first-class
+// engine concern: getStationView reads the same condition
+// (loadPartialAllocationFacts) and buildNextAction turns it into
+// NextAction.RESOLVE_PARTIAL, which advanceBag resolves through the
+// SAME service this file already covers. The scanner below points at
+// that module instead of the deleted form.
+const enginePartialSrc = repo("lib/production/engine/resolve-partial-allocation.ts");
 
 describe("service — resolves via the proven close path, honest + audited", () => {
   it("closes through closeAllocationSessionInTx with no finished lot and OUTPUT_DERIVED source", () => {
@@ -143,9 +150,11 @@ describe("SPLIT-BAG-1 floor panel — structured blocker, explicit lead-gated ac
     expect(floorPanelSrc).toMatch(/resolveScannedBagAllocationAction/);
   });
 
-  it("scan-card-form renders the panel from the structured result", () => {
-    expect(scanFormSrc).toMatch(/openAllocationBlock/);
-    expect(scanFormSrc).toMatch(/setOpenAllocBlock\(r\.openAllocationBlock\)/);
-    expect(scanFormSrc).toMatch(/<OpenAllocationCalcPanel/);
+  it("the engine resolves the same open-allocation block through the same service", () => {
+    expect(enginePartialSrc).toMatch(/resolveAllocationFromProductionOutput/);
+    expect(enginePartialSrc).toMatch(/computeSystemDerivedResolutionForBag/);
+    // An operator's physical count is never labelled system-derived.
+    expect(enginePartialSrc).toMatch(/consumedQtySource: "MANUAL_ENTRY"/);
+    expect(enginePartialSrc).toMatch(/endingBalanceSource: "MANUAL_ENTRY"/);
   });
 });

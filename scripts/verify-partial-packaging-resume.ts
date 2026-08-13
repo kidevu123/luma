@@ -37,10 +37,8 @@ function runStaticContracts(): void {
   }
 
   const actions = read("app/(floor)/floor/[token]/actions.ts");
-  const page = read("app/(floor)/floor/[token]/page.tsx");
   const partial = read("lib/production/sealing-partial-closeout.ts");
   const projector = read("lib/projector/index.ts");
-  const form = read("app/(floor)/floor/[token]/scan-card-form.tsx");
 
   assert(
     partial.includes("partial_packaging: true"),
@@ -69,14 +67,6 @@ function runStaticContracts(): void {
   assert(
     actions.includes("isWorkflowBagResumableAtSealingAfterPartialPackaging"),
     "actions: assigned pickup filter for legacy PACKAGED",
-  );
-  assert(
-    page.includes("eligiblePartialPackagingResumes"),
-    "page: partial packaging resume dropdown",
-  );
-  assert(
-    form.includes("partial packaged — resume sealing"),
-    "scan form: partial packaged resume label",
   );
   assert(
     actions.includes("!emitPartialPackaging"),

@@ -31,11 +31,17 @@ import {
   raiseProductionException,
   raiseQaHoldRelease,
   raiseQaHoldStarted,
+  resolveFreshBagStart,
   resolveStationByToken,
   PRODUCTION_EXCEPTION_CATEGORIES,
   type AdvanceInput,
   type Blocker,
+  type FreshBagStart,
 } from "@/lib/production/engine";
+// SCAN-FIRST-1 — the fresh-bag start transaction stays where it is.
+// scanCardAction is a "use server" export, so calling it from this
+// module is a server-to-server call, not a second implementation.
+import { scanCardAction } from "./actions";
 
 /** What every action on this file returns. `code` is the engine's stable
  *  blocker code — never shown to the operator, but it lets the screen
@@ -92,7 +98,13 @@ const advanceSchema = z.object({
   // exactly the wrong default for "keep this bag open".
   keepBagPartial: z.literal("true").optional(),
   partialRemainingEstimate: countField,
+  /** RESOLVE_PARTIAL's lead gate — the badge code that closes a
+   *  raw-bag allocation ledger (same gate as
+   *  resolveScannedBagAllocationAction). Also the per-form
+   *  accountability override recordStageEvent already accepts. */
+  overrideEmployeeCode: z.string().max(40).optional(),
   counter: countField,
+  counterPresses: countField,
   damaged: countField,
   cases: countField,
   displays: countField,
@@ -118,12 +130,11 @@ function optionalField(formData: FormData, key: string): string | undefined {
  *  two sources of truth for the same screen. Task 5 owns that call once
  *  the component is mounted and the refresh path is visible.
  *
- *  RESOLVE_PARTIAL is accepted and forwarded even though the engine
- *  currently REFUSES it (intentToEventType returns null for that intent,
- *  so advanceBag answers with a blocker). That is deliberate: the screen
- *  renders the spec's partial screens now, and the operator sees the
- *  engine's own refusal rather than a UI-invented message. Closing it is
- *  engine work, not this file's. */
+ *  RESOLVE_PARTIAL is a real intent as of Task 5: advanceBag routes it to
+ *  resolvePartialAllocation, which closes the prior run's raw-bag
+ *  allocation session against either the system-derived remaining or the
+ *  operator's physical count. It is lead-gated there, which is why this
+ *  schema carries overrideEmployeeCode. */
 export async function advanceBagAction(
   formData: FormData,
 ): Promise<OperatorActionResult> {
@@ -137,7 +148,9 @@ export async function advanceBagAction(
     productId: optionalField(formData, "productId"),
     keepBagPartial: optionalField(formData, "keepBagPartial"),
     partialRemainingEstimate: optionalField(formData, "partialRemainingEstimate"),
+    overrideEmployeeCode: optionalField(formData, "overrideEmployeeCode"),
     counter: optionalField(formData, "counter"),
+    counterPresses: optionalField(formData, "counterPresses"),
     damaged: optionalField(formData, "damaged"),
     cases: optionalField(formData, "cases"),
     displays: optionalField(formData, "displays"),
@@ -154,6 +167,7 @@ export async function advanceBagAction(
   // (a real 0 is a reading), and isPackagingShapedComplete routes on it.
   const inputs: AdvanceInput["inputs"] = {
     ...(d.counter != null ? { counter: d.counter } : {}),
+    ...(d.counterPresses != null ? { counterPresses: d.counterPresses } : {}),
     ...(d.damaged != null ? { damaged: d.damaged } : {}),
     ...(d.cases != null ? { cases: d.cases } : {}),
     ...(d.displays != null ? { displays: d.displays } : {}),
@@ -171,6 +185,9 @@ export async function advanceBagAction(
       clientEventId: d.clientEventId,
       inputs,
       ...(d.productId != null ? { productId: d.productId } : {}),
+      ...(d.overrideEmployeeCode != null
+        ? { overrideEmployeeCode: d.overrideEmployeeCode }
+        : {}),
       ...(d.keepBagPartial === "true" ? { keepBagPartial: true } : {}),
       ...(d.partialRemainingEstimate != null
         ? { partialRemainingEstimate: d.partialRemainingEstimate }
@@ -196,6 +213,16 @@ const claimSchema = z
     scanToken: z.string().min(1).max(200).optional(),
     /** The expected bag, when the screen already knows which one. */
     workflowBagId: z.string().uuid().optional(),
+    /** SCAN-FIRST-1 — the fresh-start half. Only read when the scanned
+     *  card has no workflow bag yet and this station kind must record a
+     *  product at start (BOTTLE_HANDPACK). */
+    productId: z.string().uuid().optional(),
+    /** P1-PARTIAL — the operator's confirmation that this partial bag
+     *  is the one they are starting, and (LOW confidence only) the
+     *  supervisor badge that rule requires. Forwarded verbatim to
+     *  scanCardAction, which owns both gates. */
+    confirmPartialReuse: z.literal("true").optional(),
+    partialReuseSupervisorCode: z.string().max(40).optional(),
   })
   .refine((d) => d.scanToken != null || d.workflowBagId != null, {
     message: "Scan a bag QR or enter its code.",
@@ -230,18 +257,58 @@ async function resolveScannedWorkflowBagId(scanToken: string): Promise<string | 
   return byId?.workflowBagId ?? null;
 }
 
+/** What SCAN_TO_CLAIM can answer with beyond ok/error. Two of the four
+ *  answers are neither: the scan is mid-flight and the operator owes one
+ *  more input before the bag can start. */
+export type ClaimScanResult =
+  | { ok: true; workflowBagId?: string }
+  | {
+      error: string;
+      code?: string;
+      suggestedAction?: Blocker["suggestedAction"];
+    }
+  /** SCAN-FIRST-1 — the scan started a NEW bag rather than claiming a
+   *  queued one, and this station kind records the product at start.
+   *  The screen shows these and re-submits with productId. */
+  | { needsProduct: { options: { productId: string; name: string; sku: string }[] } }
+  /** P1-PARTIAL — the scanned bag is a partial from an earlier run and
+   *  the operator must confirm before the run opens. The screen shows
+   *  the spec's partial screen and re-submits with confirmPartialReuse
+   *  (plus a supervisor badge when the confidence is LOW). */
+  | {
+      partialReuse: {
+        estimate: number | null;
+        confidence: string | null;
+        previousProductName: string | null;
+      };
+    };
+
 /** SCAN_TO_CLAIM's write. Every refusal an operator can cause — wrong
  *  station, already claimed, paused, not ready — comes back from
- *  claimQueuedBag's own guards, not from a pre-check here. */
+ *  claimQueuedBag's own guards, not from a pre-check here.
+ *
+ *  SCAN-FIRST-1: one gesture, two meanings. A card that already carries
+ *  a workflow bag is CLAIMED; a RAW_BAG card that does not is STARTED,
+ *  by delegating to scanCardAction (the transaction that creates the
+ *  bag, and the owner of the partial-reuse and readiness gates). The
+ *  operator screen has no fresh-card list and no pickup list, so this
+ *  branch is the only way a first-operation station can begin work
+ *  after the cutover. */
 export async function claimScannedBagAction(
   formData: FormData,
-): Promise<OperatorActionResult & { workflowBagId?: string }> {
+): Promise<ClaimScanResult> {
   const parsed = claimSchema.safeParse({
     token: formData.get("token"),
     stationId: formData.get("stationId"),
     clientEventId: formData.get("clientEventId"),
     scanToken: optionalField(formData, "scanToken"),
     workflowBagId: optionalField(formData, "workflowBagId"),
+    productId: optionalField(formData, "productId"),
+    confirmPartialReuse: optionalField(formData, "confirmPartialReuse"),
+    partialReuseSupervisorCode: optionalField(
+      formData,
+      "partialReuseSupervisorCode",
+    ),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -250,7 +317,7 @@ export async function claimScannedBagAction(
 
   let workflowBagId: string;
   try {
-    await authStation(d.token, d.stationId);
+    const station = await authStation(d.token, d.stationId);
     // A scan wins over the expected bag: the operator is holding what
     // they scanned, and claiming the queue head instead would attribute
     // work to the wrong bag.
@@ -258,6 +325,24 @@ export async function claimScannedBagAction(
       ? await resolveScannedWorkflowBagId(d.scanToken)
       : (d.workflowBagId ?? null);
     if (!resolved) {
+      if (d.scanToken) {
+        const fresh = await resolveFreshBagStart({
+          scanToken: d.scanToken,
+          stationKind: station.kind,
+        });
+        if (fresh) {
+          return startFreshBag({
+            token: d.token,
+            stationId: d.stationId,
+            fresh,
+            ...(d.productId != null ? { productId: d.productId } : {}),
+            confirmPartialReuse: d.confirmPartialReuse === "true",
+            ...(d.partialReuseSupervisorCode != null
+              ? { partialReuseSupervisorCode: d.partialReuseSupervisorCode }
+              : {}),
+          });
+        }
+      }
       return {
         error: "This code was not recognized. Try scanning again.",
         code: "BAG_UNRECOGNIZED",
@@ -277,6 +362,72 @@ export async function claimScannedBagAction(
 
   revalidateFloor(d.token);
   return { ok: true, workflowBagId };
+}
+
+/** SCAN-FIRST-1's start half. Delegates the whole write to
+ *  scanCardAction — this function only decides whether the operator
+ *  still owes an answer (a product pick, a partial confirmation) before
+ *  that action can run, and translates its structured refusals into the
+ *  shapes the screen renders.
+ *
+ *  Deliberately NOT re-implemented here: the readiness gate, the
+ *  partial-restart rules, the LOW-confidence supervisor requirement and
+ *  the allocation-session open all live in scanCardAction's transaction
+ *  and stay there. Duplicating any of them would give the floor two
+ *  answers to the same question. */
+async function startFreshBag(args: {
+  token: string;
+  stationId: string;
+  fresh: FreshBagStart;
+  productId?: string;
+  confirmPartialReuse: boolean;
+  partialReuseSupervisorCode?: string;
+}): Promise<ClaimScanResult> {
+  let productId = args.productId ?? null;
+  if (args.fresh.needsProduct && !productId) {
+    // Exactly one compatible product is master data's answer, not an
+    // operator question — the same AUTO rule the sealing pick follows.
+    if (args.fresh.options.length === 1) {
+      productId = args.fresh.options[0]?.productId ?? null;
+    } else if (args.fresh.options.length > 1) {
+      return { needsProduct: { options: args.fresh.options } };
+    }
+    // Zero options falls through: scanCardAction's own
+    // checkFirstOpProductSelection produces the operator-facing message
+    // for "master data has nothing this bag can become".
+  }
+
+  const fd = new FormData();
+  fd.set("token", args.token);
+  fd.set("stationId", args.stationId);
+  fd.set("cardId", args.fresh.cardId);
+  if (productId) fd.set("productId", productId);
+  if (args.confirmPartialReuse) fd.set("confirmPartialReuse", "true");
+  if (args.partialReuseSupervisorCode) {
+    fd.set("partialReuseSupervisorCode", args.partialReuseSupervisorCode);
+  }
+
+  const result = await scanCardAction(fd);
+  if (!result) return { ok: true };
+  if (result.partialReuseConfirmationRequired && result.partialContext) {
+    return {
+      partialReuse: {
+        estimate: result.partialContext.remainingEstimate,
+        confidence: result.partialContext.remainingConfidence,
+        previousProductName: result.partialContext.previousProductName,
+      },
+    };
+  }
+  if (result.openAllocationBlock) {
+    return {
+      error: result.openAllocationBlock.message,
+      code: "OPEN_ALLOCATION_ON_BAG",
+      suggestedAction: "NOTIFY_SUPERVISOR",
+    };
+  }
+  if (result.error) return { error: result.error };
+  revalidateFloor(args.token);
+  return { ok: true };
 }
 
 // ── exceptions ────────────────────────────────────────────────────────

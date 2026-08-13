@@ -36,6 +36,10 @@ const CURRENT: CurrentWork = {
   progress: null,
 };
 
+/** No sealing segments recorded and no partial close-out — the shape
+ *  every case below assumes unless it is testing the lane close. */
+const NO_SEALING = { segmentCount: 0, hasPartialCloseout: false };
+
 const ALL_PASS = evaluateChecks({
   bagRecognized: true,
   productResolved: true,
@@ -57,6 +61,9 @@ describe("buildNextAction", () => {
       checks: ALL_PASS,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("OPEN_SHIFT");
@@ -70,6 +77,9 @@ describe("buildNextAction", () => {
       checks: ALL_PASS,
       bagStage: null,
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("SCAN_TO_CLAIM");
@@ -94,6 +104,9 @@ describe("buildNextAction", () => {
       checks,
       bagStage: "STARTED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("BLOCKED");
@@ -110,13 +123,216 @@ describe("buildNextAction", () => {
       checks: ALL_PASS,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
+      productChoice: { kind: "NONE" },
+    });
+    expect(action.kind).toBe("COMPLETE");
+    if (action.kind === "COMPLETE") {
+      // SEALING-COUNTER plumbing (P4b Task 5): a sealing station's
+      // number is machine PRESSES, not cards — recordStageEvent refuses
+      // the segment without counterPresses and derives the card count
+      // itself. The generic `counter` field would be refused every time.
+      expect(action.inputs.map((i) => i.key)).toContain("counterPresses");
+      expect(action.inputs.map((i) => i.key)).not.toContain("counter");
+      expect(action.label).not.toMatch(/_COMPLETE/);
+    }
+  });
+
+  it("keeps the plain counter at a station that does not use the sealing machine counter", () => {
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: { ...OP, operationCode: "BLISTER", allowedStationKind: "BLISTER" },
+      checks: ALL_PASS,
+      bagStage: "STARTED",
+      expected: null,
+      stationKind: "BLISTER",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("COMPLETE");
     if (action.kind === "COMPLETE") {
       expect(action.inputs.map((i) => i.key)).toContain("counter");
-      expect(action.label).not.toMatch(/_COMPLETE/);
+      expect(action.inputs.map((i) => i.key)).not.toContain("counterPresses");
     }
+  });
+
+  it("announces START when the bag was claimed before the previous step finished", () => {
+    // Overlap scan: sealing takes a bag while blister is still running.
+    // SEALING_SEGMENT_COMPLETE requires BLISTERED, so DONE would be
+    // refused — the screen must not offer it.
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: ALL_PASS,
+      bagStage: "STARTED",
+      expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
+      productChoice: { kind: "NONE" },
+    });
+    expect(action.kind).toBe("START");
+    if (action.kind === "START") {
+      expect(action.label).toBe("Sealing");
+      expect(action.label).not.toMatch(/_COMPLETE|BLISTERED|STARTED/);
+    }
+  });
+
+  it("asks CONFIRM_BAG_EMPTY once a sealing segment is recorded, carrying the more-work form", () => {
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: ALL_PASS,
+      bagStage: "BLISTERED",
+      expected: null,
+      stationKind: "SEALING",
+      sealing: { segmentCount: 1, hasPartialCloseout: false },
+      partialAllocation: null,
+      productChoice: { kind: "NONE" },
+    });
+    expect(action.kind).toBe("CONFIRM_BAG_EMPTY");
+    if (action.kind === "CONFIRM_BAG_EMPTY") {
+      // "No, more to seal" has to lead somewhere: the same completion
+      // fields the COMPLETE case would have shown.
+      expect(action.moreWork.inputs.map((i) => i.key)).toContain("counterPresses");
+      expect(action.moreWork.label).not.toMatch(/_COMPLETE/);
+    }
+  });
+
+  it("does not ask CONFIRM_BAG_EMPTY once a partial sealing close-out satisfied the lane close", () => {
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: ALL_PASS,
+      bagStage: "BLISTERED",
+      expected: null,
+      stationKind: "SEALING",
+      sealing: { segmentCount: 2, hasPartialCloseout: true },
+      partialAllocation: null,
+      productChoice: { kind: "NONE" },
+    });
+    expect(action.kind).toBe("COMPLETE");
+  });
+
+  it("never offers the bag-close question at an operation that has no bag close", () => {
+    // COMBINED resolves to the BLISTER operation, for which
+    // intentToEventType answers null on CONFIRM_BAG_EMPTY — offering the
+    // button would produce a gesture advanceBag refuses.
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: { ...OP, operationCode: "BLISTER", allowedStationKind: "BLISTER" },
+      checks: ALL_PASS,
+      bagStage: "BLISTERED",
+      expected: null,
+      stationKind: "COMBINED",
+      sealing: { segmentCount: 3, hasPartialCloseout: false },
+      partialAllocation: null,
+      productChoice: { kind: "NONE" },
+    });
+    expect(action.kind).not.toBe("CONFIRM_BAG_EMPTY");
+  });
+
+  it("asks RESOLVE_PARTIAL when a prior run left an open ledger on the bag", () => {
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: ALL_PASS,
+      bagStage: "BLISTERED",
+      expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: {
+        inventoryBagId: "inv-1",
+        estimate: 1240,
+        needsEntry: false,
+      },
+      productChoice: { kind: "NONE" },
+    });
+    expect(action).toEqual({
+      kind: "RESOLVE_PARTIAL",
+      estimate: 1240,
+      needsEntry: false,
+    });
+  });
+
+  it("keeps a paused bag blocked rather than asking to resolve its ledger", () => {
+    const paused = evaluateChecks({
+      bagRecognized: true,
+      productResolved: true,
+      operationResolved: true,
+      materialsAvailable: true,
+      upstreamStageComplete: true,
+      bagPaused: true,
+      bagFinalized: false,
+      bagOnHold: false,
+      waitingForLabel: null,
+    });
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: paused,
+      bagStage: "BLISTERED",
+      expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: {
+        inventoryBagId: "inv-1",
+        estimate: null,
+        needsEntry: true,
+      },
+      productChoice: { kind: "NONE" },
+    });
+    expect(action.kind).toBe("BLOCKED");
+  });
+
+  it("resolves the ledger before asking which product an unmapped bag makes", () => {
+    // Picking a product is exactly what an open prior-run session
+    // refuses (assignBagProduct's OpenAllocationBlockError), so asking
+    // for one first would walk the operator into a dead end.
+    const unmapped = evaluateChecks({
+      bagRecognized: true,
+      productResolved: false,
+      operationResolved: true,
+      materialsAvailable: true,
+      upstreamStageComplete: true,
+      bagPaused: false,
+      bagFinalized: false,
+      bagOnHold: false,
+      waitingForLabel: null,
+    });
+    const action = buildNextAction({
+      hasOperatorSession: true,
+      current: CURRENT,
+      operation: OP,
+      checks: unmapped,
+      bagStage: "BLISTERED",
+      expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: {
+        inventoryBagId: "inv-1",
+        estimate: 900,
+        needsEntry: false,
+      },
+      productChoice: {
+        kind: "PICK",
+        options: [
+          { productId: "p1", name: "A", sku: "A" },
+          { productId: "p2", name: "B", sku: "B" },
+        ],
+      },
+    });
+    expect(action.kind).toBe("RESOLVE_PARTIAL");
   });
 
   it("never leaks an event or stage name into an action label", () => {
@@ -127,6 +343,9 @@ describe("buildNextAction", () => {
       checks: ALL_PASS,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "NONE" },
     });
     if (action.kind === "COMPLETE" || action.kind === "START") {
@@ -171,6 +390,9 @@ describe("buildNextAction · product picking", () => {
       checks: UNMAPPED,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "PICK", options: OPTIONS },
     });
     expect(action.kind).toBe("PICK_PRODUCT");
@@ -188,6 +410,9 @@ describe("buildNextAction · product picking", () => {
       checks: UNMAPPED_AND_PAUSED,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "PICK", options: OPTIONS },
     });
     expect(action.kind).toBe("BLOCKED");
@@ -205,6 +430,9 @@ describe("buildNextAction · product picking", () => {
       checks: UNMAPPED,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "AUTO", productId: "prod-1" },
     });
     expect(action.kind).toBe("BLOCKED");
@@ -221,6 +449,9 @@ describe("buildNextAction · product picking", () => {
       checks: UNMAPPED,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "NONE" },
     });
     expect(action.kind).toBe("BLOCKED");
@@ -237,6 +468,9 @@ describe("buildNextAction · product picking", () => {
       checks: UNMAPPED,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "PICK", options: OPTIONS },
     });
     expect(action.kind).toBe("OPEN_SHIFT");
@@ -253,6 +487,9 @@ describe("buildNextAction · product picking", () => {
       checks: ALL_PASS,
       bagStage: "BLISTERED",
       expected: null,
+      stationKind: "SEALING",
+      sealing: NO_SEALING,
+      partialAllocation: null,
       productChoice: { kind: "PICK", options: OPTIONS },
     });
     expect(action.kind).toBe("COMPLETE");
@@ -275,6 +512,8 @@ function rows(over: Partial<StationViewRows> = {}): StationViewRows {
       isOnHold: false,
     },
     operation: OP,
+    sealing: NO_SEALING,
+    partialAllocation: null,
     compatibleProducts: [],
     upNext: [],
     ...over,

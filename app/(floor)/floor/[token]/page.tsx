@@ -1,89 +1,54 @@
 // Floor station landing — what an operator sees on a tablet at a
-// production station after scanning the station QR. The URL token
-// is the station's scan_token (cryptographic identifier; rotated
-// from /machines admin).
+// production station after scanning the station QR. The URL token is the
+// station's scan_token (cryptographic identifier; rotated from
+// /machines admin).
 //
-// Each station only sees the bag CURRENTLY at this station — driven
-// by read_station_live.currentWorkflowBagId. No cross-station
-// leak.
+// P4b Task 5 — THE CUTOVER. This file used to run roughly fifteen
+// sequential resolution queries (fresh cards, eligible pickups, started
+// resumes, partial packaging resumes, sealing-final-close bags, sealing
+// segment state, product mapping, tablet compatibility, packaging BOMs,
+// station prerequisites, active rolls, idle roll lots, QC/rework,
+// allocations, timers) and rendered every one of those concepts as its
+// own panel. All of it was the state machine leaking onto the tablet.
+//
+// It is now: resolve the station, ONE engine read (getStationView), and
+// one component that renders the engine's NextAction. Every decision —
+// what to show, which fields to ask for, why the operator is stuck —
+// belongs to lib/production/engine. Anything this file re-derives would
+// be a second answer to a question the engine has already answered.
+//
+// What deliberately survives the cutover:
+//   FloorLiveRefresh   — mounted on BOTH branches, including the
+//                        inactive-station one, so a station re-activated
+//                        from /machines recovers on its own instead of
+//                        stranding a tablet on a dead screen.
+//   IdleOperatorGuard  — OP-1C shift hygiene, unchanged.
+//   ReportProblem      — Task 4's single exception workflow, passed as a
+//                        REQUIRED prop.
+//   QcPanel            — QC-3 plus [ Release hold ], the only escape
+//                        from a QA hold. Surfaced under More; P5 moves
+//                        it behind supervisor unlock wholesale.
+// The rolls page, bag-allocation and variety-pack entry points keep
+// their links (operatorMaterialLinks / floorSupervisorToolsForStation,
+// rendered inside the More sheet).
 
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
+import { stations, workflowEvents } from "@/lib/db/schema";
+import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import {
-  stations,
-  machines,
-  qrCards,
-  workflowBags,
-  workflowEvents,
-  readBagState,
-  readStationLive,
-  products,
-  productPackagingSpecs,
-  productAllowedTablets,
-  packagingMaterials,
-  packagingLots,
-  inventoryBags,
-  tabletTypes,
-  smallBoxes,
-  receives,
-  purchaseOrders,
-} from "@/lib/db/schema";
-import { eq, and, or, inArray, isNotNull, isNull, sql, desc, asc } from "drizzle-orm";
-import { ScanCardForm } from "./scan-card-form";
-import { StageActionButtons } from "./stage-action-buttons";
-import { BottleSealingRecoveryPanel } from "./bottle-sealing-recovery-panel";
-import {
-  STATION_PICKUP_FROM_STAGE,
-  STATION_STARTED_RESUME_FROM_STAGE,
-  STATIONS_THAT_FINALIZE,
-} from "@/lib/production/stage-progression";
-import {
-  resolveSealingCardsPerPress,
-  stationUsesSealingCounter,
-} from "@/lib/production/sealing-counter";
-import {
-  FIRST_OP_STATION_KINDS,
-  PRODUCT_AT_START_STATION_KINDS,
-  STATION_KIND_TO_PRODUCT_KINDS,
-} from "@/lib/production/first-op-product";
-import {
-  getUnmappedProductBanner,
-  resolveSealingProductSelection,
-  SEALING_STATION_KINDS,
-} from "@/lib/production/sealing-product";
-import {
-  getSealingProductFilterHint,
-  resolveWorkflowBagReceivedTabletContext,
-  resolveWorkflowBagTabletTypeId,
-} from "@/lib/production/workflow-bag-tablet-context";
-import {
-  deriveSealingSegmentProgress,
-  needsSealingLaneClose,
-} from "@/lib/production/sealing-segments";
-import { hasPartialSealingCloseout, isWorkflowBagResumableAtSealingAfterPartialPackaging } from "@/lib/production/sealing-partial-closeout";
-import { OperatorSessionPanel } from "./operator-session-form";
-import { IdleOperatorGuard } from "./idle-operator-guard";
-import { listActiveEmployeeOptions } from "./operator-session-actions";
+  getStationView,
+  resolveStationByToken,
+  STATION_INACTIVE_FLOOR_MESSAGE,
+} from "@/lib/production/engine";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
 import { shouldRenderQcPanel } from "@/lib/production/qc-panel-helpers";
-import { QcPanel, type PendingReworkRow } from "./qc-panel";
-import { loadAutoLots, STATION_AUTO_MATERIAL_KINDS, type AutoLoadedLot } from "@/lib/production/auto-load-lots";
-import {
-  floorSupervisorToolsForStation,
-  FLOOR_ROLL_STATION_KINDS,
-  formatStationPageSubtitle,
-  type FloorSupervisorToolLink,
-} from "@/lib/production/floor-station-mobile-nav";
-import { getActiveRollsForMachine } from "@/lib/production/active-rolls";
-import { filterSelectableIdleRollLots } from "@/lib/production/idle-roll-lots";
-import { StationRollPanel } from "./station-roll-panel";
-import { ElapsedTimer } from "./elapsed-timer";
-import { formatFloorTimeEastern } from "@/lib/floor-time";
-import { STATION_INACTIVE_FLOOR_MESSAGE } from "@/lib/production/station-management";
-import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
-import { loadFloorAllocationPanelForWorkflowBag } from "@/lib/production/floor-allocation-display";
-import { RawBagAllocationPanel } from "./raw-bag-allocation-panel";
 import { FloorLiveRefresh } from "./floor-live-refresh";
+import { IdleOperatorGuard } from "./idle-operator-guard";
+import { OperatorScreen } from "./operator-screen";
+import { QcPanel, type PendingReworkRow } from "./qc-panel";
+import { ReportProblem } from "./report-problem";
+import { listActiveEmployeeOptions } from "./operator-session-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -94,1090 +59,92 @@ export default async function FloorStationPage({
 }) {
   const { token } = await params;
 
-  const [station] = await db
-    .select({ station: stations, machine: machines })
-    .from(stations)
-    .leftJoin(machines, eq(stations.machineId, machines.id))
-    .where(eq(stations.scanToken, token));
+  const station = await resolveStationByToken(token);
   if (!station) notFound();
 
-  if (!station.station.isActive) {
+  if (!station.isActive) {
+    // FloorLiveRefresh here is not decoration. A station deactivated by
+    // mistake is re-activated from /machines, and without a subscriber
+    // this tablet would sit on the dead screen until somebody walked
+    // over and pulled to refresh. The stream 404s while the station is
+    // inactive, which the component treats like any other failure: it
+    // falls back to 60s polling and retries SSE on the same cadence, so
+    // the screen recovers within about a minute of re-activation.
     return (
       <main className="min-h-dvh bg-surface flex flex-col items-center justify-center p-6 text-center">
-        <h1 className="text-xl font-semibold text-text mb-2">
-          {station.station.label}
-        </h1>
-        <p className="text-sm text-text-muted max-w-md">{STATION_INACTIVE_FLOOR_MESSAGE}</p>
-        <p className="text-xs text-text-subtle mt-4">{station.station.kind}</p>
+        <FloorLiveRefresh token={token} />
+        <h1 className="text-xl font-semibold text-text mb-2">{station.label}</h1>
+        <p className="text-sm text-text-muted max-w-md">
+          {STATION_INACTIVE_FLOOR_MESSAGE}
+        </p>
+        <p className="text-xs text-text-subtle mt-4">{station.kind}</p>
       </main>
     );
   }
 
-  // OP-1C: active operator session
-  // a new one. activeSession is null until someone runs Open shift;
-  // the panel below handles both states.
-  const [activeSession, employeeOptions] = await Promise.all([
-    getActiveStationSession(db, station.station.id),
+  const [view, employeeOptions, activeSession] = await Promise.all([
+    getStationView(station.id),
     listActiveEmployeeOptions(),
+    getActiveStationSession(db, station.id),
   ]);
 
-  // The bag at THIS station (and only this one) lives in
-  // read_station_live.currentWorkflowBagId. Joining qr_cards back
-  // gives us the card label + scan token for display, and joining
-  // products surfaces the SKU + units/display + displays/case so
-  // downstream stations can show the inherited product without
-  // re-asking the operator.
-  const [currentAtStation] = await db
-    .select({
-      bag: workflowBags,
-      card: qrCards,
-      state: readBagState,
-      product: products,
-      inventoryBagNumber: inventoryBags.bagNumber,
-      tabletTypeName: tabletTypes.name,
-      poNumber: purchaseOrders.poNumber,
-    })
-    .from(readStationLive)
-    .innerJoin(workflowBags, eq(readStationLive.currentWorkflowBagId, workflowBags.id))
-    .leftJoin(qrCards, eq(qrCards.assignedWorkflowBagId, workflowBags.id))
-    .leftJoin(readBagState, eq(readBagState.workflowBagId, workflowBags.id))
-    .leftJoin(products, eq(products.id, workflowBags.productId))
-    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
-    .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
-    .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
-    .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
-    .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
-    .where(eq(readStationLive.stationId, station.station.id));
+  const currentBagId = view.current?.workflowBagId ?? null;
+  // read_bag_state.is_on_hold, taken from the view's own blockers rather
+  // than a second query: evaluateChecks already turned that column into
+  // the BAG_ON_HOLD blocker, and re-reading the row could disagree with
+  // the screen the operator is looking at.
+  const isOnHold =
+    view.nextAction.kind === "BLOCKED" &&
+    view.nextAction.blockers.some((b) => b.code === "BAG_ON_HOLD");
 
-  const currentBagDisplayLabel = currentAtStation
-    ? buildCurrentBagDisplayLabel({
-        cardLabel: currentAtStation.card?.label ?? null,
-        poNumber: currentAtStation.poNumber,
-        tabletTypeName: currentAtStation.tabletTypeName,
-        productName: currentAtStation.product?.name ?? null,
-        inventoryBagNumber: currentAtStation.inventoryBagNumber,
-        workflowBagNumber: currentAtStation.bag.bagNumber,
-      })
-    : null;
-
-  // RAW_BAG cards available to scan: ASSIGNED with no workflow bag
-  // (intake-reserved only). Filtered to RAW_BAG type only — VARIETY_PACK and
-  // WORKFLOW_TRAVELER cards must never appear here. Only shown at stations
-  // that can start fresh bags; pickup-only stations see only eligiblePickups.
-  const canStartFreshBag = FIRST_OP_STATION_KINDS.has(station.station.kind);
-  const requireProductAtStart = PRODUCT_AT_START_STATION_KINDS.has(
-    station.station.kind,
-  );
-
-  // First-op product kinds for this station (empty at non-first-op stations).
-  // Computed early so both the idle-card eligibility filter and the product
-  // picker can share it.
-  const allowedProductKinds =
-    STATION_KIND_TO_PRODUCT_KINDS[station.station.kind] ?? [];
-
-  // Eligible RAW_BAG cards: intake-reserved only (ASSIGNED+no-workflowBag),
-  // filtered to bags whose tablet type is compatible with this station.
-  // "Compatible" = the tablet type has at least one active product of an
-  // allowed kind for this station (e.g. CARD/VARIETY at BLISTER).
-  // Pre-fetch the compatible tablet type IDs so the main query stays a
-  // plain inArray filter rather than a correlated sub-select or runtime join.
-  const compatibleTabletTypeIds =
-    canStartFreshBag && allowedProductKinds.length > 0
-      ? (
-          await db
-            .selectDistinct({ tabletTypeId: productAllowedTablets.tabletTypeId })
-            .from(productAllowedTablets)
-            .innerJoin(products, eq(products.id, productAllowedTablets.productId))
-            .where(
-              and(
-                inArray(
-                  products.kind,
-                  allowedProductKinds as ("CARD" | "BOTTLE" | "VARIETY")[],
-                ),
-                eq(products.isActive, true),
-              ),
-            )
-        ).map((r) => r.tabletTypeId)
-      : [];
-
-  const receivedCardsRaw =
-    canStartFreshBag && compatibleTabletTypeIds.length > 0
-      ? await db
-          .select({
-            id: qrCards.id,
-            label: qrCards.label,
-            scanToken: qrCards.scanToken,
-            receiptNumber: inventoryBags.internalReceiptNumber,
-            tabletTypeName: tabletTypes.name,
-            tabletTypeId: tabletTypes.id,
-            bagNumber: inventoryBags.bagNumber,
-            poNumber: purchaseOrders.poNumber,
-          })
-          .from(qrCards)
-          .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
-          .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
-          .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
-          .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
-          .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
-          .where(
-            and(
-              eq(qrCards.cardType, "RAW_BAG"),
-              eq(qrCards.status, "ASSIGNED"),
-              isNull(qrCards.assignedWorkflowBagId),
-              or(
-                isNull(inventoryBags.tabletTypeId),
-                inArray(inventoryBags.tabletTypeId, compatibleTabletTypeIds),
-              ),
-            ),
-          )
-      : [];
-  const receivedCards = receivedCardsRaw.sort((a, b) =>
-    a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }),
-  );
-
-  // First-op product picker (PRD-1): when this station is BLISTER /
-  // COMBINED, the operator must pick a product on a fresh-card scan.
-  // List active products whose kind is allowed for this station kind.
-  const allowedProductsRaw = canStartFreshBag && allowedProductKinds.length > 0
-    ? await db
-        .select({
-          id: products.id,
-          sku: products.sku,
-          name: products.name,
-          kind: products.kind,
-          unitsPerDisplay: products.unitsPerDisplay,
-          displaysPerCase: products.displaysPerCase,
-        })
-        .from(products)
-        .where(
-          and(
-            eq(products.isActive, true),
-            inArray(products.kind, allowedProductKinds as ("CARD" | "BOTTLE" | "VARIETY")[]),
-          ),
-        )
-    : [];
-
-  // Build allowedTabletTypeIds per product so the client can filter
-  // the picker to only show products compatible with the scanned bag's
-  // tablet type (e.g. Chocolate Brown only shows its 2 products).
-  const allowedProductIds = allowedProductsRaw.map((p) => p.id);
-  const tabletRows = allowedProductIds.length > 0
-    ? await db
-        .select({
-          productId: productAllowedTablets.productId,
-          tabletTypeId: productAllowedTablets.tabletTypeId,
-        })
-        .from(productAllowedTablets)
-        .where(inArray(productAllowedTablets.productId, allowedProductIds))
-    : [];
-
-  const tabletsByProduct = new Map<string, string[]>();
-  for (const r of tabletRows) {
-    const list = tabletsByProduct.get(r.productId) ?? [];
-    list.push(r.tabletTypeId);
-    tabletsByProduct.set(r.productId, list);
-  }
-
-  const allowedProducts = allowedProductsRaw.map((p) => ({
-    ...p,
-    allowedTabletTypeIds: tabletsByProduct.get(p.id) ?? [],
-  }));
-
-  // ASSIGNED cards whose bag is at a stage THIS station can pick up
-  // (multi-station travel — VALIDATION-2D model). Sealing accepts
-  // BLISTERED, packaging accepts SEALED, etc. Surfacing these in the
-  // scan picker is the only way the operator can claim a released
-  // bag without typing a UUID.
-  const pickupStages = STATION_PICKUP_FROM_STAGE[station.station.kind] ?? [];
-  const resumeStages = STATION_STARTED_RESUME_FROM_STAGE[station.station.kind] ?? [];
-  const eligiblePickups =
-    pickupStages.length === 0
-      ? []
-      : await db
-          .select({
-            id: qrCards.id,
-            label: qrCards.label,
-            scanToken: qrCards.scanToken,
-            bagId: qrCards.assignedWorkflowBagId,
-            bagStage: readBagState.stage,
-            productSku: products.sku,
-            receiptNumber: inventoryBags.internalReceiptNumber,
-            tabletTypeName: tabletTypes.name,
-            bagNumber: inventoryBags.bagNumber,
-            poNumber: purchaseOrders.poNumber,
-          })
-          .from(qrCards)
-          .innerJoin(
-            readBagState,
-            eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
-          )
-          .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
-          .leftJoin(products, eq(products.id, workflowBags.productId))
-          .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
-          .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
-          .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
-          .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
-          .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
-          .where(
-            and(
-              eq(qrCards.status, "ASSIGNED"),
-              isNotNull(qrCards.assignedWorkflowBagId),
-              eq(readBagState.isFinalized, false),
-              eq(readBagState.isPaused, false),
-              inArray(readBagState.stage, pickupStages as string[]),
-            ),
-          );
-
-  const eligibleStartedResumes =
-    canStartFreshBag && resumeStages.length > 0
-      ? await db
-          .select({
-            id: qrCards.id,
-            label: qrCards.label,
-            scanToken: qrCards.scanToken,
-            bagId: qrCards.assignedWorkflowBagId,
-            bagStage: readBagState.stage,
-            productSku: products.sku,
-            receiptNumber: inventoryBags.internalReceiptNumber,
-            tabletTypeName: tabletTypes.name,
-            bagNumber: inventoryBags.bagNumber,
-            poNumber: purchaseOrders.poNumber,
-          })
-          .from(qrCards)
-          .innerJoin(
-            readBagState,
-            eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
-          )
-          .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
-          .leftJoin(products, eq(products.id, workflowBags.productId))
-          .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
-          .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
-          .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
-          .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
-          .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
-          .where(
-            and(
-              eq(qrCards.status, "ASSIGNED"),
-              isNotNull(qrCards.assignedWorkflowBagId),
-              eq(readBagState.isFinalized, false),
-              eq(readBagState.isPaused, false),
-              inArray(readBagState.stage, resumeStages as string[]),
-            ),
-          )
-      : [];
-
-  const partialPackagingResumeRaw =
-    station.station.kind === "SEALING"
-      ? await db
-          .select({
-            id: qrCards.id,
-            label: qrCards.label,
-            scanToken: qrCards.scanToken,
-            bagId: qrCards.assignedWorkflowBagId,
-            bagStage: readBagState.stage,
-            productSku: products.sku,
-            receiptNumber: inventoryBags.internalReceiptNumber,
-            tabletTypeName: tabletTypes.name,
-            bagNumber: inventoryBags.bagNumber,
-            poNumber: purchaseOrders.poNumber,
-          })
-          .from(qrCards)
-          .innerJoin(
-            readBagState,
-            eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
-          )
-          .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
-          .leftJoin(products, eq(products.id, workflowBags.productId))
-          .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
-          .leftJoin(tabletTypes, eq(tabletTypes.id, inventoryBags.tabletTypeId))
-          .leftJoin(smallBoxes, eq(smallBoxes.id, inventoryBags.smallBoxId))
-          .leftJoin(receives, eq(receives.id, smallBoxes.receiveId))
-          .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
-          .where(
-            and(
-              eq(qrCards.status, "ASSIGNED"),
-              isNotNull(qrCards.assignedWorkflowBagId),
-              eq(readBagState.isFinalized, false),
-              eq(readBagState.isPaused, false),
-              eq(readBagState.stage, "PACKAGED"),
-            ),
-          )
-      : [];
-
-  let eligiblePartialPackagingResumes: typeof partialPackagingResumeRaw = [];
-  if (partialPackagingResumeRaw.length > 0) {
-    const partialBagIds = partialPackagingResumeRaw
-      .map((c) => c.bagId)
-      .filter((id): id is string => id != null);
-    const partialResumeEvents =
-      partialBagIds.length > 0
-        ? await db
-            .select({
-              workflowBagId: workflowEvents.workflowBagId,
-              eventType: workflowEvents.eventType,
-              payload: workflowEvents.payload,
-            })
-            .from(workflowEvents)
-            .where(inArray(workflowEvents.workflowBagId, partialBagIds))
-        : [];
-    const eventsByPartialBag = new Map<
-      string,
-      Array<{ eventType: string; payload: Record<string, unknown> | null }>
-    >();
-    for (const row of partialResumeEvents) {
-      const list = eventsByPartialBag.get(row.workflowBagId) ?? [];
-      list.push({
-        eventType: row.eventType,
-        payload: (row.payload as Record<string, unknown> | null) ?? null,
-      });
-      eventsByPartialBag.set(row.workflowBagId, list);
-    }
-    eligiblePartialPackagingResumes = partialPackagingResumeRaw.filter((c) => {
-      if (!c.bagId) return false;
-      return isWorkflowBagResumableAtSealingAfterPartialPackaging(
-        eventsByPartialBag.get(c.bagId) ?? [],
-        { stage: c.bagStage, isFinalized: false },
-      );
-    });
-  }
-
-  const resumeIds = new Set(eligibleStartedResumes.map((c) => c.id));
-  const partialPackagingResumeIds = new Set(
-    eligiblePartialPackagingResumes.map((c) => c.id),
-  );
-  const eligiblePickupsMerged = [
-    ...eligibleStartedResumes,
-    ...eligiblePartialPackagingResumes,
-    ...eligiblePickups.filter(
-      (c) => !resumeIds.has(c.id) && !partialPackagingResumeIds.has(c.id),
-    ),
-  ];
-
-  const pickupBagIds = eligiblePickupsMerged
-    .map((c) => c.bagId)
-    .filter((id): id is string => id != null);
-  const sealingSegmentCountsByBag =
-    pickupBagIds.length > 0
-      ? new Map(
-          (
-            await db
-              .select({
-                workflowBagId: workflowEvents.workflowBagId,
-                n: sql<number>`count(*)::int`,
-              })
-              .from(workflowEvents)
-              .where(
-                and(
-                  inArray(workflowEvents.workflowBagId, pickupBagIds),
-                  eq(workflowEvents.eventType, "SEALING_SEGMENT_COMPLETE"),
-                ),
-              )
-              .groupBy(workflowEvents.workflowBagId)
-          ).map((row) => [row.workflowBagId, row.n ?? 0] as const),
-        )
-      : new Map<string, number>();
-
-  const partialSealingCloseoutByBag = new Map<string, boolean>();
-  if (pickupBagIds.length > 0) {
-    const sealingCompleteEvents = await db
-      .select({
-        workflowBagId: workflowEvents.workflowBagId,
-        eventType: workflowEvents.eventType,
-        payload: workflowEvents.payload,
-      })
-      .from(workflowEvents)
-      .where(
-        and(
-          inArray(workflowEvents.workflowBagId, pickupBagIds),
-          eq(workflowEvents.eventType, "SEALING_COMPLETE"),
-        ),
-      );
-    for (const bagId of pickupBagIds) {
-      const eventsForBag = sealingCompleteEvents
-        .filter((ev) => ev.workflowBagId === bagId)
-        .map((ev) => ({
-          eventType: ev.eventType,
-          payload: (ev.payload as Record<string, unknown> | null) ?? null,
-        }));
-      partialSealingCloseoutByBag.set(
-        bagId,
-        hasPartialSealingCloseout(eventsForBag),
-      );
-    }
-  }
-
-  const eligiblePickupsForForm = eligiblePickupsMerged.map((c) => ({
-    ...c,
-    needsSealingFinalClose:
-      station.station.kind === "SEALING" &&
-      needsSealingLaneClose({
-        stage: c.bagStage,
-        segmentCount: c.bagId
-          ? (sealingSegmentCountsByBag.get(c.bagId) ?? 0)
-          : 0,
-        hasPartialSealingCloseout: c.bagId
-          ? (partialSealingCloseoutByBag.get(c.bagId) ?? false)
-          : false,
-      }),
-  }));
-
-  const sealingFinalizePickups =
-    station.station.kind === "SEALING"
-      ? eligiblePickupsForForm.filter((c) => c.needsSealingFinalClose)
-      : [];
-
-  // Auto-load available lots for deterministic-material stations
-  const autoLots = STATION_AUTO_MATERIAL_KINDS[station.station.kind]
-    ? await loadAutoLots(station.station.kind)
-    : [];
-
-  // STATION-TIMER-2: For downstream stations, anchor the timer to when this
-  // station picked up the bag (BAG_PICKED_UP) and recompute paused seconds
-  // from events after that pickup — bag-global pausedSecondsAccum includes
-  // pauses at prior stations and produces negative elapsed for overlap pickups.
-  let stationTimerStartMs: number | null = null;
-  let stationTimerPickedUpAt: Date | null = null;
-  let stationPausedSecondsAccum: number =
-    currentAtStation?.state?.pausedSecondsAccum ?? 0;
-
-  if (currentAtStation && !FIRST_OP_STATION_KINDS.has(station.station.kind)) {
-    const [pickupEvent] = await db
-      .select({ occurredAt: workflowEvents.occurredAt })
-      .from(workflowEvents)
-      .where(
-        and(
-          eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
-          eq(workflowEvents.stationId, station.station.id),
-          sql`event_type = 'BAG_PICKED_UP'`,
-        ),
-      )
-      .orderBy(desc(workflowEvents.occurredAt))
-      .limit(1);
-
-    if (pickupEvent) {
-      const pickedUpAt = new Date(
-        pickupEvent.occurredAt as unknown as string,
-      );
-      stationTimerPickedUpAt = pickedUpAt;
-      stationTimerStartMs = pickedUpAt.getTime();
-
-      const pauseEventsAfterPickup = await db
-        .select({
-          eventType: workflowEvents.eventType,
-          occurredAt: workflowEvents.occurredAt,
-        })
-        .from(workflowEvents)
-        .where(
-          and(
-            eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
-            sql`event_type IN ('BAG_PAUSED', 'BAG_RESUMED')`,
-            sql`${workflowEvents.occurredAt} > ${pickedUpAt.toISOString()}`,
-          ),
-        )
-        .orderBy(asc(workflowEvents.occurredAt));
-
-      let stationPauseSecs = 0;
-      let pauseStart: number | null = null;
-      for (const ev of pauseEventsAfterPickup) {
-        const t = new Date(ev.occurredAt as unknown as string).getTime();
-        if (ev.eventType === "BAG_PAUSED") {
-          pauseStart = t;
-        } else if (ev.eventType === "BAG_RESUMED" && pauseStart !== null) {
-          stationPauseSecs += Math.floor((t - pauseStart) / 1000);
-          pauseStart = null;
-        }
-      }
-      stationPausedSecondsAccum = stationPauseSecs;
-    }
-  }
-
-  // Load the product's packaging BOM so the packaging close-out form
-  // can preview expected material consumption as the operator types.
-  const currentProductId = currentAtStation?.bag.productId ?? null;
-  const supervisorTools = floorSupervisorToolsForStation(
-    token,
-    station.station.kind,
-  );
-
-  const packagingSpecsForForm =
-    currentProductId != null &&
-    (station.station.kind === "PACKAGING" || station.station.kind === "COMBINED")
-      ? await db
-          .select({
-            materialName: packagingMaterials.name,
-            materialKind: packagingMaterials.kind,
-            qtyPerUnit: productPackagingSpecs.qtyPerUnit,
-            perScope: productPackagingSpecs.perScope,
-          })
-          .from(productPackagingSpecs)
-          .innerJoin(
-            packagingMaterials,
-            eq(productPackagingSpecs.packagingMaterialId, packagingMaterials.id),
-          )
-          .where(eq(productPackagingSpecs.productId, currentProductId))
-          .orderBy(asc(productPackagingSpecs.perScope))
-      : [];
-
-  const hasProductMapped = currentProductId != null;
-  const unmappedProductBanner =
-    currentAtStation && !hasProductMapped
-      ? getUnmappedProductBanner(station.station.kind)
-      : null;
-
-  let sealingProductOptionsForForm: {
-    id: string;
-    sku: string;
-    name: string;
-  }[] = [];
-  let sealingAutoProductId: string | null = null;
-  let sealingProductConfigError: string | null = null;
-  let sealingProductFilterHint: string | null = null;
-  if (
-    currentAtStation &&
-    !hasProductMapped &&
-    SEALING_STATION_KINDS.has(station.station.kind)
-  ) {
-    const sealingTabletTypeId = await resolveWorkflowBagTabletTypeId(
-      db,
-      currentAtStation.bag.id,
-    );
-    sealingProductFilterHint = getSealingProductFilterHint(sealingTabletTypeId);
-
-    const sealingProductKinds =
-      STATION_KIND_TO_PRODUCT_KINDS[station.station.kind] ?? ["CARD"];
-
-    const sealingProductsRaw = await db
-      .select({
-        id: products.id,
-        sku: products.sku,
-        name: products.name,
-        kind: products.kind,
-      })
-      .from(products)
-      .where(
-        and(
-          eq(products.isActive, true),
-          inArray(
-            products.kind,
-            sealingProductKinds as ("CARD" | "BOTTLE" | "VARIETY")[],
-          ),
-        ),
-      );
-
-    const sealingProductIds = sealingProductsRaw.map((p) => p.id);
-    const sealingTabletRows =
-      sealingProductIds.length > 0
-        ? await db
-            .select({
-              productId: productAllowedTablets.productId,
-              tabletTypeId: productAllowedTablets.tabletTypeId,
-            })
-            .from(productAllowedTablets)
-            .where(inArray(productAllowedTablets.productId, sealingProductIds))
-        : [];
-
-    const sealingTabletsByProduct = new Map<string, string[]>();
-    for (const r of sealingTabletRows) {
-      const list = sealingTabletsByProduct.get(r.productId) ?? [];
-      list.push(r.tabletTypeId);
-      sealingTabletsByProduct.set(r.productId, list);
-    }
-
-    const sealingSelection = resolveSealingProductSelection({
-      stationKind: station.station.kind,
-      candidates: sealingProductsRaw.map((p) => ({
-        id: p.id,
-        sku: p.sku,
-        name: p.name,
-        kind: p.kind,
-        allowedTabletTypeIds:
-          sealingTabletsByProduct.get(p.id) ?? [],
-      })),
-      tabletTypeId: sealingTabletTypeId,
-    });
-    sealingProductOptionsForForm = sealingSelection.options;
-    sealingAutoProductId = sealingSelection.autoProductId;
-    sealingProductConfigError = sealingSelection.configError;
-  }
-
-  const sealingCardsPerPress = stationUsesSealingCounter(station.station.kind)
-    ? resolveSealingCardsPerPress(
-        station.machine,
-        station.station.machineId,
-      )
-    : null;
-
-  const sealingEventsForForm = currentAtStation
-    ? (
-        await db
-          .select({
-            eventType: workflowEvents.eventType,
-            stationId: workflowEvents.stationId,
-            payload: workflowEvents.payload,
-          })
-          .from(workflowEvents)
-          .where(
-            and(
-              eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
-              inArray(workflowEvents.eventType, [
-                "SEALING_SEGMENT_COMPLETE",
-                "SEALING_COMPLETE",
-              ]),
-            ),
-          )
-      ).map((row) => ({
-        eventType: row.eventType,
-        stationId: row.stationId,
-        payload: (row.payload ?? null) as Record<string, unknown> | null,
-      }))
-    : [];
-
-  const sealingSegmentProgressForForm = currentAtStation
-    ? deriveSealingSegmentProgress(sealingEventsForForm)
-    : null;
-
-  const hasPartialSealingCloseoutForForm = currentAtStation
-    ? hasPartialSealingCloseout(sealingEventsForForm)
-    : false;
-
-  const handpackTabletContext =
-    station.station.kind === "HANDPACK_BLISTER" && currentAtStation
-      ? await resolveWorkflowBagReceivedTabletContext(
-          db,
-          currentAtStation.bag.id,
-        )
-      : null;
-  const handpackTabletContextForForm =
-    station.station.kind === "HANDPACK_BLISTER" && currentAtStation
-      ? handpackTabletContext
-        ? {
-            status: "resolved" as const,
-            tabletTypeId: handpackTabletContext.tabletTypeId,
-            tabletTypeName: handpackTabletContext.tabletTypeName,
-            source: handpackTabletContext.source,
-            receiptNumber: handpackTabletContext.receiptNumber,
-            bagNumber: handpackTabletContext.bagNumber,
-          }
-        : { status: "missing" as const }
-      : null;
-
-  const showRollPanel = FLOOR_ROLL_STATION_KINDS.has(station.station.kind);
-  type RollChangeRole = "PVC" | "FOIL";
-  let requiredRollChangeRole: RollChangeRole | null = null;
-  let rollPanelData: {
-    activeRolls: {
-      role: "PVC" | "FOIL";
-      rollNumber: string | null;
-      materialName: string;
-      materialKind: string;
-      currentWeightEstimateGrams: number | null;
-      mountedAt: string;
-      confidence: "HIGH" | "MEDIUM" | "LOW";
-    }[];
-    idleRollLots: {
-      id: string;
-      rollNumber: string | null;
-      netWeightGrams: number | null;
-      currentEstimateGrams: number | null;
-      materialName: string;
-      materialKind: string;
-    }[];
-    activeBag: { id: string; label: string; startedAt: Date | string | null } | null;
-    machineBound: boolean;
-  } | null = null;
-
-  if (showRollPanel) {
-    if (currentAtStation?.state?.isPaused) {
-      const [pauseEvent] = await db
-        .select({ payload: workflowEvents.payload })
-        .from(workflowEvents)
-        .where(
-          and(
-            eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
-            eq(workflowEvents.eventType, "BAG_PAUSED"),
-          ),
-        )
-        .orderBy(desc(workflowEvents.occurredAt), desc(workflowEvents.id))
-        .limit(1);
-      const payload = (pauseEvent?.payload ?? {}) as Record<string, unknown>;
-      const reason = typeof payload.reason === "string" ? payload.reason : null;
-      requiredRollChangeRole =
-        reason === "pvc_swap" ? "PVC" : reason === "foil_swap" ? "FOIL" : null;
-    }
-
-    const machineBound = station.machine != null;
-    const [activeRollsRaw, availableLots] = await Promise.all([
-      machineBound && station.machine
-        ? getActiveRollsForMachine(station.machine.id)
-        : Promise.resolve([]),
-      machineBound
-        ? db
-            .select({
-              id: packagingLots.id,
-              status: packagingLots.status,
-              rollNumber: packagingLots.rollNumber,
-              netWeightGrams: packagingLots.netWeightGrams,
-              currentEstimateGrams: packagingLots.currentWeightGramsEstimate,
-              materialName: packagingMaterials.name,
-              materialKind: packagingMaterials.kind,
-            })
-            .from(packagingLots)
-            .innerJoin(
-              packagingMaterials,
-              eq(packagingMaterials.id, packagingLots.packagingMaterialId),
-            )
-            .where(and(eq(packagingLots.status, "AVAILABLE")))
-        : Promise.resolve([]),
-    ]);
-    const idleRollLots = filterSelectableIdleRollLots(availableLots);
-    const activeBagForRolls =
-      currentAtStation && !currentAtStation.state?.isFinalized
-        ? {
-            id: currentAtStation.bag.id,
-            label: currentBagDisplayLabel?.primary ?? currentAtStation.card?.label ?? "Active bag",
-            startedAt: currentAtStation.bag.startedAt,
-          }
-        : null;
-    rollPanelData = {
-      machineBound,
-      activeRolls: activeRollsRaw.map((r) => ({
-        role: r.role,
-        rollNumber: r.rollNumber,
-        materialName: r.materialName,
-        materialKind: r.materialKind,
-        currentWeightEstimateGrams: r.currentWeightEstimateGrams,
-        mountedAt: r.mountedAt,
-        confidence: r.confidence,
-      })),
-      idleRollLots: idleRollLots.map((l) => ({
-        id: l.id,
-        rollNumber: l.rollNumber,
-        netWeightGrams: l.netWeightGrams,
-        currentEstimateGrams: l.currentEstimateGrams,
-        materialName: l.materialName,
-        materialKind: l.materialKind,
-      })),
-      activeBag: activeBagForRolls,
-    };
-  }
-
-  const allocationPanelData =
-    currentAtStation?.bag.inventoryBagId != null
-      ? await loadFloorAllocationPanelForWorkflowBag(
-          db,
-          currentAtStation.bag.id,
-          currentAtStation.bag.inventoryBagId,
-        )
-      : null;
+  const qcPanel =
+    shouldRenderQcPanel(station.kind) && currentBagId ? (
+      <QcPanel
+        token={token}
+        stationId={station.id}
+        stationKind={station.kind}
+        workflowBagId={currentBagId}
+        currentOperatorName={view.operator?.name ?? null}
+        accountabilitySource={activeSession?.accountabilitySource ?? null}
+        pendingRework={await loadPendingRework(currentBagId)}
+        isOnHold={isOnHold}
+      />
+    ) : null;
 
   return (
-    <main className="min-h-dvh bg-page px-4 pt-2 sm:px-6 sm:pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-3">
+    <>
       <FloorLiveRefresh token={token} />
-      <header className="space-y-0.5">
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight leading-snug">
-          {station.station.label}
-        </h1>
-        <p className="text-[11px] text-text-subtle capitalize">
-          {formatStationPageSubtitle(
-            station.station.kind,
-            station.machine?.name ?? null,
-          )}
-        </p>
-      </header>
-
-      {activeSession ? (
-        <IdleOperatorGuard token={token} stationId={station.station.id} />
+      {view.operator ? (
+        <IdleOperatorGuard token={token} stationId={station.id} />
       ) : null}
-
-      <OperatorSessionPanel
+      <OperatorScreen
+        view={view}
         token={token}
-        stationId={station.station.id}
-        stationKind={station.station.kind}
-        activeSession={activeSession}
         employeeOptions={employeeOptions}
-        currentWorkflowBagId={currentAtStation?.bag.id ?? null}
-        currentBagIsPaused={currentAtStation?.state?.isPaused ?? false}
+        activeSession={activeSession}
+        reportProblem={
+          <ReportProblem
+            token={token}
+            stationId={station.id}
+            workflowBagId={currentBagId}
+          />
+        }
+        qcPanel={qcPanel}
       />
-
-      {rollPanelData ? (
-        <StationRollPanel
-          token={token}
-          stationId={station.station.id}
-          machineBound={rollPanelData.machineBound}
-          activeRolls={rollPanelData.activeRolls}
-          idleRollLots={rollPanelData.idleRollLots}
-          activeBag={rollPanelData.activeBag}
-          requiredChangeRole={requiredRollChangeRole}
-        />
-      ) : null}
-
-      <AutoLoadedLotsPanel lots={autoLots} stationKind={station.station.kind} />
-
-      <section className="rounded-2xl bg-surface border border-border p-4 space-y-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-subtle">
-          Current bag
-        </p>
-        {!currentAtStation ? (
-          <div className="py-1">
-            {sealingFinalizePickups.length > 0 ? (
-              <div className="rounded-lg border-2 border-sky-400 bg-sky-50 px-3 py-2 text-sm text-sky-900 mb-3 space-y-1">
-                <p className="font-semibold">
-                  {sealingFinalizePickups.length === 1
-                    ? "1 bag waiting for final sealing close"
-                    : `${sealingFinalizePickups.length} bags waiting for final sealing close`}
-                </p>
-                <p className="text-xs leading-relaxed">
-                  Pick the bag below (or scan its QR) to mark{" "}
-                  <span className="font-medium">Sealing complete — all machines done</span>.
-                  Packaging stays blocked until that step.
-                </p>
-                <ul className="text-xs font-medium list-disc pl-4">
-                  {sealingFinalizePickups.map((c) => (
-                    <li key={c.id}>
-                      {c.label}
-                      {c.productSku ? ` — ${c.productSku}` : ""}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <p className="text-sm text-text-muted mb-2">
-              {canStartFreshBag
-                ? "Scan a bag QR to start, or pick a backup below."
-                : "Scan a QR card or pick from the list below."}
-            </p>
-            <ScanCardForm
-              token={token}
-              stationId={station.station.id}
-              canStartFreshBag={canStartFreshBag}
-              receivedCards={receivedCards}
-              eligiblePickups={eligiblePickupsForForm
-                .filter(
-                  (
-                    c,
-                  ): c is typeof c & { bagId: string } => c.bagId != null,
-                )
-                .map((c) => ({
-                  id: c.id,
-                  label: c.label,
-                  scanToken: c.scanToken,
-                  bagId: c.bagId,
-                  bagStage: c.bagStage ?? "",
-                  productSku: c.productSku ?? null,
-                  receiptNumber: c.receiptNumber ?? null,
-                  tabletTypeName: c.tabletTypeName ?? null,
-                  bagNumber: c.bagNumber ?? null,
-                  poNumber: c.poNumber ?? null,
-                  needsSealingFinalClose: c.needsSealingFinalClose,
-                }))}
-              allowedProducts={allowedProducts.map((p) => ({
-                id: p.id,
-                sku: p.sku,
-                name: p.name,
-                allowedTabletTypeIds: p.allowedTabletTypeIds,
-              }))}
-              requireProductForFreshBag={requireProductAtStart}
-            />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-border/70 bg-surface-2/40 p-3 sm:p-4">
-              <p className="text-base font-semibold tracking-tight mb-2">
-                {currentBagDisplayLabel?.primary ?? "—"}
-              </p>
-              {currentBagDisplayLabel?.secondary ? (
-                <p className="text-[11px] text-text-subtle -mt-1 mb-2">
-                  {currentBagDisplayLabel.secondary}
-                </p>
-              ) : null}
-              {currentAtStation.product ? (
-                <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900 space-y-0.5">
-                  <div className="font-semibold">
-                    Making: {currentAtStation.product.name}
-                  </div>
-                  {SEALING_STATION_KINDS.has(station.station.kind) ? (
-                    <div className="text-emerald-900/80">
-                      Product locked for this bag. Contact admin if this is
-                      wrong.
-                    </div>
-                  ) : null}
-                  {currentAtStation.product.unitsPerDisplay != null &&
-                  currentAtStation.product.displaysPerCase != null ? (
-                    <div className="text-emerald-900/70">
-                      {currentAtStation.product.unitsPerDisplay} units/display ·{" "}
-                      {currentAtStation.product.displaysPerCase} displays/case
-                    </div>
-                  ) : (
-                    <div className="text-amber-700">
-                      Packaging structure incomplete — supervisor must update.
-                    </div>
-                  )}
-                </div>
-              ) : unmappedProductBanner ? (
-                <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <div className="font-semibold">{unmappedProductBanner.title}</div>
-                  <div>{unmappedProductBanner.detail}</div>
-                </div>
-              ) : null}
-              {allocationPanelData ? (
-                <RawBagAllocationPanel
-                  receiptLabel={allocationPanelData.receiptLabel}
-                  humanLot={allocationPanelData.humanLot}
-                  startingBalanceQty={allocationPanelData.startingBalanceQty}
-                  consumedQtyEstimate={allocationPanelData.consumedQtyEstimate}
-                  endingBalanceEstimate={allocationPanelData.endingBalanceEstimate}
-                  sessionStatus={
-                    allocationPanelData.sessionStatus === "OPEN" ||
-                    allocationPanelData.sessionStatus === "CLOSED" ||
-                    allocationPanelData.sessionStatus === "DEPLETED" ||
-                    allocationPanelData.sessionStatus === "RETURNED_TO_STOCK"
-                      ? allocationPanelData.sessionStatus
-                      : null
-                  }
-                  workflowBagId={currentAtStation.bag.id}
-                  missingReason={allocationPanelData.missingReason ?? null}
-                />
-              ) : null}
-              <p className="text-xs text-text-muted mt-2">
-                {stationTimerPickedUpAt ? (
-                  <>
-                    Picked up{" "}
-                    {formatFloorTimeEastern(stationTimerPickedUpAt)}
-                  </>
-                ) : (
-                  <>
-                    Started{" "}
-                    {currentAtStation.bag.startedAt
-                      ? formatFloorTimeEastern(
-                          new Date(
-                            currentAtStation.bag.startedAt as unknown as string,
-                          ),
-                        )
-                      : "—"}
-                  </>
-                )}
-                {currentAtStation.state?.currentOperatorCode
-                  ? ` · operator ${currentAtStation.state.currentOperatorCode}`
-                  : ""}
-              </p>
-            </div>
-            {(stationTimerStartMs !== null || currentAtStation.bag.startedAt) && (
-              <ElapsedTimer
-                startedAtMs={
-                  stationTimerStartMs ??
-                  new Date(
-                    currentAtStation.bag.startedAt as unknown as string,
-                  ).getTime()
-                }
-                pausedSecondsAccum={stationPausedSecondsAccum}
-                isPaused={currentAtStation.state?.isPaused ?? false}
-                pausedAtMs={
-                  currentAtStation.state?.pausedAt
-                    ? new Date(
-                        currentAtStation.state.pausedAt as unknown as string,
-                      ).getTime()
-                    : null
-                }
-              />
-            )}
-            <StageActionButtons
-              token={token}
-              stationId={station.station.id}
-              stationKind={station.station.kind}
-              workflowBagId={currentAtStation.bag.id}
-              isPaused={currentAtStation.state?.isPaused ?? false}
-              currentStage={currentAtStation.state?.stage ?? null}
-              productKind={currentAtStation.product?.kind ?? null}
-              unitsPerDisplay={currentAtStation.product?.unitsPerDisplay ?? null}
-              displaysPerCase={currentAtStation.product?.displaysPerCase ?? null}
-              packagingSpecs={packagingSpecsForForm}
-              sealingCardsPerPress={sealingCardsPerPress}
-              hasProductMapped={hasProductMapped}
-              sealingProductOptions={sealingProductOptionsForForm}
-              sealingAutoProductId={sealingAutoProductId}
-              sealingProductConfigError={sealingProductConfigError}
-              sealingProductFilterHint={sealingProductFilterHint}
-              rollChangeRole={requiredRollChangeRole}
-              handpackTabletContext={handpackTabletContextForForm}
-              sealingSegmentProgress={sealingSegmentProgressForForm}
-              hasPartialSealingCloseout={hasPartialSealingCloseoutForForm}
-            />
-            {/* Help operator pick the next action when the bag has
-             *  already advanced past this station's stage. The
-             *  StageActionButtons hides its primary button in that
-             *  case; this banner replaces it. */}
-            <BagAdvancedBanner
-              token={token}
-              stationKind={station.station.kind}
-              currentStage={currentAtStation.state?.stage ?? null}
-              isFinalized={currentAtStation.state?.isFinalized ?? false}
-              productKind={currentAtStation.product?.kind ?? null}
-            />
-            {/* BOTTLE-SEALING-RECOVERY-1: a bottle bag stuck at BLISTERED at the
-             *  packaging station (cap-seal/sticker never scanned) gets an
-             *  accurate message + lead recovery instead of the card-line
-             *  "waiting for sealing" dead-end. */}
-            {(station.station.kind === "PACKAGING" ||
-              station.station.kind === "COMBINED") &&
-            currentAtStation.product?.kind === "BOTTLE" &&
-            currentAtStation.state?.stage === "BLISTERED" &&
-            !(currentAtStation.state?.isFinalized ?? false) ? (
-              <BottleSealingRecoveryPanel
-                token={token}
-                stationId={station.station.id}
-                workflowBagId={currentAtStation.bag.id}
-              />
-            ) : null}
-            {/* QC-3: quick QC issue panel. Only on packaging /
-             *  sealing / combined stations (per qc-panel-helpers).
-             *  Pending rework for this bag is fetched server-side
-             *  so the receive surface is one round-trip away. */}
-            {shouldRenderQcPanel(station.station.kind) ? (
-              <QcPanel
-                token={token}
-                stationId={station.station.id}
-                stationKind={station.station.kind}
-                workflowBagId={currentAtStation.bag.id}
-                currentOperatorName={activeSession?.employeeNameSnapshot ?? null}
-                accountabilitySource={activeSession?.accountabilitySource ?? null}
-                pendingRework={await loadPendingRework(currentAtStation.bag.id)}
-                isOnHold={currentAtStation.state?.isOnHold ?? false}
-              />
-            ) : null}
-          </div>
-        )}
-      </section>
-
-      <SupervisorToolsPanel tools={supervisorTools} />
-    </main>
+    </>
   );
 }
-
-// Maps a station kind to the stage a bag must be at for that
-// station's primary stage event to be valid. Mirrors the server-side
-// EVENT_STAGE_PREREQ map; kept inline here so the UI never imports
-// from "use server" actions.
-const STATION_PREREQ_STAGE: Record<string, string> = {
-  BLISTER: "STARTED",
-  HANDPACK_BLISTER: "STARTED",
-  SEALING: "BLISTERED",
-  PACKAGING: "SEALED",
-  COMBINED: "STARTED", // first action is BLISTER_COMPLETE
-  BOTTLE_HANDPACK: "STARTED",
-  // BOTTLE-ORDER-FLEX-1: cap-seal and sticker are interchangeable; their
-  // primary entry stage is BLISTERED, but both also accept SEALED (handled
-  // by the explicit bottle exception in BagAdvancedBanner). The single
-  // value here is just the primary/first-run stage.
-  BOTTLE_CAP_SEAL: "BLISTERED",
-  BOTTLE_STICKER: "BLISTERED",
-};
 
 /** QC-3 — pending REWORK_SENT events for the current bag that have
  *  not yet been fully received. "Pending" today = any REWORK_SENT
  *  for this bag with no paired REWORK_RECEIVED row (full or partial
  *  doesn't matter — QC-3 only surfaces "Mark fully received"; partial
  *  receive lands in QC-4). The receiving station's operator marks
- *  them received from the QC panel. */
+ *  them received from the QC panel.
+ *
+ *  Kept in this file across the cutover, unchanged: it feeds the ONE
+ *  legacy panel the cutover keeps, and moving it into the engine would
+ *  put a QC concern in the production engine's contract for no gain. */
 async function loadPendingRework(workflowBagId: string): Promise<PendingReworkRow[]> {
   const sent = await db
     .select({
@@ -1247,167 +214,4 @@ async function loadPendingRework(workflowBagId: string): Promise<PendingReworkRo
         accountableEmployeeName,
       };
     });
-}
-
-function BagAdvancedBanner({
-  token,
-  stationKind,
-  currentStage,
-  isFinalized,
-  productKind,
-}: {
-  token: string;
-  stationKind: string;
-  currentStage: string | null;
-  isFinalized: boolean;
-  productKind: string | null;
-}) {
-  if (!currentStage) return null;
-  if (isFinalized) {
-    return (
-      <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-        <p className="font-semibold">Bag is finalized.</p>
-        <p className="text-xs">
-          Scan a new card to start the next bag at this station.
-        </p>
-      </div>
-    );
-  }
-  if (stationKind === "SEALING" && currentStage === "STARTED") {
-    return (
-      <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 space-y-0.5">
-        <p className="font-semibold">Waiting for blister to complete.</p>
-        <p className="text-xs">
-          This bag is still being blistered or hand-packed. Sealing will
-          unlock automatically once the prior station completes.
-        </p>
-      </div>
-    );
-  }
-  if (stationKind === "PACKAGING" && currentStage === "BLISTERED") {
-    // BOTTLE-SEALING-RECOVERY-1: bottle bags do not use the card sealing
-    // station — their finishing is cap-seal + sticker. The bottle-specific
-    // message + lead recovery action render in BottleSealingRecoveryPanel, so
-    // this card-line banner is suppressed for bottle products.
-    if (productKind === "BOTTLE") return null;
-    return (
-      <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 space-y-0.5">
-        <p className="font-semibold">Waiting for sealing to complete.</p>
-        <p className="text-xs">
-          This bag is still being sealed. Packaging will unlock automatically
-          once the sealing station completes.
-        </p>
-      </div>
-    );
-  }
-  // BOTTLE-ORDER-FLEX-1: cap-seal and sticker run in either order, so
-  // both are "ready" for a freshly-filled bag (BLISTERED) or one the
-  // other finishing station already handled (SEALED). No out-of-sequence
-  // warning for either stage.
-  if (
-    (stationKind === "BOTTLE_CAP_SEAL" || stationKind === "BOTTLE_STICKER") &&
-    (currentStage === "BLISTERED" || currentStage === "SEALED")
-  ) {
-    return null;
-  }
-  const prereq = STATION_PREREQ_STAGE[stationKind];
-  if (!prereq || currentStage === prereq) return null;
-
-  // The bag has advanced past (or is otherwise out of sequence with)
-  // this station's primary action. Spell out the next step instead
-  // of leaving the form looking like it's still ready.
-  const stageWord =
-    {
-      STARTED: "started",
-      BLISTERED: "blistered",
-      SEALED: "sealed",
-      PACKAGED: "packaged",
-      FINALIZED: "finalized",
-    }[currentStage] ?? currentStage.toLowerCase();
-  // P2-AUTO-ADVANCE-1: the manual release button is gone — a completed stage
-  // releases the bag on its own, and the card stays attached either way, so the
-  // hint now points at the next station's scan instead of a button to tap here.
-  const nextHint =
-    currentStage === "BLISTERED"
-      ? "Nothing to tap here. The card stays attached and the sealing station scans the same card to claim the bag."
-      : currentStage === "SEALED"
-        ? "Nothing to tap here. The card stays attached and the packaging station scans the same card to claim the bag."
-        : currentStage === "PACKAGED"
-          ? // Only promise the Finalize button where it can actually render.
-            // A SEALING station can hold a PACKAGED bag (partial-packaging
-            // resume), and StageActionButtons shows Finalize only on stations
-            // in STATIONS_THAT_FINALIZE.
-            STATIONS_THAT_FINALIZE.has(stationKind)
-            ? "Packaging close-out normally closes this bag on its own. It is still open, so tap Finalize bag below."
-            : "Packaging will close out this bag."
-          : `Bag is at ${stageWord}; this station has no further forward action.`;
-  return (
-    <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900 space-y-0.5">
-      <p className="font-semibold">Bag already {stageWord} at this station.</p>
-      <p className="text-xs">{nextHint}</p>
-    </div>
-  );
-}
-
-function SupervisorToolsPanel({ tools }: { tools: FloorSupervisorToolLink[] }) {
-  if (tools.length === 0) return null;
-  return (
-    <details className="rounded-lg border border-border/50 bg-surface/60 text-sm">
-      <summary className="cursor-pointer list-none px-3 py-2.5 min-h-[44px] flex items-center gap-2 text-text-muted [&::-webkit-details-marker]:hidden">
-        <span className="font-medium">Supervisor tools</span>
-        <span className="text-[10px] text-text-subtle">(optional)</span>
-      </summary>
-      <div className="border-t border-border/50 px-3 pb-3 pt-1 space-y-2">
-        <ul className="space-y-2">
-          {tools.map((tool) => (
-            <li key={tool.id}>
-              <a
-                href={tool.href}
-                className="flex items-center justify-center rounded-lg border border-border/70 bg-page px-4 min-h-[44px] text-sm font-medium hover:bg-surface-2/60"
-              >
-                {tool.label}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </details>
-  );
-}
-
-function AutoLoadedLotsPanel({
-  lots,
-  stationKind,
-}: {
-  lots: AutoLoadedLot[];
-  stationKind: string;
-}) {
-  if (!STATION_AUTO_MATERIAL_KINDS[stationKind]) return null;
-  return (
-    <div className="rounded-lg border border-border/70 bg-surface px-3 py-2.5 space-y-1.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-text-subtle">
-        Materials on hand
-      </p>
-      {lots.length === 0 ? (
-        <p className="text-sm text-amber-800 font-medium leading-snug">
-          No stock on hand — receive materials before starting.
-        </p>
-      ) : (
-        <ul className="space-y-1">
-          {lots.map((lot) => (
-            <li
-              key={lot.lotId}
-              className="flex items-center justify-between gap-2 text-sm leading-snug"
-            >
-              <span className="font-medium truncate">{lot.materialName}</span>
-              <span className="tabular-nums text-text-muted text-xs shrink-0">
-                {lot.qtyOnHand.toLocaleString()}
-                {lot.supplierLotNumber ? ` · ${lot.supplierLotNumber}` : ""}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 }

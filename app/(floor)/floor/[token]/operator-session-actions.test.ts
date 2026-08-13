@@ -51,9 +51,14 @@ describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · operator session form UI", () => {
     expect(formSrc).toMatch(/Full name \(last resort/);
   });
 
-  it("page passes stationKind into OperatorSessionPanel", () => {
-    const pageSrc = readFileSync(join(__dirname, "page.tsx"), "utf8");
-    expect(pageSrc).toMatch(/stationKind=\{station\.station\.kind\}/);
+  // P4b Task 5 (THE CUTOVER) — page.tsx no longer mounts
+  // OperatorSessionPanel directly; the operator screen does, in both
+  // places it can appear (the OPEN_SHIFT case and End shift under
+  // More). The prop still has to arrive, so the scanner follows it.
+  it("the operator screen passes stationKind into OperatorSessionPanel", () => {
+    const screenSrc = readFileSync(join(__dirname, "operator-screen.tsx"), "utf8");
+    expect(screenSrc).toMatch(/stationKind=\{station\.kind\}/);
+    expect(screenSrc).toMatch(/stationKind=\{view\.station\.kind\}/);
   });
 });
 
@@ -74,10 +79,18 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · end-shift counter guard", () => {
     expect(formSrc).toMatch(/shiftEndCounterSnapshotMissingError/);
   });
 
-  it("page passes current active bag pause state to the operator panel", () => {
-    const pageSrc = readFileSync(join(__dirname, "page.tsx"), "utf8");
-    expect(pageSrc).toMatch(/currentWorkflowBagId=\{currentAtStation\?\.bag\.id \?\? null\}/);
-    expect(pageSrc).toMatch(/currentBagIsPaused=\{currentAtStation\?\.state\?\.isPaused \?\? false\}/);
+  // P4b Task 5 (THE CUTOVER) — same guard, new host. End shift moved
+  // into the More sheet, and it is the PANEL there rather than a bare
+  // endOperatorSessionAction button precisely so this counter-snapshot
+  // gate still runs; both facts it needs are passed through.
+  it("the operator screen passes current active bag pause state to the operator panel", () => {
+    const screenSrc = readFileSync(join(__dirname, "operator-screen.tsx"), "utf8");
+    expect(screenSrc).toMatch(/currentWorkflowBagId=\{currentWorkflowBagId\}/);
+    expect(screenSrc).toMatch(/currentBagIsPaused=\{currentBagIsPaused\}/);
+    expect(screenSrc).toMatch(/code === "BAG_PAUSED"/);
+    // End shift must not bypass the panel: the screen imports no
+    // session-ending action of its own.
+    expect(screenSrc).not.toMatch(/from "\.\/operator-session-actions"/);
   });
 });
 
