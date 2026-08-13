@@ -83,6 +83,7 @@ import { STATION_INACTIVE_FLOOR_MESSAGE } from "@/lib/production/station-managem
 import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
 import { loadFloorAllocationPanelForWorkflowBag } from "@/lib/production/floor-allocation-display";
 import { RawBagAllocationPanel } from "./raw-bag-allocation-panel";
+import { FloorLiveRefresh } from "./floor-live-refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -871,6 +872,7 @@ export default async function FloorStationPage({
 
   return (
     <main className="min-h-dvh bg-page px-4 pt-2 sm:px-6 sm:pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-w-2xl mx-auto space-y-3">
+      <FloorLiveRefresh token={token} />
       <header className="space-y-0.5">
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight leading-snug">
           {station.station.label}

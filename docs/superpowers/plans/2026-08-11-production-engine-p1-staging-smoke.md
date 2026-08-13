@@ -125,3 +125,24 @@ Run these two FIRST, in order, before any floor behaviour check.
       cap-seal already fired. Before the fix this pinned the station with
       no exit — complete refused, no release or finalize button — until
       packaging finalized the bag.
+
+## Phase 3 (v1.32.0) — realtime
+
+- [ ] Two tablets, blister + sealing: complete a bag at blister; the sealing
+      tablet's queue updates within ~2s with NO touch.
+- [ ] Unrelated station (e.g. BOTTLE_STICKER) does NOT refresh on that event
+      (watch the network tab: no router.refresh fetch).
+- [ ] Bad token: GET /floor/api/stream/<garbage-uuid> returns 404 with no
+      station-existence oracle (inactive station also 404).
+- [ ] Kill the app server mid-connection; tablet falls back to 60s polling,
+      then reconnects SSE within ~60s of the server returning.
+- [ ] Admin floor-board stream still works (payload extension is additive).
+- [ ] SSE connection count: with N tablets open, `SELECT count(*) FROM
+      pg_stat_activity WHERE query LIKE '%LISTEN%'` stays at 1 (one bus
+      connection per process, not per tablet).
+- [ ] Inactive-station page does not self-recover when re-activated (pre-existing; reload the tablet manually after re-activating a station).
+- [ ] Two sealers + one bag: pickup at sealer A clears the bag from sealer
+      B's pickup list within ~2s (the same-kind arm's payoff).
+- [ ] Pause a STARTED bag at blister; the sealing tablet's pickup list does
+      NOT update (known Phase 3 gap — non-flow events carry stationKind
+      null; fix lands in Phase 4). Reload shows truth.

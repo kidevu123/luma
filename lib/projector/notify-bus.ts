@@ -14,6 +14,8 @@ export type FloorEvent = {
   eventType: string;
   workflowBagId: string;
   stationId: string | null;
+  stationKind: string | null;
+  queueStageKey: string | null;
   occurredAt: string;
 };
 

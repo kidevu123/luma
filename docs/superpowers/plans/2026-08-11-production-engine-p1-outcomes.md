@@ -172,6 +172,18 @@ Branch `feat/production-engine-p2`. Three short notes for whoever reads
   5's concerns section for the argument that it may deserve revisiting
   once the bag also auto-releases at BLISTERED on a partial close.
 
+## Phase 3 outcomes
+
+Branch `feat/production-engine-p3`. Realtime shipped: floor tablets receive stream events from pg_notify and auto-refresh queues without operator touch. SSE route `/floor/api/stream/<stationToken>` is authed by station token and filtered by relevance rule:
+
+- **Own event:** if the event originates from the tablet's own station, refresh always.
+- **Same-kind peer:** if the event is from a different station but the same kind (e.g. SEALING to SEALING), refresh only when the event concerns a bag eligible for that station's queue.
+- **Claimable queue:** if the event stage matches a station kind in the bag's next route step, refresh.
+
+The stream uses hello-gated polling invariant: polling stops as soon as a connection proves live (EventSource open); if the connection drops, polling resumes at 60s. If the server restarts, the tablet reconnects SSE within ~60s.
+
+What CI cannot verify: the stream route end-to-end (staging smoke); EventSource reconnect behaviour under real traffic (staging smoke); the pg_notify round-trip latency and per-station filtering under load (staging smoke). Relevance rule and payload construction are pure-tested.
+
 ### Phase 2 deferred minors (final-review triaged, none floor-reachable)
 
 - Sibling-release payload marker shipped (`auto_release_reason`); the
@@ -189,3 +201,19 @@ Branch `feat/production-engine-p2`. Three short notes for whoever reads
   comment; unfiltered qrCards join (shared with station-view);
   `resolveRouteCodeForQueue` null-product fallback test; migration-text
   assertions unbound; scanner slice bound; `actions.ts:2589` copy.
+
+### Known Phase 3 gaps (P4 work)
+
+- Non-flow events (`BAG_PAUSED`, `BAG_RESUMED`, etc.) carry `stationKind:
+  null`, so same-kind tablets miss pause/resume updates — a paused bag's
+  peers only learn the truth on next reload. The fix is an in-process
+  stationId-to-kind cache in the projector, stamping every event
+  (flow and non-flow alike) with its originating station's kind.
+- Events with both `stationId: null` AND non-flow type match no tablet
+  at all under the current relevance rule — no station refreshes.
+- The inactive-station page does not mount the refresher, so
+  re-activating a station does not self-recover the tablet; a one-line
+  mount in that branch would make it self-recover within 60s via the
+  existing 404-then-poll path.
+- Consider a `subscribers.size` gauge on the notify bus for observability
+  into live SSE connection counts per process.

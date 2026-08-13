@@ -96,6 +96,7 @@ import { assertCounterSnapshotAllowed } from "@/lib/production/counter-snapshot-
 import {
   recordStageEvent,
   projectBagReleasedEvent,
+  resolveStationByToken,
 } from "@/lib/production/engine";
 
 // Canonical source: lib/production/first-op-product.ts FIRST_OP_STATION_KINDS.
@@ -135,14 +136,7 @@ type StationRow = typeof stations.$inferSelect;
 /** Resolve and lock a station by its URL scan token. Returns null
  *  if no match — caller should reject the request. */
 async function resolveStation(token: string): Promise<StationRow | null> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
-    return null;
-  }
-  const [row] = await db
-    .select()
-    .from(stations)
-    .where(eq(stations.scanToken, token));
-  return row ?? null;
+  return resolveStationByToken(token);
 }
 
 /** Compose the per-action wrapper: validate token + stationId
