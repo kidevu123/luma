@@ -71,6 +71,26 @@ export function shouldAssignProductFirst(args: {
   return SEALING_EVENTS_REQUIRING_SAVED_PRODUCT.has(args.eventType);
 }
 
+/** Pure: does this gesture look like a packaging COMPLETE? Presence, not
+ *  truthiness — an explicit 0 for cases/displays/loose still names the
+ *  gesture's shape, the same discipline buildRecordStageEventInput uses
+ *  for counterPresses. Feeds resolveOperation's preferOperation so a
+ *  COMBINED station resolves PACKAGING instead of its default blister
+ *  alias (pickOperationForStationKind's COMBINED-AT-PACKAGING-1 branch).
+ *  A non-COMBINED station ignores the preference entirely (see that
+ *  function's guard), so this is safe to compute unconditionally. */
+export function isPackagingShapedComplete(
+  intent: AdvanceIntent,
+  inputs: AdvanceInput["inputs"],
+): boolean {
+  if (intent !== "COMPLETE") return false;
+  return (
+    inputs.cases !== undefined ||
+    inputs.displays !== undefined ||
+    inputs.loose !== undefined
+  );
+}
+
 /** Station kinds whose completion event is NOT the one their aliased
  *  operation implies. resolve-operation aliases HANDPACK_BLISTER onto the
  *  BLISTER operation, so the operation code alone yields
@@ -213,6 +233,36 @@ export function buildRecordPackagingCompleteInput(args: {
 //     carry. advanceBag never creates bags: CLAIM takes an already-queued
 //     one through claimQueuedBag. Fresh-card scanning is P4b's scan-first
 //     UX.
+//
+// COMBINED-AT-PACKAGING-1 (P4b Task 2) — what a COMBINED station CAN and
+// CANNOT reach through advanceBag now:
+//   - CAN reach PACKAGING. A COMPLETE gesture carrying cases/displays/
+//     loose (isPackagingShapedComplete) sets preferOperation: "PACKAGING",
+//     which pickOperationForStationKind honors for stationKind ===
+//     "COMBINED" — resolveOperation then returns the PACKAGING operation
+//     instead of its default blister alias, and the
+//     `operationCode === "PACKAGING"` branch above routes it to
+//     recordPackagingComplete, which already accepted station.kind ===
+//     "COMBINED" (record-packaging-complete.ts) before this task closed
+//     the routing gap that kept that branch unreachable from a COMBINED
+//     station.
+//   - CANNOT reach HEAT_SEAL. There is no isSealingShapedComplete: a
+//     sealing gesture's only positive signal is `counterPresses`
+//     (buildRecordStageEventInput), and `counter` doubles as the blister
+//     count, so the two shapes are not reliably distinguishable from
+//     AdvanceInput alone the way cases/displays/loose are for packaging.
+//     A COMBINED station's sealing-shaped gesture therefore still
+//     resolves to the blister operation and fires BLISTER_COMPLETE
+//     (which ALLOWED_EVENTS_BY_KIND.COMBINED does accept, so nothing
+//     errors — it just records the wrong stage). This is also why
+//     shouldAssignProductFirst misses it on an unmapped bag: that
+//     function keys off the RESOLVED eventType, and BLISTER_COMPLETE is
+//     not in SEALING_EVENTS_REQUIRING_SAVED_PRODUCT, so the
+//     assign-then-record sequence never triggers for a COMBINED station's
+//     sealing gesture — the same ledger note Task 1 left open. Closing
+//     this needs a sealing-shaped detector (or a route-driven signal)
+//     before COMBINED-at-sealing can compose the same way
+//     COMBINED-at-packaging now does; out of scope for this task.
 // ─────────────────────────────────────────────────────────────────────
 export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
   try {
@@ -275,6 +325,13 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
   const resolved = await resolveOperation({
     productId: bag?.productId ?? input.productId ?? null,
     stationKind: stationRow.kind,
+    // COMBINED-AT-PACKAGING-1 — a packaging-shaped COMPLETE crosses
+    // pickOperationForStationKind's COMBINED-only preference gate; every
+    // other station kind ignores this even when it happens to name an
+    // operation the station cannot perform.
+    ...(isPackagingShapedComplete(input.intent, input.inputs)
+      ? { preferOperation: "PACKAGING" }
+      : {}),
   });
   if (!resolved) return { ok: false, blocker: blockerFor("OPERATION_UNRESOLVED") };
 

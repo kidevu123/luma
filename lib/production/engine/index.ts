@@ -19,6 +19,8 @@ export {
   intentToEventType,
   buildRecordStageEventInput,
   buildRecordPackagingCompleteInput,
+  shouldAssignProductFirst,
+  isPackagingShapedComplete,
 } from "./advance";
 export { recordStageEvent, projectBagReleasedEvent } from "./record-stage-event";
 export type { RecordStageEventInput, StationRow } from "./record-stage-event";
@@ -39,6 +41,15 @@ export type {
 } from "./assign-bag-product";
 export { evaluateChecks, blockersFromChecks, blockerFor } from "./resolve-exceptions";
 export type { CheckResult, EngineFacts } from "./resolve-exceptions";
+export {
+  raiseProductionException,
+  PRODUCTION_EXCEPTION_CATEGORIES,
+} from "./raise-production-exception";
+export type {
+  ProductionExceptionCategory,
+  RaiseProductionExceptionInput,
+  RaiseProductionExceptionResult,
+} from "./raise-production-exception";
 export { resolveCompletionInputs } from "./resolve-completion";
 export { resolveProductChoice } from "./resolve-product-choice";
 export type { ProductChoice } from "./resolve-product-choice";

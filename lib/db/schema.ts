@@ -264,6 +264,12 @@ export const workflowEventTypeEnum = pgEnum("workflow_event_type", [
   // Finished goods release — fires when a finishedLot moves from
   // PENDING_QC → RELEASED. Decouples QC release from BAG_FINALIZED.
   "FINISHED_GOODS_RELEASED",
+  // P4b Task 2 — the single exception workflow's catch-all event for
+  // categories with no existing equivalent (material/product/other).
+  // Migration 0072. Non-progressing: absent from STAGE_FOR_EVENT,
+  // THROUGHPUT_COLUMN, and bag-queue.ts's FLOW_EVENTS by design — it
+  // records an exception without advancing stage or queue state.
+  "PRODUCTION_EXCEPTION_RAISED",
 ]);
 
 export const finishedLotStatusEnum = pgEnum("finished_lot_status", [

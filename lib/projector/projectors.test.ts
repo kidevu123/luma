@@ -12,7 +12,11 @@ vi.mock("@/lib/db", () => ({
   db: { transaction: () => Promise.resolve(undefined) },
 }));
 
-import { buildThroughputProjection, floorThroughputDayKey } from "./index";
+import {
+  buildThroughputProjection,
+  floorThroughputDayKey,
+  resolveStageForWorkflowEvent,
+} from "./index";
 import {
   classifyQueueStatus,
   QUEUE_THRESHOLDS,
@@ -89,6 +93,43 @@ describe("buildThroughputProjection", () => {
         null,
       ),
     ).toBeNull();
+  });
+});
+
+// ─── P4b Task 2 — PRODUCTION_EXCEPTION_RAISED is non-progressing ────
+// Migration 0072 adds the enum value; this pins the projector's other
+// half of that contract — the event records without moving stage,
+// throughput, or either queue read model.
+describe("PRODUCTION_EXCEPTION_RAISED — non-progression", () => {
+  it("has no STAGE_FOR_EVENT entry — resolveStageForWorkflowEvent returns undefined", () => {
+    expect(
+      resolveStageForWorkflowEvent("PRODUCTION_EXCEPTION_RAISED", {}),
+    ).toBeUndefined();
+    expect(
+      resolveStageForWorkflowEvent("PRODUCTION_EXCEPTION_RAISED", null),
+    ).toBeUndefined();
+  });
+
+  it("has no THROUGHPUT_COLUMN entry — buildThroughputProjection returns null", () => {
+    expect(
+      buildThroughputProjection("PRODUCTION_EXCEPTION_RAISED", {}, null),
+    ).toBeNull();
+  });
+
+  it("is not in QUEUE_REFRESH_EVENTS — does not refresh read_queue_state", () => {
+    expect(QUEUE_REFRESH_EVENTS.has("PRODUCTION_EXCEPTION_RAISED")).toBe(
+      false,
+    );
+  });
+
+  it("is not referenced by bag-queue.ts's FLOW_EVENTS — read_bag_queue is untouched", () => {
+    // FLOW_EVENTS is module-private and its only consumer
+    // (applyBagQueueTransition) needs a live transaction, so this pins
+    // the source text directly rather than exercising the DB-bound
+    // function — consistent with this repo's no-DB-in-tests convention.
+    const path = join(process.cwd(), "lib", "projector", "bag-queue.ts");
+    const src = readFileSync(path, "utf8");
+    expect(src.includes("PRODUCTION_EXCEPTION_RAISED")).toBe(false);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   buildRecordStageEventInput,
   buildRecordPackagingCompleteInput,
   shouldAssignProductFirst,
+  isPackagingShapedComplete,
 } from "./advance";
 import type { StationRow } from "./record-stage-event";
 
@@ -465,5 +466,47 @@ describe("ASSIGN-PRODUCT-EXTRACT-1 · shouldAssignProductFirst", () => {
           intentToEventType("CONFIRM_BAG_EMPTY", "HEAT_SEAL", "SEALING") ?? "",
       }),
     ).toBe(true);
+  });
+});
+
+describe("COMBINED-AT-PACKAGING-1 · isPackagingShapedComplete", () => {
+  it("is true when a COMPLETE carries cases", () => {
+    expect(isPackagingShapedComplete("COMPLETE", { cases: 5 })).toBe(true);
+  });
+
+  it("is true when a COMPLETE carries displays", () => {
+    expect(isPackagingShapedComplete("COMPLETE", { displays: 2 })).toBe(true);
+  });
+
+  it("is true when a COMPLETE carries loose", () => {
+    expect(isPackagingShapedComplete("COMPLETE", { loose: 1 })).toBe(true);
+  });
+
+  it("is true on an explicit 0 — presence, not truthiness", () => {
+    // Mirrors buildRecordStageEventInput's counterPresses discipline: a
+    // real reading of 0 (e.g. zero cases, all loose) must still mark the
+    // gesture's shape, not be treated as "field absent".
+    expect(isPackagingShapedComplete("COMPLETE", { cases: 0 })).toBe(true);
+  });
+
+  it("is false for a COMPLETE carrying only a blister/sealing counter", () => {
+    expect(isPackagingShapedComplete("COMPLETE", { counter: 40 })).toBe(false);
+    expect(
+      isPackagingShapedComplete("COMPLETE", { counterPresses: 10 }),
+    ).toBe(false);
+  });
+
+  it("is false for a COMPLETE with no inputs at all", () => {
+    expect(isPackagingShapedComplete("COMPLETE", {})).toBe(false);
+  });
+
+  it("is false for every other intent even if inputs look packaging-shaped", () => {
+    for (const intent of [
+      "CLAIM",
+      "CONFIRM_BAG_EMPTY",
+      "RESOLVE_PARTIAL",
+    ] as const) {
+      expect(isPackagingShapedComplete(intent, { cases: 5 })).toBe(false);
+    }
   });
 });

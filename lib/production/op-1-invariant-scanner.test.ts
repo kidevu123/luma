@@ -41,6 +41,9 @@ const LIVE_EMISSION_FILES: ReadonlyArray<string> = [
   // through projectEvent directly (a claim is not a stage event), so it
   // needs the same accountability wiring as every other emission.
   "lib/production/engine/claim-queued-bag.ts",
+  // P4b Task 2: the single exception workflow's catch-all write path.
+  // Emits PRODUCTION_EXCEPTION_RAISED through projectEvent directly.
+  "lib/production/engine/raise-production-exception.ts",
   "app/(floor)/floor/[token]/roll-actions.ts",
   "app/(floor)/floor/[token]/bag-allocation-actions.ts",
   "app/(admin)/inbound/packaging-materials/actions.ts",
@@ -75,6 +78,7 @@ const ACCOUNTABLE_EVENTS: ReadonlyArray<string> = [
   "BAG_RELEASED",
   "BAG_FINALIZED",
   "OPERATOR_CHANGE",
+  "PRODUCTION_EXCEPTION_RAISED",
   // material_inventory_events
   "MATERIAL_RECEIVED",
   "ROLL_MOUNTED",
