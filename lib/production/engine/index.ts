@@ -50,6 +50,10 @@ export type {
   RaiseProductionExceptionInput,
   RaiseProductionExceptionResult,
 } from "./raise-production-exception";
+export { raiseDowntimeStarted } from "./raise-downtime";
+export type { RaiseDowntimeInput, RaiseDowntimeResult } from "./raise-downtime";
+export { raiseQaHoldStarted } from "./raise-qa-hold";
+export type { RaiseQaHoldInput, RaiseQaHoldResult } from "./raise-qa-hold";
 export { resolveCompletionInputs } from "./resolve-completion";
 export {
   assembleCompletionInputs,
@@ -66,6 +70,9 @@ export {
   pauseNeedsCounterSnapshot,
   primaryBlockerSentence,
   progressPercent,
+  REPORT_PROBLEM_CATEGORY_LAYOUT,
+  reportProblemCategoryDisabled,
+  reportProblemRouteFor,
   shouldSubmitAutoProduct,
   upNextSummary,
 } from "./operator-screen-model";
@@ -76,6 +83,7 @@ export type {
   OperatorPauseModel,
   PartialScreen,
   PauseReason,
+  ReportProblemRoute,
 } from "./operator-screen-model";
 export { resolveProductChoice } from "./resolve-product-choice";
 export type { ProductChoice } from "./resolve-product-choice";

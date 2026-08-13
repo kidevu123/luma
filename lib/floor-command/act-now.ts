@@ -102,6 +102,7 @@ export function buildActNowPanel(
     });
   }
 
+  let exceptionSeq = 0;
   for (const a of attention) {
     if (a.type === "idle_machine") {
       items.push({
@@ -118,6 +119,23 @@ export function buildActNowPanel(
         severity: "warn",
         title: "Rework pending",
         detail: `${a.label} · ${a.detail}`,
+      });
+    }
+    if (a.type === "production_exception") {
+      // Report Problem (P4b Task 4). DOWNTIME_STARTED/QA_HOLD_STARTED
+      // are an active machine or quality stoppage the operator just
+      // raised — crit, same bar as a bag on hold. PRODUCTION_EXCEPTION_
+      // RAISED is the catch-all (material/product/other) — warn, same
+      // bar as any other reported-but-not-yet-triaged item.
+      exceptionSeq += 1;
+      items.push({
+        id: `exception-${exceptionSeq}-${a.label}`,
+        severity: a.exceptionEventType === "PRODUCTION_EXCEPTION_RAISED" ? "warn" : "crit",
+        title: a.label,
+        detail: a.detail,
+        href: a.receiptNumber
+          ? `/workflow-submissions?receipt=${encodeURIComponent(a.receiptNumber)}`
+          : "/workflow-submissions",
       });
     }
   }

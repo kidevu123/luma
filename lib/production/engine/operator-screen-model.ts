@@ -18,6 +18,7 @@
 
 import { evaluateChecks } from "./resolve-exceptions";
 import type { CheckResult } from "./resolve-exceptions";
+import type { ProductionExceptionCategory } from "./raise-production-exception";
 import type {
   AdvanceInput,
   CompletionInput,
@@ -316,6 +317,84 @@ export function operatorMaterialLinks(
   stationKind: string,
 ): FloorSupervisorToolLink[] {
   return floorSupervisorToolsForStation(token, stationKind);
+}
+
+// ── report problem (P4b Task 4) ─────────────────────────────────────────
+
+/** The spec's six Report Problem categories, in the layout's reading
+ *  order:
+ *    [ Material ] [ Machine ] [ Product ]
+ *    [ Bag ]      [ Quality ] [ Other ]
+ *  Re-exported from the engine's own category union (PRODUCTION_EXCEPTION_
+ *  CATEGORIES) rather than redeclared, so the button labels can never name
+ *  a category the emitters do not accept. */
+export const REPORT_PROBLEM_CATEGORY_LAYOUT: readonly ProductionExceptionCategory[] = [
+  "MATERIAL",
+  "MACHINE",
+  "PRODUCT",
+  "BAG",
+  "QUALITY",
+  "OTHER",
+];
+
+/** Where a category's ONE follow-up answer goes — the mapping table
+ *  raise-production-exception.ts's own header carries, made checkable
+ *  without a DOM. MACHINE gets a pause attempt (best-effort — see
+ *  report-problem.tsx) alongside the DOWNTIME_STARTED record; QUALITY
+ *  and BAG are each exactly one write; the rest fall through to the
+ *  catch-all exception event. */
+export type ReportProblemRoute =
+  | "PAUSE_AND_DOWNTIME" // MACHINE
+  | "QA_HOLD" // QUALITY
+  | "PAUSE" // BAG
+  | "EXCEPTION"; // MATERIAL / PRODUCT / OTHER
+
+export function reportProblemRouteFor(
+  category: ProductionExceptionCategory,
+): ReportProblemRoute {
+  switch (category) {
+    case "MACHINE":
+      return "PAUSE_AND_DOWNTIME";
+    case "QUALITY":
+      return "QA_HOLD";
+    case "BAG":
+      return "PAUSE";
+    case "MATERIAL":
+    case "PRODUCT":
+    case "OTHER":
+      return "EXCEPTION";
+  }
+}
+
+/** Should this category's button be disabled when no bag is pinned at
+ *  the station?
+ *
+ *  EXCEPTION (material/product/other) goes through raiseProductionException,
+ *  which requires a bag to attach to (workflow_events.workflow_bag_id is
+ *  NOT NULL) and has no better fallback than the station's current pin —
+ *  with neither, there is nothing to report about, so the button is
+ *  disabled rather than inviting a submission that can only fail.
+ *
+ *  PAUSE (bag) is disabled for the same concrete reason: pauseBagAction's
+ *  workflowBagId is a required field with no "use the station's current
+ *  bag" fallback, and a bag problem with no bag at the station is not a
+ *  report Luma can attach anywhere.
+ *
+ *  PAUSE_AND_DOWNTIME (machine) and QA_HOLD (quality) stay enabled
+ *  without a bag: a machine can be down, or a quality concern can be
+ *  raised, before any bag has reached the station. Both still resolve
+ *  through emitStationedExceptionEvent's own bag fallback/guard, so a
+ *  truly bagless station surfaces PRODUCTION_EXCEPTION_NO_BAG as a
+ *  Blocker instead of failing silently — see raise-downtime.ts /
+ *  raise-qa-hold.ts. Bagless MACHINE/QUALITY reports that reach a
+ *  station with NO bag ever pinned are P5 scope for a friendlier
+ *  station-only message; today they get that same blocker's sentence. */
+export function reportProblemCategoryDisabled(
+  route: ReportProblemRoute,
+  hasBag: boolean,
+): boolean {
+  if (hasBag) return false;
+  return route === "EXCEPTION" || route === "PAUSE";
 }
 
 // ── small display helpers ─────────────────────────────────────────────

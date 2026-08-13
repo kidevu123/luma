@@ -223,6 +223,57 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
     });
   }
 
+  // P4b Task 4 — Report Problem's PRODUCTION_EXCEPTION_RAISED,
+  // DOWNTIME_STARTED, and QA_HOLD_STARTED, so every category lands on
+  // the Act Now rail (spec: "All land on the /floor-board Act Now
+  // rail"). None of the three had ANY reader before this — grepping the
+  // repo for each literal turned up only their schema.ts enum
+  // declarations and this task's own new emitters. DOWNTIME_ENDED and
+  // QA_HOLD_RELEASED exist on the enum but nothing emits them yet
+  // (that pairing is P5 scope, same as the supervisor inbox/badge the
+  // spec describes), so this is a straight recency window rather than
+  // an unresolved-vs-resolved query like loadDowntimeToday's BAG_PAUSED/
+  // BAG_RESUMED pairing (floor-manager-snapshot.ts) — a report simply
+  // ages off the rail after a few hours instead of being dismissed.
+  const exceptionRows = (await db.execute(sql`
+    SELECT
+      we.event_type AS event_type,
+      we.payload AS payload,
+      we.occurred_at AS occurred_at,
+      s.label AS station_label,
+      wb.receipt_number AS receipt_number
+    FROM workflow_events we
+    LEFT JOIN stations s ON s.id = we.station_id
+    LEFT JOIN workflow_bags wb ON wb.id = we.workflow_bag_id
+    WHERE we.event_type::text IN
+      ('PRODUCTION_EXCEPTION_RAISED', 'DOWNTIME_STARTED', 'QA_HOLD_STARTED')
+      AND we.occurred_at >= now() - interval '4 hours'
+    ORDER BY we.occurred_at DESC
+    LIMIT 10
+  `)) as unknown as Array<{
+    event_type: "PRODUCTION_EXCEPTION_RAISED" | "DOWNTIME_STARTED" | "QA_HOLD_STARTED";
+    payload: { category?: string; detail?: string } | null;
+    occurred_at: string;
+    station_label: string | null;
+    receipt_number: string | null;
+  }>;
+
+  for (const row of exceptionRows) {
+    const kind =
+      row.event_type === "DOWNTIME_STARTED"
+        ? "Machine down"
+        : row.event_type === "QA_HOLD_STARTED"
+          ? "Quality hold"
+          : (row.payload?.category ?? "Reported");
+    items.push({
+      type: "production_exception",
+      label: row.station_label ?? "Unknown station",
+      detail: [kind, row.payload?.detail].filter(Boolean).join(" — "),
+      exceptionEventType: row.event_type,
+      receiptNumber: row.receipt_number,
+    });
+  }
+
   return items;
 }
 

@@ -27,7 +27,9 @@ import {
   advanceBag,
   assertStationActiveForFloorActions,
   claimQueuedBag,
+  raiseDowntimeStarted,
   raiseProductionException,
+  raiseQaHoldStarted,
   resolveStationByToken,
   PRODUCTION_EXCEPTION_CATEGORIES,
   type AdvanceInput,
@@ -312,6 +314,90 @@ export async function raiseProductionExceptionAction(
     const result = await raiseProductionException({
       stationId: d.stationId,
       category: d.category,
+      detail: d.detail,
+      clientEventId: d.clientEventId,
+      ...(d.workflowBagId != null ? { workflowBagId: d.workflowBagId } : {}),
+    });
+    if (!result.ok) return fail(result.blocker);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not send this." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
+// Report Problem's MACHINE and QUALITY categories share this shape —
+// station + optional bag + one detail string — but not the exception
+// category enum, since neither becomes a PRODUCTION_EXCEPTION_RAISED.
+const reportDetailSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  workflowBagId: z.string().uuid().optional(),
+  detail: z.string().min(1).max(500),
+  clientEventId: z.string().regex(UUID_RE, "Invalid client event id."),
+});
+
+/** Report Problem's MACHINE category, second write. The first —
+ *  pauseBagAction — is called by the client directly (it already has
+ *  its own floor action) and its outcome is NOT a precondition here: a
+ *  bag that is already paused for another reason must not block the
+ *  downtime record. raiseDowntimeStarted is total, like
+ *  raiseProductionException, so there is nothing to translate but the
+ *  shape. */
+export async function raiseDowntimeAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = reportDetailSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    workflowBagId: optionalField(formData, "workflowBagId"),
+    detail: formData.get("detail"),
+    clientEventId: formData.get("clientEventId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    const result = await raiseDowntimeStarted({
+      stationId: d.stationId,
+      detail: d.detail,
+      clientEventId: d.clientEventId,
+      ...(d.workflowBagId != null ? { workflowBagId: d.workflowBagId } : {}),
+    });
+    if (!result.ok) return fail(result.blocker);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not send this." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
+/** Report Problem's QUALITY category. Exactly one write — no pause
+ *  attempt (Task 4's mapping table: QUALITY is QA_HOLD_STARTED alone). */
+export async function raiseQaHoldAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = reportDetailSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    workflowBagId: optionalField(formData, "workflowBagId"),
+    detail: formData.get("detail"),
+    clientEventId: formData.get("clientEventId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    const result = await raiseQaHoldStarted({
+      stationId: d.stationId,
       detail: d.detail,
       clientEventId: d.clientEventId,
       ...(d.workflowBagId != null ? { workflowBagId: d.workflowBagId } : {}),

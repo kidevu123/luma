@@ -17,14 +17,17 @@
 // guards is the OTHER direction: it must never let a caller-supplied
 // workflowBagId that disagrees with the station's actual current bag
 // silently re-pin it out from under the operator screen. See the
-// PRODUCTION_EXCEPTION_WRONG_BAG branch below.
+// PRODUCTION_EXCEPTION_WRONG_BAG branch in emit-stationed-event.ts.
+//
+// P4b Task 4 — the bag-resolution + wrong-bag-guard + accountable-write
+// body below moved to emit-stationed-event.ts's emitStationedExceptionEvent,
+// shared verbatim with raise-downtime.ts and raise-qa-hold.ts (the
+// MACHINE/QUALITY paths this file's own header describes). This
+// function's observable behavior — blocker codes, ordering, the
+// detail-required check before anything else runs — is unchanged.
 
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { readStationLive, stations } from "@/lib/db/schema";
-import { projectEvent } from "@/lib/projector";
-import { resolveStationAccountability } from "@/lib/production/station-operator-session";
 import { blockerFor } from "./resolve-exceptions";
+import { emitStationedExceptionEvent } from "./emit-stationed-event";
 import type { Blocker } from "./types";
 
 /** The six categories the Report Problem screen offers. All six are
@@ -76,94 +79,19 @@ export type RaiseProductionExceptionResult =
 export async function raiseProductionException(
   input: RaiseProductionExceptionInput,
 ): Promise<RaiseProductionExceptionResult> {
-  try {
-    const detail = input.detail.trim();
-    if (!detail) {
-      return { ok: false, blocker: blockerFor("PRODUCTION_EXCEPTION_DETAIL_REQUIRED") };
-    }
-
-    const [stationRow] = await db
-      .select({ id: stations.id })
-      .from(stations)
-      .where(eq(stations.id, input.stationId));
-    if (!stationRow) {
-      return { ok: false, blocker: blockerFor("STATION_UNRESOLVED") };
-    }
-
-    const [live] = await db
-      .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
-      .from(readStationLive)
-      .where(eq(readStationLive.stationId, input.stationId));
-    const currentWorkflowBagId = live?.currentWorkflowBagId ?? null;
-
-    let workflowBagId: string | null;
-    if (input.workflowBagId) {
-      // WRONG-BAG-GUARD-1 — projectEvent's read_station_live upsert
-      // re-pins current_workflow_bag_id to whatever workflowBagId this
-      // event carries (any stationed event that isn't BAG_FINALIZED /
-      // BAG_RELEASED does this — lib/projector/index.ts:402-424). A
-      // caller naming a DIFFERENT bag than the one actually pinned here
-      // would silently hijack the station's current-work pin, so refuse
-      // instead of emitting. A station with NO current bag pinned is
-      // fine — there is nothing to hijack, and pinning it now is exactly
-      // what "this event is about this station's current work" means.
-      if (currentWorkflowBagId && currentWorkflowBagId !== input.workflowBagId) {
-        return {
-          ok: false,
-          blocker: {
-            code: "PRODUCTION_EXCEPTION_WRONG_BAG",
-            operatorSentence:
-              "Report the bag currently at this station, or clear it first.",
-            supervisorDetail: `Supplied workflowBagId ${input.workflowBagId} does not match this station's read_station_live.current_workflow_bag_id ${currentWorkflowBagId}.`,
-            suggestedAction: "NOTIFY_SUPERVISOR",
-          },
-        };
-      }
-      workflowBagId = input.workflowBagId;
-    } else {
-      workflowBagId = currentWorkflowBagId;
-    }
-    if (!workflowBagId) {
-      return { ok: false, blocker: blockerFor("PRODUCTION_EXCEPTION_NO_BAG") };
-    }
-    // Narrowed to a stable string binding so the transaction closure
-    // below does not re-widen it to `string | null`.
-    const resolvedWorkflowBagId: string = workflowBagId;
-
-    await db.transaction(async (tx) => {
-      const accountability = await resolveStationAccountability(tx, {
-        stationId: input.stationId,
-        overrideEmployeeCode: input.overrideEmployeeCode ?? null,
-      });
-
-      await projectEvent(tx, {
-        workflowBagId: resolvedWorkflowBagId,
-        stationId: input.stationId,
-        eventType: "PRODUCTION_EXCEPTION_RAISED",
-        payload: {
-          category: input.category,
-          detail,
-        },
-        ...(input.clientEventId ? { clientEventId: input.clientEventId } : {}),
-        enteredByUserId: accountability.enteredByUserId,
-        accountableEmployeeId: accountability.accountableEmployeeId,
-        accountabilitySource: accountability.accountabilitySource,
-        accountableEmployeeNameSnapshot:
-          accountability.accountableEmployeeNameSnapshot,
-      });
-    });
-
-    return { ok: true };
-  } catch (err) {
-    return {
-      ok: false,
-      blocker: {
-        code: "PRODUCTION_EXCEPTION_FAILED",
-        operatorSentence:
-          "Something went wrong recording this. Ask a supervisor.",
-        supervisorDetail: err instanceof Error ? err.message : String(err),
-        suggestedAction: "NOTIFY_SUPERVISOR",
-      },
-    };
+  const detail = input.detail.trim();
+  if (!detail) {
+    return { ok: false, blocker: blockerFor("PRODUCTION_EXCEPTION_DETAIL_REQUIRED") };
   }
+
+  return emitStationedExceptionEvent({
+    stationId: input.stationId,
+    eventType: "PRODUCTION_EXCEPTION_RAISED",
+    payload: { category: input.category, detail },
+    ...(input.workflowBagId != null ? { workflowBagId: input.workflowBagId } : {}),
+    ...(input.clientEventId != null ? { clientEventId: input.clientEventId } : {}),
+    ...(input.overrideEmployeeCode != null
+      ? { overrideEmployeeCode: input.overrideEmployeeCode }
+      : {}),
+  });
 }

@@ -13,6 +13,9 @@ import {
   pauseNeedsCounterSnapshot,
   primaryBlockerSentence,
   progressPercent,
+  REPORT_PROBLEM_CATEGORY_LAYOUT,
+  reportProblemCategoryDisabled,
+  reportProblemRouteFor,
   shouldSubmitAutoProduct,
   upNextSummary,
 } from "./operator-screen-model";
@@ -387,5 +390,43 @@ describe("display helpers", () => {
         etaMinutes: null,
       }),
     ).toBe("1042 · Chocolate Brown · still upstream");
+  });
+});
+
+describe("report problem (P4b Task 4)", () => {
+  it("lists all six categories, in the spec's layout order", () => {
+    expect(REPORT_PROBLEM_CATEGORY_LAYOUT).toEqual([
+      "MATERIAL",
+      "MACHINE",
+      "PRODUCT",
+      "BAG",
+      "QUALITY",
+      "OTHER",
+    ]);
+  });
+
+  it("routes each category per raise-production-exception.ts's mapping table", () => {
+    expect(reportProblemRouteFor("MACHINE")).toBe("PAUSE_AND_DOWNTIME");
+    expect(reportProblemRouteFor("QUALITY")).toBe("QA_HOLD");
+    expect(reportProblemRouteFor("BAG")).toBe("PAUSE");
+    expect(reportProblemRouteFor("MATERIAL")).toBe("EXCEPTION");
+    expect(reportProblemRouteFor("PRODUCT")).toBe("EXCEPTION");
+    expect(reportProblemRouteFor("OTHER")).toBe("EXCEPTION");
+  });
+
+  it("never disables a category once a bag is pinned", () => {
+    for (const route of ["PAUSE_AND_DOWNTIME", "QA_HOLD", "PAUSE", "EXCEPTION"] as const) {
+      expect(reportProblemCategoryDisabled(route, true)).toBe(false);
+    }
+  });
+
+  it("disables EXCEPTION and PAUSE without a bag — both require one to attach to", () => {
+    expect(reportProblemCategoryDisabled("EXCEPTION", false)).toBe(true);
+    expect(reportProblemCategoryDisabled("PAUSE", false)).toBe(true);
+  });
+
+  it("leaves PAUSE_AND_DOWNTIME and QA_HOLD enabled without a bag — a machine or quality concern can predate one", () => {
+    expect(reportProblemCategoryDisabled("PAUSE_AND_DOWNTIME", false)).toBe(false);
+    expect(reportProblemCategoryDisabled("QA_HOLD", false)).toBe(false);
   });
 });
