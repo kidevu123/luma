@@ -19,9 +19,11 @@ cannot reach.
       pre-deploy behaviour.
 - [ ] Complete packaging on a bag. Cases/displays/loose all record, and
       packaging material consumption fires as before.
-- [ ] Complete packaging on a bag via advanceBag (P4a): same cases/displays/loose
+- [ ] Complete packaging on a bag via advanceBag: same cases/displays/loose
       counts and material consumption as the legacy packagingCompleteAction.
       Assert against zoho-side payload expectations unchanged.
+      NOT EXECUTABLE until P4b wires a caller to advanceBag — do not check
+      this box during P4a smoke; it belongs to the P4b run.
 - [ ] A handpack blister completion still issues blister card material
       (this path moved into record-stage-event.ts — confirm it did not
       regress).
