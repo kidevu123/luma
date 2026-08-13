@@ -64,13 +64,15 @@ describe("resolveCompletionInputs", () => {
     }
   });
 
-  it("leaves the damaged count unitless at packaging", () => {
-    // Packaging counts cases, displays and loose units; a single unit
-    // label on "damaged" would be wrong for two of the three.
+  it("labels the damaged count in units at packaging (2026-08-13 decision)", () => {
+    // P4a Task 2: packaging counts cases, displays and loose units, but
+    // damage is a single field always counted in loose units — replaces
+    // the P1-era "deliberately unitless" placeholder now that the floor
+    // decision is in.
     const inputs = resolveCompletionInputs(
       op({ operationCode: "PACKAGING", allowedStationKind: "PACKAGING", outputUnit: "cases" }),
     );
-    expect(inputs.find((i) => i.key === "damaged")?.unit).toBeNull();
+    expect(inputs.find((i) => i.key === "damaged")?.unit).toBe("units");
   });
 
   it("omits damaged entirely for an operation with no output", () => {

@@ -96,6 +96,11 @@ export type AdvanceInput = {
      *  sealed count, and REFUSES a sealing segment without it
      *  (SEALING_COUNTER_PRESS_ERROR). */
     counterPresses?: number;
+    /** Loose units damaged during this operation — cards ripped, bottles
+     *  cracked, etc. (2026-08-13 decision). At packaging this maps to
+     *  `rippedCards`, not `damagedPackaging`: packaging-MATERIAL damage
+     *  (foil, cases, labels) is a separate exception-flow concern, not an
+     *  operator count. */
     damaged?: number;
     cases?: number;
     displays?: number;

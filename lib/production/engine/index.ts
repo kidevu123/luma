@@ -13,7 +13,12 @@ export type {
   UpNextBag,
 } from "./types";
 
-export { advanceBag, intentToEventType, buildRecordStageEventInput } from "./advance";
+export {
+  advanceBag,
+  intentToEventType,
+  buildRecordStageEventInput,
+  buildRecordPackagingCompleteInput,
+} from "./advance";
 export { recordStageEvent, projectBagReleasedEvent } from "./record-stage-event";
 export type { RecordStageEventInput, StationRow } from "./record-stage-event";
 export {

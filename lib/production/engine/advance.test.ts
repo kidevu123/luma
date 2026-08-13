@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { intentToEventType, buildRecordStageEventInput } from "./advance";
+import {
+  intentToEventType,
+  buildRecordStageEventInput,
+  buildRecordPackagingCompleteInput,
+} from "./advance";
 import type { StationRow } from "./record-stage-event";
 
 describe("intentToEventType", () => {
@@ -169,5 +173,97 @@ describe("buildRecordStageEventInput", () => {
       clientEventId: "cid-1",
     });
     expect(out.pickedSealingProductId).toBeNull();
+  });
+});
+
+const PACKAGING_STATION = { id: "s2", label: "Packaging 1", kind: "PACKAGING" } as StationRow;
+
+describe("buildRecordPackagingCompleteInput", () => {
+  it("routes cases to masterCases", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 4 },
+      clientEventId: "cid-1",
+    });
+    expect(out.masterCases).toBe(4);
+  });
+
+  it("routes displays to displaysMade", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { displays: 9 },
+      clientEventId: "cid-1",
+    });
+    expect(out.displaysMade).toBe(9);
+  });
+
+  it("routes loose to looseCards", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { loose: 12 },
+      clientEventId: "cid-1",
+    });
+    expect(out.looseCards).toBe(12);
+  });
+
+  it("routes the operator's damaged count to rippedCards, not damagedPackaging", () => {
+    // 2026-08-13 decision: operator-counted damage is loose units (ripped
+    // cards). Packaging-material damage is a separate exception-flow
+    // concern this mapping never populates.
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { damaged: 3 },
+      clientEventId: "cid-1",
+    });
+    expect(out.rippedCards).toBe(3);
+  });
+
+  it("always sends damagedPackaging as zero regardless of input", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { damaged: 3, cases: 1, displays: 2, loose: 5 },
+      clientEventId: "cid-1",
+    });
+    expect(out.damagedPackaging).toBe(0);
+  });
+
+  it("zero-defaults every count when the operator supplied none", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: {},
+      clientEventId: "cid-1",
+    });
+    expect(out.masterCases).toBe(0);
+    expect(out.displaysMade).toBe(0);
+    expect(out.looseCards).toBe(0);
+    expect(out.rippedCards).toBe(0);
+    expect(out.damagedPackaging).toBe(0);
+  });
+
+  it("carries the clientEventId through so the DB can dedupe a retry", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-pkg-1",
+    });
+    expect(out.clientEventId).toBe("cid-pkg-1");
+  });
+
+  it("does not yet carry a partial-close request (Task 3)", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-1",
+    });
+    expect(out.keepBagPartial).toBe(false);
+    expect(out.partialRemainingEstimate).toBeNull();
   });
 });
