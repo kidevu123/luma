@@ -683,7 +683,7 @@ describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · packaging complete accountabilit
     // now (`operatorCode`) instead of `parsed.data.operatorCode` — the
     // mechanical rename the relocation required. Both halves stay pinned:
     // the action passes parsed.data.operatorCode in, the moved body reads it.
-    expect(actionsSrc).toMatch(/operatorCode: parsed\.data\.operatorCode/);
+    expect(chunk).toMatch(/operatorCode: parsed\.data\.operatorCode/);
     expect(chunk).toMatch(/overrideEmployeeCode: operatorCode/);
     expect(chunk).toMatch(
       /accountableEmployeeId: accountability\.accountableEmployeeId/,

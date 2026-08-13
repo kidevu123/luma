@@ -11,9 +11,14 @@ import { ESLint } from "eslint";
 // unrestricted) and moved actions.ts onto the barrel. Re-measured after
 // both changes: still 80 — the only deep engine import in floor code was
 // that one line, and it now resolves to the permitted barrel.
+// P4a Task 1 took it to 75: extracting packagingCompleteAction's body to
+// lib/production/engine/record-packaging-complete.ts left 5 lib/production
+// imports in actions.ts with no remaining reference, and they went with
+// the body. Re-pinned, because a stale 80 leaves exactly the slack this
+// comment warns about. Trail: 82 -> 80 -> (79, reverted) -> 80 -> 75.
 // Phase 4 drives this to zero and flips the rule to "error"; until then
 // the only rule is that it must not grow.
-const BASELINE_VIOLATIONS = 80;
+const BASELINE_VIOLATIONS = 75;
 
 describe("floor import boundary", () => {
   it("blocks a non-engine lib/production import from floor code", async () => {
