@@ -19,6 +19,9 @@ cannot reach.
       pre-deploy behaviour.
 - [ ] Complete packaging on a bag. Cases/displays/loose all record, and
       packaging material consumption fires as before.
+- [ ] Complete packaging on a bag via advanceBag (P4a): same cases/displays/loose
+      counts and material consumption as the legacy packagingCompleteAction.
+      Assert against zoho-side payload expectations unchanged.
 - [ ] A handpack blister completion still issues blister card material
       (this path moved into record-stage-event.ts — confirm it did not
       regress).
@@ -143,6 +146,6 @@ Run these two FIRST, in order, before any floor behaviour check.
 - [ ] Inactive-station page does not self-recover when re-activated (pre-existing; reload the tablet manually after re-activating a station).
 - [ ] Two sealers + one bag: pickup at sealer A clears the bag from sealer
       B's pickup list within ~2s (the same-kind arm's payoff).
-- [ ] Pause a STARTED bag at blister; the sealing tablet's pickup list does
-      NOT update (known Phase 3 gap — non-flow events carry stationKind
-      null; fix lands in Phase 4). Reload shows truth.
+- [ ] Pause a STARTED bag at blister; the sealing tablet's pickup list updates
+      within ~2s (P4a: non-flow events carry stationKind via process cache,
+      gap (a) closed). Reload confirms truth.

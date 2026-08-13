@@ -29,6 +29,8 @@ const defaultLoader: StationKindLoader = async (tx, stationId) => {
   return row?.kind ?? null;
 };
 
+// Revisit if stations.kind ever becomes editable — every admin write site
+// today touches only scanToken/label/isActive; kind is set once at insert.
 const cache = new Map<string, string | null>();
 
 /** Returns a station's kind, querying at most once per process per

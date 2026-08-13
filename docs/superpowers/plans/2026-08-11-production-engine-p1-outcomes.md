@@ -222,3 +222,14 @@ What CI cannot verify: the stream route end-to-end (staging smoke); EventSource 
   existing 404-then-poll path.
 - Consider a `subscribers.size` gauge on the notify bus for observability
   into live SSE connection counts per process.
+
+## Phase 4a outcomes
+
+Branch `feat/production-engine-p4a`. Full fidelity: `advanceBag` now handles all normal-floor workflows without legacy-action fallback.
+
+**Decisions recorded:**
+
+- **Packaging damage granularity:** loose units (operator-counted ripped/damaged loose cards). Mapped to `damaged` field in `AdvanceInput` with `unit: "units"` semantics; routed as `rippedCards` to `recordPackagingComplete`.
+- **Ambiguous product resolution:** operator pick from filtered list (2–3 compatible products auto-filtered by station kind). `PICK_PRODUCT` `NextAction` variant; unambiguous cases auto-resolve.
+
+**Gap (a) closure:** Non-flow events (`BAG_PAUSED`, `BAG_RESUMED`, etc.) now carry `stationKind` via in-process memoization (`lib/projector/station-kind-cache.ts`), so same-kind tablets refresh on pause/resume without reload.

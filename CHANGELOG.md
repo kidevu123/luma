@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.33.0] — 2026-08-13
+
+- Phase 4a: advanceBag reaches full fidelity — packaging counts and loose-unit damage, partial-close and override passthrough, filtered product picking, stationKind on every notify. No visible change; the new operator screen lands in 4b.
+
 ## [1.32.0] — 2026-08-12
 
 - Phase 3: floor tablets update in real time. Station-token SSE stream with per-station relevance filtering; pg_notify payload carries stationKind and queueStageKey; floor page refreshes automatically (no visible chrome). Polling fallback at 60s if SSE drops.
