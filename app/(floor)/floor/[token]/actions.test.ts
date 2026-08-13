@@ -27,6 +27,17 @@ const recordPackagingCompleteSrc = readFileSync(
   ),
   "utf8",
 );
+// ASSIGN-PRODUCT-EXTRACT-1: saveSealingProductAction's guard sequence,
+// transaction body and the OpenAllocationBlockError / raiseAllocationOpen
+// Failure pair it throws through moved verbatim to
+// lib/production/engine/assign-bag-product.ts for the same "use server"
+// reason. Same treatment: stitched back in where the body used to sit
+// (immediately after saveSealingProductAction, before the SPLIT-BAG-1
+// section) so every assertion below is unchanged.
+const assignBagProductSrc = readFileSync(
+  join(__dirname, "../../../../lib/production/engine/assign-bag-product.ts"),
+  "utf8",
+);
 const actionsSrc = actionsFileSrc
   .replace(
     "// ── pause / resume",
@@ -35,6 +46,10 @@ const actionsSrc = actionsFileSrc
   .replace(
     "// ── lookup card by scan token",
     `${recordPackagingCompleteSrc}\n// ── lookup card by scan token`,
+  )
+  .replace(
+    `// ── SPLIT-BAG-1 — floor "Use calculated remaining"`,
+    `${assignBagProductSrc}\n// ── SPLIT-BAG-1 — floor "Use calculated remaining"`,
   );
 const projectorSrc = readFileSync(
   join(__dirname, "../../../../lib/projector/index.ts"),
@@ -486,7 +501,12 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
     const saveIdx = actionsSrc.indexOf("export async function saveSealingProductAction");
     const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
     const block = actionsSrc.slice(saveIdx, fireIdx);
-    expect(block).toMatch(/bagProductRow\.productId === parsed\.data\.productId/);
+    // ASSIGN-PRODUCT-EXTRACT-1: the picked product is read off the input
+    // type now (`productId`) instead of `parsed.data.productId` — the
+    // mechanical rename the relocation required. Both halves stay pinned:
+    // the action passes parsed.data.productId in, the moved body reads it.
+    expect(block).toMatch(/productId: parsed\.data\.productId/);
+    expect(block).toMatch(/bagProductRow\.productId === productId/);
     expect(block).toMatch(/return \{ ok: true \}/);
   });
 

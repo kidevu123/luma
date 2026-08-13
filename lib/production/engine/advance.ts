@@ -8,7 +8,9 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { stations, workflowBags } from "@/lib/db/schema";
 import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
+import { SEALING_STATION_KINDS } from "@/lib/production/sealing-product";
 import type { AdvanceInput, AdvanceIntent, AdvanceResult } from "./types";
+import { assignBagProduct } from "./assign-bag-product";
 import { claimQueuedBag } from "./claim-queued-bag";
 import { blockerFor } from "./resolve-exceptions";
 import { resolveOperation } from "./resolve-operation";
@@ -40,6 +42,16 @@ const COMPLETE_EVENT_FOR_OPERATION: Readonly<Record<string, string>> = {
 const BAG_CLOSE_EVENT_FOR_OPERATION: Readonly<Record<string, string>> = {
   HEAT_SEAL: "SEALING_COMPLETE",
 };
+
+/** The events recordStageEvent refuses on an unmapped bag at a
+ *  sealing-capable station (SEALING_SAVE_PRODUCT_FIRST_ERROR). Mirrors the
+ *  isSealingSegment/isSealingFinal pair in record-stage-event.ts — kept in
+ *  step with it deliberately, because this is the exact set for which
+ *  advanceBag must assign the product BEFORE recording the work. */
+const SEALING_EVENTS_REQUIRING_SAVED_PRODUCT: ReadonlySet<string> = new Set([
+  SEALING_SEGMENT_EVENT,
+  "SEALING_COMPLETE",
+]);
 
 /** Station kinds whose completion event is NOT the one their aliased
  *  operation implies. resolve-operation aliases HANDPACK_BLISTER onto the
@@ -169,17 +181,14 @@ export function buildRecordPackagingCompleteInput(args: {
 // UI (P4b retires them).
 //
 // One product boundary is deliberate rather than missing. advanceBag
-// CARRIES a product (AdvanceInput.productId -> pickedSealingProductId)
-// but does not ASSIGN one:
-//   - Sealing. Saving a finished SKU onto an unmapped bag is
-//     saveSealingProductAction's transaction (update workflow_bags +
-//     PRODUCT_MAPPED + ensureOpenRawBagAllocationSessionForWorkflowBag +
-//     audit). It is a separate operator gesture with its own
-//     idempotency, so the pick and the work stay two calls. P4b's screen
-//     makes both; extracting that body into an engine assignBagProduct()
-//     (the P1 Task 7 verbatim-relocation playbook) is P4b's to do, and
-//     must keep the allocation-session step or the raw-bag ledger silently
-//     stops opening.
+// both CARRIES a product (AdvanceInput.productId ->
+// pickedSealingProductId) and, at sealing only, ASSIGNS one:
+//   - Sealing. P4b Task 1 extracted saveSealingProductAction's
+//     transaction (update workflow_bags + PRODUCT_MAPPED +
+//     ensureOpenRawBagAllocationSessionForWorkflowBag + audit) into
+//     assignBagProduct(). A COMPLETE that carries a product for an
+//     unmapped bag now runs assign-then-record inside this call, the same
+//     order and the same two events the old two-gesture UI produced.
 //   - First operation. The product lands in the workflow_bags INSERT
 //     inside scanCardAction (actions.ts:397-403) — the same statement
 //     that creates the bag — so there is nothing for recordStageEvent to
@@ -278,6 +287,69 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
       };
     }
     return { ok: true, view: await getStationView(input.stationId) };
+  }
+
+  // ASSIGN-PRODUCT-EXTRACT-1 — the old UI made TWO calls at sealing: save
+  // the product (saveSealingProductAction), then record the work. The
+  // operator screen makes one gesture, so advanceBag runs the same
+  // sequence in the same order. The condition is deliberately the mirror
+  // of recordStageEvent's guard (a sealing segment/close at a
+  // sealing-capable station refuses an unmapped bag): assign writes
+  // workflow_bags.product_id, and the guard below then MATCHES the id the
+  // gesture carried instead of rejecting it. A bag that already carries a
+  // product is never touched here — re-mapping stays a rejection
+  // (SEALING_PRODUCT_ALREADY_SAVED_ERROR), which is what makes product
+  // identity a one-way lock.
+  if (
+    input.intent === "COMPLETE" &&
+    input.productId &&
+    !bag?.productId &&
+    SEALING_EVENTS_REQUIRING_SAVED_PRODUCT.has(eventType) &&
+    SEALING_STATION_KINDS.has(stationRow.kind)
+  ) {
+    const assigned = await assignBagProduct({
+      station: stationRow,
+      workflowBagId: input.workflowBagId,
+      productId: input.productId,
+      // One gesture, two events. They cannot share an idempotency key —
+      // the partial unique index is per client_event_id — so the product
+      // map gets a derived suffix, exactly as the packaging auto-finalize
+      // does with "-auto-finalize".
+      ...(input.clientEventId
+        ? { clientEventId: `${input.clientEventId}-product` }
+        : {}),
+      ...(input.overrideEmployeeCode != null
+        ? { overrideEmployeeCode: input.overrideEmployeeCode }
+        : {}),
+    });
+    if ("openAllocationBlock" in assigned) {
+      // The raw bag still has an OPEN allocation from a prior run. Not an
+      // operator mistake and not fixable at the tablet: closing that
+      // ledger is lead-gated. Surface it as a blocker rather than a
+      // silent no-op — the structured panel is P4b Task 5's to render.
+      return {
+        ok: false,
+        blocker: {
+          code: "OPEN_ALLOCATION_ON_BAG",
+          operatorSentence:
+            "This bag is still open from a previous run. Ask a supervisor.",
+          supervisorDetail: assigned.openAllocationBlock.message,
+          suggestedAction: "NOTIFY_SUPERVISOR",
+        },
+      };
+    }
+    if ("error" in assigned) {
+      return {
+        ok: false,
+        blocker: {
+          code: "PRODUCT_ASSIGN_REJECTED",
+          operatorSentence:
+            "This product could not be saved on the bag. Ask a supervisor.",
+          supervisorDetail: assigned.error,
+          suggestedAction: "NOTIFY_SUPERVISOR",
+        },
+      };
+    }
   }
 
   const result = await recordStageEvent(

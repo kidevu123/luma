@@ -14,7 +14,16 @@ const actionSrc = repo("app/(admin)/partial-bags/actions.ts");
 const pageSrc = repo("app/(admin)/partial-bags/page.tsx");
 const buttonSrc = repo("app/(admin)/partial-bags/use-calculated-remaining-button.tsx");
 const lifecycleSrc = repo("lib/production/raw-bag-allocation-lifecycle.ts");
-const floorActionsSrc = repo("app/(floor)/floor/[token]/actions.ts");
+// ASSIGN-PRODUCT-EXTRACT-1: saveSealingProductAction's guard sequence,
+// transaction body and the OpenAllocationBlockError / raiseAllocationOpen
+// Failure pair it throws through moved verbatim to
+// lib/production/engine/assign-bag-product.ts (actions.ts is "use server",
+// so the shared implementation cannot be exported from it). Stitched back
+// in where the body used to sit so every assertion below is unchanged.
+const floorActionsSrc = repo("app/(floor)/floor/[token]/actions.ts").replace(
+  `// ── SPLIT-BAG-1 — floor "Use calculated remaining"`,
+  `${repo("lib/production/engine/assign-bag-product.ts")}\n// ── SPLIT-BAG-1 — floor "Use calculated remaining"`,
+);
 const floorPanelSrc = repo("app/(floor)/floor/[token]/open-allocation-calc-panel.tsx");
 const scanFormSrc = repo("app/(floor)/floor/[token]/scan-card-form.tsx");
 

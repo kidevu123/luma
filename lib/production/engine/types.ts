@@ -122,12 +122,13 @@ export type AdvanceInput = {
   keepBagPartial?: boolean;
   /** The product the operator picked from a PICK_PRODUCT next action (or
    *  the one resolveProductChoice auto-resolved). Read on the sealing
-   *  path only, where it becomes recordStageEvent's
-   *  `pickedSealingProductId` — the guard that refuses a segment whose
-   *  product disagrees with the one already saved on the bag. It does NOT
-   *  itself write workflow_bags.product_id: assigning a product to an
-   *  unmapped bag is still saveSealingProductAction's transaction (see
-   *  the note above advanceBag). */
+   *  path only, where it plays two roles: on an UNMAPPED bag a COMPLETE
+   *  assigns it first (assignBagProduct — workflow_bags.product_id +
+   *  PRODUCT_MAPPED + the raw-bag allocation session), and it is then
+   *  recordStageEvent's `pickedSealingProductId` — the guard that refuses
+   *  a segment whose product disagrees with the one saved on the bag. On
+   *  an already-mapped bag it is a guard only; a different product is a
+   *  rejection, never a silent re-map. */
   productId?: string;
   /** Packaging-only: an operator-entered estimate of tablets remaining in
    *  a kept-partial bag. An estimate, never the confirmed allocation

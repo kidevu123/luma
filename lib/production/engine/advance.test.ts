@@ -1,10 +1,17 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   intentToEventType,
   buildRecordStageEventInput,
   buildRecordPackagingCompleteInput,
 } from "./advance";
 import type { StationRow } from "./record-stage-event";
+
+// advanceBagInner needs a database, and the default vitest run has none
+// (see vitest.config.ts), so the assign-then-record SEQUENCE is pinned at
+// the source level — the same technique the floor scanners use.
+const advanceSrc = readFileSync(join(__dirname, "advance.ts"), "utf8");
 
 describe("intentToEventType", () => {
   it("maps COMPLETE at blister to BLISTER_COMPLETE", () => {
@@ -365,5 +372,57 @@ describe("buildRecordPackagingCompleteInput", () => {
       clientEventId: "cid-1",
     });
     expect("operatorCode" in out).toBe(false);
+  });
+});
+
+describe("ASSIGN-PRODUCT-EXTRACT-1 · product assignment through advanceBag", () => {
+  it("assigns the product BEFORE recording the stage event", () => {
+    const assignIdx = advanceSrc.indexOf("await assignBagProduct({");
+    const recordIdx = advanceSrc.indexOf("await recordStageEvent(");
+    expect(assignIdx).toBeGreaterThan(-1);
+    expect(recordIdx).toBeGreaterThan(-1);
+    // Same order as the old two-gesture UI: save product, then complete.
+    // Reversed, recordStageEvent would reject the unmapped bag with
+    // SEALING_SAVE_PRODUCT_FIRST_ERROR and the work would be lost.
+    expect(assignIdx).toBeLessThan(recordIdx);
+  });
+
+  it("only assigns on an unmapped bag at a sealing-capable station", () => {
+    const assignIdx = advanceSrc.indexOf("await assignBagProduct({");
+    const guard = advanceSrc.slice(
+      advanceSrc.lastIndexOf("if (", assignIdx),
+      assignIdx,
+    );
+    expect(guard).toMatch(/input\.intent === "COMPLETE"/);
+    expect(guard).toMatch(/input\.productId/);
+    // Never re-maps: a bag that already carries a product is untouched.
+    expect(guard).toMatch(/!bag\?\.productId/);
+    expect(guard).toMatch(/SEALING_EVENTS_REQUIRING_SAVED_PRODUCT\.has\(eventType\)/);
+    expect(guard).toMatch(/SEALING_STATION_KINDS\.has\(stationRow\.kind\)/);
+  });
+
+  it("mirrors recordStageEvent's unmapped-bag guard event set", () => {
+    // recordStageEvent refuses an unmapped bag for exactly these two
+    // events; the assign step must cover the same set or the guard fires.
+    expect(advanceSrc).toMatch(
+      /SEALING_EVENTS_REQUIRING_SAVED_PRODUCT[\s\S]{0,160}SEALING_SEGMENT_EVENT,\s*\n\s*"SEALING_COMPLETE",/,
+    );
+  });
+
+  it("gives the product map its own idempotency key", () => {
+    // One gesture, two events: sharing a client_event_id would collide on
+    // the partial unique index and drop one of them.
+    expect(advanceSrc).toMatch(/clientEventId: `\$\{input\.clientEventId\}-product`/);
+  });
+
+  it("surfaces an assignment failure as a blocker, never a silent skip", () => {
+    expect(advanceSrc).toMatch(/code: "OPEN_ALLOCATION_ON_BAG"/);
+    expect(advanceSrc).toMatch(/code: "PRODUCT_ASSIGN_REJECTED"/);
+    // No fall-through: both branches return before recordStageEvent.
+    const assignIdx = advanceSrc.indexOf("await assignBagProduct({");
+    const recordIdx = advanceSrc.indexOf("await recordStageEvent(");
+    const between = advanceSrc.slice(assignIdx, recordIdx);
+    expect(between).toMatch(/if \("openAllocationBlock" in assigned\)/);
+    expect(between).toMatch(/if \("error" in assigned\)/);
   });
 });

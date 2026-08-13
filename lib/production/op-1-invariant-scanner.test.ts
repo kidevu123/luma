@@ -34,6 +34,9 @@ const LIVE_EMISSION_FILES: ReadonlyArray<string> = [
   // sequence and transaction body live here now; it emits
   // PACKAGING_COMPLETE and BAG_FINALIZED (auto-finalize).
   "lib/production/engine/record-packaging-complete.ts",
+  // ASSIGN-PRODUCT-EXTRACT-1: saveSealingProductAction's guard sequence
+  // and transaction body live here now; it emits PRODUCT_MAPPED.
+  "lib/production/engine/assign-bag-product.ts",
   // P2-QUEUE-1: the CLAIM intent's write half. Emits BAG_PICKED_UP
   // through projectEvent directly (a claim is not a stage event), so it
   // needs the same accountability wiring as every other emission.
