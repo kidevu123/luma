@@ -16,6 +16,12 @@ export type {
 export { advanceBag, intentToEventType, buildRecordStageEventInput } from "./advance";
 export { recordStageEvent, projectBagReleasedEvent } from "./record-stage-event";
 export type { RecordStageEventInput, StationRow } from "./record-stage-event";
+export {
+  recordPackagingComplete,
+  projectBagFinalizedEvent,
+  resolveDeferredQrReleaseAfterPackaging,
+} from "./record-packaging-complete";
+export type { RecordPackagingCompleteInput } from "./record-packaging-complete";
 export { evaluateChecks, blockersFromChecks, blockerFor } from "./resolve-exceptions";
 export type { CheckResult, EngineFacts } from "./resolve-exceptions";
 export { resolveCompletionInputs } from "./resolve-completion";

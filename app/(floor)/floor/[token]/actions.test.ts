@@ -14,10 +14,28 @@ const recordStageEventSrc = readFileSync(
   join(__dirname, "../../../../lib/production/engine/record-stage-event.ts"),
   "utf8",
 );
-const actionsSrc = actionsFileSrc.replace(
-  "// ── pause / resume",
-  `${recordStageEventSrc}\n// ── pause / resume`,
+// PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's guard sequence,
+// transaction body and its auto-finalize / deferred-QR helpers moved
+// verbatim to lib/production/engine/record-packaging-complete.ts for the
+// same "use server" reason. Same treatment: stitched back in where the
+// body used to sit (immediately after packagingCompleteAction, before
+// lookupCardByTokenAction) so every assertion below is unchanged.
+const recordPackagingCompleteSrc = readFileSync(
+  join(
+    __dirname,
+    "../../../../lib/production/engine/record-packaging-complete.ts",
+  ),
+  "utf8",
 );
+const actionsSrc = actionsFileSrc
+  .replace(
+    "// ── pause / resume",
+    `${recordStageEventSrc}\n// ── pause / resume`,
+  )
+  .replace(
+    "// ── lookup card by scan token",
+    `${recordPackagingCompleteSrc}\n// ── lookup card by scan token`,
+  );
 const projectorSrc = readFileSync(
   join(__dirname, "../../../../lib/projector/index.ts"),
   "utf8",
@@ -652,9 +670,21 @@ describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · packaging complete accountabilit
   it("packagingCompleteAction resolves accountability via resolveStationAccountability", () => {
     const idx = actionsSrc.indexOf("export async function packagingCompleteAction");
     expect(idx).toBeGreaterThan(-1);
-    const chunk = actionsSrc.slice(idx, idx + 7200);
+    // PACKAGING-COMPLETE-EXTRACT-1: the fixed 7200-char window no longer
+    // reaches the transaction now that the extracted module's header sits
+    // between the two, so this uses the same block boundary the rest of
+    // this file uses for the packaging path.
+    const chunk = actionsSrc.slice(
+      idx,
+      actionsSrc.indexOf("export async function lookupCardByTokenAction"),
+    );
     expect(chunk).toMatch(/resolveStationAccountability\(tx,/);
-    expect(chunk).toMatch(/overrideEmployeeCode: parsed\.data\.operatorCode/);
+    // PACKAGING-COMPLETE-EXTRACT-1: the override is read off the input type
+    // now (`operatorCode`) instead of `parsed.data.operatorCode` — the
+    // mechanical rename the relocation required. Both halves stay pinned:
+    // the action passes parsed.data.operatorCode in, the moved body reads it.
+    expect(actionsSrc).toMatch(/operatorCode: parsed\.data\.operatorCode/);
+    expect(chunk).toMatch(/overrideEmployeeCode: operatorCode/);
     expect(chunk).toMatch(
       /accountableEmployeeId: accountability\.accountableEmployeeId/,
     );

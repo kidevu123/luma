@@ -11,10 +11,25 @@ const recordStageEventSrc = readFileSync(
   join(__dirname, "../../../../lib/production/engine/record-stage-event.ts"),
   "utf8",
 );
-const actionsSrc = actionsFileSrc.replace(
-  "// ── pause / resume",
-  `${recordStageEventSrc}\n// ── pause / resume`,
+// PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's body moved
+// verbatim to lib/production/engine/record-packaging-complete.ts. Same
+// treatment — stitched back in where it used to sit.
+const recordPackagingCompleteSrc = readFileSync(
+  join(
+    __dirname,
+    "../../../../lib/production/engine/record-packaging-complete.ts",
+  ),
+  "utf8",
 );
+const actionsSrc = actionsFileSrc
+  .replace(
+    "// ── pause / resume",
+    `${recordStageEventSrc}\n// ── pause / resume`,
+  )
+  .replace(
+    "// ── lookup card by scan token",
+    `${recordPackagingCompleteSrc}\n// ── lookup card by scan token`,
+  );
 
 describe("STATION-HANDPACK-1 · HANDPACK_BLISTER timed-only completion", () => {
   it("maps HANDPACK_BLISTER to HANDPACK_BLISTER_COMPLETE event", () => {

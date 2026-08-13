@@ -14,7 +14,22 @@ const stageButtonsSrc = readFileSync(
   "utf8",
 );
 const scanFormSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
-const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
+// PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's body and the
+// deferred-QR helpers moved verbatim to
+// lib/production/engine/record-packaging-complete.ts (actions.ts is
+// "use server", so the shared implementation cannot be exported from it).
+// Stitched back in where the body used to sit so these scanners keep
+// covering the whole packaging close-out path unchanged.
+const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8").replace(
+  "// ── lookup card by scan token",
+  `${readFileSync(
+    join(
+      __dirname,
+      "../../../../lib/production/engine/record-packaging-complete.ts",
+    ),
+    "utf8",
+  )}\n// ── lookup card by scan token`,
+);
 const partialBagsSrc = repo("lib/production/partial-bags.ts");
 const qrListSrc = repo("app/(admin)/qr-cards/qr-cards-list.tsx");
 
