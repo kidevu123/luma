@@ -89,6 +89,26 @@ export type AdvanceInput = {
    *  an overrideEmployeeCode); see the Phase 2 preconditions on advanceBag. */
   operatorSessionId: string;
   intent: AdvanceIntent;
+  /** Sealing's bag-level close mode: "whole" (default) or "partial". Read
+   *  only when the intent/operation pair resolves to SEALING_COMPLETE on a
+   *  pure SEALING station; ignored everywhere else. */
+  sealingCloseMode?: string;
+  /** Required alongside sealingCloseMode === "partial" — validated inside
+   *  recordStageEvent, not here. */
+  partialCloseReason?: string;
+  partialCloseReasonNote?: string;
+  /** Per-form accountability override: lets an operator with no open shift
+   *  supply a code instead of throwing. Passed to both recordStageEvent
+   *  (overrideEmployeeCode) and recordPackagingComplete (operatorCode). */
+  overrideEmployeeCode?: string;
+  /** Packaging-only: the operator explicitly keeping a bottle bag as a
+   *  partial rather than confirming it empty. Absent/false is today's
+   *  default — a bag closed through advanceBag finalizes as fully empty. */
+  keepBagPartial?: boolean;
+  /** Packaging-only: an operator-entered estimate of tablets remaining in
+   *  a kept-partial bag. An estimate, never the confirmed allocation
+   *  balance — see luma-data-honesty. */
+  partialRemainingEstimate?: number;
   inputs: {
     counter?: number;
     /** Sealing counter presses. Distinct from `counter`: recordStageEvent

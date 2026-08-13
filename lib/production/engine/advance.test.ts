@@ -174,6 +174,40 @@ describe("buildRecordStageEventInput", () => {
     });
     expect(out.pickedSealingProductId).toBeNull();
   });
+
+  it("carries sealingCloseMode, partialCloseReason, partialCloseReasonNote, and overrideEmployeeCode through when supplied", () => {
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_COMPLETE",
+      inputs: {},
+      clientEventId: "cid-1",
+      sealingCloseMode: "partial",
+      partialCloseReason: "END_OF_SHIFT",
+      partialCloseReasonNote: "line stopped early",
+      overrideEmployeeCode: "EMP-42",
+    });
+    expect(out.sealingCloseMode).toBe("partial");
+    expect(out.partialCloseReason).toBe("END_OF_SHIFT");
+    expect(out.partialCloseReasonNote).toBe("line stopped early");
+    expect(out.overrideEmployeeCode).toBe("EMP-42");
+  });
+
+  it("omits sealingCloseMode, partialCloseReason, partialCloseReasonNote, and overrideEmployeeCode when absent", () => {
+    // exactOptionalPropertyTypes discipline, per the counterPresses
+    // precedent: the key must not materialize as present-and-undefined.
+    const out = buildRecordStageEventInput({
+      station: STATION,
+      workflowBagId: "bag-1",
+      eventType: "SEALING_SEGMENT_COMPLETE",
+      inputs: { counter: 1 },
+      clientEventId: "cid-1",
+    });
+    expect("sealingCloseMode" in out).toBe(false);
+    expect("partialCloseReason" in out).toBe(false);
+    expect("partialCloseReasonNote" in out).toBe(false);
+    expect("overrideEmployeeCode" in out).toBe(false);
+  });
 });
 
 const PACKAGING_STATION = { id: "s2", label: "Packaging 1", kind: "PACKAGING" } as StationRow;
@@ -256,7 +290,12 @@ describe("buildRecordPackagingCompleteInput", () => {
     expect(out.clientEventId).toBe("cid-pkg-1");
   });
 
-  it("does not yet carry a partial-close request (Task 3)", () => {
+  it("defaults keepBagPartial to false and partialRemainingEstimate to null when absent", () => {
+    // REPLACES the Task 2 pin "does not yet carry a partial-close request":
+    // Task 3 threads AdvanceInput.keepBagPartial / partialRemainingEstimate
+    // through this mapper, so the gap that test pinned no longer exists —
+    // this test now pins the unchanged DEFAULT when the caller supplies
+    // neither field, not an inability to carry them.
     const out = buildRecordPackagingCompleteInput({
       station: PACKAGING_STATION,
       workflowBagId: "bag-1",
@@ -265,5 +304,39 @@ describe("buildRecordPackagingCompleteInput", () => {
     });
     expect(out.keepBagPartial).toBe(false);
     expect(out.partialRemainingEstimate).toBeNull();
+  });
+
+  it("carries keepBagPartial and partialRemainingEstimate through when supplied", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-1",
+      keepBagPartial: true,
+      partialRemainingEstimate: 25,
+    });
+    expect(out.keepBagPartial).toBe(true);
+    expect(out.partialRemainingEstimate).toBe(25);
+  });
+
+  it("carries overrideEmployeeCode through as operatorCode when supplied", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-1",
+      overrideEmployeeCode: "EMP-42",
+    });
+    expect(out.operatorCode).toBe("EMP-42");
+  });
+
+  it("omits operatorCode when overrideEmployeeCode is absent", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1 },
+      clientEventId: "cid-1",
+    });
+    expect("operatorCode" in out).toBe(false);
   });
 });

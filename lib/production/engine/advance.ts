@@ -82,6 +82,10 @@ export function buildRecordStageEventInput(args: {
   eventType: string;
   inputs: AdvanceInput["inputs"];
   clientEventId: string;
+  sealingCloseMode?: AdvanceInput["sealingCloseMode"];
+  partialCloseReason?: AdvanceInput["partialCloseReason"];
+  partialCloseReasonNote?: AdvanceInput["partialCloseReasonNote"];
+  overrideEmployeeCode?: AdvanceInput["overrideEmployeeCode"];
 }): RecordStageEventInput {
   return {
     station: args.station,
@@ -91,7 +95,8 @@ export function buildRecordStageEventInput(args: {
     // Presence, not truthiness: recordStageEvent treats `undefined` as
     // "no counter supplied" and refuses the seal, so a real reading of 0
     // must survive. Under exactOptionalPropertyTypes the key must be
-    // absent rather than present-and-undefined when there is none.
+    // absent rather than present-and-undefined when there is none. The
+    // same discipline applies to every field below: absent stays absent.
     ...(args.inputs.counterPresses != null
       ? { counterPresses: args.inputs.counterPresses }
       : {}),
@@ -99,6 +104,18 @@ export function buildRecordStageEventInput(args: {
     cardsReopened: 0,
     ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
     pickedSealingProductId: null,
+    ...(args.sealingCloseMode != null
+      ? { sealingCloseMode: args.sealingCloseMode }
+      : {}),
+    ...(args.partialCloseReason != null
+      ? { partialCloseReason: args.partialCloseReason }
+      : {}),
+    ...(args.partialCloseReasonNote != null
+      ? { partialCloseReasonNote: args.partialCloseReasonNote }
+      : {}),
+    ...(args.overrideEmployeeCode != null
+      ? { overrideEmployeeCode: args.overrideEmployeeCode }
+      : {}),
   };
 }
 
@@ -110,6 +127,9 @@ export function buildRecordPackagingCompleteInput(args: {
   workflowBagId: string;
   inputs: AdvanceInput["inputs"];
   clientEventId: string;
+  keepBagPartial?: AdvanceInput["keepBagPartial"];
+  partialRemainingEstimate?: AdvanceInput["partialRemainingEstimate"];
+  overrideEmployeeCode?: AdvanceInput["overrideEmployeeCode"];
 }): RecordPackagingCompleteInput {
   return {
     station: args.station,
@@ -125,25 +145,21 @@ export function buildRecordPackagingCompleteInput(args: {
     // through this path.
     damagedPackaging: 0,
     rippedCards: args.inputs.damaged ?? 0,
-    // Partial-close fields (keepBagPartial / partialRemainingEstimate):
-    // Task 3. No AdvanceInput field carries them yet, so a bottle bag
-    // closed through advanceBag today always finalizes as fully empty.
-    keepBagPartial: false,
-    partialRemainingEstimate: null,
+    // Partial-close fields: absent AdvanceInput.keepBagPartial /
+    // partialRemainingEstimate keeps today's default — a bottle bag
+    // closed through advanceBag finalizes as fully empty.
+    keepBagPartial: args.keepBagPartial ?? false,
+    partialRemainingEstimate: args.partialRemainingEstimate ?? null,
     ...(args.clientEventId ? { clientEventId: args.clientEventId } : {}),
+    ...(args.overrideEmployeeCode != null
+      ? { operatorCode: args.overrideEmployeeCode }
+      : {}),
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// REMAINING LIMITATIONS — what advanceBag still cannot express.
-//
-//   Partial-close fields. Sealing's partial close-out
-//   (sealingCloseMode / partialCloseReason / partialCloseReasonNote /
-//   packsRemaining / cardsReopened) and packaging's partial-bag keep
-//   (keepBagPartial / partialRemainingEstimate) have no AdvanceInput
-//   field yet. overrideEmployeeCode is in the same bucket: no per-form
-//   accountability override, so a first-op count with no open shift
-//   throws even when the operator supplied a code. Task 3 closes this.
+// Full fidelity as of P4a; the legacy actions remain only for the old
+// UI (P4b retires them).
 //
 //   Sealing / first-op product selection. pickedSealingProductId is
 //   hard-coded null and PRODUCT_MAPPED is unreachable through this path.
@@ -223,6 +239,9 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
         workflowBagId: input.workflowBagId,
         inputs: input.inputs,
         clientEventId: input.clientEventId,
+        keepBagPartial: input.keepBagPartial,
+        partialRemainingEstimate: input.partialRemainingEstimate,
+        overrideEmployeeCode: input.overrideEmployeeCode,
       }),
     );
     if ("error" in packagingResult) {
@@ -246,6 +265,10 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
       eventType,
       inputs: input.inputs,
       clientEventId: input.clientEventId,
+      sealingCloseMode: input.sealingCloseMode,
+      partialCloseReason: input.partialCloseReason,
+      partialCloseReasonNote: input.partialCloseReasonNote,
+      overrideEmployeeCode: input.overrideEmployeeCode,
     }),
   );
 
