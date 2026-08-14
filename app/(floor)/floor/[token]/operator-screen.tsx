@@ -73,6 +73,7 @@ import { pauseBagAction, resumeBagAction, saveSealingProductAction } from "./act
 import {
   advanceBagAction,
   claimScannedBagAction,
+  supervisorClaimBagAction,
   raiseProductionExceptionAction,
 } from "./operator-actions";
 import { SupervisorBanner, SupervisorSheet } from "./supervisor-sheet";
@@ -1127,12 +1128,13 @@ function MoreSheet({
 
       {/* P5-SUPERVISOR Task 4 — supervisor-only tools inside More.
           Rendered ONLY when a session is open (cosmetic); the real
-          gates are server-side in claimScannedBagAction and the QC /
-          roll / bag-allocation / variety action families. Manual bag
-          pick reuses claimScannedBagAction via the sanctioned P4b
-          path (resolveFreshBagStart / startFreshBag) — no bespoke
-          claim logic here. Corrections is a plain deep-link to the
-          admin correction wizard: the floor does not build voiding. */}
+          gates are server-side in supervisorClaimBagAction and the
+          QC / roll / bag-allocation / variety action families. Manual
+          bag pick routes through supervisorClaimBagAction which
+          requires a live supervisor session and delegates to the
+          same P4b claim path (claimQueuedBag) — no bespoke claim
+          logic here. Corrections is a plain deep-link to the admin
+          correction wizard: the floor does not build voiding. */}
       {view.supervisor ? (
         <ManualBagPickPanel
           token={token}
@@ -1689,21 +1691,19 @@ function PartialBag({
 // The "old dropdown reborn". Renders the queue of bags that can start
 // or resume at THIS station (view.upNext, which loadStationViewRows
 // already scopes to eligibleStationKinds and drops rows held by a
-// non-eligible station). Each row submits claimScannedBagAction with
-// workflowBagId — the SANCTIONED P4b path (resolveFreshBagStart /
-// startFreshBag inside operator-actions.ts). NO bespoke claim logic
-// here; if the P4b path refuses (bag not ready, held elsewhere, on
-// hold), the operator sees the same blocker sentence they would from
-// a scan.
+// non-eligible station). Each row submits supervisorClaimBagAction —
+// the ONLY server entry that claims a queued bag without a scan.
+// That action gates on requireSupervisorSession server-side and
+// delegates the actual write to the same P4b claim path
+// (claimQueuedBag); the refusal sentence is the same one an operator
+// would see on any other gated action when the station is locked.
 //
-// Server-side, claimScannedBagAction is NOT gated (an operator picks
-// up bags on the sanctioned scan path with no supervisor unlock); the
-// gating in Task 4 is only for QC / rolls / bag-allocation / variety /
-// hold-release. Rendering this section from view.supervisor is
-// cosmetic: it puts the affordance behind supervisor unlock in the
-// tablet UI because the intent of the tool is manual override, but a
-// hand-crafted request against claimScannedBagAction is not refused
-// (that would refuse a normal scan too).
+// Rendering this section from view.supervisor is COSMETIC — the real
+// control is the server-side gate. Fix round 1 for Task 4: the
+// original wiring called claimScannedBagAction with workflowBagId
+// only, which was ungated on that action, so the "supervisor-only"
+// affordance was hand-crafted-request bypassable. The new
+// supervisorClaimBagAction requires a live supervisor session.
 function ManualBagPickPanel({
   token,
   stationId,
@@ -1729,7 +1729,7 @@ function ManualBagPickPanel({
         fd.set("stationId", stationId);
         fd.set("workflowBagId", workflowBagId);
         fd.set("clientEventId", newClientEventId());
-        const r = await claimScannedBagAction(fd);
+        const r = await supervisorClaimBagAction(fd);
         if (r && "error" in r && r.error) {
           setError(r.error);
         }

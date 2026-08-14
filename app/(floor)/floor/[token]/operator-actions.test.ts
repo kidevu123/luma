@@ -67,7 +67,7 @@ describe("claimScannedBagAction — one gesture, two meanings (SCAN-FIRST-1)", (
     // A card that already carries a workflow bag must be CLAIMED. If the
     // fresh-start fork ran first it would try to start a bag that is
     // already in production.
-    const resolvedIdx = src.indexOf("const resolved = d.scanToken");
+    const resolvedIdx = src.indexOf("const resolved = await resolveScannedWorkflowBagId(d.scanToken)");
     const freshIdx = src.indexOf("await resolveFreshBagStart({");
     expect(resolvedIdx).toBeGreaterThan(-1);
     expect(freshIdx).toBeGreaterThan(resolvedIdx);
@@ -81,5 +81,108 @@ describe("claimScannedBagAction — one gesture, two meanings (SCAN-FIRST-1)", (
     // answers to the same question.
     expect(src).toMatch(/import \{ scanCardAction \} from "\.\/actions";/);
     expect(src).toMatch(/const result = await scanCardAction\(fd\);/);
+  });
+});
+
+describe("claimScannedBagAction — scanToken is required (P5-SUPERVISOR Task 4 fix round 1)", () => {
+  // Physical possession of the QR is the control on this path. Before
+  // this round the schema accepted a workflowBagId-only request as a
+  // fallback and the new ManualBagPickPanel was the first caller to
+  // exercise it — a hand-crafted request could claim a queued bag
+  // while the station was locked. The manual override now goes
+  // through supervisorClaimBagAction (which requires a live supervisor
+  // session); this action's schema refuses a workflowBagId-only
+  // request with the standard invalid-input shape.
+  function claimSchemaBlock(): string {
+    const start = src.indexOf("const claimSchema = z");
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("async function resolveScannedWorkflowBagId", start);
+    return src.slice(start, end);
+  }
+
+  it("the schema declares scanToken as REQUIRED (no .optional())", () => {
+    const block = claimSchemaBlock();
+    // Match the scanToken field declaration and assert it is not
+    // followed by .optional() before the next field.
+    const match = block.match(/scanToken:\s*z\.string\(\)\.min\(1\)\.max\(200\)([^,\n]*),/);
+    expect(match).not.toBeNull();
+    expect(match?.[1] ?? "").not.toContain(".optional()");
+  });
+
+  it("no .refine() fallback lets workflowBagId satisfy the schema alone", () => {
+    // Pre-P5 the schema carried:
+    //   .refine((d) => d.scanToken != null || d.workflowBagId != null, ...)
+    // That refine is what made workflowBagId-only requests pass the
+    // parse step. It must be gone from the claim schema block.
+    const block = claimSchemaBlock();
+    expect(block).not.toMatch(/\.refine\(/);
+  });
+
+  it("the flow reads d.scanToken unconditionally (no d.workflowBagId ?? null fallback)", () => {
+    // Belt-and-braces: even if someone re-added .optional() to the
+    // schema, the resolver must not fall back to the workflowBagId
+    // hint. The single line "const resolved = await
+    // resolveScannedWorkflowBagId(d.scanToken)" is the invariant.
+    expect(src).toMatch(
+      /const resolved = await resolveScannedWorkflowBagId\(d\.scanToken\);/,
+    );
+    expect(src).not.toMatch(/d\.workflowBagId \?\? null/);
+  });
+});
+
+describe("supervisorClaimBagAction — the ONLY unscanned claim entry, server-gated", () => {
+  // The manual-bag-pick tool in More is the only floor caller that
+  // claims a queued bag without a scan. The gate below is a live
+  // supervisor session; without it, "supervisor-only" is cosmetic
+  // (view.supervisor only hides the panel — a hand-crafted request
+  // would still land on the write path).
+  function supervisorClaimBlock(): string {
+    const start = src.indexOf(
+      "export async function supervisorClaimBagAction",
+    );
+    expect(start).toBeGreaterThan(-1);
+    // Function body ends at the first line-anchored "}" — the closing
+    // brace of the top-level function, always at column 0 followed by a
+    // blank line. This avoids including the JSDoc for the next helper.
+    const end = src.indexOf("\n}\n", start);
+    expect(end).toBeGreaterThan(start);
+    return src.slice(start, end + 2);
+  }
+
+  it("gates on requireSupervisorSession inside a db.transaction before delegating", () => {
+    const block = supervisorClaimBlock();
+    const gateIdx = block.indexOf(
+      "requireSupervisorSession(tx, d.stationId)",
+    );
+    const claimIdx = block.indexOf("await claimQueuedBag({");
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(claimIdx).toBeGreaterThan(gateIdx);
+    // The gate must sit inside a db.transaction (same pattern as
+    // releaseQaHoldAction), and refusal must use the shared refusal
+    // sentence + code so the operator sees "Supervisor unlock
+    // required for this." exactly once across the surface.
+    expect(block).toMatch(/db\.transaction\(\(tx\) =>[\s\S]*?requireSupervisorSession/);
+    expect(block).toContain("SUPERVISOR_GATE_REFUSAL_SENTENCE");
+    expect(block).toContain("SUPERVISOR_GATE_REFUSAL_CODE");
+  });
+
+  it("delegates the write to the sanctioned P4b path (claimQueuedBag)", () => {
+    // No bespoke claim logic — the same engine function every scan
+    // path already goes through. A second implementation would give
+    // the floor two answers to the same question.
+    const block = supervisorClaimBlock();
+    expect(block).toMatch(/await claimQueuedBag\(\{/);
+    // And no fresh-start fork — the manual pick is queue-only.
+    expect(block).not.toMatch(/resolveFreshBagStart|scanCardAction/);
+  });
+
+  it("writes an audit row with the pinned action name and supervisor session ids", () => {
+    // Pinning the action name protects downstream ledger filters —
+    // renaming would silently drop the manual-pick rows.
+    const block = supervisorClaimBlock();
+    expect(block).toContain("floor.supervisor.manual_bag_claim");
+    expect(block).toMatch(/targetType: "WorkflowBag"/);
+    expect(block).toMatch(/supervisor_session_id: supSession\.id/);
+    expect(block).toMatch(/supervisor_employee_id: supSession\.employeeId/);
   });
 });
