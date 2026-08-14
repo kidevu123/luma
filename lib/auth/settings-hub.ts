@@ -57,6 +57,18 @@ export const SETTINGS_HUB_SECTIONS: SettingsHubSectionDef[] = [
         hint: "manage roles and access",
         minRole: "ADMIN",
       },
+      {
+        // P5-SUPERVISOR Task 2 — set who can unlock a station in
+        // supervisor mode. Separate from /settings/users because
+        // supervisors are EMPLOYEES (people who work the floor),
+        // not USERS (admin/system accounts). The two lists overlap
+        // but the primary keys are distinct.
+        href: "/settings/employees",
+        icon: "ShieldCheck",
+        label: "Employees & supervisors",
+        hint: "PIN and supervisor flag for floor unlock",
+        minRole: "ADMIN",
+      },
     ],
   },
   {

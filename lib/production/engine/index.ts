@@ -230,3 +230,22 @@ export {
 } from "../qc-events";
 export { nextLotStatusForUnmount, getActiveRollsForMachine } from "../active-rolls";
 export { filterSelectableIdleRollLots } from "../idle-roll-lots";
+
+// P5-SUPERVISOR Task 2 — station supervisor session engine. Server
+// barrel exports the whole surface (open/close/require/remaining),
+// including the input + result types the floor action layer needs
+// to shape its FormData handler. The client barrel below exports
+// ONLY the pure ticker + type, because the module transitively
+// imports @/lib/db and @/lib/db/audit.
+export {
+  SUPERVISOR_SESSION_TTL_MS,
+  openSupervisorSession,
+  closeSupervisorSession,
+  requireSupervisorSession,
+  supervisorSessionRemainingSeconds,
+} from "./supervisor-session";
+export type {
+  OpenSupervisorSessionInput,
+  OpenSupervisorSessionResult,
+  SupervisorSessionSnapshot,
+} from "./supervisor-session";
