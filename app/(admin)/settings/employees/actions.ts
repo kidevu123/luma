@@ -40,6 +40,10 @@ const setPinSchema = z.object({
 export async function setEmployeeSupervisorPinAction(
   formData: FormData,
 ): Promise<{ error: string } | { ok: true }> {
+  // Decision: ADMIN tier may set supervisor PINs, matching every other
+  // settings/* surface. PIN-setting grants floor-side escalation, so if
+  // role granularity ever tightens, this is the first candidate for
+  // OWNER-only.
   const me = await requireAdmin();
   const parsed = setPinSchema.safeParse({
     employeeId: formData.get("employeeId"),

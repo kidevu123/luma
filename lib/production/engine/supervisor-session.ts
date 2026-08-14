@@ -32,6 +32,12 @@
 // verifyPassword. No payload, audit entry, or error string carries
 // pin material; the source-scan test in supervisor-session.test.ts
 // pins this by construction.
+//
+// RATE LIMITING. No rate limiting on unlock attempts today. Current
+// mitigations: station scan-token boundary (unlock only reachable via
+// authed station URL), LAN-only deployment, audit trail on every
+// attempt path, and PIN length enforced admin-side. If floor tablets
+// ever leave the LAN, add per-station throttle here. Revisit in P6.
 
 import { and, eq, isNull, lt } from "drizzle-orm";
 import { db } from "@/lib/db";
