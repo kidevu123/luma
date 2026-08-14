@@ -48,6 +48,8 @@ import {
   helpChecklistForView,
   helpIdleNote,
   helpNotifyDetail,
+  helpNotifyDisabled,
+  helpNotifyRequiresBagCopy,
   operatorMaterialLinks,
   operatorPauseModel,
   SEALING_PARTIAL_CLOSE_REASONS,
@@ -1314,6 +1316,7 @@ function HelpSheet({
   const idleNote = helpIdleNote(view);
   const failed = checks.filter((c) => !c.passed);
   const detail = helpNotifyDetail(checks);
+  const notifyDisabled = helpNotifyDisabled(view);
 
   return (
     <Sheet title="Why can't I continue?" error={error} onClose={onClose}>
@@ -1347,11 +1350,22 @@ function HelpSheet({
       <button
         type="button"
         className={SECONDARY_BUTTON}
-        disabled={pending}
+        disabled={pending || notifyDisabled}
         onClick={() => onNotify(detail)}
       >
         Notify supervisor
       </button>
+      {notifyDisabled ? (
+        // Fix round 2 (MED 2): the button used to be enabled on the idle
+        // SCAN_TO_CLAIM screen, and clicking it there fired
+        // raiseProductionExceptionAction with no workflowBagId — which
+        // the action refuses as PRODUCTION_EXCEPTION_NO_BAG. Same shape
+        // as Report Problem's category grid: helper text explains the
+        // gate in the same sheet, on the same touchscreen.
+        <p className="text-center text-sm text-text-muted">
+          {helpNotifyRequiresBagCopy}
+        </p>
+      ) : null}
     </Sheet>
   );
 }

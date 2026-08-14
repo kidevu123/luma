@@ -262,6 +262,30 @@ Branch `feat/production-engine-p4b`. The operator screen lands.
 - Partial-close handoff: inline supervisor PIN to approve handoff to next sealer when operator declines "bag empty."
 - Hold dismissal options: whether operator can dismiss holds on the rail (vs. supervisor only).
 
+**Tracked follow-ups (post-cutover, filed for P5 decision):**
+
+- **`damagedPackaging` always writes 0 through advanceBag.** The
+  operator screen collects an operator-counted damaged-loose-cards
+  number (mapped to `rippedCards` per the P4a decision) but has no
+  input for packaging-material damage — foil, cases, labels. The
+  advanceBag path hardcodes `damagedPackaging: 0`
+  (`lib/production/engine/advance.ts:170`) which flows into the
+  projector's `damageCount` and the Zoho receive payload's damage
+  fields. This is currently a missing-as-zero mistake the operator
+  cannot correct on-screen: a torn foil roll or crushed case gets
+  recorded as no damage at all. The deleted `rework` field's
+  replacement (whether damage lives on the operator gesture, on a
+  supervisor exception, or both) is a P5 decision — do not treat 0 as
+  ground truth on any packaging bag until then.
+
+- **QA-hold rollback trap.** Any bag held via `QA_HOLD_STARTED` under
+  1.34 sets `read_bag_state.is_on_hold = true`. Rolling back to 1.33
+  strands those bags — 1.33's UI has no code path that clears the
+  column, so every station refuses to work them until 1.34 (or a hand-
+  written UPDATE) returns. Documented in the smoke checklist's
+  "Rollback (Phase 4b)" block with the SQL one-liner to run BEFORE any
+  revert. Mirror when this note relocates.
+
 **Deferred to P6:**
 
 - Data-driven routes: `queueAfterWorkAt` and `resolve-operation` sourced from `route_operations` (vs. hardcoded legacy table). Legacy table deletion and `read_queue_state` double-count fix.

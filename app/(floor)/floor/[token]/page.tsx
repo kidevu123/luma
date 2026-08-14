@@ -28,9 +28,13 @@
 //   QcPanel            — QC-3 plus [ Release hold ], the only escape
 //                        from a QA hold. Surfaced under More; P5 moves
 //                        it behind supervisor unlock wholesale.
-// The rolls page, bag-allocation and variety-pack entry points keep
-// their links (operatorMaterialLinks / floorSupervisorToolsForStation,
-// rendered inside the More sheet).
+// The rolls page keeps its More-sheet link today (operatorMaterialLinks
+// / floorSupervisorToolsForStation returns exactly one entry — "rolls"
+// — and only at BLISTER / COMBINED). Bag-allocation and variety-pack
+// entry points are NOT surfaced from More right now; they still live on
+// their own admin routes. If those sub-flows need floor entry points
+// again, extend floorSupervisorToolsForStation — this file already
+// renders whatever it returns.
 
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";

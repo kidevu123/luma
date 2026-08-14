@@ -285,6 +285,30 @@ export function primaryBlockerSentence(action: NextAction): string | null {
   return action.blockers[0]?.operatorSentence ?? null;
 }
 
+/** Should the ? Help sheet's [ Notify supervisor ] button be disabled?
+ *
+ *  Fix round 2 (MED 2): the button used to be enabled on the idle
+ *  SCAN_TO_CLAIM screen with no bag pinned. Clicking it there submitted
+ *  raiseProductionExceptionAction with no workflowBagId, which the
+ *  action rejects as PRODUCTION_EXCEPTION_NO_BAG — a 500-ish error the
+ *  operator can neither read nor act on. Same shape as Report Problem's
+ *  category grid (reportProblemCategoryDisabled): the write needs a
+ *  bag, so disable the affordance and use helpNotifyRequiresBagCopy
+ *  below to explain why in the same sheet, on the same touchscreen.
+ *
+ *  Bagless supervisor notification is P5 scope (station_supervisor_
+ *  sessions), same as the other bagless writes. */
+export function helpNotifyDisabled(view: StationView): boolean {
+  return view.current == null;
+}
+
+/** Visible helper copy shown UNDER the disabled [ Notify supervisor ]
+ *  button — mirrors report-problem.tsx's "Scan the bag this is about
+ *  first." Deliberately not a `title` tooltip: tooltips are invisible on
+ *  a touchscreen. */
+export const helpNotifyRequiresBagCopy =
+  "Scan the bag this is about first.";
+
 // ── chrome ────────────────────────────────────────────────────────────
 
 export type OperatorPauseModel = {

@@ -6,6 +6,8 @@ import {
   helpChecklistForView,
   helpIdleNote,
   helpNotifyDetail,
+  helpNotifyDisabled,
+  helpNotifyRequiresBagCopy,
   EXCEPTION_DETAIL_MAX_LENGTH,
   operatorMaterialLinks,
   operatorPauseModel,
@@ -313,6 +315,40 @@ describe("helpNotifyDetail", () => {
     );
     const detail = helpNotifyDetail(long);
     expect(detail.length).toBeLessThanOrEqual(EXCEPTION_DETAIL_MAX_LENGTH);
+  });
+});
+
+describe("helpNotifyDisabled (MED 2 fix round 2)", () => {
+  it("is disabled on the idle SCAN_TO_CLAIM screen with no bag pinned", () => {
+    // Regression: pre-fix, Notify supervisor was enabled here and every
+    // click fired raiseProductionExceptionAction with no workflowBagId,
+    // which the action refuses as PRODUCTION_EXCEPTION_NO_BAG.
+    const idle = view({
+      current: null,
+      nextAction: { kind: "SCAN_TO_CLAIM", expected: null },
+    });
+    expect(helpNotifyDisabled(idle)).toBe(true);
+  });
+
+  it("is disabled on the OPEN_SHIFT screen too — same bagless case", () => {
+    const preShift = view({
+      current: null,
+      nextAction: { kind: "OPEN_SHIFT" },
+    });
+    expect(helpNotifyDisabled(preShift)).toBe(true);
+  });
+
+  it("is enabled once a bag is pinned at the station", () => {
+    // Default view() has a current bag — reproduces the "bag in hand"
+    // case where a supervisor notification carries a real workflowBagId.
+    expect(helpNotifyDisabled(view())).toBe(false);
+  });
+
+  it("mirrors Report Problem's visible touchscreen copy (no tooltip)", () => {
+    // Same sentence as report-problem.tsx's grid helper text — one
+    // vocabulary for both bagless-write gates, checked so a copy change
+    // in one spot cannot silently diverge here.
+    expect(helpNotifyRequiresBagCopy).toBe("Scan the bag this is about first.");
   });
 });
 

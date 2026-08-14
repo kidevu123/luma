@@ -96,6 +96,8 @@ export {
   helpChecklistForView,
   helpIdleNote,
   helpNotifyDetail,
+  helpNotifyDisabled,
+  helpNotifyRequiresBagCopy,
   EXCEPTION_DETAIL_MAX_LENGTH,
   operatorMaterialLinks,
   operatorPauseModel,
