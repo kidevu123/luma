@@ -6,6 +6,7 @@ import { CheckCircle2 } from "lucide-react";
 import type { ActNowItem } from "@/lib/floor-command/act-now";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import { board } from "./board-ui";
+import { AcknowledgeButton } from "./acknowledge-button";
 
 const SEVERITY_STYLES = {
   crit: "border-red-400/30 bg-red-400/[0.06]",
@@ -48,7 +49,9 @@ export function ActNowRail({
               const inner = (
                 <div
                   className={`rounded-lg border px-3 py-2.5 ${SEVERITY_STYLES[item.severity]} ${
-                    item.href ? "hover:bg-white/[0.03] transition-colors" : ""
+                    item.href && !item.stationReportId
+                      ? "hover:bg-white/[0.03] transition-colors"
+                      : ""
                   }`}
                 >
                   <div className="flex items-baseline justify-between gap-2">
@@ -64,9 +67,21 @@ export function ActNowRail({
                   <p className="mt-0.5 text-[11px] text-slate-400 leading-snug">
                     {item.detail}
                   </p>
+                  {item.stationReportId ? (
+                    // station_exception_reports rows are acknowledged here.
+                    // Workflow-event exceptions (DOWNTIME/QA) are deliberately
+                    // NOT acknowledgeable — they resolve through their own flows
+                    // (QA via Release hold; downtime-end is a P6 flow). Providing
+                    // a generic ack button on those rows would bypass the
+                    // resolution accounting those flows maintain.
+                    <AcknowledgeButton reportId={item.stationReportId} />
+                  ) : null}
                 </div>
               );
-              return item.href ? (
+              // Station-report items render their own Acknowledge button, so
+              // we do not wrap them in a navigating <Link> — clicking the card
+              // should not navigate away.
+              return item.href && !item.stationReportId ? (
                 <Link key={item.id} href={item.href} className="block">
                   {inner}
                 </Link>

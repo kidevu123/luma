@@ -24,6 +24,13 @@ export type ActNowItem = {
   title: string;
   detail: string;
   href?: string;
+  /** Populated only for station_report items (P5 Task 6). The admin
+   *  Act Now rail renders [ Acknowledge ] for rows that carry this id.
+   *  Workflow-event exceptions (DOWNTIME/QA) deliberately do NOT carry
+   *  this field — they resolve through their own flows (QA via Release
+   *  hold; downtime-end is P6) and must not be short-circuited by a
+   *  generic acknowledgement button. */
+  stationReportId?: string;
 };
 
 /** Report Problem (P4b Task 4) rows admitted into one Act Now build —
@@ -172,6 +179,10 @@ export function buildActNowPanel(
         title: a.label,
         detail: a.detail,
         href: "/floor-board",
+        // Carry the DB row id so the admin rail can render [ Acknowledge ].
+        // production_exception rows (DOWNTIME/QA) deliberately omit this —
+        // they resolve through their own flows, not via a generic ack button.
+        ...(a.stationReportId != null ? { stationReportId: a.stationReportId } : {}),
       });
     }
   }
