@@ -239,6 +239,8 @@ export { filterSelectableIdleRollLots } from "../idle-roll-lots";
 // imports @/lib/db and @/lib/db/audit.
 export {
   SUPERVISOR_SESSION_TTL_MS,
+  SUPERVISOR_GATE_REFUSAL_CODE,
+  SUPERVISOR_GATE_REFUSAL_SENTENCE,
   openSupervisorSession,
   closeSupervisorSession,
   requireSupervisorSession,

@@ -104,6 +104,26 @@ vi.mock("next/cache", () => ({
   revalidatePath: () => {},
 }));
 
+// P5-SUPERVISOR Task 4 — QC actions are behind the supervisor gate.
+// This test file already covers the payload / accountability wiring;
+// the gate refusal path is exercised in the staging smoke checklist.
+// Stub requireSupervisorSession so buildTx() (which returns empty on
+// SELECT) does not answer "locked" and fold every assertion here.
+vi.mock("@/lib/production/engine/supervisor-session", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/lib/production/engine/supervisor-session")
+  >("@/lib/production/engine/supervisor-session");
+  return {
+    ...actual,
+    requireSupervisorSession: vi.fn().mockResolvedValue({
+      id: "ffffffff-ffff-4fff-8fff-ffffffffff01",
+      employeeId: "ffffffff-ffff-4fff-8fff-ffffffffff02",
+      openedAt: new Date(),
+      expiresAt: new Date(Date.now() + 900_000),
+    }),
+  };
+});
+
 // Import AFTER the mocks above are registered.
 import * as projectEventModule from "@/lib/projector";
 import {

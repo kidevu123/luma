@@ -38,6 +38,8 @@ import {
   withAccountabilityPayload,
   assertStationActiveForFloorActions,
   assertCounterSnapshotAllowed,
+  requireSupervisorSession,
+  SUPERVISOR_GATE_REFUSAL_SENTENCE,
 } from "@/lib/production/engine";
 
 // Same UUID-v4-ish pattern used in actions.ts. The floor PWA passes
@@ -225,6 +227,14 @@ export async function mountRollAction(
     const startingWeight = startingWeightGrams ?? lot.net_weight_grams;
     const workflowBagId = d.workflowBagId && d.workflowBagId !== "" ? d.workflowBagId : null;
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate. Roll
+    // mount/unmount/weigh/change are hidden behind view.supervisor in
+    // the UI; this refuses a hand-crafted request that skips the sheet.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, station.id),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: station.id,
@@ -267,7 +277,12 @@ export async function mountRollAction(
             action: "ROLL_MOUNTED",
             targetType: "packaging_lot",
             targetId: lot.id,
-            after: { role: d.role, machine_id: station.machineId },
+            after: {
+              role: d.role,
+              machine_id: station.machineId,
+              supervisor_session_id: supSession.id,
+              supervisor_employee_id: supSession.employeeId,
+            },
           },
           tx,
         );
@@ -360,6 +375,12 @@ export async function unmountRollAction(
       endingWeightGrams,
     });
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, station.id),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: station.id,
@@ -439,6 +460,8 @@ export async function unmountRollAction(
             after: {
               ending_weight_grams: endingWeightGrams,
               new_status: nextStatus,
+              supervisor_session_id: supSession.id,
+              supervisor_employee_id: supSession.employeeId,
             },
           },
           tx,
@@ -521,6 +544,12 @@ export async function weighRollAction(
     const previousEstimate = lot.current_weight_grams_estimate;
     const variance = previousEstimate != null ? currentWeightGrams - previousEstimate : null;
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, station.id),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: station.id,
@@ -566,6 +595,8 @@ export async function weighRollAction(
             after: {
               current_weight_grams: d.currentWeightGrams,
               variance_grams: variance,
+              supervisor_session_id: supSession.id,
+              supervisor_employee_id: supSession.employeeId,
             },
           },
           tx,
@@ -771,6 +802,13 @@ export async function changeRollAction(
     // client_event_id, which is a uuid column and can't carry
     // role suffixes — that was the original 22P02 bug).
     const segmentGroupId = randomUUID();
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate. Mid-bag roll
+    // change is a supervisor action; the check runs in its own tx
+    // ahead of the mutation tx below.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, station.id),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: station.id,
@@ -1026,6 +1064,8 @@ export async function changeRollAction(
               old_roll_end_state: d.oldRollEndState,
               old_final_yield: oldFinalYield,
               workflow_bag_id: workflowBagId,
+              supervisor_session_id: supSession.id,
+              supervisor_employee_id: supSession.employeeId,
             },
           },
           tx,

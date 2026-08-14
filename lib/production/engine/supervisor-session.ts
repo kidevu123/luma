@@ -84,6 +84,21 @@ export type OpenSupervisorSessionResult =
 const UNLOCK_REFUSAL_SENTENCE =
   "That code and PIN combination does not unlock this station.";
 
+/** P5-SUPERVISOR Task 4 — the one sentence every server-side gate
+ *  returns when a mutation was attempted without an OPEN supervisor
+ *  session. Shared across all surfaces so the operator sees the same
+ *  copy regardless of which action refused: qc, roll, bag-allocation,
+ *  variety, or hold-release. Every gated action wraps the sentence in
+ *  its own return shape (`{ error, code? }`), no other string is used. */
+export const SUPERVISOR_GATE_REFUSAL_SENTENCE =
+  "Supervisor unlock required for this.";
+
+/** P5-SUPERVISOR Task 4 — the stable error code every gated refusal
+ *  carries. Screens do not string-match the sentence; they match
+ *  this code when they need to decide "reopen the supervisor sheet"
+ *  vs. "show a generic error toast". */
+export const SUPERVISOR_GATE_REFUSAL_CODE = "SUPERVISOR_UNLOCK_REQUIRED";
+
 function unlockRefusal(supervisorDetail: string): Blocker {
   return {
     code: "SUPERVISOR_PIN_INVALID",

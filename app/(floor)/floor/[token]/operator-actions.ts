@@ -33,13 +33,17 @@ import {
   raiseProductionException,
   raiseQaHoldRelease,
   raiseQaHoldStarted,
+  requireSupervisorSession,
   resolveFreshBagStart,
   resolveStationByToken,
   PRODUCTION_EXCEPTION_CATEGORIES,
+  SUPERVISOR_GATE_REFUSAL_CODE,
+  SUPERVISOR_GATE_REFUSAL_SENTENCE,
   type AdvanceInput,
   type Blocker,
   type FreshBagStart,
 } from "@/lib/production/engine";
+import { writeAudit } from "@/lib/db/audit";
 // SCAN-FIRST-1 — the fresh-bag start transaction stays where it is.
 // scanCardAction is a "use server" export, so calling it from this
 // module is a server-to-server call, not a second implementation.
@@ -623,6 +627,20 @@ export async function releaseQaHoldAction(
 
   try {
     await authStation(d.token, d.stationId);
+    // P5-SUPERVISOR Task 4 — server-side gate. Release hold is a QC
+    // supervisor action (view.supervisor hides the qc-panel button;
+    // this check refuses a hand-crafted request when locked). Runs a
+    // dedicated read-only tx because raiseQaHoldRelease opens its own
+    // write tx afterward.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) {
+      return {
+        error: SUPERVISOR_GATE_REFUSAL_SENTENCE,
+        code: SUPERVISOR_GATE_REFUSAL_CODE,
+      };
+    }
     const result = await raiseQaHoldRelease({
       stationId: d.stationId,
       workflowBagId: d.workflowBagId,
@@ -630,6 +648,21 @@ export async function releaseQaHoldAction(
       ...(d.detail != null ? { detail: d.detail } : {}),
     });
     if (!result.ok) return fail(result.blocker);
+    // P5-SUPERVISOR Task 4 — audit the gated write. QA_HOLD_RELEASED is
+    // written as a workflow_events row by raiseQaHoldRelease; this
+    // audit_log row records the supervisor session that authorised it.
+    await writeAudit({
+      actorId: null,
+      actorRole: null,
+      action: "floor.supervisor.qa_hold_release",
+      targetType: "WorkflowBag",
+      targetId: d.workflowBagId,
+      after: {
+        station_id: d.stationId,
+        supervisor_session_id: supSession.id,
+        supervisor_employee_id: supSession.employeeId,
+      },
+    });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not release this." };
   }

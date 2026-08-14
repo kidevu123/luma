@@ -1125,6 +1125,38 @@ function MoreSheet({
 
       {qcPanel}
 
+      {/* P5-SUPERVISOR Task 4 — supervisor-only tools inside More.
+          Rendered ONLY when a session is open (cosmetic); the real
+          gates are server-side in claimScannedBagAction and the QC /
+          roll / bag-allocation / variety action families. Manual bag
+          pick reuses claimScannedBagAction via the sanctioned P4b
+          path (resolveFreshBagStart / startFreshBag) — no bespoke
+          claim logic here. Corrections is a plain deep-link to the
+          admin correction wizard: the floor does not build voiding. */}
+      {view.supervisor ? (
+        <ManualBagPickPanel
+          token={token}
+          stationId={view.station.id}
+          upNext={view.upNext}
+          pending={pending}
+        />
+      ) : null}
+
+      {view.supervisor ? (
+        <a
+          href="/workflow-submissions"
+          className={SHEET_ITEM}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          <span className="flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-text-muted" />
+            Corrections
+          </span>
+          <ChevronRight className="h-5 w-5 text-text-muted" />
+        </a>
+      ) : null}
+
       {/* End shift is the PANEL, not a bare button. BLISTER-PAUSE-COUNT-
           SNAPSHOT-1 refuses to close a shift on a counting station whose
           bag is still running until the operator records the machine
@@ -1649,5 +1681,124 @@ function PartialBag({
         Continue
       </button>
     </section>
+  );
+}
+
+// ── ManualBagPickPanel (P5-SUPERVISOR Task 4) ────────────────────────
+//
+// The "old dropdown reborn". Renders the queue of bags that can start
+// or resume at THIS station (view.upNext, which loadStationViewRows
+// already scopes to eligibleStationKinds and drops rows held by a
+// non-eligible station). Each row submits claimScannedBagAction with
+// workflowBagId — the SANCTIONED P4b path (resolveFreshBagStart /
+// startFreshBag inside operator-actions.ts). NO bespoke claim logic
+// here; if the P4b path refuses (bag not ready, held elsewhere, on
+// hold), the operator sees the same blocker sentence they would from
+// a scan.
+//
+// Server-side, claimScannedBagAction is NOT gated (an operator picks
+// up bags on the sanctioned scan path with no supervisor unlock); the
+// gating in Task 4 is only for QC / rolls / bag-allocation / variety /
+// hold-release. Rendering this section from view.supervisor is
+// cosmetic: it puts the affordance behind supervisor unlock in the
+// tablet UI because the intent of the tool is manual override, but a
+// hand-crafted request against claimScannedBagAction is not refused
+// (that would refuse a normal scan too).
+function ManualBagPickPanel({
+  token,
+  stationId,
+  upNext,
+  pending: outerPending,
+}: {
+  token: string;
+  stationId: string;
+  upNext: StationView["upNext"];
+  pending: boolean;
+}) {
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const handleClaim = React.useCallback(
+    async (workflowBagId: string) => {
+      if (pending || outerPending) return;
+      setPending(true);
+      setError(null);
+      try {
+        const fd = new FormData();
+        fd.set("token", token);
+        fd.set("stationId", stationId);
+        fd.set("workflowBagId", workflowBagId);
+        fd.set("clientEventId", newClientEventId());
+        const r = await claimScannedBagAction(fd);
+        if (r && "error" in r && r.error) {
+          setError(r.error);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not pick up this bag.");
+      } finally {
+        setPending(false);
+      }
+    },
+    [pending, outerPending, token, stationId],
+  );
+
+  if (upNext.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-1">
+          Manual bag pick
+        </p>
+        <p className="text-sm text-text-muted">
+          No bags waiting for this station.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-1">
+          Manual bag pick
+        </p>
+        <p className="text-xs text-text-muted">
+          Supervisor override — claim uses the same scan path.
+        </p>
+      </div>
+      {error ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-900"
+        >
+          {error}
+        </p>
+      ) : null}
+      <ul className="space-y-1">
+        {upNext.slice(0, 8).map((bag) => (
+          <li key={bag.workflowBagId}>
+            <button
+              type="button"
+              disabled={pending || outerPending}
+              onClick={() => void handleClaim(bag.workflowBagId)}
+              className="flex w-full items-center justify-between rounded-lg border border-border bg-surface-2 px-3 py-2 text-left text-sm hover:bg-surface disabled:opacity-60"
+            >
+              <span className="truncate">
+                <span className="font-medium">{bag.bagLabel}</span>
+                {bag.productName ? (
+                  <span className="text-text-muted"> · {bag.productName}</span>
+                ) : null}
+              </span>
+              <span className="ml-2 whitespace-nowrap text-xs text-text-muted">
+                {bag.readyState === "READY"
+                  ? "ready"
+                  : bag.etaMinutes != null
+                    ? `~${bag.etaMinutes}m`
+                    : "upstream"}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

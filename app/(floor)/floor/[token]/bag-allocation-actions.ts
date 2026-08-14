@@ -34,6 +34,8 @@ import {
   deriveBagStatusAfterClose,
   AllocationOpenBlockedError,
   openAllocationSessionForBagStart,
+  requireSupervisorSession,
+  SUPERVISOR_GATE_REFUSAL_SENTENCE,
 } from "@/lib/production/engine";
 
 const UUID_RE =
@@ -185,6 +187,16 @@ export async function openAllocationSessionAction(
     const startingBalance = balance.startingBalance;
     const startingSource = d.startingBalanceSource ?? balance.source;
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate. Manual bag-
+    // allocation opens/closes are supervisor actions (variety runs
+    // choose the balance; the operator page only ever runs the
+    // sanctioned start path). Runs in its own read-only tx ahead of
+    // the write tx below.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     let sessionId = "";
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
@@ -248,6 +260,27 @@ export async function openAllocationSessionAction(
         .update(inventoryBags)
         .set({ status: "IN_USE" })
         .where(eq(inventoryBags.id, d.inventoryBagId));
+
+      // P5-SUPERVISOR Task 4 — audit the gated write (was previously
+      // recorded only through rawBagAllocationEvents, which is a
+      // domain-event log, not audit_log). Adds the supervisor session
+      // that authorised the manual open.
+      await writeAudit(
+        {
+          actorId: null,
+          actorRole: null,
+          action: "floor.supervisor.allocation_open",
+          targetType: "RawBagAllocationSession",
+          targetId: session.id,
+          after: {
+            station_id: d.stationId,
+            inventory_bag_id: d.inventoryBagId,
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
+          },
+        },
+        tx,
+      );
     });
 
     return { ok: true, sessionId };
@@ -314,6 +347,12 @@ export async function closeAllocationSessionAction(
       .where(eq(inventoryBags.id, session.inventoryBagId))
       .limit(1);
     const bagQrCode = bagRow?.bagQrCode ?? null;
+
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
 
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
@@ -396,6 +435,23 @@ export async function closeAllocationSessionAction(
           }, tx);
         }
       }
+
+      // P5-SUPERVISOR Task 4 — audit the gated close.
+      await writeAudit(
+        {
+          actorId: null,
+          actorRole: null,
+          action: "floor.supervisor.allocation_close",
+          targetType: "RawBagAllocationSession",
+          targetId: session.id,
+          after: {
+            station_id: d.stationId,
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
+          },
+        },
+        tx,
+      );
     });
 
     return { ok: true };
@@ -445,6 +501,12 @@ export async function returnRawBagAction(
       return { error: `Session is ${session.allocationStatus} — cannot return.` };
     }
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: d.stationId,
@@ -485,6 +547,24 @@ export async function returnRawBagAction(
         .update(inventoryBags)
         .set({ status: "AVAILABLE" })
         .where(eq(inventoryBags.id, session.inventoryBagId));
+
+      // P5-SUPERVISOR Task 4 — audit the gated return.
+      await writeAudit(
+        {
+          actorId: null,
+          actorRole: null,
+          action: "floor.supervisor.allocation_return",
+          targetType: "RawBagAllocationSession",
+          targetId: session.id,
+          after: {
+            station_id: d.stationId,
+            returned_qty: d.returnedQty,
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
+          },
+        },
+        tx,
+      );
     });
 
     return { ok: true };
@@ -544,6 +624,12 @@ export async function markBagDepletedAction(
       .limit(1);
     const bagQrCode = bagRow?.bagQrCode ?? null;
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: d.stationId,
@@ -600,6 +686,23 @@ export async function markBagDepletedAction(
           }, tx);
         }
       }
+
+      // P5-SUPERVISOR Task 4 — audit the gated deplete.
+      await writeAudit(
+        {
+          actorId: null,
+          actorRole: null,
+          action: "floor.supervisor.allocation_deplete",
+          targetType: "RawBagAllocationSession",
+          targetId: session.id,
+          after: {
+            station_id: d.stationId,
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
+          },
+        },
+        tx,
+      );
     });
 
     return { ok: true };
@@ -642,6 +745,14 @@ export async function repairSourceAllocationAction(
   const d = parsed.data;
   try {
     await authStation(d.token, d.stationId);
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate. Repair is a
+    // supervisor-only recovery (already accepts a lead code); adding
+    // the session gate makes the ledger write require both a lead
+    // badge and an OPEN supervisor session.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
     let sessionId = "";
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
@@ -674,6 +785,8 @@ export async function repairSourceAllocationAction(
             inventory_bag_id: d.inventoryBagId,
             reused_existing_session: result.reused,
             lead_employee_id: accountability.accountableEmployeeId,
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
           },
         },
         tx,
@@ -721,6 +834,13 @@ export async function adjustRawBagAction(
     const bag = await loadInventoryBag(d.inventoryBagId);
     if (!bag) return { error: "Inventory bag not found." };
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate. Adjustment
+    // is a supervisor correction; the gate matches its intent.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
         stationId: d.stationId,
@@ -739,6 +859,25 @@ export async function adjustRawBagAction(
         confidence: "MEDIUM",
         ...(d.clientEventId ? { clientEventId: d.clientEventId } : {}),
       });
+
+      // P5-SUPERVISOR Task 4 — audit the gated adjustment.
+      await writeAudit(
+        {
+          actorId: null,
+          actorRole: null,
+          action: "floor.supervisor.allocation_adjust",
+          targetType: "InventoryBag",
+          targetId: d.inventoryBagId,
+          after: {
+            station_id: d.stationId,
+            adjustment_qty: d.adjustmentQty,
+            reason: d.reason,
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
+          },
+        },
+        tx,
+      );
     });
 
     return { ok: true };
