@@ -22,36 +22,83 @@ import { join } from "path";
 
 const src = readFileSync(join(__dirname, "record-stage-event.ts"), "utf8");
 
+/** recordStageEvent's transaction BODY — from `db.transaction(async (tx)
+ *  => {` to the `});` that closes it.
+ *
+ *  Slicing to the body (rather than "before some later export") is what
+ *  makes the placement assertions real: a call that drifted out of the
+ *  transaction but stayed above the next export would still have passed
+ *  a "comes before X" check while committing separately from the event
+ *  it belongs to. */
+function transactionBody(): string {
+  const open = src.indexOf("await db.transaction(async (tx) => {");
+  expect(open).toBeGreaterThan(-1);
+  // The transaction is opened at 4-space indent inside a try block, so
+  // its closing line is the first `    });` at that same indent.
+  const close = src.indexOf("\n    });", open);
+  expect(close).toBeGreaterThan(open);
+  return src.slice(open, close);
+}
+
+/** The whole releaseStaleSiblingSealingPins helper — sliced to the NEXT
+ *  function declaration rather than a fixed character budget, which the
+ *  helper has already outgrown once (it is 1684 chars against the old
+ *  1600-char window, so the tail was going unchecked). */
+function siblingHelper(): string {
+  const start = src.indexOf("async function releaseStaleSiblingSealingPins");
+  expect(start).toBeGreaterThan(-1);
+  // The helper's own closing brace: the first `}` at column 0 after the
+  // declaration. Stopping at the NEXT declaration instead would swallow
+  // that function's doc comment, and a fixed character budget is what
+  // went stale in the first place.
+  const close = src.indexOf("\n}\n", start);
+  expect(close).toBeGreaterThan(start);
+  return src.slice(start, close + 2);
+}
+
 describe("stale sibling sealing pins — release stays inside the transaction", () => {
-  it("fires after the primary auto-release and before the transaction ends", () => {
-    // The failure this prevents: the call drifting OUT of the tx (e.g.
-    // next to the exported projectBagReleasedEvent helper), which would
-    // let the sealing close commit while the sibling pin release fails
-    // separately — leaving another sealer pinned to a bag that is done.
-    expect(src).toMatch(/await releaseStaleSiblingSealingPins\(tx, \{/);
-    const primaryIdx = src.indexOf("await maybeAutoReleaseAfterComplete");
-    const siblingIdx = src.indexOf("await releaseStaleSiblingSealingPins");
-    const outsideTxnIdx = src.indexOf(
-      "export async function projectBagReleasedEvent",
-    );
+  it("fires after the primary auto-release and INSIDE the transaction", () => {
+    // The failure this prevents: the call drifting OUT of the tx, which
+    // would let the sealing close commit while the sibling pin release
+    // fails separately — leaving another sealer pinned to a bag that is
+    // done. Anchored on the transaction body itself, so "still above
+    // some later export" is not mistaken for "still inside".
+    const body = transactionBody();
+    expect(body).toMatch(/await releaseStaleSiblingSealingPins\(tx, \{/);
+    const primaryIdx = body.indexOf("await maybeAutoReleaseAfterComplete");
+    const siblingIdx = body.indexOf("await releaseStaleSiblingSealingPins");
     expect(primaryIdx).toBeGreaterThan(-1);
     expect(siblingIdx).toBeGreaterThan(primaryIdx);
-    expect(siblingIdx).toBeLessThan(outsideTxnIdx);
+    // Non-vacuous: the slice must be the real body, not an empty string
+    // or the whole file.
+    expect(body.length).toBeGreaterThan(500);
+    expect(body).not.toContain("export async function projectBagReleasedEvent");
   });
 
   it("is gated on the FINAL sealing close, never a partial one", () => {
     // A partial close-out ends this lane, not the bag: other sealers may
     // still be working it, so clearing their pins would be wrong.
-    const siblingIdx = src.indexOf("await releaseStaleSiblingSealingPins");
-    expect(src.slice(Math.max(0, siblingIdx - 200), siblingIdx)).toMatch(
+    const body = transactionBody();
+    const siblingIdx = body.indexOf("await releaseStaleSiblingSealingPins");
+    expect(body.slice(Math.max(0, siblingIdx - 200), siblingIdx)).toMatch(
       /isSealingFinal && !isPartialSealingClose/,
     );
   });
 
   it("emits real BAG_RELEASED events scoped to other SEALING stations", () => {
-    const helperIdx = src.indexOf("async function releaseStaleSiblingSealingPins");
-    expect(helperIdx).toBeGreaterThan(-1);
-    const helper = src.slice(helperIdx, helperIdx + 1600);
+    const helper = siblingHelper();
+    // The negative assertion below is only worth anything if the window
+    // covers the WHOLE helper, so the window is derived from the source
+    // rather than budgeted. The scanner this replaced sliced a fixed
+    // 1600 characters; the helper is 1538 today, so that budget did in
+    // fact still cover it — but only by 62 characters, and a scanner
+    // that silently degrades from "does not write the read model" to
+    // "does not write the read model in its first 1600 characters" is
+    // not one to leave in place. These two assertions say the slice
+    // really is exactly the helper: it ends at the closing brace, and it
+    // has not run on into the next function.
+    expect(helper.trimEnd().endsWith("}")).toBe(true);
+    expect(helper).not.toContain("maybeAutoReleaseAfterComplete");
     // Through the shared projection — never a direct read-model write,
     // which would leave workflow_events (the source of truth) silent
     // about a release that happened.
@@ -74,8 +121,7 @@ describe("stale sibling sealing pins — release stays inside the transaction", 
     // station's operator — the sibling's operator did nothing. Without
     // this marker the audit trail reads as station A's operator
     // releasing station B's bag.
-    const helperIdx = src.indexOf("async function releaseStaleSiblingSealingPins");
-    const helper = src.slice(helperIdx, helperIdx + 1600);
+    const helper = siblingHelper();
     expect(helper).toMatch(/auto_release_reason: "STALE_SIBLING_SEALING_PIN"/);
   });
 });

@@ -5,7 +5,7 @@
 // handling as a manual closeout, just with a system-derived balance and an
 // explicit, auditable SYSTEM_DERIVED_FROM_PRODUCTION_OUTPUT provenance.
 
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import type { CurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { writeAudit } from "@/lib/db/audit";
@@ -52,9 +52,23 @@ export type SystemDerivedResolution =
     };
 
 /** READ-ONLY: can this bag's OPEN session be resolved from production output?
- *  Returns the derived numbers when yes, or an explicit reason when no. */
+ *  Returns the derived numbers when yes, or an explicit reason when no.
+ *
+ *  P4b Task 5 fix round 2 — `opts.excludeWorkflowBagId`. A physical bag can
+ *  carry more than one OPEN session (the exact state the floor's partial
+ *  screen exists to clear), and this select used to take whichever row the
+ *  planner returned first. For every EXISTING caller that is harmless-ish
+ *  and unchanged: they are asking "what is open on this bag" from outside
+ *  any run. For the RESOLVE_PARTIAL path it is not — that caller has a run
+ *  of its OWN in flight, and picking its session would derive, and then
+ *  CLOSE, the ledger of the bag the operator is still working. So the
+ *  exclusion is opt-in (behaviour unchanged unless passed) while the
+ *  ORDERING is unconditional: an unordered `select` has no defined row
+ *  order, so two reads a second apart could legitimately disagree, and a
+ *  deterministic read is strictly better for every caller. */
 export async function computeSystemDerivedResolutionForBag(
   inventoryBagId: string,
+  opts?: { excludeWorkflowBagId?: string },
 ): Promise<SystemDerivedResolution> {
   const openSessions = await db
     .select({
@@ -68,7 +82,17 @@ export async function computeSystemDerivedResolutionForBag(
       and(
         eq(rawBagAllocationSessions.inventoryBagId, inventoryBagId),
         eq(rawBagAllocationSessions.allocationStatus, "OPEN"),
+        ...(opts?.excludeWorkflowBagId
+          ? [ne(rawBagAllocationSessions.workflowBagId, opts.excludeWorkflowBagId)]
+          : []),
       ),
+    )
+    // Oldest first, id as the tiebreaker — the same ordering
+    // loadInventoryContext and loadPartialAllocationFacts use. The
+    // stalest ledger is the one blocking the bag.
+    .orderBy(
+      asc(rawBagAllocationSessions.openedAt),
+      asc(rawBagAllocationSessions.id),
     );
 
   if (openSessions.length === 0) {
@@ -276,9 +300,16 @@ export async function resolveAllocationFromProductionOutput(args: {
   operatorRemainingEstimate?: number | null;
   weighBackGrams?: number | null;
   note?: string | null;
+  /** Threaded straight through to computeSystemDerivedResolutionForBag —
+   *  see its comment. This function CLOSES the session it derives, so a
+   *  caller with a run in flight must be able to say "not mine". */
+  excludeWorkflowBagId?: string;
 }): Promise<ResolveSystemDerivedResult> {
   const resolution = await computeSystemDerivedResolutionForBag(
     args.inventoryBagId,
+    args.excludeWorkflowBagId
+      ? { excludeWorkflowBagId: args.excludeWorkflowBagId }
+      : undefined,
   );
   if (!resolution.available) {
     return { ok: false, reason: resolution.reason, error: resolution.message };

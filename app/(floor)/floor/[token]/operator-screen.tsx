@@ -244,14 +244,17 @@ export function OperatorScreen({
     void submitProduct(auto.productId);
   }, [auto, submitProduct]);
 
+  /** Returns whether the write landed. Callers that opened a SHEET need
+   *  the answer: a refusal must leave the sheet open on top of the error,
+   *  because the sheet is where the inputs that caused it still are. */
   const advance = React.useCallback(
     async (
       intent: "COMPLETE" | "CONFIRM_BAG_EMPTY" | "RESOLVE_PARTIAL",
       extra: Record<string, string> = {},
-    ) => {
+    ): Promise<boolean> => {
       if (!current || !operatorSessionId) {
         setError("Open a shift before recording work.");
-        return;
+        return false;
       }
       const ok = await run(async () => {
         const fd = baseForm();
@@ -266,6 +269,7 @@ export function OperatorScreen({
         setPartialQty("");
         setKeepWorkingBag(false);
       }
+      return ok;
     },
     [baseForm, current, operatorSessionId, run],
   );
@@ -706,16 +710,19 @@ export function OperatorScreen({
           error={error}
           onClose={() => setSheet("none")}
           onSubmit={async (reason, note) => {
-            await advance("CONFIRM_BAG_EMPTY", {
+            const ok = await advance("CONFIRM_BAG_EMPTY", {
               sealingCloseMode: "partial",
               partialCloseReason: reason,
               ...(note.trim() ? { partialCloseReasonNote: note.trim() } : {}),
             });
-            // The sheet closes on the NEXT render either way: a refusal
-            // (validateSealingPartialCloseInput) leaves the error banner
-            // visible inside the sheet, which is where the operator can
-            // still fix the reason.
-            setSheet("none");
+            // Stay open on a refusal, like TypedCodeSheet does. The
+            // sheet is where the reason and note the operator picked
+            // still are, and validateSealingPartialCloseInput refuses
+            // for reasons they can act on ("record at least one sealing
+            // segment", "add a short note"). Closing it would drop the
+            // selection and show the error over a screen with no way to
+            // retry.
+            if (ok) setSheet("none");
           }}
         />
       ) : null}

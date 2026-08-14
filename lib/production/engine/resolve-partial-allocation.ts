@@ -116,8 +116,12 @@ export async function loadPartialAllocationFacts(args: {
     .limit(1);
   if (!priorOpen) return null;
 
+  // Exclude THIS run's own session. Without it the derivation could be
+  // computed from the ledger of the bag the operator is still working —
+  // and the write below closes whatever it derived.
   const resolution = await computeSystemDerivedResolutionForBag(
     args.inventoryBagId,
+    { excludeWorkflowBagId: args.workflowBagId },
   );
   if (resolution.available) {
     return {
@@ -242,6 +246,12 @@ export async function resolvePartialAllocation(
       inventoryBagId: facts.inventoryBagId,
       actor,
       operatorRemainingEstimate: operatorEstimate,
+      // Same exclusion the read used. This helper re-derives internally
+      // and CLOSES what it derives, so without it the two halves of this
+      // flow could disagree about which session they mean — the read
+      // showing the prior run's estimate and the write closing the
+      // current run's ledger.
+      excludeWorkflowBagId: input.workflowBagId,
     });
     if (!result.ok) return rejected(result.error);
     return { ok: true };
