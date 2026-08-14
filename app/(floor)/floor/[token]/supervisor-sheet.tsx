@@ -162,7 +162,7 @@ export function SupervisorSheet({
             onChange={(e) => setPin(e.target.value)}
             className="h-14 w-full rounded-xl border border-border bg-surface px-4 text-2xl tabular-nums text-text"
             placeholder="----"
-            autoComplete="current-password"
+            autoComplete="off"
           />
         </label>
 
