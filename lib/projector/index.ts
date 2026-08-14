@@ -584,6 +584,22 @@ export async function projectEvent(tx: Tx, ev: EventInput): Promise<void> {
         })
         .where(eq(readBagState.workflowBagId, ev.workflowBagId));
     }
+  } else if (ev.eventType === "QA_HOLD_STARTED") {
+    // Per-bag QA hold — complements BATCH_HELD (batch-wide), per the
+    // schema.ts comment at the QA_HOLD_STARTED enum entry. P4b Task 4
+    // fix round 1: raiseQaHoldStarted emits this event, but nothing
+    // wrote read_bag_state.is_on_hold from it until now — the
+    // evaluateChecks() BAG_ON_HOLD blocker and the floor-board chip
+    // both read that column, so a QA hold was recorded but invisible.
+    await tx
+      .update(readBagState)
+      .set({ isOnHold: true, updatedAt: occurredAt })
+      .where(eq(readBagState.workflowBagId, ev.workflowBagId));
+  } else if (ev.eventType === "QA_HOLD_RELEASED") {
+    await tx
+      .update(readBagState)
+      .set({ isOnHold: false, updatedAt: occurredAt })
+      .where(eq(readBagState.workflowBagId, ev.workflowBagId));
   }
 
   // 3. workflow_bags.finalizedAt + qr_cards release on BAG_FINALIZED +

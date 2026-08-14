@@ -44,17 +44,24 @@ import {
   HelpCircle,
   Send,
   Inbox,
+  Unlock,
 } from "lucide-react";
 import {
   reportPackagingDamageAction,
   reworkSentAction,
   reworkReceivedAction,
 } from "./qc-actions";
+// P4b Task 4 fix round 2 (N1) — releaseQaHoldAction lives in
+// operator-actions.ts (the engine-barrel-only floor write surface),
+// not qc-actions.ts, because it delegates to raiseQaHoldRelease from
+// @/lib/production/engine rather than the QC-2 event set this file's
+// other actions use.
+import { releaseQaHoldAction } from "./operator-actions";
 import {
   QUICK_DAMAGE_ENTRIES,
   damageHasReworkShortcut,
   type QuickDamageType,
-} from "@/lib/production/qc-panel-helpers";
+} from "@/lib/production/engine/client";
 
 // crypto.randomUUID() is only available in secure contexts. Floor
 // PWA runs over plain HTTP on the LAN — mirror the fallback that
@@ -110,6 +117,11 @@ export type QcPanelProps = {
   accountabilitySource: string | null;
   /** Pending rework events to receive at this station. Empty when none. */
   pendingRework: PendingReworkRow[];
+  /** read_bag_state.is_on_hold for the current bag (P4b Task 4 fix
+   *  round 2, N1). Gates [ Release hold ] — hidden entirely when
+   *  false rather than disabled, since "release" makes no sense on a
+   *  bag that isn't held. */
+  isOnHold: boolean;
 };
 
 type Status =
@@ -127,6 +139,7 @@ export function QcPanel(props: QcPanelProps) {
     currentOperatorName,
     accountabilitySource,
     pendingRework,
+    isOnHold,
   } = props;
 
   const hasOperator = currentOperatorName != null;
@@ -277,6 +290,35 @@ export function QcPanel(props: QcPanelProps) {
     [hasOperator, stationId, token, workflowBagId],
   );
 
+  // P4b Task 4 fix round 2 (N1) — single tap, no required note (see
+  // raise-qa-hold-release.ts's header). Does not gate on hasOperator
+  // the way every other action here does: a hold is a station-level
+  // fact blocking the NEXT operator from claiming this bag, not
+  // something only the operator who is currently on shift can clear,
+  // and stalling supervisors behind "open a shift first" would defeat
+  // the point of making release easy.
+  const submitReleaseHold = React.useCallback(async () => {
+    setStatus({ kind: "pending", what: "QA_HOLD_RELEASED" });
+    try {
+      const fd = new FormData();
+      fd.set("token", token);
+      fd.set("stationId", stationId);
+      fd.set("clientEventId", newClientEventId());
+      fd.set("workflowBagId", workflowBagId);
+      const r = await releaseQaHoldAction(fd);
+      if ("error" in r && r.error) {
+        setStatus({ kind: "error", message: r.error });
+        return;
+      }
+      setStatus({ kind: "ok", what: "Hold released" });
+    } catch (err) {
+      setStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Server error.",
+      });
+    }
+  }, [stationId, token, workflowBagId]);
+
   return (
     <details className="group rounded-2xl border border-border bg-surface">
       <summary className="flex cursor-pointer list-none items-center justify-between rounded-2xl px-5 py-3 hover:bg-page">
@@ -288,10 +330,39 @@ export function QcPanel(props: QcPanelProps) {
               {pendingRework.length} pending rework
             </span>
           ) : null}
+          {isOnHold ? (
+            // Visible from the closed panel — a hold blocks this bag
+            // at every downstream station (claim-queued-bag's
+            // BAG_ON_HOLD blocker), not just here, so it should not
+            // require expanding "Report QC issue" to notice.
+            <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-800">
+              QA hold
+            </span>
+          ) : null}
         </div>
         <ChevronDown className="h-4 w-4 text-text-subtle transition-transform group-open:rotate-180" />
       </summary>
       <div className="space-y-5 border-t border-border/70 px-5 py-4">
+        {isOnHold ? (
+          <div className="flex flex-col items-start gap-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-rose-900">
+              This bag is on QA hold — blocked from claiming at every
+              station until released.
+            </p>
+            <button
+              type="button"
+              disabled={status.kind === "pending"}
+              onClick={() => void submitReleaseHold()}
+              className="inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-rose-400 bg-rose-100 px-3 min-h-[44px] text-sm font-semibold text-rose-900 hover:bg-rose-200 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+            >
+              <Unlock className="h-4 w-4" />
+              {status.kind === "pending" && status.what === "QA_HOLD_RELEASED"
+                ? "Releasing…"
+                : "Release hold"}
+            </button>
+          </div>
+        ) : null}
+
         {/* Operator + bag context */}
         <div className="rounded-lg border border-border/70 bg-surface-2/40 px-3 py-2 text-xs">
           {hasOperator ? (

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Calculator, AlertTriangle } from "lucide-react";
 import { resolveScannedBagAllocationAction } from "./actions";
-import type { FloorOpenAllocationBlock } from "@/lib/production/system-derived-allocation-resolution";
+import type { FloorOpenAllocationBlock } from "@/lib/production/engine/client";
 
 /** SPLIT-BAG-1 — floor panel shown when a start/scan is blocked because the
  *  physical raw bag still has an OPEN allocation from a prior product. When the

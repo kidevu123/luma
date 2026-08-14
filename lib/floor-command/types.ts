@@ -93,9 +93,20 @@ export type ShiftTargetStatus = {
 };
 
 export type AttentionItem = {
-  type: "idle_machine" | "rework_pending";
+  type: "idle_machine" | "rework_pending" | "production_exception";
   label: string;
   detail: string;
+  /** production_exception only — which of Report Problem's three
+   *  reused-or-new events produced this row (P4b Task 4). Lets
+   *  buildActNowPanel pick a severity/wording without re-parsing the
+   *  label. */
+  exceptionEventType?:
+    | "PRODUCTION_EXCEPTION_RAISED"
+    | "DOWNTIME_STARTED"
+    | "QA_HOLD_STARTED";
+  /** production_exception only — for the Act Now row's href, same
+   *  pattern as the waiting-bag rows below. */
+  receiptNumber?: string | null;
 };
 
 export type OperatorDailyRow = {

@@ -129,6 +129,29 @@ const NON_CHECKLIST_BLOCKERS: readonly Blocker[] = [
       "read_bag_queue.claimed_by_station_id is set to a different station.",
     suggestedAction: "SCAN_AGAIN",
   },
+  {
+    // raiseProductionException — workflow_events.workflow_bag_id is
+    // NOT NULL, so an exception with no workflowBagId supplied falls
+    // back to the station's currently pinned bag (read_station_live).
+    // When there is no bag active there either, there is nothing to
+    // attach the event to. Not a checklist row: this is a precondition
+    // of the Report Problem gesture itself, not a reason a bag can't
+    // advance.
+    code: "PRODUCTION_EXCEPTION_NO_BAG",
+    operatorSentence:
+      "Scan the bag this is about first, or ask a supervisor to log it.",
+    supervisorDetail:
+      "No workflowBagId was supplied and read_station_live has no current bag for this station.",
+    suggestedAction: "SCAN_AGAIN",
+  },
+  {
+    // raiseProductionException refuses to write an empty exception —
+    // an operator-actionable input mistake, not a routing failure.
+    code: "PRODUCTION_EXCEPTION_DETAIL_REQUIRED",
+    operatorSentence: "Add a short note about what's wrong before sending.",
+    supervisorDetail: "raiseProductionException received an empty detail string.",
+    suggestedAction: "NONE",
+  },
 ];
 
 const BLOCKER_CATALOGUE: ReadonlyMap<string, Blocker> = new Map([

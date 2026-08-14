@@ -31,14 +31,14 @@ import {
 } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { refreshMaterialReadModelsAfterConsumption } from "@/lib/projector/material-read-model-refresh";
-import { nextLotStatusForUnmount } from "@/lib/production/active-rolls";
 import { kgToGrams } from "@/lib/inbound/roll-weight";
 import {
+  nextLotStatusForUnmount,
   resolveStationAccountability,
   withAccountabilityPayload,
-} from "@/lib/production/station-operator-session";
-import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
-import { assertCounterSnapshotAllowed } from "@/lib/production/counter-snapshot-guard-loader";
+  assertStationActiveForFloorActions,
+  assertCounterSnapshotAllowed,
+} from "@/lib/production/engine";
 
 // Same UUID-v4-ish pattern used in actions.ts. The floor PWA passes
 // a clientEventId so a network retry doesn't double-fire. We persist

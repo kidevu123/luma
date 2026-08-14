@@ -49,10 +49,72 @@ cannot reach.
       once. One wins; the other gets a clear message and no duplicate
       read_station_live row.
 
-## Rollback
+## Rollback (Phase 1)
 If any behaviour check fails, revert the branch. The extraction in
 Task 7 is the highest-risk change: record-stage-event.ts holds logic
 that previously lived inside fireStageEventAction.
+
+## Rollback (Phase 4b)
+
+Phase 4b did not ship behind a feature flag. Rollback is a `git revert`
+of the merge commit plus a redeploy — the systemd timer will pick up
+the previous stamp on the next pull. There is no runtime toggle.
+
+**Trigger criteria — any of these justifies a revert:**
+- A normal operator flow is blocked with no More / Help path out
+  (screen stuck without a scan-again, pause, or supervisor route).
+- The screen records the wrong counts on a completed bag (counter values
+  land in the wrong workflow_event column, or bag advances with a count
+  the operator did not enter).
+- Read models are empty and `npm run rebuild:read-models` (below) does
+  not recover — the new screen renders entirely from read models and
+  will show "No current work" everywhere without them.
+
+**QA-hold rollback trap — DO THIS BEFORE REVERTING.**
+
+QA holds land in v1.34 as a real event (`QA_HOLD_STARTED`) that sets
+`read_bag_state.is_on_hold = true`. The v1.33 UI has NO code path that
+sets or clears that column: any bag held under 1.34 will stay
+`is_on_hold=true` after the revert and every station will refuse to
+work it, with no operator path to release. Release every open hold
+before rolling back:
+
+```sql
+-- Run on LXC 122's Postgres BEFORE the revert. Confirms the bags this
+-- will re-open, then clears the column.
+SELECT workflow_bag_id FROM read_bag_state WHERE is_on_hold = true;
+UPDATE read_bag_state SET is_on_hold = false WHERE is_on_hold = true;
+```
+
+Skipping this leaves every held bag stranded until 1.34 (or a hand-
+written UPDATE) returns.
+
+## Deploy prerequisite — read models rebuild
+
+Run `npm run rebuild:read-models` immediately after the Phase 4b
+deploy lands. The new operator screen renders entirely from read
+models (`read_station_live`, `read_bag_queue`); a bag in flight from
+before the deploy has no queue row and will not appear in any
+station's UP NEXT without a rebuild. This has been outstanding since
+v1.31.0 — the rebuild is idempotent and finishes in seconds on a
+healthy DB (abort and investigate if it runs past ~2 minutes; that
+means the in-flight scope is not being applied).
+
+## First-morning operator comms
+
+Post on the floor before the first shift after the cutover:
+
+- **The station screen changed.** One screen per station now — the
+  panels are gone. What used to be many buttons is a single scan-first
+  workflow.
+- **Release and Finalize are gone (since 1.31).** The bag advances on
+  its own once a stage completes; there is no button to press.
+- **Pause, Report problem, Enter code, End shift** all live under the
+  More button in the top-right of the station screen.
+- **Bagless machine-down cannot be filed on the screen.** Every Report
+  Problem write today needs a bag pinned at the station — a
+  machine-down report with no bag will not go through. Tell a
+  supervisor in person until P5 ships the bagless path.
 
 ## Phase 2 (v1.31.0) — queue and auto-advance
 
@@ -151,3 +213,49 @@ Run these two FIRST, in order, before any floor behaviour check.
 - [ ] Pause a STARTED bag at blister; the sealing tablet's pickup list updates
       within ~2s (P4a: non-flow events carry stationKind via process cache,
       gap (a) closed). Reload confirms truth.
+
+## Phase 4b (v1.34.0) — THE OPERATOR SCREEN
+
+Per-station-kind operator-screen render and workflow checklist:
+
+- [ ] **Blister station:** open shift (operator picker) → station shows name + "No current work" → scan/enter bag QR → SCAN_TO_CLAIM state with camera + UP NEXT queue + "Enter code manually" option → claim picks bag → COMPLETE state shows "Blister count:" counter input field + DONE button → enter count (e.g., 1000) + submit DONE → bag auto-advances to sealing queue without release button. Auto-advance occurs within ~2s on sealing tablet's upNext.
+
+- [ ] **Sealing station:** open shift → SCAN_TO_CLAIM → claim → multi-segment workflow: COMPLETE with "Seal passes:" counter and "Pause" button under More → enter count (e.g., 500) + DONE → CONFIRM_BAG_EMPTY shows "[ Yes, bag empty ]" and "[ No, more to work ]" buttons. Answer "No" → returns to the COMPLETE counter for the next sealing run (station stays pinned to the bag). Answer "Yes" → bag auto-advances.
+
+- [ ] **Packaging station:** open shift → SCAN_TO_CLAIM → claim → COMPLETE shows three counters: "Cases:", "Displays:", "Loose units:" (or "Loose cards:" if handpack product) → enter counts (e.g., 9, 25, 0) + DONE → if loose cards damaged ("[ Yes ]" / "[ No ]"), enter damaged count if yes → bag auto-finalizes, queue row disappears.
+
+- [ ] **Handpack blister station:** same flow as blister (counter input "Blister count:"), but input emits HANDPACK_BLISTER_COMPLETE event.
+
+- [ ] **Bottle-fill station:** COMPLETE with counter "Fill count:" → auto-releases to both finishing stations (stickering + cap-seal) if pinned.
+
+- [ ] **PICK_PRODUCT (AUTO path):** Station with unambiguous product → scan bag → auto-submit happens silently, no PICK_PRODUCT case shown; bag proceeds directly to COMPLETE state.
+
+- [ ] **PICK_PRODUCT (PICK path):** Product ambiguous (2-3 candidates by station kind) → scan bag → PICK_PRODUCT shows 2-3 filtered buttons (e.g., "Hyroxi MIT A", "Hyroxi MIT B") → select one → proceeds to COMPLETE.
+
+- [ ] **Partial flow:** On a sealing bag mid-seal, under More → "Pause with reason" (reuse existing pause action) → reason dropdown → submit → bag pauses. On same station, scan the paused bag → "[ Why? ]" button (Help) under BLOCKED → shows pause reason in checklist. Resume via supervisor (P5 scope). Alternatively, under More → "Close sealing early" → sets sealing-close mode → COMPLETE counter now labeled "Final seal passes:" → enter count + DONE → CONFIRM_BAG_EMPTY (final yes/no) → if yes, bag advances; if no, cannot proceed (handoff to next sealer).
+
+- [ ] **RESOLVE_PARTIAL confirmation:** On a partial-close bag, the sheet renders one of two lines above the counter — "Estimated remaining: <n> units" when the previous operator's partial-close carried a numeric estimate, or "System cannot confidently determine remaining quantity." when it did not. Both variants must appear on the rendered flow across the two cases (text matches operator-screen.tsx's PartialBag/PartialWorkflowBag components; there is no "system computed" label anywhere).
+
+- [ ] **Exception workflow — six categories:**
+  - [ ] Machine: click "Report problem" under More → "[ Machine ]" category → enter a short reason in the "What's wrong?" textarea (no machine picker — the machine is derived from the station's binding) → Send → attempts pauseBagAction (best-effort — silently no-ops with no bag pinned) AND emits DOWNTIME_STARTED. Bag shows on Act Now rail; stations see BLOCKED. Supervisor clears the downtime later (P5).
+  - [ ] Quality: click "Report problem" → "[ Quality ]" → form optional fields (allow empty) → submits, emits QA_HOLD_STARTED event. Bag now shows BLOCKED "QA Hold: <detail or empty>". Supervisor can release hold (below).
+  - [ ] Bag: click "Report problem" → "[ Bag ]" category → emits BAG_PAUSED (reuse action), bag shows paused reason.
+  - [ ] Material: click "Report problem" → "[ Material ]" → brief reason text → emits PRODUCTION_EXCEPTION_RAISED, Act Now rail picks it up.
+  - [ ] Product: click "Report problem" → "[ Product ]" → reason → emits PRODUCTION_EXCEPTION_RAISED.
+  - [ ] Other: click "Report problem" → "[ Other ]" → reason → emits PRODUCTION_EXCEPTION_RAISED.
+
+- [ ] **QA hold round-trip:** Once a QA_HOLD_STARTED bag exists (bag shows BLOCKED), verify supervisor (or ops) can release it. Under More or via supervisor unlock (scope: P5 inline PIN or supervisor session), "Release QA hold" option appears → click → bag returns to previous state (was at COMPLETE, goes back to COMPLETE; was at SCAN_TO_CLAIM goes to SCAN_TO_CLAIM). Emit QA_HOLD_RELEASED event. Re-scan bag at same station confirms it is no longer blocked.
+
+- [ ] **Help checklist:** On BLOCKED state (or via "?" button anytime), the sheet renders `evaluateChecks()`'s output as a static pass/fail list — not a decision tree. Up to eight rows in this order: bag recognized, product recognized, station correct, materials available, previous step complete, not on hold, not paused, not finished. The three "bag-in-hand" rows (bag, product, station) are DROPPED on an idle SCAN_TO_CLAIM view and replaced with the note "No bag at this station yet." The first failing row's operator sentence appears in the amber footer, and [ Notify supervisor ] is DISABLED when no bag is pinned (helper text: "Scan the bag this is about first.").
+
+- [ ] **Fresh-bag start at first-op stations:** Station is first-in-route (e.g., blister for a TABLET batch). Scan a bag that has no prior workflow_events → SCAN_TO_CLAIM shows no UPSTREAM_RUNNING holder (upNext is empty) → claim → COMPLETE (not skipped). Before engine, this path would have errored or skipped SCAN_TO_CLAIM. After, the station can start fresh bags.
+
+- [ ] **End-shift counter:** Operator clicks "End shift" under More → counter shows total bags completed this shift (sum of final stage events, e.g., 3 blisters, 2 seals, 1 packaged) → message "Contact supervisor if count disagrees." Operator confirms/cancels.
+
+- [ ] **sseSubscribers visible:** GET /api/health returns JSON with `sseSubscribers: <number>` field. Open two tablets on the same floor server → `sseSubscribers` shows 2. Close one → next /api/health call shows 1. Refresh confirms subscriber count matches open connections.
+
+- [ ] **Packaging via COMBINED routing (preferOperation):** Combined station receives a bag with packaging inputs (cases/displays/loose). Engine picks PACKAGING operation (not BLISTER) from combined's available ops (verify via log or test). Packaging counter fields render, not blister segment. Inputs route to the packaging path, not blister-then-packaging.
+
+- [ ] **Legacy panel deletion:** Verify the old `stage-action-buttons.tsx` and `scan-card-form.tsx` are no longer in the main page render path. Main page code under ~200 lines. If those files still exist, they are only used by other routes (e.g., rolls page) or deleted. Scanner tests for those panels have been deleted or replaced by engine tests.
+
+- [ ] **Previously non-executable item now executable:** From the P4a smoke checklist, the box "Complete packaging on a bag via advanceBag" no longer carries "NOT EXECUTABLE until P4b" label. It is now checked as executable (OperatorScreen wires advanceBag for packaging complete). Verify the box is unlabeled.

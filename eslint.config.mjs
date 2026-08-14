@@ -65,20 +65,27 @@ export default [
     files: ["app/(floor)/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
-        "warn",
+        "error",
         {
           patterns: [
             {
-              // Three entries, all required. "@/lib/production/*" catches
-              // siblings of the engine; "@/lib/production/*/**" catches DEEP
-              // paths (a lone "*" does not cross "/", so without this line
-              // "@/lib/production/engine/record-stage-event" — and every
-              // other deep path — was silently unrestricted). The negation
-              // re-permits the barrel and ONLY the barrel.
+              // Four entries, all required. "@/lib/production/*" catches
+              // siblings of the engine; "@/lib/production/*/**" catches
+              // DEEP paths (a lone "*" does not cross "/", so without
+              // this line "@/lib/production/engine/record-stage-event" —
+              // and every other deep path — was silently unrestricted).
+              // The two negations re-permit the barrel and the
+              // CLIENT-SAFE barrel, and nothing else: a `"use client"`
+              // file that imports the server barrel drags @/lib/db into
+              // the browser bundle and the Next build fails on
+              // `Can't resolve 'perf_hooks'`, so the split is a build
+              // constraint, not a preference. See
+              // lib/production/engine/client.ts.
               group: [
                 "@/lib/production/*",
                 "@/lib/production/*/**",
                 "!@/lib/production/engine",
+                "!@/lib/production/engine/client",
               ],
               message:
                 "Floor code must go through lib/production/engine. See docs/superpowers/specs/2026-08-11-production-engine-operator-experience-design.md",

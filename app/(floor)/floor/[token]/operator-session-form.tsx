@@ -17,17 +17,32 @@ import {
 } from "./operator-session-actions";
 import { pauseBagAction } from "./actions";
 import {
-  FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS,
-  sessionSatisfiesFirstOpCount,
-} from "@/lib/production/station-operator-session";
-import {
   isBlisterCounterSnapshotStation,
   parseNonnegativeIntegerInput,
   shiftEndCounterSnapshotHelperText,
   shiftEndCounterSnapshotMissingError,
-} from "@/lib/production/blister-counter-snapshot";
+} from "@/lib/production/engine/client";
 
-type ActiveSession = {
+// FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS / sessionSatisfiesFirstOpCount
+// — duplicated from lib/production/station-operator-session.ts (canonical
+// source; do NOT deduplicate). That module also imports the
+// stationOperatorSessions TABLE OBJECT (a runtime value) from
+// @/lib/db/schema for its DB-touching exports, so re-exporting anything
+// from it through lib/production/engine/client.ts would pull that import
+// into this "use client" file's bundle and fail the Next build the same
+// way lib/production/engine/client.ts's own header comment warns about.
+// Mirrors the FRESH_BAG_STATION_KINDS precedent in actions.ts: same
+// isolation reasoning, same "update both sets in tandem" obligation.
+const FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS: ReadonlySet<string> =
+  new Set(["BLISTER", "COMBINED", "BOTTLE_HANDPACK"]);
+
+function sessionSatisfiesFirstOpCount(session: {
+  employeeId: string | null;
+}): boolean {
+  return session.employeeId != null;
+}
+
+export type ActiveSession = {
   id: string;
   employeeId: string | null;
   employeeNameSnapshot: string;

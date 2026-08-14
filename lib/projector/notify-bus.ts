@@ -33,6 +33,10 @@ export function subscribe(fn: Subscriber): () => void {
   };
 }
 
+export function subscriberCount(): number {
+  return subscribers.size;
+}
+
 function ensureListener() {
   if (listenerStarted) return;
   listenerStarted = true;

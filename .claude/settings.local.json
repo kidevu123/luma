@@ -186,7 +186,13 @@
       "Bash(perl -i -ne 'print unless $. >= 2067 && $. <= 2308' \"app/\\(floor\\)/floor/[token]/actions.ts\")",
       "Bash(perl -i -ne 'print unless \\($. >= 2549 && $. <= 2681\\) || \\($. >= 2459 && $. <= 2504\\)' \"app/\\(floor\\)/floor/[token]/actions.ts\")",
       "Bash(sed -n '2702,2879p' base-actions.ts)",
-      "Bash(sed -n '373,549p' new-mod.ts)"
+      "Bash(sed -n '373,549p' new-mod.ts)",
+      "Bash(awk 'NR>=1127 && NR<=1272' old-actions.ts)",
+      "Bash(awk 'NR>=1128 && NR<=1273' old-actions.ts)",
+      "Bash(awk 'NR>=197 && NR<=224' old-actions.ts)",
+      "Bash(awk 'NR>=48 && NR<=75' /Users/sahilkhatri/Work/luma/lib/production/engine/assign-bag-product.ts)",
+      "Bash(perl -pi -e 's/<Sheet title=\"\\(More|Pause|Enter code manually|Why can.t I continue\\\\?\\)\" onClose=\\\\{onClose\\\\}>/<Sheet title=\"$1\" error={error} onClose={onClose}>/' \"app/\\(floor\\)/floor/[token]/operator-screen.tsx\")",
+      "Bash(awk *)"
     ]
   }
 }

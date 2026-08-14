@@ -31,23 +31,72 @@ import {
   stations,
   tabletTypes,
   workflowBags,
+  workflowEvents,
 } from "@/lib/db/schema";
 import { STATION_KIND_TO_PRODUCT_KINDS } from "@/lib/production/first-op-product";
 import type { RouteOperationView } from "@/lib/production/routes";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
 import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
+import { checkStageProgression } from "@/lib/production/stage-progression";
+import {
+  SEALING_SEGMENT_EVENT,
+  needsSealingLaneClose,
+} from "@/lib/production/sealing-segments";
+import { hasPartialSealingCloseout } from "@/lib/production/sealing-partial-closeout";
+import { intentToEventType, operationHasBagCloseGesture } from "./intent-events";
 import { resolveOperation } from "./resolve-operation";
 import { resolveCompletionInputs } from "./resolve-completion";
+import {
+  loadPartialAllocationFacts,
+  type PartialAllocationFacts,
+} from "./resolve-partial-allocation";
 import { resolveProductChoice, type ProductChoice } from "./resolve-product-choice";
 import { etaMinutes, medianCycleMinutes } from "./eta";
 import { evaluateChecks, blockersFromChecks, type CheckResult } from "./resolve-exceptions";
 import type {
+  CompletionInput,
   CurrentWork,
   NextAction,
   ProductOption,
   StationView,
   UpNextBag,
 } from "./types";
+
+/** The bag stages at which a COMBINED station's gesture is packaging
+ *  rather than blister. COMBINED-AT-PACKAGING-1 closed the routing gap in
+ *  advanceBag (a packaging-SHAPED gesture crosses pickOperationForStation-
+ *  Kind's preference gate), but a gesture only takes that shape when the
+ *  SCREEN asked for cases/displays/loose — and the screen asks for
+ *  whatever resolveCompletionInputs was handed. Without this, a COMBINED
+ *  station holding a SEALED bag renders the blister counter, the operator
+ *  types a card count, and the write records BLISTER_COMPLETE on a bag
+ *  that is already blistered. See the Task 2 ledger note (F2).
+ *
+ *  WHAT A COMBINED STATION STILL CANNOT DO — the honest limit, unchanged
+ *  by this task:
+ *
+ *   1. SEAL through the engine. Sealing is reached by stage BLISTERED,
+ *      which is ALSO the stage a COMBINED station's own blister
+ *      completion lands on, so stage alone cannot tell "I just
+ *      blistered this" from "I am about to seal it". There is no
+ *      isSealingShapedComplete either (advance.ts's header explains
+ *      why: `counter` doubles as the blister count, and counterPresses
+ *      is only emitted once the operation ALREADY resolved to
+ *      HEAT_SEAL — a circular signal). A COMBINED sealing gesture
+ *      therefore still resolves to BLISTER and fires BLISTER_COMPLETE,
+ *      which ALLOWED_EVENTS_BY_KIND.COMBINED accepts, so nothing errors
+ *      — it records the wrong stage. Closing it needs a station MODE
+ *      (what is this machine doing right now) or route-driven data, not
+ *      another inference.
+ *   2. Lane-close. buildNextAction only offers CONFIRM_BAG_EMPTY where
+ *      the resolved operation has a bag-close event, and BLISTER has
+ *      none — so a COMBINED bag with sealing segments on it must be
+ *      closed at a pure SEALING station.
+ *   3. Assign a product mid-flow. shouldAssignProductFirst keys off the
+ *      resolved event type, and BLISTER_COMPLETE is not one of the two
+ *      events that demand a saved product, so the assign-then-record
+ *      sequence never triggers at COMBINED (the Task 1 ledger note). */
+const COMBINED_PACKAGING_STAGES: ReadonlySet<string> = new Set(["SEALED"]);
 
 export type NextActionInput = {
   hasOperatorSession: boolean;
@@ -60,6 +109,15 @@ export type NextActionInput = {
    *  NONE for a bag that already has one — the choice is only asked for
    *  an unmapped bag. */
   productChoice: ProductChoice;
+  /** The station's kind — the tiebreaker intentToEventType and
+   *  resolveCompletionInputs both need (HANDPACK_BLISTER's event
+   *  override; the sealing machine counter). */
+  stationKind: string;
+  /** Sealing lane facts for the bag in hand, folded by the loader. */
+  sealing: { segmentCount: number; hasPartialCloseout: boolean };
+  /** A prior run's still-OPEN allocation session on this physical bag,
+   *  or null when there is nothing to resolve. */
+  partialAllocation: PartialAllocationFacts | null;
 };
 
 /** Operator-facing verb for an operation. Never an event name. */
@@ -155,6 +213,24 @@ export function buildNextAction(input: NextActionInput): NextAction {
   }
 
   const blockers = blockersFromChecks(input.checks);
+
+  // RESOLVE-PARTIAL-1 — a prior run's OPEN allocation on this physical
+  // bag outranks the product question, because assigning a product is
+  // exactly what it refuses (assign-bag-product.ts's
+  // OpenAllocationBlockError). It does NOT outrank a paused, held or
+  // finalized bag: those are wrong with the bag itself, and resolving a
+  // ledger would not fix them.
+  const nonProductBlockers = blockers.filter(
+    (b) => b.code !== "PRODUCT_UNRESOLVED",
+  );
+  if (input.partialAllocation && nonProductBlockers.length === 0) {
+    return {
+      kind: "RESOLVE_PARTIAL",
+      estimate: input.partialAllocation.estimate,
+      needsEntry: input.partialAllocation.needsEntry,
+    };
+  }
+
   // A pickable product outranks the PRODUCT_UNRESOLVED blocker: the bag
   // is not broken, it just has not been told which SKU it is making, and
   // the operator standing at the station is the one who knows. It does
@@ -175,11 +251,59 @@ export function buildNextAction(input: NextActionInput): NextAction {
     return { kind: "SCAN_TO_CLAIM", expected: input.expected };
   }
 
-  return {
-    kind: "COMPLETE",
-    label: `${operationVerb(input.operation.operationCode)} complete`,
-    inputs: resolveCompletionInputs(input.operation),
+  const operationCode = input.operation.operationCode;
+  const work = {
+    label: `${operationVerb(operationCode)} complete`,
+    inputs: resolveCompletionInputs(input.operation, {
+      stationKind: input.stationKind,
+    }) as CompletionInput[],
   };
+
+  // Sealing lane-close. Several sealers share one blistered bag; each
+  // records its own segment, and the bag-level SEALING_COMPLETE must fire
+  // before packaging or the bag strands (which is why
+  // needsSealingLaneClose exists at all). Gated on the operation actually
+  // HAVING a bag-close gesture, so a COMBINED station — whose operation
+  // resolves to BLISTER, for which intentToEventType answers null — is
+  // never offered a button advanceBag would refuse.
+  if (
+    operationHasBagCloseGesture(operationCode) &&
+    needsSealingLaneClose({
+      stage: input.bagStage,
+      segmentCount: input.sealing.segmentCount,
+      hasPartialSealingCloseout: input.sealing.hasPartialCloseout,
+    })
+  ) {
+    return { kind: "CONFIRM_BAG_EMPTY", moreWork: work };
+  }
+
+  // START — claimed early, work not yet possible. The bag is at this
+  // station (read_station_live pinned it, so a claim event fired) but its
+  // stage has not reached what this operation's completion event
+  // requires, which is the overlap scan the spec preserves: sealing may
+  // take a bag while blister is still running, and COMPLETE stays shut
+  // until BLISTERED lands. Asked of checkStageProgression — the same
+  // guard recordStageEvent applies inside the write — so the screen can
+  // never offer a DONE the engine would refuse.
+  const completeEvent = intentToEventType(
+    "COMPLETE",
+    operationCode,
+    input.stationKind,
+  );
+  if (completeEvent) {
+    const progression = checkStageProgression({
+      eventType: completeEvent,
+      currentStage: input.bagStage,
+      // SEALING-PARTIAL-CLOSEOUT-1: packaging may complete from
+      // BLISTERED once sealing closed out partially.
+      packagingPartialSealedReady: input.sealing.hasPartialCloseout,
+    });
+    if (!progression.allowed) {
+      return { kind: "START", label: operationVerb(operationCode) };
+    }
+  }
+
+  return { kind: "COMPLETE", ...work };
 }
 
 /** Recent per-bag cycle times at one station KIND, in minutes, as one
@@ -282,7 +406,7 @@ async function loadMedianCycleMinutesByProduct(
  *  Empty when the station kind has no product-kind mapping: a station
  *  that is not supposed to decide product identity must not offer a
  *  pick. */
-async function loadCompatibleProducts(args: {
+export async function loadCompatibleProductsForStation(args: {
   tabletTypeId: string;
   stationKind: string;
 }): Promise<ProductOption[]> {
@@ -349,10 +473,68 @@ export async function getStationView(stationId: string): Promise<StationView> {
     .leftJoin(purchaseOrders, eq(purchaseOrders.id, receives.poId))
     .where(eq(readStationLive.stationId, stationId));
 
+  // COMBINED-AT-PACKAGING-1 (Task 2 ledger note F2) — a COMBINED station
+  // holding a post-sealing bag is packaging it, so the READ must resolve
+  // the packaging operation too. Only then does the screen ask for
+  // cases/displays/loose, which is what makes the gesture
+  // packaging-shaped and re-crosses the same preference gate inside
+  // advanceBag. Every other station kind ignores preferOperation
+  // (pickOperationForStationKind gates on the raw kind).
+  const currentStage = currentAtStation?.state?.stage ?? null;
+  const preferPackagingAtCombined =
+    stationRow.station.kind === "COMBINED" &&
+    currentStage != null &&
+    COMBINED_PACKAGING_STAGES.has(currentStage);
+
   const resolved = currentAtStation
     ? await resolveOperation({
         productId: currentAtStation.bag.productId,
         stationKind: stationRow.station.kind,
+        ...(preferPackagingAtCombined ? { preferOperation: "PACKAGING" } : {}),
+      })
+    : null;
+
+  // Sealing lane facts for the bag in hand: the segment count and
+  // whether a partial close-out already satisfied the lane close. Same
+  // two event types page.tsx folded for the legacy panel, folded by the
+  // same two helpers.
+  const sealingEvents = currentAtStation
+    ? (
+        await db
+          .select({
+            eventType: workflowEvents.eventType,
+            stationId: workflowEvents.stationId,
+            payload: workflowEvents.payload,
+          })
+          .from(workflowEvents)
+          .where(
+            and(
+              eq(workflowEvents.workflowBagId, currentAtStation.bag.id),
+              inArray(workflowEvents.eventType, [
+                SEALING_SEGMENT_EVENT,
+                "SEALING_COMPLETE",
+              ]),
+            ),
+          )
+      ).map((row) => ({
+        eventType: row.eventType,
+        stationId: row.stationId,
+        payload: (row.payload ?? null) as Record<string, unknown> | null,
+      }))
+    : [];
+  const sealing = {
+    segmentCount: sealingEvents.filter((e) => e.eventType === SEALING_SEGMENT_EVENT)
+      .length,
+    hasPartialCloseout: hasPartialSealingCloseout(sealingEvents),
+  };
+
+  // RESOLVE-PARTIAL-1 — a prior run's still-OPEN ledger on the same
+  // physical bag. Null in the ordinary case, which is every bag whose
+  // only open session is its own.
+  const partialAllocation = currentAtStation
+    ? await loadPartialAllocationFacts({
+        inventoryBagId: currentAtStation.bag.inventoryBagId,
+        workflowBagId: currentAtStation.bag.id,
       })
     : null;
 
@@ -400,7 +582,7 @@ export async function getStationView(stationId: string): Promise<StationView> {
   // SEALING_PRODUCT_ALREADY_SAVED_ERROR exists to refuse.
   const compatibleProducts =
     currentAtStation && !currentAtStation.bag.productId && currentAtStation.tabletTypeId
-      ? await loadCompatibleProducts({
+      ? await loadCompatibleProductsForStation({
           tabletTypeId: currentAtStation.tabletTypeId,
           stationKind: stationRow.station.kind,
         })
@@ -446,6 +628,8 @@ export async function getStationView(stationId: string): Promise<StationView> {
         }
       : null,
     operation: resolved?.operation ?? null,
+    sealing,
+    partialAllocation,
     // Data, not a decision: resolveProductChoice runs in the pure half.
     compatibleProducts,
     // The clock enters the engine HERE and nowhere else — every function
@@ -469,6 +653,14 @@ export type StationViewRows = {
     isOnHold: boolean;
   } | null;
   operation: RouteOperationView | null;
+  /** Sealing lane facts for the bag in hand — the segment count and
+   *  whether a partial sealing close-out already satisfied the lane
+   *  close. Both zero/false when there is no bag. */
+  sealing: { segmentCount: number; hasPartialCloseout: boolean };
+  /** A prior run's still-OPEN raw-bag allocation session on this
+   *  physical bag, with the system-derived remaining when it can be
+   *  derived. Null in the ordinary case. */
+  partialAllocation: PartialAllocationFacts | null;
   /** Active products this bag's tablet type may become at this station,
    *  loaded ONLY when the bag has no product_id (see getStationView).
    *  Empty otherwise — assembleStationView reads it through
@@ -528,6 +720,9 @@ export function assembleStationView(rows: StationViewRows): StationView {
       operation: rows.operation,
       checks,
       productChoice: resolveProductChoice(rows.compatibleProducts),
+      stationKind: rows.station.kind,
+      sealing: rows.sealing,
+      partialAllocation: rows.partialAllocation,
       bagStage: rows.current?.stage ?? null,
       // The bag the operator should scan next is the head of the same
       // list the screen shows — never a second, differently-ordered pick.

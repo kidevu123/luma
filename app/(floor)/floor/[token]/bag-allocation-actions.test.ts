@@ -145,7 +145,7 @@ import {
   closeAllocationSessionAction,
   markBagDepletedAction,
 } from "./bag-allocation-actions";
-import { deriveBagStatusAfterClose } from "@/lib/production/bag-allocation";
+import { deriveBagStatusAfterClose } from "@/lib/production/engine";
 
 // ── Fixtures ──────────────────────────────────────────────────────────
 

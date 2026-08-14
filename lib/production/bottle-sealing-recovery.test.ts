@@ -78,16 +78,23 @@ describe("recoverBottleSealingHoldAction — product-kind aware, lead-gated, saf
 });
 
 describe("banner + panel — product-kind aware UI", () => {
-  it("the card-line 'waiting for sealing' banner is suppressed for bottle products", () => {
-    expect(pageSrc).toMatch(/if \(productKind === "BOTTLE"\) return null;/);
-    // The card message still exists for non-bottle products.
-    expect(pageSrc).toMatch(/Waiting for sealing to complete/);
-  });
-
-  it("renders the recovery panel only for a bottle bag stuck at BLISTERED at packaging", () => {
-    expect(pageSrc).toMatch(/BottleSealingRecoveryPanel/);
-    expect(pageSrc).toMatch(/currentAtStation\.product\?\.kind === "BOTTLE"/);
-    expect(pageSrc).toMatch(/currentAtStation\.state\?\.stage === "BLISTERED"/);
+  // P4b Task 5 (THE CUTOVER) — the hand-written "waiting for sealing"
+  // banner is GONE from page.tsx. The engine says the same thing now,
+  // once, for every station: a claimed bag whose stage has not reached
+  // what this operation needs renders NextAction.START, whose copy is
+  // "still being worked on at the step before this one". There is no
+  // longer a card-vs-bottle branch to suppress, because there is no
+  // longer a card-specific banner — which is what the original
+  // assertion was working around.
+  it("the recovery panel is still reachable from the operator screen", () => {
+    const screenSrc = readFileSync(
+      join(__dirname, "../../app/(floor)/floor/[token]/operator-screen.tsx"),
+      "utf8",
+    );
+    expect(screenSrc).toMatch(/BottleSealingRecoveryPanel/);
+    // Offered exactly where the dead end is: a bag is here and this
+    // station cannot move it forward yet.
+    expect(screenSrc).toMatch(/view\.nextAction\.kind === "START"/);
   });
 
   it("panel uses bottle language (not card sealing) and states what it does NOT change", () => {

@@ -19,10 +19,12 @@ function assert(cond: boolean, msg: string): void {
   }
 }
 
+// P4b Task 5 (THE CUTOVER): the UI assertions below pointed at
+// scan-card-form.tsx / stage-action-buttons.tsx and at page.tsx's inline
+// resolutions, all of which are DELETED. The SERVER-side assertions in
+// this script are the ones that carry the invariant, and they stay.
 function main(): void {
   const actions = read("app/(floor)/floor/[token]/actions.ts");
-  const form = read("app/(floor)/floor/[token]/scan-card-form.tsx");
-  const page = read("app/(floor)/floor/[token]/page.tsx");
   const resolveMod = read("lib/production/floor-scan-resolve.ts");
 
   assert(
@@ -40,19 +42,6 @@ function main(): void {
   assert(
     actions.includes("pickBestFloorScanCard"),
     "actions: uses pickBestFloorScanCard",
-  );
-  assert(form.includes('fd.set("stationId", stationId)'), "scan form passes stationId to lookup");
-  assert(
-    page.includes("partialSealingCloseoutByBag"),
-    "page: partial sealing close-out per pickup bag",
-  );
-  assert(
-    !page.includes("hasPartialSealingCloseout: false"),
-    "page: no hardcoded hasPartialSealingCloseout false",
-  );
-  assert(
-    page.includes("eligiblePartialPackagingResumes"),
-    "page: partial packaging resume pickup list",
   );
   assert(
     actions.includes("isWorkflowBagResumableAtSealingAfterPartialPackaging"),

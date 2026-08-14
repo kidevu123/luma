@@ -13,30 +13,38 @@ import {
   readBagState,
   readStationLive,
   products,
-  productAllowedTablets,
   rawBagAllocationSessions,
   workflowEvents,
 } from "@/lib/db/schema";
-import { canResumeFinalizedWorkflowOnInventoryBag } from "@/lib/production/partial-bag-restart";
+import { writeAudit } from "@/lib/db/audit";
+import { projectEvent } from "@/lib/projector";
+import { refreshMaterialReadModelsAfterBlister } from "@/lib/projector/material-read-model-refresh";
+// The engine barrel is the ONLY permitted entry point from app/(floor)/
+// into lib/production — deep paths are restricted too (eslint.config.mjs).
 import {
+  recordStageEvent,
+  recordPackagingComplete,
+  assignBagProduct,
+  OpenAllocationBlockError,
+  raiseAllocationOpenFailure,
+  projectBagFinalizedEvent,
+  resolveDeferredQrReleaseAfterPackaging,
+  projectBagReleasedEvent,
+  resolveStationByToken,
+  canResumeFinalizedWorkflowOnInventoryBag,
   loadPartialReuseContext,
   type PartialBagSession,
   type PartialReuseContext,
-} from "@/lib/production/partial-bags";
-import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
-import { batchProductionBlockReason } from "@/lib/production/batch-production-guard";
-import { loadRawBagStartClassificationForScan, RAW_BAG_START_OPERATOR_MESSAGES } from "@/lib/production/floor-partial-bag-start-resolution";
-import {
+  classifyFloorScanCard,
+  batchProductionBlockReason,
+  loadRawBagStartClassificationForScan,
+  RAW_BAG_START_OPERATOR_MESSAGES,
   floorScanInputMatchesCard,
   pickBestFloorScanCard,
   type FloorScanCardCandidate,
-} from "@/lib/production/floor-scan-resolve";
-import { numericSuffix } from "@/lib/production/qr-sort";
-import { floorReadinessOperatorMessage } from "@/lib/production/floor-readiness";
-import { evaluateQrCardReadinessById } from "@/lib/production/floor-readiness-loaders";
-import { writeAudit } from "@/lib/db/audit";
-import { projectEvent } from "@/lib/projector";
-import {
+  numericSuffix,
+  floorReadinessOperatorMessage,
+  evaluateQrCardReadinessById,
   STATION_RELEASE_FROM_STAGE,
   STATION_PICKUP_FROM_STAGE,
   STATION_STARTED_RESUME_FROM_STAGE,
@@ -45,44 +53,24 @@ import {
   bothBottleFinishingDone,
   missingBottleFinishingSteps,
   BOTTLE_FINISHING_EVENTS,
-} from "@/lib/production/stage-progression";
-import { coercePartialRemainingEstimate } from "@/lib/production/partial-remaining-input";
-import {
+  coercePartialRemainingEstimate,
   computeSystemDerivedResolutionForBag,
   buildFloorOpenAllocationBlock,
   resolveAllocationFromProductionOutput,
   type FloorOpenAllocationBlock,
-} from "@/lib/production/system-derived-allocation-resolution";
-import { refreshMaterialReadModelsAfterBlister } from "@/lib/projector/material-read-model-refresh";
-import { resolveStationAccountability } from "@/lib/production/station-operator-session";
-import { ensureOpenRawBagAllocationSessionForWorkflowBag } from "@/lib/production/raw-bag-allocation-lifecycle";
-import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
-import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
-import {
+  resolveStationAccountability,
+  ensureOpenRawBagAllocationSessionForWorkflowBag,
+  assertStationActiveForFloorActions,
+  SEALING_SEGMENT_EVENT,
   SEALING_PARTIAL_CLOSE_REASONS,
-  deriveSealedPartialCountFromSegments,
   isWorkflowBagResumableAtSealingAfterPartialPackaging,
-} from "@/lib/production/sealing-partial-closeout";
-import {
   lookupInventoryBagByQrScanToken,
-  resolveWorkflowBagTabletTypeId,
-} from "@/lib/production/workflow-bag-tablet-context";
-import {
   parseNonnegativeIntegerInput,
   pauseCounterSnapshotMissingError,
   stationRequiresBlisterCounterSnapshot,
-} from "@/lib/production/blister-counter-snapshot";
-import { recordBlisterCounterRollSegment } from "@/lib/production/blister-roll-segments";
-import { assertCounterSnapshotAllowed } from "@/lib/production/counter-snapshot-guard-loader";
-// The engine barrel is the ONLY permitted entry point from app/(floor)/
-// into lib/production — deep paths are restricted too (eslint.config.mjs).
-import {
-  recordStageEvent,
-  recordPackagingComplete,
-  projectBagFinalizedEvent,
-  resolveDeferredQrReleaseAfterPackaging,
-  projectBagReleasedEvent,
-  resolveStationByToken,
+  recordBlisterCounterRollSegment,
+  assertCounterSnapshotAllowed,
+  checkFirstOpProductSelection,
 } from "@/lib/production/engine";
 
 // Canonical source: lib/production/first-op-product.ts FIRST_OP_STATION_KINDS.
@@ -195,33 +183,13 @@ class PartialReuseConfirmationRequiredError extends Error {
   }
 }
 
-/** SPLIT-BAG-1 — thrown (inside the start transaction, so it rolls back with no
- *  writes) when the raw bag is blocked by an OPEN allocation from a prior run.
- *  The outer catch converts it to a STRUCTURED floor-blocker result so the
- *  station shows a "Use calculated remaining" panel instead of a dead-end
- *  error. Carries only the ids needed to compute eligibility after rollback. */
-class OpenAllocationBlockError extends Error {
-  readonly inventoryBagId: string;
-  readonly cardId: string | null;
-  constructor(inventoryBagId: string, cardId: string | null) {
-    super("This bag has an open allocation from a prior run.");
-    this.name = "OpenAllocationBlockError";
-    this.inventoryBagId = inventoryBagId;
-    this.cardId = cardId;
-  }
-}
-
-/** Raise the right error for a failed allocation open: the structured
- *  split-bag block for the "open session on this bag" case, else a plain error. */
-function raiseAllocationOpenFailure(
-  alloc: { error: string; code?: string },
-  ctx: { inventoryBagId: string; cardId: string | null },
-): never {
-  if (alloc.code === "OPEN_SESSION_ON_BAG") {
-    throw new OpenAllocationBlockError(ctx.inventoryBagId, ctx.cardId);
-  }
-  throw new Error(alloc.error);
-}
+// ASSIGN-PRODUCT-EXTRACT-1: OpenAllocationBlockError and
+// raiseAllocationOpenFailure moved verbatim to
+// lib/production/engine/assign-bag-product.ts alongside the sealing
+// product-save body that throws them. They are imported back through the
+// engine barrel (see the import block above) because the scan and pickup
+// paths below throw and catch the SAME class — two copies would make
+// `instanceof` silently stop matching.
 
 /** P1-PARTIAL — gate for every partial-bag start path. Throws the
  *  confirmation error on the first (unconfirmed) attempt, and enforces
@@ -1088,16 +1056,6 @@ const eventSchema = z.object({
   partialCloseReasonNote: z.string().max(200).optional().nullable(),
 });
 
-import {
-  FIRST_OP_STATION_KINDS,
-  checkFirstOpProductSelection,
-} from "@/lib/production/first-op-product";
-import {
-  SEALING_STATION_KINDS,
-  SEALING_PRODUCT_ALREADY_SAVED_ERROR,
-  validateSealingProductPick,
-} from "@/lib/production/sealing-product";
-
 const saveSealingProductSchema = z.object({
   token: z.string().uuid(),
   workflowBagId: z.string().uuid(),
@@ -1125,148 +1083,22 @@ export async function saveSealingProductAction(
 
   try {
     const station = await authStation(parsed.data.token, parsed.data.stationId);
-    if (!SEALING_STATION_KINDS.has(station.kind)) {
-      return {
-        error: `Station kind ${station.kind} cannot save product at sealing.`,
-      };
-    }
-
-    const [live] = await db
-      .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
-      .from(readStationLive)
-      .where(eq(readStationLive.stationId, parsed.data.stationId));
-    if (live?.currentWorkflowBagId !== parsed.data.workflowBagId) {
-      return { error: "This bag is not active at this sealing station." };
-    }
-
-    const [bagProductRow] = await db
-      .select({ productId: workflowBags.productId })
-      .from(workflowBags)
-      .where(eq(workflowBags.id, parsed.data.workflowBagId));
-
-    if (bagProductRow?.productId) {
-      if (bagProductRow.productId === parsed.data.productId) {
-        return { ok: true };
-      }
-      return { error: SEALING_PRODUCT_ALREADY_SAVED_ERROR };
-    }
-
-    await db.transaction(async (tx) => {
-      const accountability = await resolveStationAccountability(tx, {
-        stationId: parsed.data.stationId,
-        overrideEmployeeCode: parsed.data.overrideEmployeeCode ?? null,
-      });
-
-      const [productLookup] = await tx
-        .select({
-          id: products.id,
-          sku: products.sku,
-          name: products.name,
-          kind: products.kind,
-          isActive: products.isActive,
-        })
-        .from(products)
-        .where(eq(products.id, parsed.data.productId));
-
-      const tabletTypeId = await resolveWorkflowBagTabletTypeId(
-        tx,
-        parsed.data.workflowBagId,
-      );
-
-      const tabletRows = await tx
-        .select({ tabletTypeId: productAllowedTablets.tabletTypeId })
-        .from(productAllowedTablets)
-        .where(eq(productAllowedTablets.productId, parsed.data.productId));
-
-      const sealingPick = validateSealingProductPick({
-        stationKind: station.kind,
-        pickedProductId: parsed.data.productId,
-        product: productLookup ?? null,
-        tabletTypeId,
-        allowedTabletTypeIds: tabletRows.map((r) => r.tabletTypeId),
-      });
-      if (!sealingPick.ok) {
-        throw new Error(sealingPick.reason);
-      }
-
-      await tx
-        .update(workflowBags)
-        .set({ productId: sealingPick.productId })
-        .where(eq(workflowBags.id, parsed.data.workflowBagId));
-
-      await projectEvent(tx, {
-        workflowBagId: parsed.data.workflowBagId,
-        stationId: parsed.data.stationId,
-        eventType: "PRODUCT_MAPPED",
-        payload: {
-          product_id: sealingPick.productId,
-          product_sku: productLookup?.sku ?? null,
-          product_name: productLookup?.name ?? null,
-          product_kind: productLookup?.kind ?? null,
-          station_kind: station.kind,
-          source: "SEALING_SELECTION",
-        },
-        clientEventId: parsed.data.clientEventId ?? null,
-        enteredByUserId: accountability.enteredByUserId,
-        accountableEmployeeId: accountability.accountableEmployeeId,
-        accountabilitySource: accountability.accountabilitySource,
-        accountableEmployeeNameSnapshot:
-          accountability.accountableEmployeeNameSnapshot,
-      });
-
-      await writeAudit(
-        {
-          actorId: accountability.enteredByUserId ?? null,
-          actorRole: null,
-          action: "floor.sealing_product_saved",
-          targetType: "WorkflowBag",
-          targetId: parsed.data.workflowBagId,
-          after: {
-            product_id: sealingPick.productId,
-            product_sku: productLookup?.sku ?? null,
-            station_id: parsed.data.stationId,
-            source: "SEALING_SELECTION",
-          },
-        },
-        tx,
-      );
-
-      const [wfBagRow] = await tx
-        .select({ inventoryBagId: workflowBags.inventoryBagId })
-        .from(workflowBags)
-        .where(eq(workflowBags.id, parsed.data.workflowBagId))
-        .limit(1);
-      if (wfBagRow?.inventoryBagId) {
-        const sealingInventoryBagId = wfBagRow.inventoryBagId;
-        const alloc = await ensureOpenRawBagAllocationSessionForWorkflowBag(tx, {
-          inventoryBagId: wfBagRow.inventoryBagId,
-          workflowBagId: parsed.data.workflowBagId,
-          productId: sealingPick.productId,
-        });
-        if (!alloc.ok) {
-          if (sealingInventoryBagId) {
-            raiseAllocationOpenFailure(alloc, {
-              inventoryBagId: sealingInventoryBagId,
-              cardId: null,
-            });
-          }
-          throw new Error(alloc.error);
-        }
-      }
+    // ASSIGN-PRODUCT-EXTRACT-1: the guard sequence + transaction body now
+    // lives in lib/production/engine/assign-bag-product.ts so the
+    // production engine and this action run one implementation. Moved
+    // verbatim — see that module's header.
+    const result = await assignBagProduct({
+      station,
+      workflowBagId: parsed.data.workflowBagId,
+      productId: parsed.data.productId,
+      clientEventId: parsed.data.clientEventId,
+      overrideEmployeeCode: parsed.data.overrideEmployeeCode,
     });
-  } catch (err) {
-    if (err instanceof OpenAllocationBlockError) {
-      const resolution = await computeSystemDerivedResolutionForBag(
-        err.inventoryBagId,
-      );
-      return {
-        openAllocationBlock: buildFloorOpenAllocationBlock({
-          inventoryBagId: err.inventoryBagId,
-          cardId: err.cardId,
-          resolution,
-        }),
-      };
+    if ("openAllocationBlock" in result) {
+      return { openAllocationBlock: result.openAllocationBlock };
     }
+    if ("error" in result) return { error: result.error };
+  } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Could not save product.",
     };

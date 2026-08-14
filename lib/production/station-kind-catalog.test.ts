@@ -91,17 +91,21 @@ describe("STATION-KIND-FIX-1 · HANDPACK_BLISTER floor expectations (regression)
     expect(getDefaultPauseReasonForStation("BLISTER")).toBe("shift_end");
   });
 
-  it("HANDPACK_BLISTER uses timed-only complete, not blister count form", () => {
+  // P4b Task 5 (THE CUTOVER) — stage-action-buttons.tsx is DELETED, and
+  // with it the per-station form catalogue this scanned. The fact it
+  // protected — a HANDPACK_BLISTER station fires
+  // HANDPACK_BLISTER_COMPLETE and not the blister-count event — is now
+  // the engine's intentToEventType override, covered by
+  // lib/production/engine/advance.test.ts against real output rather
+  // than by matching a form's constant table.
+  it("HANDPACK_BLISTER completes with its own event, not the blister one", () => {
     const src = readFileSync(
-      join(__dirname, "../../app/(floor)/floor/[token]/stage-action-buttons.tsx"),
+      join(__dirname, "engine/intent-events.ts"),
       "utf8",
     );
     expect(src).toMatch(
-      /HANDPACK_BLISTER:.*Hand-pack complete.*HANDPACK_BLISTER_COMPLETE/s,
+      /HANDPACK_BLISTER: \{ BLISTER: "HANDPACK_BLISTER_COMPLETE" \}/,
     );
-    expect(src).toMatch(/TIMED_ONLY_EVENTS.*HANDPACK_BLISTER_COMPLETE/s);
-    const richLine = src.match(/RICH_FORM_EVENTS = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? "";
-    expect(richLine).not.toMatch(/HANDPACK_BLISTER_COMPLETE/);
   });
 });
 

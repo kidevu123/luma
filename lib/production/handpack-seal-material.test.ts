@@ -20,8 +20,16 @@ const pageSrc = readFileSync(
   join(__dirname, "../../app/(floor)/floor/[token]/page.tsx"),
   "utf8",
 );
-const stageSrc = readFileSync(
-  join(__dirname, "../../app/(floor)/floor/[token]/stage-action-buttons.tsx"),
+// P4b Task 5 (THE CUTOVER) — stage-action-buttons.tsx and
+// scan-card-form.tsx are DELETED; their two scanners here are replaced
+// by an engine assertion. What they protected was "the sealing DONE
+// gesture is one path that always asks for counter presses, never a
+// hand-pack-filtered variant". That is now resolveCompletionInputs's
+// job — it emits the counterPresses field for HEAT_SEAL at every
+// station kind that carries the machine counter — and is asserted
+// against the engine source below instead of against a deleted form.
+const completionSrc = readFileSync(
+  join(__dirname, "engine/resolve-completion.ts"),
   "utf8",
 );
 
@@ -98,20 +106,13 @@ describe("SEALING-FLOW-CLARITY-2 · unified sealing completion path", () => {
     expect(pageSrc).not.toMatch(/bagIsHandpacked/);
   });
 
-  it("stage-action-buttons always exposes SEALING_COMPLETE — no hand-pack filter", () => {
-    expect(stageSrc).not.toMatch(/bagIsHandpacked/);
-    expect(stageSrc).not.toMatch(/SealHandpackForm/);
-    expect(stageSrc).toMatch(/SealingCompleteForm/);
-    expect(stageSrc).toMatch(/Counter presses/);
-  });
-
-  it("scan-card-form unchanged", () => {
-    const scanSrc = readFileSync(
-      join(__dirname, "../../app/(floor)/floor/[token]/scan-card-form.tsx"),
-      "utf8",
-    );
-    expect(scanSrc).not.toMatch(/SealHandpackForm/);
-    expect(scanSrc).not.toMatch(/handpack-seal-material/);
+  it("the engine asks for counter presses at sealing — no hand-pack variant", () => {
+    expect(completionSrc).toMatch(/stationUsesSealingCounter/);
+    expect(completionSrc).toMatch(/key: "counterPresses"/);
+    // No hand-pack-specific branch anywhere in the completion resolver:
+    // one sealing path, whatever produced the blistered cards.
+    expect(completionSrc).not.toMatch(/HANDPACK/);
+    expect(completionSrc).not.toMatch(/handpack/i);
   });
 
   it("stage-progression unchanged", () => {
@@ -124,18 +125,11 @@ describe("SEALING-FLOW-CLARITY-2 · unified sealing completion path", () => {
   });
 });
 
-describe("SEALING-MATERIAL-NONBLOCKING-1 · counter presses scroll-safe input", () => {
-  function sealingFormBlock(): string {
-    const formIdx = stageSrc.indexOf("function SealingCompleteForm");
-    const blisterIdx = stageSrc.indexOf("function BlisterCompleteForm");
-    return stageSrc.slice(formIdx, blisterIdx);
-  }
-
-  it("Counter presses NumField uses scrollSafe to prevent wheel changes", () => {
-    const block = sealingFormBlock();
-    expect(block).toMatch(/label="Counter presses"/);
-    expect(block).toMatch(/scrollSafe/);
-    const numFieldIdx = stageSrc.indexOf("function NumField");
-    expect(stageSrc.slice(numFieldIdx, numFieldIdx + 900)).toMatch(/onWheel/);
-  });
-});
+// P4b Task 5 (THE CUTOVER) — the "Counter presses NumField uses
+// scrollSafe" scanner is DELETED with stage-action-buttons.tsx. It
+// protected an input-widget detail (a mouse wheel must not silently
+// change a typed count) of a form that no longer exists; the operator
+// screen's numeric fields are plain text inputs with inputMode="numeric"
+// and pattern="[0-9]*", which have no wheel behaviour to guard. There is
+// no engine-side equivalent to move it to, and inventing one would be a
+// test with nothing behind it.

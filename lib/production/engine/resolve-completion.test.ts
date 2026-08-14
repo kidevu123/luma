@@ -82,3 +82,56 @@ describe("resolveCompletionInputs", () => {
     expect(inputs).toEqual([]);
   });
 });
+
+describe("resolveCompletionInputs · the sealing machine counter (P4b Task 5)", () => {
+  const sealOp = op({
+    operationCode: "HEAT_SEAL",
+    allowedStationKind: "SEALING",
+    requiresCounter: true,
+    outputUnit: "cards",
+  });
+
+  it("asks for counter PRESSES at a station that carries the sealing counter", () => {
+    // recordStageEvent refuses a sealing segment whose counterPresses is
+    // undefined (SEALING_COUNTER_PRESS_ERROR) and derives the card count
+    // itself. Asking for `counter` here would make every sealing DONE a
+    // refusal — the gap this closes.
+    const inputs = resolveCompletionInputs(sealOp, { stationKind: "SEALING" });
+    const keys = inputs.map((i) => i.key);
+    expect(keys).toContain("counterPresses");
+    expect(keys).not.toContain("counter");
+    expect(inputs.find((i) => i.key === "counterPresses")?.required).toBe(true);
+  });
+
+  it("labels the presses field in presses, not in the operation's cards", () => {
+    const inputs = resolveCompletionInputs(sealOp, { stationKind: "SEALING" });
+    expect(inputs.find((i) => i.key === "counterPresses")?.unit).toBe("presses");
+    // Damage is still counted in the operation's own output unit.
+    expect(inputs.find((i) => i.key === "damaged")?.unit).toBe("cards");
+  });
+
+  it("covers COMBINED too — stationUsesSealingCounter is the rule, not a SEALING literal", () => {
+    const inputs = resolveCompletionInputs(sealOp, { stationKind: "COMBINED" });
+    expect(inputs.map((i) => i.key)).toContain("counterPresses");
+  });
+
+  it("keeps the plain counter where the machine counter does not apply", () => {
+    // No station kind supplied (a caller that has not been rewired) and
+    // a station kind that does not carry the counter both fall back to
+    // the generic field rather than silently demanding presses.
+    expect(resolveCompletionInputs(sealOp).map((i) => i.key)).toContain("counter");
+    expect(
+      resolveCompletionInputs(sealOp, { stationKind: "HANDPACK_BLISTER" }).map(
+        (i) => i.key,
+      ),
+    ).toContain("counter");
+  });
+
+  it("never asks for presses at a non-sealing operation", () => {
+    const inputs = resolveCompletionInputs(
+      op({ operationCode: "BLISTER", allowedStationKind: "BLISTER", outputUnit: "cards" }),
+      { stationKind: "COMBINED" },
+    );
+    expect(inputs.map((i) => i.key)).not.toContain("counterPresses");
+  });
+});

@@ -48,11 +48,37 @@ const STATION_KIND_ALIAS: Readonly<Record<string, string>> = {
   HANDPACK_BLISTER: "BLISTER",
 };
 
-/** Pure: choose the operation a station of this kind performs. */
+/** Pure: choose the operation a station of this kind performs.
+ *
+ *  COMBINED-AT-PACKAGING-1 — a COMBINED station fires multiple card-flow
+ *  operations: LEGACY_MACHINE_KIND_TO_OPERATION in routes.ts:65-68 and
+ *  ALLOWED_EVENTS_BY_KIND.COMBINED in record-stage-event.ts (:97-103)
+ *  both list BLISTER_COMPLETE alongside the sealing and packaging event
+ *  types. STATION_KIND_ALIAS above only ever aliases COMBINED onto
+ *  BLISTER, though, so without a preference every COMBINED gesture
+ *  resolves to blister — including a genuinely packaging-shaped one.
+ *
+ *  opts.preferOperation lets a caller (advanceBag) name the operation
+ *  the gesture actually looks like. It is honored ONLY when
+ *  `stationKind === "COMBINED"` — deliberately the raw station kind, not
+ *  `effective`. HANDPACK_BLISTER also aliases onto BLISTER but is not
+ *  COMBINED and must never be handed an operation outside its own
+ *  allowedStationKind; gating on the raw kind keeps a plain (non-
+ *  COMBINED) station from ever crossing into a foreign op, preference or
+ *  not — the preference only WIDENS COMBINED's existing permissiveness,
+ *  it never bypasses another kind's guard. If the route has no operation
+ *  with that code, the preference is silently dropped and COMBINED falls
+ *  back to its ordinary blister match. */
 export function pickOperationForStationKind(
   ops: readonly RouteOperationView[],
   stationKind: string,
+  opts?: { preferOperation?: string },
 ): RouteOperationView | null {
+  if (opts?.preferOperation && stationKind === "COMBINED") {
+    const preferred = ops.find((o) => o.operationCode === opts.preferOperation);
+    if (preferred) return preferred;
+  }
+
   const effective = STATION_KIND_ALIAS[stationKind] ?? stationKind;
   const matches = ops
     .filter((o) => o.allowedStationKind === effective)
@@ -63,6 +89,7 @@ export function pickOperationForStationKind(
 export async function resolveOperation(input: {
   productId: string | null;
   stationKind: string;
+  preferOperation?: string;
 }): Promise<ResolvedOperation | null> {
   if (!input.productId) return null;
 
@@ -70,7 +97,13 @@ export async function resolveOperation(input: {
   if (!route || !route.routeId) return null;
 
   const ops = await getRouteOperations(route.routeId);
-  const operation = pickOperationForStationKind(ops, input.stationKind);
+  const operation = pickOperationForStationKind(
+    ops,
+    input.stationKind,
+    input.preferOperation !== undefined
+      ? { preferOperation: input.preferOperation }
+      : undefined,
+  );
   if (!operation) return null;
 
   return {

@@ -1,457 +1,184 @@
+// P4b Task 5 — THE CUTOVER. What this file scans changed completely.
+//
+// It used to be a ~510-line structural scanner over page.tsx's fifteen
+// inline resolutions and their panels: the pickup list, the resume list,
+// the fresh-card list, the product picker, the elapsed timer and its
+// station-scoped pause math, the sealing product options, the hand-pack
+// tablet context, the roll panel, the two "waiting for X" banners, the
+// supervisor-tools disclosure. Every one of those concepts is gone from
+// this page — that is the point of the cutover — so every assertion
+// about them is gone too.
+//
+// WHERE THE DELETED COVERAGE WENT (one line per retired describe block;
+// the task report carries the full justification):
+//
+//   STATION-MOBILE-UX-1/2 (layout, subtitle, bag label lines)
+//     -> the bag label is built by the ENGINE now
+//        (buildCurrentBagDisplayLabel inside getStationView), and
+//        lib/production/engine/station-view.test.ts pins BOTH lines
+//        ("carries both label lines so the rewire cannot drop the
+//        subline"). Layout ordering is no longer a page concern.
+//   PRODUCTION-OVERLAP-3 (idle copy, pickup/resume lists)
+//     -> behaviour RETIRED by spec §"Removed from operator mode": the
+//        bag dropdown, eligible-pickup list and resume list are gone
+//        from operator mode entirely. What replaces them is
+//        SCAN_TO_CLAIM + view.upNext, covered by
+//        station-view.test.ts's up-next and expected-scan cases.
+//   STATION-ACTIVE-UX-1 (Eastern time, ElapsedTimer, Op label)
+//     -> behaviour RETIRED: the spec's screen carries no timer and no
+//        picked-up timestamp. elapsed-timer.tsx survives for P5's
+//        supervisor view; the Op-label assertions scanned
+//        stage-action-buttons.tsx, which is DELETED.
+//   PRODUCTION-OVERLAP-1/2 (SEALING + PACKAGING waiting banners)
+//     -> replaced by NextAction.START, which says the same thing once
+//        for every station kind instead of twice by hand. Covered by
+//        station-view.test.ts "announces START when the bag was claimed
+//        before the previous step finished".
+//   STATION-TIMER-2 / STATION-SEALING-TIMER-ROLLS-CLEANUP-1
+//     -> the station-scoped timer queries are deleted with the timer.
+//        The projector half of that work is a separate concern and is
+//        KEPT below.
+//   PRODUCT-SELECTION-AT-SEALING-1 (page wiring)
+//     -> replaced by the engine's product resolution:
+//        resolve-product-choice.test.ts (AUTO vs PICK vs none) and
+//        station-view.test.ts's product-picking block.
+//   HANDPACK-TABLET-CONTEXT-1 (page wiring)
+//     -> the context was a prop of the deleted StageActionButtons.
+//        lib/production/workflow-bag-tablet-context.test.ts still covers
+//        the resolver itself.
+//   MATERIAL-ROLL-CHANGE-1 · station roll panel ON MAIN PAGE
+//     -> behaviour MOVED: rolls reach the operator through More's
+//        "Change material" link (operatorMaterialLinks), asserted in
+//        lib/production/floor-station-mobile-nav.test.ts. The panel
+//        COMPONENT block is KEPT below — the component still exists for
+//        the rolls page and P5's supervisor view.
+//   MULTI-SEALING-FINAL-CLOSE-UNSTICK-1 (idle lane-close banner)
+//     -> replaced by NextAction.CONFIRM_BAG_EMPTY, which asks the
+//        question on the bag itself instead of listing stranded bags on
+//        an idle screen. Covered by station-view.test.ts's lane-close
+//        cases (including the partial-closeout exemption).
+
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 
 const pageSrc = readFileSync(join(__dirname, "page.tsx"), "utf8");
-const layoutSrc = readFileSync(join(__dirname, "layout.tsx"), "utf8");
 
-describe("STATION-MOBILE-UX-1 · floor station page layout", () => {
-  it("does not render primary top tool nav row", () => {
-    expect(pageSrc).not.toMatch(
-      /<nav className="flex flex-wrap gap-2 text-xs">/,
-    );
-    expect(pageSrc).not.toMatch(/href=\{`\/floor\/\$\{token\}\/rolls`\}.*Rolls/);
+describe("P4b-CUTOVER-1 · the station page is one read and one component", () => {
+  it("renders the operator screen from a single getStationView call", () => {
+    expect(pageSrc).toMatch(/getStationView\(station\.id\)/);
+    expect(pageSrc).toMatch(/<OperatorScreen/);
   });
 
-  it("gates supervisor tools by station kind", () => {
-    expect(pageSrc).toMatch(/floorSupervisorToolsForStation/);
-    expect(pageSrc).toMatch(/SupervisorToolsPanel/);
+  it("passes Report problem as a required prop, not an optional slot", () => {
+    expect(pageSrc).toMatch(/reportProblem=\{/);
+    expect(pageSrc).toMatch(/<ReportProblem/);
   });
 
-  it("keeps scan card; version footer lives in station layout", () => {
-    expect(pageSrc).toMatch(/ScanCardForm/);
-    expect(pageSrc).not.toMatch(/getPackageVersion/);
-    expect(pageSrc).not.toMatch(/Luma · v/);
-    expect(layoutSrc).toMatch(/LumaBuildFooter/);
-    expect(layoutSrc).toMatch(/min-h-dvh flex flex-col/);
+  it("no longer renders any of the legacy panels or lists", () => {
+    for (const gone of [
+      "ScanCardForm",
+      "StageActionButtons",
+      "BagAdvancedBanner",
+      "SupervisorToolsPanel",
+      "AutoLoadedLotsPanel",
+      "StationRollPanel",
+      "RawBagAllocationPanel",
+      "ElapsedTimer",
+      "OperatorSessionPanel",
+    ]) {
+      expect(pageSrc).not.toMatch(new RegExp(gone));
+    }
   });
 
-  it("places supervisor tools after current bag (footer is in layout)", () => {
-    const toolsIdx = pageSrc.indexOf("SupervisorToolsPanel");
-    const bagIdx = pageSrc.indexOf("Current bag");
-    expect(toolsIdx).toBeGreaterThan(bagIdx);
+  it("no longer resolves stages, pickups or product pickers itself", () => {
+    // The engine owns every one of these. A reappearance here is the
+    // leak the cutover exists to close.
+    for (const gone of [
+      "STATION_PICKUP_FROM_STAGE",
+      "STATION_STARTED_RESUME_FROM_STAGE",
+      "STATION_PREREQ_STAGE",
+      "FIRST_OP_STATION_KINDS",
+      "resolveSealingProductSelection",
+      "needsSealingLaneClose",
+      "productAllowedTablets",
+      "loadAutoLots",
+    ]) {
+      expect(pageSrc).not.toMatch(new RegExp(gone));
+    }
   });
 
-  it("keeps operator session before current bag section", () => {
-    const sessionIdx = pageSrc.indexOf("OperatorSessionPanel");
-    const bagIdx = pageSrc.indexOf("Current bag");
-    expect(sessionIdx).toBeGreaterThan(-1);
-    expect(bagIdx).toBeGreaterThan(sessionIdx);
-  });
-});
-
-describe("STATION-MOBILE-UX-2 · mobile-first station page", () => {
-  it("does not show Online badge or Station label clutter", () => {
-    expect(pageSrc).not.toMatch(/>\s*Online\s*</);
-    expect(pageSrc).not.toMatch(/>\s*Station\s*</);
-  });
-
-  it("uses collapsed details for supervisor tools, not top nav", () => {
-    expect(pageSrc).toMatch(/<details className=.*Supervisor tools/s);
-    expect(pageSrc).not.toMatch(/<nav className="flex flex-wrap/);
-  });
-
-  it("uses compact station subtitle helper", () => {
-    expect(pageSrc).toMatch(/formatStationPageSubtitle/);
-  });
-
-  it("does not show internal bag id chip on active bag", () => {
-    expect(pageSrc).not.toMatch(/bag\.id\.slice\(0, 8\)/);
-  });
-
-  it("uses received-bag lineage for the Current bag label", () => {
-    expect(pageSrc).toMatch(/buildCurrentBagDisplayLabel/);
-    expect(pageSrc).toMatch(/poNumber:\s*purchaseOrders\.poNumber/);
-    expect(pageSrc).toMatch(/tabletTypeName:\s*tabletTypes\.name/);
-    expect(pageSrc).toMatch(/inventoryBagNumber:\s*inventoryBags\.bagNumber/);
-    expect(pageSrc).toMatch(/leftJoin\(inventoryBags,\s*eq\(inventoryBags\.id,\s*workflowBags\.inventoryBagId\)\)/);
-    expect(pageSrc).toMatch(/leftJoin\(purchaseOrders,\s*eq\(purchaseOrders\.id,\s*receives\.poId\)\)/);
-  });
-
-  it("keeps the QR card label as secondary text instead of the primary Current bag label", () => {
-    expect(pageSrc).toMatch(/currentBagDisplayLabel\?\.primary/);
-    expect(pageSrc).toMatch(/currentBagDisplayLabel\?\.secondary/);
-    expect(pageSrc).not.toMatch(/currentAtStation\.card\?\.label \?\? "—"/);
-  });
-
-  it("keeps ScanCardForm for backup dropdown path", () => {
-    expect(pageSrc).toMatch(/ScanCardForm/);
+  it("stays well under the 200-line exit criterion for the render path", () => {
+    // The whole file is allowed to be longer than the render path
+    // (loadPendingRework and the cutover note live here too), but the
+    // component itself must stay small enough to read in one screen.
+    const start = pageSrc.indexOf("export default async function FloorStationPage");
+    const end = pageSrc.indexOf("/** QC-3 — pending REWORK_SENT");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(pageSrc.slice(start, end).split("\n").length).toBeLessThan(200);
   });
 });
 
-describe("PRODUCTION-OVERLAP-3 · idle-state copy and pickup labels", () => {
-  it("idle copy for pickup-only stations does not say 'released from the prior stage'", () => {
-    expect(pageSrc).not.toMatch(/Scan a bag QR released from the prior stage/);
+describe("P4b-CUTOVER-1 · the inactive-station branch can recover itself", () => {
+  it("mounts FloorLiveRefresh on BOTH branches", () => {
+    // A station re-activated from /machines must not need someone to
+    // walk over and reload the tablet. The stream 404s while inactive,
+    // which the component treats as any other failure: 60s polling plus
+    // a 60s SSE retry, so the screen recovers on its own.
+    const matches = pageSrc.match(/<FloorLiveRefresh token=\{token\} \/>/g) ?? [];
+    expect(matches.length).toBe(2);
+    const inactiveIdx = pageSrc.indexOf("if (!station.isActive)");
+    const returnIdx = pageSrc.indexOf("<FloorLiveRefresh", inactiveIdx);
+    const branchEnd = pageSrc.indexOf("</main>", inactiveIdx);
+    expect(returnIdx).toBeGreaterThan(inactiveIdx);
+    expect(returnIdx).toBeLessThan(branchEnd);
   });
 
-  it("idle copy for pickup-only stations says 'Scan a QR card or pick from the list below'", () => {
-    expect(pageSrc).toMatch(/Scan a QR card or pick from the list below/);
-  });
-
-  it("pickup dropdown label does not say 'released bag' (overlap pickup ≠ released bag)", () => {
-    const formSrc = require('fs').readFileSync(
-      require('path').join(__dirname, 'scan-card-form.tsx'),
-      'utf8'
-    );
-    expect(formSrc).not.toMatch(/Pick up released bag/);
-    expect(formSrc).toMatch(/Pick up or resume bag \(same QR continues\)/);
-  });
-
-  it("loads PO/tablet/bag context for pickup and resume options", () => {
-    expect(pageSrc).toMatch(/receiptNumber:\s*inventoryBags\.internalReceiptNumber/);
-    expect(pageSrc).toMatch(/tabletTypeName:\s*tabletTypes\.name/);
-    expect(pageSrc).toMatch(/bagNumber:\s*inventoryBags\.bagNumber/);
-    expect(pageSrc).toMatch(/poNumber:\s*purchaseOrders\.poNumber/);
-    expect(pageSrc).toMatch(/leftJoin\(inventoryBags,\s*eq\(inventoryBags\.id,\s*workflowBags\.inventoryBagId\)\)/);
+  it("still shows the inactive message from the shared constant", () => {
+    expect(pageSrc).toMatch(/STATION_INACTIVE_FLOOR_MESSAGE/);
   });
 });
 
-describe('STATION-ACTIVE-UX-1 · active bag Eastern time', () => {
-  it('imports formatFloorTimeEastern from floor-time helper', () => {
-    expect(pageSrc).toMatch(/formatFloorTimeEastern/);
-    expect(pageSrc).toMatch(/from.*floor-time/);
+describe("P4b-CUTOVER-1 · what the cutover deliberately keeps", () => {
+  it("keeps the QC panel (P5 gates it; it hosts Release hold)", () => {
+    expect(pageSrc).toMatch(/shouldRenderQcPanel\(station\.kind\)/);
+    expect(pageSrc).toMatch(/<QcPanel/);
+    expect(pageSrc).toMatch(/isOnHold=\{isOnHold\}/);
   });
 
-  it('does not call bare toLocaleTimeString on startedAt', () => {
-    // Eastern formatting is done via formatFloorTimeEastern, never bare
-    const startedIdx = pageSrc.indexOf('startedAt');
-    const chunk = pageSrc.slice(startedIdx, startedIdx + 300);
-    expect(chunk).not.toMatch(/\.toLocaleTimeString\(\)/);
+  it("derives isOnHold from the view's own blocker, not a second query", () => {
+    // Two reads of read_bag_state could disagree with each other, and
+    // the operator would be looking at the one that lost.
+    expect(pageSrc).toMatch(/b\.code === "BAG_ON_HOLD"/);
+    expect(pageSrc).not.toMatch(/readBagState/);
   });
 
-  it('wraps startedAt in formatFloorTimeEastern call', () => {
-    expect(pageSrc).toMatch(/formatFloorTimeEastern\s*\(\s*new Date/);
-  });
-});
-
-describe('STATION-ACTIVE-UX-1 · elapsed timer component', () => {
-  it('imports ElapsedTimer from elapsed-timer module', () => {
-    expect(pageSrc).toMatch(/ElapsedTimer/);
-    expect(pageSrc).toMatch(/from.*elapsed-timer/);
-  });
-
-  it('places ElapsedTimer after Current bag label', () => {
-    const bagIdx = pageSrc.indexOf('Current bag');
-    // Use the JSX usage (<ElapsedTimer), not the import line
-    const timerIdx = pageSrc.indexOf('<ElapsedTimer');
-    expect(timerIdx).toBeGreaterThan(bagIdx);
-  });
-
-  it('passes startedAtMs prop as number via getTime()', () => {
-    // JSX spans multiple lines — use s flag
-    expect(pageSrc).toMatch(/startedAtMs=\{[\s\S]*?\.getTime\(\)/);
-  });
-
-  it('passes pausedSecondsAccum from state', () => {
-    expect(pageSrc).toMatch(/pausedSecondsAccum=\{/);
-    expect(pageSrc).toMatch(/pausedSecondsAccum/);
-  });
-
-  it('passes isPaused from state', () => {
-    expect(pageSrc).toMatch(/isPaused=\{.*state\?.*isPaused/);
-  });
-
-  it('passes pausedAtMs as null when state.pausedAt is absent', () => {
-    expect(pageSrc).toMatch(/pausedAtMs=\{/);
-    // null fallback for pausedAt — multiline JSX, use s flag
-    expect(pageSrc).toMatch(/pausedAtMs=\{[\s\S]*?null[\s\S]*?\}/);
-  });
-
-  it('elapsed-timer is a use-client component', () => {
-    const timerSrc = require('fs').readFileSync(
-      require('path').join(__dirname, 'elapsed-timer.tsx'),
-      'utf8'
-    );
-    expect(timerSrc).toMatch(/^"use client"/);
-    expect(timerSrc).toMatch(/setInterval/);
-    expect(timerSrc).toMatch(/clearInterval/);
-    expect(timerSrc).toMatch(/Paused at/);
+  it("keeps the idle-operator guard", () => {
+    expect(pageSrc).toMatch(/<IdleOperatorGuard/);
   });
 });
 
-describe("PRODUCTION-OVERLAP-1 · SEALING waiting banner", () => {
-  it("BagAdvancedBanner guards on SEALING + STARTED before the generic prereq check", () => {
-    const guardIdx = pageSrc.indexOf(
-      'stationKind === "SEALING" && currentStage === "STARTED"',
-    );
-    const prereqIdx = pageSrc.indexOf("STATION_PREREQ_STAGE[stationKind]");
-    expect(guardIdx).toBeGreaterThan(-1);
-    expect(prereqIdx).toBeGreaterThan(-1);
-    expect(guardIdx).toBeLessThan(prereqIdx);
-  });
+// KEPT from the pre-cutover file — neither depends on page.tsx.
 
-  it("waiting banner says Waiting for blister to complete", () => {
-    expect(pageSrc).toMatch(/Waiting for blister to complete/);
-  });
-
-  it("waiting banner uses amber border/background (not red or blue)", () => {
-    const waitIdx = pageSrc.indexOf("Waiting for blister to complete");
-    const chunk = pageSrc.slice(waitIdx - 200, waitIdx + 50);
-    expect(chunk).toMatch(/amber/);
-    expect(chunk).not.toMatch(/red/);
-    expect(chunk).not.toMatch(/sky/);
-  });
-
-  it("BagAdvancedBanner is rendered with stationKind from station data", () => {
-    expect(pageSrc).toMatch(/stationKind=\{station\.station\.kind\}/);
-  });
-
-  it("waiting banner text mentions blister and hand-pack", () => {
-    expect(pageSrc).toMatch(/blistered or hand-packed/);
-  });
-
-  it("STATION_PREREQ_STAGE still maps SEALING to BLISTERED (completion gate unchanged)", () => {
-    expect(pageSrc).toMatch(/SEALING:\s*"BLISTERED"/);
-  });
-});
-
-describe("PRODUCTION-OVERLAP-2 · PACKAGING waiting banner", () => {
-  it("BagAdvancedBanner guards on PACKAGING + BLISTERED before the generic prereq check", () => {
-    const guardIdx = pageSrc.indexOf(
-      'stationKind === "PACKAGING" && currentStage === "BLISTERED"',
-    );
-    const prereqIdx = pageSrc.indexOf("STATION_PREREQ_STAGE[stationKind]");
-    expect(guardIdx).toBeGreaterThan(-1);
-    expect(prereqIdx).toBeGreaterThan(-1);
-    expect(guardIdx).toBeLessThan(prereqIdx);
-  });
-
-  it("waiting banner says Waiting for sealing to complete", () => {
-    expect(pageSrc).toMatch(/Waiting for sealing to complete/);
-  });
-
-  it("waiting banner uses amber border/background (not red or blue)", () => {
-    const waitIdx = pageSrc.indexOf("Waiting for sealing to complete");
-    const chunk = pageSrc.slice(waitIdx - 200, waitIdx + 50);
-    expect(chunk).toMatch(/amber/);
-    expect(chunk).not.toMatch(/red/);
-    expect(chunk).not.toMatch(/sky/);
-  });
-
-  it("waiting banner text mentions sealing station", () => {
-    expect(pageSrc).toMatch(/sealing station completes/);
-  });
-
-  it("STATION_PREREQ_STAGE still maps PACKAGING to SEALED (completion gate unchanged)", () => {
-    expect(pageSrc).toMatch(/PACKAGING:\s*"SEALED"/);
-  });
-});
-
-describe('STATION-TIMER-2 · station-scoped elapsed timer', () => {
-  it('queries BAG_PICKED_UP event for downstream stations', () => {
-    expect(pageSrc).toMatch(/BAG_PICKED_UP/);
-    expect(pageSrc).toMatch(/stationTimerStartMs/);
-  });
-
-  it('gates pickup query on FIRST_OP_STATION_KINDS check', () => {
-    expect(pageSrc).toMatch(/FIRST_OP_STATION_KINDS\.has/);
-  });
-
-  it('declares stationPausedSecondsAccum for station-scoped pause math', () => {
-    expect(pageSrc).toMatch(/stationPausedSecondsAccum/);
-  });
-
-  it('queries BAG_PAUSED and BAG_RESUMED events after pickup timestamp', () => {
-    expect(pageSrc).toMatch(/BAG_PAUSED.*BAG_RESUMED|BAG_RESUMED.*BAG_PAUSED/s);
-  });
-
-  it('shows Picked up label for downstream stations instead of Started', () => {
-    expect(pageSrc).toMatch(/stationTimerPickedUpAt/);
-    expect(pageSrc).toMatch(/Picked up/);
-  });
-
-  it('passes stationPausedSecondsAccum to ElapsedTimer', () => {
-    const timerIdx = pageSrc.indexOf('<ElapsedTimer');
-    const timerChunk = pageSrc.slice(timerIdx, timerIdx + 500);
-    expect(timerChunk).toMatch(/stationPausedSecondsAccum/);
-  });
-
-  it('falls back to bag startedAt when no pickup event found (first-op stations)', () => {
-    expect(pageSrc).toMatch(/stationTimerStartMs\s*\?\?/);
-    expect(pageSrc).toMatch(/stationTimerStartMs !== null/);
-  });
-});
-
-describe('STATION-TIMER-2 · projector HANDPACK_BLISTER_COMPLETE boundary', () => {
-  it('includes HANDPACK_BLISTER_COMPLETE in stageBoundaries', () => {
-    const projSrc = require('fs').readFileSync(
-      require('path').join(__dirname, '../../../../lib/projector/index.ts'),
-      'utf8'
+describe("STATION-TIMER-2 · projector HANDPACK_BLISTER_COMPLETE boundary", () => {
+  it("includes HANDPACK_BLISTER_COMPLETE in stageBoundaries", () => {
+    const projSrc = readFileSync(
+      join(__dirname, "../../../../lib/projector/index.ts"),
+      "utf8",
     );
     expect(projSrc).toMatch(/HANDPACK_BLISTER_COMPLETE/);
-    const boundaryIdx = projSrc.indexOf('stageBoundaries');
+    const boundaryIdx = projSrc.indexOf("stageBoundaries");
     const chunk = projSrc.slice(boundaryIdx, boundaryIdx + 600);
     expect(chunk).toMatch(/HANDPACK_BLISTER_COMPLETE/);
   });
 });
 
-describe('STATION-SEALING-TIMER-ROLLS-CLEANUP-1 · station timer uses latest station-scoped pickup', () => {
-  it('uses stationId filter on BAG_PICKED_UP query — not any station pickup', () => {
-    // The query must filter by station ID, not just by bag ID
-    expect(pageSrc).toMatch(/workflowEvents\.stationId.*station\.station\.id|station\.station\.id.*workflowEvents\.stationId/s);
-    // Must use desc ordering to get the most recent pickup
-    expect(pageSrc).toMatch(/orderBy\(desc/);
-    expect(pageSrc).toMatch(/\.limit\(1\)/);
-  });
-
-  it('recomputes paused seconds from events strictly after pickup timestamp', () => {
-    expect(pageSrc).toMatch(/workflowEvents\.occurredAt.*>.*pickedUpAt/s);
-  });
-
-  it('SEALING station page does not link to /rolls sub-page', () => {
-    // The rolls link is gated on floorSupervisorToolsForStation — it is NOT rendered
-    // unconditionally. Verify the rolls href only appears inside a conditional block.
-    expect(pageSrc).toMatch(/floorSupervisorToolsForStation/);
-    expect(pageSrc).not.toMatch(/href=["'`]\/floor\/.*\/rolls["'`]/);
-  });
-});
-
-describe('STATION-ACTIVE-UX-1 · Op label clarity', () => {
-  const sab = require('fs').readFileSync(
-    require('path').join(__dirname, 'stage-action-buttons.tsx'),
-    'utf8'
-  );
-
-  it('does not use the old Op # (4 digits) placeholder text', () => {
-    expect(sab).not.toMatch(/Op # \(4 digits\)/);
-  });
-
-  it('uses Operator code as placeholder', () => {
-    expect(sab).toMatch(/placeholder="Operator code"/);
-  });
-
-  it('keeps aria-label describing the operator badge field', () => {
-    expect(sab).toMatch(/aria-label="Operator code"/);
-  });
-});
-
-describe("PRODUCT-SELECTION-AT-SEALING-1 · page wiring", () => {
-  it("uses PRODUCT_AT_START for requireProductForFreshBag, not canStartFreshBag", () => {
-    expect(pageSrc).toMatch(/PRODUCT_AT_START_STATION_KINDS/);
-    expect(pageSrc).toMatch(/requireProductAtStart/);
-    expect(pageSrc).toMatch(/requireProductForFreshBag=\{requireProductAtStart\}/);
-    expect(pageSrc).not.toMatch(/requireProductForFreshBag=\{canStartFreshBag\}/);
-  });
-
-  it("loads sealing product options when bag has no product at sealing station", () => {
-    expect(pageSrc).toMatch(/sealingProductOptionsForForm/);
-    // The page now resolves the option list through the shared helper
-    // at lib/production/sealing-product (resolveSealingProductSelection)
-    // instead of an inline filterSealingProductsByTabletType call.
-    expect(pageSrc).toMatch(
-      /from "@\/lib\/production\/sealing-product"/,
-    );
-    expect(pageSrc).toMatch(/resolveSealingProductSelection/);
-    expect(pageSrc).toMatch(/sealingTabletsByProduct/);
-    expect(pageSrc).toMatch(/hasProductMapped/);
-    expect(pageSrc).toMatch(/sealingProductOptions=\{sealingProductOptionsForForm\}/);
-  });
-
-  it("shows product locked copy at sealing when product is mapped", () => {
-    expect(pageSrc).toMatch(/Product locked for this bag/);
-    expect(pageSrc).toMatch(/Contact admin if this is/);
-  });
-
-  it("uses station-aware unmapped product banner, not legacy copy at SEALING", () => {
-    expect(pageSrc).toMatch(/getUnmappedProductBanner/);
-    expect(pageSrc).toMatch(/unmappedProductBanner/);
-    expect(pageSrc).not.toMatch(
-      /This bag was started before the first-op product picker/,
-    );
-  });
-
-  it("resolves tablet type via shared workflow bag resolver for sealing options", () => {
-    expect(pageSrc).toMatch(/resolveWorkflowBagTabletTypeId/);
-    expect(pageSrc).toMatch(/getSealingProductFilterHint/);
-    expect(pageSrc).toMatch(/sealingProductFilterHint=\{sealingProductFilterHint\}/);
-    const optionsBlock = pageSrc.slice(
-      pageSrc.indexOf("sealingProductOptionsForForm"),
-      pageSrc.indexOf("sealingProductOptionsForForm") + 1200,
-    );
-    expect(optionsBlock).not.toMatch(/bagQrCode/);
-  });
-
-  it("does not import scan-card-form changes", () => {
-    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
-    expect(scanSrc).toMatch(/requireProductForFreshBag/);
-    expect(scanSrc).not.toMatch(/PRODUCT_AT_START/);
-  });
-});
-
-describe("HANDPACK-TABLET-CONTEXT-1 · page wiring", () => {
-  it("resolves hand-pack tablet context from received bag lineage", () => {
-    expect(pageSrc).toMatch(/resolveWorkflowBagReceivedTabletContext/);
-    expect(pageSrc).toMatch(/handpackTabletContextForForm/);
-    expect(pageSrc).toMatch(/HANDPACK_BLISTER.*currentAtStation/s);
-  });
-
-  it("passes handpackTabletContext to StageActionButtons", () => {
-    expect(pageSrc).toMatch(/handpackTabletContext=\{handpackTabletContextForForm\}/);
-  });
-
-  it("does not load all active tablet types for normal hand-pack operator selection", () => {
-    expect(pageSrc).not.toMatch(/handpackTabletTypeOptions/);
-    expect(pageSrc).not.toMatch(/tabletTypes\.isActive[\s\S]{0,160}orderBy\(tabletTypes\.name\)/);
-  });
-
-  it("scan-card-form.tsx is not modified for this feature", () => {
-    const scanSrc = readFileSync(join(__dirname, "scan-card-form.tsx"), "utf8");
-    expect(scanSrc).not.toMatch(/handpackTabletType/);
-    expect(scanSrc).not.toMatch(/tabletTypeId.*FormData/);
-  });
-});
-
-describe("MATERIAL-ROLL-CHANGE-1 · station roll panel on main page", () => {
-  it("imports StationRollPanel and active roll helper", () => {
-    expect(pageSrc).toMatch(/StationRollPanel/);
-    expect(pageSrc).toMatch(/getActiveRollsForMachine/);
-    expect(pageSrc).toMatch(/FLOOR_ROLL_STATION_KINDS/);
-  });
-
-  it("gates roll panel to BLISTER/COMBINED via FLOOR_ROLL_STATION_KINDS", () => {
-    expect(pageSrc).toMatch(/FLOOR_ROLL_STATION_KINDS\.has/);
-    expect(pageSrc).toMatch(/rollPanelData/);
-  });
-
-  it("renders StationRollPanel between operator session and current bag", () => {
-    const sessionIdx = pageSrc.indexOf("OperatorSessionPanel");
-    const rollIdx = pageSrc.indexOf("<StationRollPanel");
-    const bagIdx = pageSrc.indexOf("Current bag");
-    expect(rollIdx).toBeGreaterThan(sessionIdx);
-    expect(bagIdx).toBeGreaterThan(rollIdx);
-  });
-
-  it("passes active roll status props to StationRollPanel", () => {
-    expect(pageSrc).toMatch(/activeRolls=\{rollPanelData\.activeRolls\}/);
-    expect(pageSrc).toMatch(/idleRollLots=\{rollPanelData\.idleRollLots\}/);
-    expect(pageSrc).toMatch(/activeBag=\{rollPanelData\.activeBag\}/);
-  });
-
-  it("derives a required PVC roll-change card only from latest pvc_swap pause", () => {
-    expect(pageSrc).toMatch(/requiredRollChangeRole/);
-    expect(pageSrc).toMatch(/eq\(workflowEvents\.eventType, "BAG_PAUSED"\)/);
-    expect(pageSrc).toMatch(/reason === "pvc_swap" \? "PVC"/);
-  });
-
-  it("derives a required Foil roll-change card only from latest foil_swap pause", () => {
-    expect(pageSrc).toMatch(/reason === "foil_swap" \? "FOIL"/);
-    expect(pageSrc).toMatch(/requiredChangeRole=\{requiredRollChangeRole\}/);
-  });
-
-  it("does not derive roll-change prompts for non-roll station kinds", () => {
-    const showRollPanelIdx = pageSrc.indexOf("const showRollPanel");
-    const queryIdx = pageSrc.indexOf('eq(workflowEvents.eventType, "BAG_PAUSED")');
-    expect(showRollPanelIdx).toBeGreaterThan(-1);
-    expect(queryIdx).toBeGreaterThan(showRollPanelIdx);
-    expect(pageSrc).toMatch(/if \(showRollPanel\)/);
-  });
-});
-
 describe("MATERIAL-ROLL-CHANGE-1 · station roll panel component", () => {
-  const panelSrc = readFileSync(
-    join(__dirname, "station-roll-panel.tsx"),
-    "utf8",
-  );
+  // The component is no longer mounted on the station page (rolls reach
+  // the operator through More -> Change material). It is kept, with its
+  // coverage, for the rolls route and P5's supervisor view.
+  const panelSrc = readFileSync(join(__dirname, "station-roll-panel.tsx"), "utf8");
 
   it("is a client component with Change PVC roll and Change Foil roll buttons", () => {
     expect(panelSrc).toMatch(/^"use client"/);
@@ -484,7 +211,9 @@ describe("MATERIAL-ROLL-CHANGE-1 · station roll panel component", () => {
 
   it("pause-triggered form uses roll token input and existing changeRollAction path", () => {
     const formSrc = readFileSync(join(__dirname, "rolls-forms.tsx"), "utf8");
-    expect(panelSrc).toMatch(/replacementInputMode=\{requiredChangeRole \? "text" : "select"\}/);
+    expect(panelSrc).toMatch(
+      /replacementInputMode=\{requiredChangeRole \? "text" : "select"\}/,
+    );
     expect(panelSrc).toMatch(/showEndingWeight=\{requiredChangeRole != null\}/);
     expect(formSrc).toMatch(/name="newRollToken"/);
     expect(formSrc).toMatch(/fd\.set\("newPackagingLotId", newRollToken\)/);
@@ -494,19 +223,5 @@ describe("MATERIAL-ROLL-CHANGE-1 · station roll panel component", () => {
     expect(formSrc).toMatch(/value="removed_partial"/);
     expect(formSrc).toMatch(/name="endingWeightKg"/);
     expect(formSrc).toMatch(/changeRollAction/);
-  });
-});
-
-describe("MULTI-SEALING-FINAL-CLOSE-UNSTICK-1 · idle sealing finalize pickup", () => {
-  it("flags eligible pickups that need lane-close", () => {
-    expect(pageSrc).toMatch(/needsSealingLaneClose/);
-    expect(pageSrc).toMatch(/needsSealingFinalClose/);
-    expect(pageSrc).toMatch(/SEALING_SEGMENT_COMPLETE/);
-  });
-
-  it("shows banner when sealing station has no bag but finalize pickups exist", () => {
-    expect(pageSrc).toMatch(/sealingFinalizePickups/);
-    expect(pageSrc).toMatch(/waiting for final sealing close/);
-    expect(pageSrc).toMatch(/Sealing complete — all machines done/);
   });
 });

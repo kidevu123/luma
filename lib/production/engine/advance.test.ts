@@ -3,6 +3,8 @@ import {
   intentToEventType,
   buildRecordStageEventInput,
   buildRecordPackagingCompleteInput,
+  shouldAssignProductFirst,
+  isPackagingShapedComplete,
 } from "./advance";
 import type { StationRow } from "./record-stage-event";
 
@@ -365,5 +367,146 @@ describe("buildRecordPackagingCompleteInput", () => {
       clientEventId: "cid-1",
     });
     expect("operatorCode" in out).toBe(false);
+  });
+});
+
+describe("ASSIGN-PRODUCT-EXTRACT-1 · shouldAssignProductFirst", () => {
+  it("assigns when an unmapped bag's gesture carries a pick at a sealing segment", () => {
+    expect(
+      shouldAssignProductFirst({
+        bagProductId: null,
+        inputProductId: "prod-1",
+        eventType: "SEALING_SEGMENT_COMPLETE",
+      }),
+    ).toBe(true);
+  });
+
+  it("assigns at the bag-level sealing close too", () => {
+    // recordStageEvent refuses an unmapped bag for SEALING_COMPLETE just as
+    // it does for the segment, so both must be covered or the close is
+    // rejected with SEALING_SAVE_PRODUCT_FIRST_ERROR.
+    expect(
+      shouldAssignProductFirst({
+        bagProductId: null,
+        inputProductId: "prod-1",
+        eventType: "SEALING_COMPLETE",
+      }),
+    ).toBe(true);
+  });
+
+  it("never re-maps a bag that already carries a product", () => {
+    // A disagreeing pick must reach recordStageEvent's guard and be
+    // rejected (SEALING_PRODUCT_ALREADY_SAVED_ERROR) — silently re-mapping
+    // would break the one-way product identity lock.
+    expect(
+      shouldAssignProductFirst({
+        bagProductId: "prod-1",
+        inputProductId: "prod-2",
+        eventType: "SEALING_SEGMENT_COMPLETE",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not assign when the gesture carries no pick", () => {
+    expect(
+      shouldAssignProductFirst({
+        bagProductId: null,
+        inputProductId: null,
+        eventType: "SEALING_SEGMENT_COMPLETE",
+      }),
+    ).toBe(false);
+    expect(
+      shouldAssignProductFirst({
+        bagProductId: null,
+        inputProductId: undefined,
+        eventType: "SEALING_SEGMENT_COMPLETE",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not assign at a non-sealing event", () => {
+    // Blister/handpack/bottle bags get their product at the first-op scan,
+    // and packaging routes to recordPackagingComplete — neither is this
+    // step's business.
+    for (const eventType of [
+      "BLISTER_COMPLETE",
+      "HANDPACK_BLISTER_COMPLETE",
+      "BOTTLE_HANDPACK_COMPLETE",
+      "BOTTLE_STICKER_COMPLETE",
+      "BOTTLE_CAP_SEAL_COMPLETE",
+      "PACKAGING_COMPLETE",
+      "BAG_PICKED_UP",
+    ]) {
+      expect(
+        shouldAssignProductFirst({
+          bagProductId: null,
+          inputProductId: "prod-1",
+          eventType,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("agrees with intentToEventType on which gestures reach it", () => {
+    // Reachability, not source order: the events shouldAssignProductFirst
+    // accepts must be events intentToEventType actually produces at a
+    // sealing station, or the branch is dead code.
+    expect(
+      shouldAssignProductFirst({
+        bagProductId: null,
+        inputProductId: "prod-1",
+        eventType: intentToEventType("COMPLETE", "HEAT_SEAL", "SEALING") ?? "",
+      }),
+    ).toBe(true);
+    expect(
+      shouldAssignProductFirst({
+        bagProductId: null,
+        inputProductId: "prod-1",
+        eventType:
+          intentToEventType("CONFIRM_BAG_EMPTY", "HEAT_SEAL", "SEALING") ?? "",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("COMBINED-AT-PACKAGING-1 · isPackagingShapedComplete", () => {
+  it("is true when a COMPLETE carries cases", () => {
+    expect(isPackagingShapedComplete("COMPLETE", { cases: 5 })).toBe(true);
+  });
+
+  it("is true when a COMPLETE carries displays", () => {
+    expect(isPackagingShapedComplete("COMPLETE", { displays: 2 })).toBe(true);
+  });
+
+  it("is true when a COMPLETE carries loose", () => {
+    expect(isPackagingShapedComplete("COMPLETE", { loose: 1 })).toBe(true);
+  });
+
+  it("is true on an explicit 0 — presence, not truthiness", () => {
+    // Mirrors buildRecordStageEventInput's counterPresses discipline: a
+    // real reading of 0 (e.g. zero cases, all loose) must still mark the
+    // gesture's shape, not be treated as "field absent".
+    expect(isPackagingShapedComplete("COMPLETE", { cases: 0 })).toBe(true);
+  });
+
+  it("is false for a COMPLETE carrying only a blister/sealing counter", () => {
+    expect(isPackagingShapedComplete("COMPLETE", { counter: 40 })).toBe(false);
+    expect(
+      isPackagingShapedComplete("COMPLETE", { counterPresses: 10 }),
+    ).toBe(false);
+  });
+
+  it("is false for a COMPLETE with no inputs at all", () => {
+    expect(isPackagingShapedComplete("COMPLETE", {})).toBe(false);
+  });
+
+  it("is false for every other intent even if inputs look packaging-shaped", () => {
+    for (const intent of [
+      "CLAIM",
+      "CONFIRM_BAG_EMPTY",
+      "RESOLVE_PARTIAL",
+    ] as const) {
+      expect(isPackagingShapedComplete(intent, { cases: 5 })).toBe(false);
+    }
   });
 });

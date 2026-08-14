@@ -16,7 +16,7 @@ import { eq, and, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { stations, varietyRuns, rawBagAllocationSessions, qrCards } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
-import { resolveStationAccountability } from "@/lib/production/station-operator-session";
+import { resolveStationAccountability } from "@/lib/production/engine";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

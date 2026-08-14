@@ -1,7 +1,7 @@
 // STATION-MOBILE-UX-1/2 — which optional floor sub-pages and panels belong on a station.
 // Validation / supervisor tools only; primary operator flow stays on page.tsx.
 
-import { STATION_AUTO_MATERIAL_KINDS } from "@/lib/production/auto-load-lots";
+import { STATION_AUTO_MATERIAL_KINDS } from "@/lib/production/station-auto-material-kinds";
 
 /** PVC / foil roll mount, weigh, change-roll (blister press only — not sealing). */
 export const FLOOR_ROLL_STATION_KINDS = new Set([

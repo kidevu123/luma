@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { getPackageVersion } from "@/lib/build-metadata";
+import { subscriberCount } from "@/lib/projector/notify-bus";
 
 export const dynamic = "force-dynamic";
 
@@ -27,5 +28,6 @@ export async function GET() {
     version: getPackageVersion(),
     sha: process.env.BUILD_GIT_SHA ?? "dev",
     elapsedMs: Date.now() - t0,
+    sseSubscribers: subscriberCount(),
   });
 }

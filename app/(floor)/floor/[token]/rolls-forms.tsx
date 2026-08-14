@@ -29,8 +29,8 @@ import { formatGramsAsKg } from "@/lib/inbound/roll-weight";
 import {
   filterIdleRollLotsForRole,
   idleRollLotMatchesRole,
-} from "@/lib/production/idle-roll-lots";
-import { sortRollLotsForPicker } from "@/lib/production/roll-lot-sort";
+  sortRollLotsForPicker,
+} from "@/lib/production/engine/client";
 
 type ActionResult = { ok?: true; error?: string } | void;
 
