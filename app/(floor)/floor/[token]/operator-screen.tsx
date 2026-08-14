@@ -37,6 +37,7 @@ import {
   PauseCircle,
   PlayCircle,
   ScanLine,
+  SkipForward,
   X,
   XCircle,
 } from "lucide-react";
@@ -49,6 +50,8 @@ import {
   helpNotifyDetail,
   operatorMaterialLinks,
   operatorPauseModel,
+  SEALING_PARTIAL_CLOSE_REASONS,
+  SEALING_PARTIAL_CLOSE_REASON_LABELS,
   partialScreenFor,
   pauseCounterSnapshotCopy,
   pauseNeedsCounterSnapshot,
@@ -57,6 +60,7 @@ import {
   shouldSubmitAutoProduct,
   upNextSummary,
   type CompletionInput,
+  type SealingPartialCloseReason,
   type StationView,
 } from "@/lib/production/engine/client";
 import { BottleSealingRecoveryPanel } from "./bottle-sealing-recovery-panel";
@@ -138,7 +142,7 @@ export function OperatorScreen({
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [sheet, setSheet] = React.useState<
-    "none" | "more" | "help" | "pause" | "code"
+    "none" | "more" | "help" | "pause" | "code" | "sealingPartial"
   >("none");
   const [scannerOpen, setScannerOpen] = React.useState(false);
   const [values, setValues] = React.useState<Record<string, string>>({});
@@ -660,6 +664,7 @@ export function OperatorScreen({
           onClose={() => setSheet("none")}
           onPause={() => setSheet("pause")}
           onEnterCode={() => setSheet("code")}
+          onCloseSealingEarly={() => setSheet("sealingPartial")}
           onResume={() =>
             void run(async () => {
               // Silence here would look like a successful resume. The bag
@@ -691,6 +696,26 @@ export function OperatorScreen({
               return pauseBagAction(fd);
             });
             if (ok) setSheet("none");
+          }}
+        />
+      ) : null}
+
+      {sheet === "sealingPartial" ? (
+        <CloseSealingEarlySheet
+          pending={pending}
+          error={error}
+          onClose={() => setSheet("none")}
+          onSubmit={async (reason, note) => {
+            await advance("CONFIRM_BAG_EMPTY", {
+              sealingCloseMode: "partial",
+              partialCloseReason: reason,
+              ...(note.trim() ? { partialCloseReasonNote: note.trim() } : {}),
+            });
+            // The sheet closes on the NEXT render either way: a refusal
+            // (validateSealingPartialCloseInput) leaves the error banner
+            // visible inside the sheet, which is where the operator can
+            // still fix the reason.
+            setSheet("none");
           }}
         />
       ) : null}
@@ -923,6 +948,7 @@ function MoreSheet({
   onPause,
   onResume,
   onEnterCode,
+  onCloseSealingEarly,
 }: {
   view: StationView;
   token: string;
@@ -938,6 +964,7 @@ function MoreSheet({
   onPause: () => void;
   onResume: () => void;
   onEnterCode: () => void;
+  onCloseSealingEarly: () => void;
 }) {
   const isPaused =
     view.nextAction.kind === "BLOCKED" &&
@@ -953,6 +980,21 @@ function MoreSheet({
   // wider offer cannot become a wider effect.
   const offerBottleRecovery =
     currentWorkflowBagId != null && view.nextAction.kind === "START";
+  // SEALING-PARTIAL-CLOSEOUT-1. Spec conformance note: the operator
+  // screen splits Normal from Exception, and closing a bag that is NOT
+  // empty is an exception — so it lives under More, deliberately, and
+  // never as a second button beside "Yes, bag empty" on the main screen.
+  //
+  // The gate is exactly the precondition
+  // validateSealingPartialCloseInput enforces server-side:
+  // CONFIRM_BAG_EMPTY is emitted only when the bag has sealing segments
+  // and no partial close-out yet (needsSealingLaneClose), and the
+  // partial path itself is refused off a pure SEALING station
+  // (recordStageEvent's isPureSealingStation). Offering it anywhere
+  // else would be offering a refusal.
+  const offerCloseSealingEarly =
+    view.station.kind === "SEALING" &&
+    view.nextAction.kind === "CONFIRM_BAG_EMPTY";
 
   return (
     <Sheet title="More" error={error} onClose={onClose}>
@@ -994,6 +1036,21 @@ function MoreSheet({
         </span>
         <ChevronRight className="h-5 w-5 text-text-muted" />
       </button>
+
+      {offerCloseSealingEarly ? (
+        <button
+          type="button"
+          className={SHEET_ITEM}
+          disabled={pending}
+          onClick={onCloseSealingEarly}
+        >
+          <span className="flex items-center gap-3">
+            <SkipForward className="h-5 w-5 text-text-muted" />
+            Close sealing early
+          </span>
+          <ChevronRight className="h-5 w-5 text-text-muted" />
+        </button>
+      ) : null}
 
       {offerBottleRecovery && currentWorkflowBagId ? (
         <BottleSealingRecoveryPanel
@@ -1093,6 +1150,99 @@ function PauseSheet({
       >
         <PauseCircle className="h-6 w-6" />
         Pause bag
+      </button>
+    </Sheet>
+  );
+}
+
+/** SEALING-PARTIAL-CLOSEOUT-1 — "Close sealing early".
+ *
+ *  The bag is not empty, but this lane is done with it: end of shift, a
+ *  handoff, a material problem. The engine records the segments sealed
+ *  so far as the bag's sealed count and lets packaging pick it up at
+ *  BLISTERED (allowsPackagingCompleteAtBlistered), instead of stranding
+ *  it waiting for a lane close that is not coming.
+ *
+ *  SPEC CONFORMANCE: this is the EXCEPTION half of the spec's
+ *  Normal/Exception split, so it lives under More rather than beside
+ *  "Yes, bag empty" on the main screen — the normal answer to "is this
+ *  bag empty?" must stay two buttons, not three.
+ *
+ *  The reason list is the engine's own SEALING_PARTIAL_CLOSE_REASONS,
+ *  never a local copy: validateSealingPartialCloseInput refuses anything
+ *  outside it, and OTHER additionally demands a note of at least three
+ *  characters. Both rules are enforced server-side; the note field is
+ *  required here only when the reason is OTHER so the operator is not
+ *  bounced by a refusal they could have been told about first. */
+function CloseSealingEarlySheet({
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  pending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (reason: SealingPartialCloseReason, note: string) => void;
+}) {
+  const [reason, setReason] = React.useState<SealingPartialCloseReason | null>(
+    null,
+  );
+  const [note, setNote] = React.useState("");
+  const needsNote = reason === "OTHER";
+
+  return (
+    <Sheet title="Close sealing early" error={error} onClose={onClose}>
+      <p className="text-sm text-text-muted">
+        The bag still has cards in it, but this machine is done with it.
+        Packaging can take what has been sealed so far.
+      </p>
+      <div className="space-y-2">
+        {SEALING_PARTIAL_CLOSE_REASONS.map((code) => (
+          <button
+            key={code}
+            type="button"
+            onClick={() => setReason(code)}
+            className={`${SHEET_ITEM} ${
+              reason === code ? "border-brand-700 ring-2 ring-brand-700/30" : ""
+            }`}
+          >
+            <span>{SEALING_PARTIAL_CLOSE_REASON_LABELS[code]}</span>
+            {reason === code ? (
+              <CheckCircle2 className="h-5 w-5 text-brand-700" />
+            ) : null}
+          </button>
+        ))}
+      </div>
+      {needsNote ? (
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium text-text-muted">
+            What happened?
+          </span>
+          <textarea
+            value={note}
+            disabled={pending}
+            maxLength={500}
+            rows={3}
+            onChange={(e) => setNote(e.target.value)}
+            className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
+            placeholder="Short note — a supervisor sees this."
+          />
+        </label>
+      ) : null}
+      <button
+        type="button"
+        className={PRIMARY_BUTTON}
+        disabled={
+          pending || reason == null || (needsNote && note.trim().length < 3)
+        }
+        onClick={() => {
+          if (!reason) return;
+          onSubmit(reason, note);
+        }}
+      >
+        <SkipForward className="h-6 w-6" />
+        Close sealing early
       </button>
     </Sheet>
   );
@@ -1201,13 +1351,17 @@ function HelpSheet({
 
 /** The lead badge both partial screens collect.
  *
- *  Closing a raw-bag allocation ledger has been lead-gated since
+ *  Closing a raw-bag allocation ledger has asked for a badge since
  *  SPLIT-BAG-1 (resolveScannedBagAllocationAction resolves the code
  *  through resolveStationAccountability with SUPERVISOR_OVERRIDE), and
- *  resolvePartialAllocation keeps that gate. The spec replaces the typed
- *  code with an inline supervisor PIN once station_supervisor_sessions
- *  lands in P5; until then the badge is the honest ask — dropping it
- *  would let any operator close a ledger they cannot see. */
+ *  resolvePartialAllocation reproduces that exactly.
+ *
+ *  BE HONEST ABOUT WHAT IT IS: not a refusal. An unrecognized code falls
+ *  back to the station's open operator session, so with a shift running
+ *  the write proceeds and is attributed to that operator — same as the
+ *  legacy floor panel. It records WHO is answering for the number; it
+ *  does not stop anyone. A real gate is a supervisor session, which is
+ *  P5's station_supervisor_sessions. */
 function LeadCodeField({
   value,
   pending,

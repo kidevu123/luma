@@ -103,6 +103,14 @@ const advanceSchema = z.object({
    *  resolveScannedBagAllocationAction). Also the per-form
    *  accountability override recordStageEvent already accepts. */
   overrideEmployeeCode: z.string().max(40).optional(),
+  /** SEALING-PARTIAL-CLOSEOUT-1 — "Close sealing early". Only read when
+   *  the intent/operation pair resolves to SEALING_COMPLETE on a pure
+   *  SEALING station; recordStageEvent ignores it everywhere else and
+   *  validates the reason itself (validateSealingPartialCloseInput), so
+   *  this schema deliberately does not re-check the vocabulary. */
+  sealingCloseMode: z.enum(["whole", "partial"]).optional(),
+  partialCloseReason: z.string().max(40).optional(),
+  partialCloseReasonNote: z.string().max(500).optional(),
   counter: countField,
   counterPresses: countField,
   damaged: countField,
@@ -149,6 +157,9 @@ export async function advanceBagAction(
     keepBagPartial: optionalField(formData, "keepBagPartial"),
     partialRemainingEstimate: optionalField(formData, "partialRemainingEstimate"),
     overrideEmployeeCode: optionalField(formData, "overrideEmployeeCode"),
+    sealingCloseMode: optionalField(formData, "sealingCloseMode"),
+    partialCloseReason: optionalField(formData, "partialCloseReason"),
+    partialCloseReasonNote: optionalField(formData, "partialCloseReasonNote"),
     counter: optionalField(formData, "counter"),
     counterPresses: optionalField(formData, "counterPresses"),
     damaged: optionalField(formData, "damaged"),
@@ -187,6 +198,18 @@ export async function advanceBagAction(
       ...(d.productId != null ? { productId: d.productId } : {}),
       ...(d.overrideEmployeeCode != null
         ? { overrideEmployeeCode: d.overrideEmployeeCode }
+        : {}),
+      // Absent stays absent: recordStageEvent defaults sealingCloseMode
+      // to "whole", and a present-but-undefined key would be a partial
+      // close nobody asked for under exactOptionalPropertyTypes.
+      ...(d.sealingCloseMode != null
+        ? { sealingCloseMode: d.sealingCloseMode }
+        : {}),
+      ...(d.partialCloseReason != null
+        ? { partialCloseReason: d.partialCloseReason }
+        : {}),
+      ...(d.partialCloseReasonNote != null
+        ? { partialCloseReasonNote: d.partialCloseReasonNote }
         : {}),
       ...(d.keepBagPartial === "true" ? { keepBagPartial: true } : {}),
       ...(d.partialRemainingEstimate != null

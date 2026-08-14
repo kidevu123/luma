@@ -252,6 +252,8 @@ describe("buildNextAction", () => {
       sealing: NO_SEALING,
       partialAllocation: {
         inventoryBagId: "inv-1",
+        sessionId: "sess-prior",
+        startingBalanceQty: 5000,
         estimate: 1240,
         needsEntry: false,
       },
@@ -287,6 +289,8 @@ describe("buildNextAction", () => {
       sealing: NO_SEALING,
       partialAllocation: {
         inventoryBagId: "inv-1",
+        sessionId: "sess-prior",
+        startingBalanceQty: 5000,
         estimate: null,
         needsEntry: true,
       },
@@ -321,6 +325,8 @@ describe("buildNextAction", () => {
       sealing: NO_SEALING,
       partialAllocation: {
         inventoryBagId: "inv-1",
+        sessionId: "sess-prior",
+        startingBalanceQty: 5000,
         estimate: 900,
         needsEntry: false,
       },

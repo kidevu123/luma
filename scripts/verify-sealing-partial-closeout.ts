@@ -37,19 +37,65 @@ function runStaticContracts(): void {
   }
 
   const actions = read("app/(floor)/floor/[token]/actions.ts");
+  // P4b Task 5 (THE CUTOVER): the three UI assertions that used to read
+  // stage-action-buttons.tsx now read the operator screen, where the
+  // flow lives as More -> "Close sealing early" (the spec's Normal /
+  // Exception split — closing a bag that is not empty is an exception,
+  // so it is deliberately not a third button beside "Yes, bag empty").
+  const screen = read("app/(floor)/floor/[token]/operator-screen.tsx");
+  const operatorActions = read("app/(floor)/floor/[token]/operator-actions.ts");
+  // P4a extractions moved fireStageEventAction's and
+  // packagingCompleteAction's transaction bodies out of actions.ts into
+  // the engine, which left the four server assertions below reading a
+  // file the code had already vacated (this script had been FAILING on
+  // the first of them since then). They now read the modules that
+  // actually hold the behaviour.
+  const recordStage = read("lib/production/engine/record-stage-event.ts");
+  const recordPackaging = read(
+    "lib/production/engine/record-packaging-complete.ts",
+  );
   const projector = read("lib/projector/index.ts");
   const partial = read("lib/production/sealing-partial-closeout.ts");
   const progression = read("lib/production/stage-progression.ts");
 
 
+  assert(screen.includes("Close sealing early"), "Step 3 UI: Close sealing early entry");
+  assert(
+    screen.includes('sealingCloseMode: "partial"'),
+    "Step 3 UI: submits sealingCloseMode partial",
+  );
+  assert(
+    screen.includes("SEALING_PARTIAL_CLOSE_REASONS") &&
+      screen.includes("SEALING_PARTIAL_CLOSE_REASON_LABELS"),
+    "Step 3 UI: reason picker draws from the engine vocabulary",
+  );
+  assert(
+    !screen.includes("Confirm sealing complete"),
+    "Step 3 UI: old confirm copy absent",
+  );
+  assert(
+    operatorActions.includes("sealingCloseMode") &&
+      operatorActions.includes("partialCloseReason"),
+    "operator-actions: partial close fields reach advanceBag",
+  );
+
   assert(actions.includes("sealingCloseMode"), "actions: sealingCloseMode form field");
   assert(
-    actions.includes("sealingFinalOnPureStation"),
-    "actions: pure sealing final close skips counter",
+    recordStage.includes("sealingFinalOnPureStation"),
+    "engine: pure sealing final close skips counter",
   );
-  assert(actions.includes("validateSealingPartialCloseInput"), "actions: partial validation");
-  assert(actions.includes("maybeAutoReleaseAfterPartialSealingClose"), "actions: partial auto-release");
-  assert(actions.includes("packagingPartialSealedReady"), "actions: packaging BLISTERED gate");
+  assert(
+    recordStage.includes("validateSealingPartialCloseInput"),
+    "engine: partial validation",
+  );
+  assert(
+    recordStage.includes("maybeAutoReleaseAfterPartialSealingClose"),
+    "engine: partial auto-release",
+  );
+  assert(
+    recordPackaging.includes("packagingPartialSealedReady"),
+    "engine: packaging BLISTERED gate",
+  );
 
   assert(projector.includes("resolveStageForWorkflowEvent"), "projector: stage resolver");
   assert(projector.includes("isPartialSealingClosePayload"), "projector: partial payload guard");
@@ -62,16 +108,16 @@ function runStaticContracts(): void {
     "partial helpers: resumable after partial packaging",
   );
   assert(
-    actions.includes("shouldEmitPartialPackagingComplete"),
-    "actions: partial packaging emit gate",
+    recordPackaging.includes("shouldEmitPartialPackagingComplete"),
+    "engine: partial packaging emit gate",
   );
   assert(
-    actions.includes("buildPartialPackagingCompletePayload"),
-    "actions: partial packaging payload builder",
+    recordPackaging.includes("buildPartialPackagingCompletePayload"),
+    "engine: partial packaging payload builder",
   );
   assert(
-    actions.includes("!emitPartialPackaging"),
-    "actions: skip auto-finalize for partial packaging",
+    recordPackaging.includes("!emitPartialPackaging"),
+    "engine: skip auto-finalize for partial packaging",
   );
   assert(projector.includes("isPartialPackagingPayload"), "projector: partial packaging payload guard");
 

@@ -34,6 +34,17 @@ export { evaluateChecks, blockersFromChecks, blockerFor } from "./resolve-except
 export type { CheckResult, EngineFacts } from "./resolve-exceptions";
 
 export { resolveCompletionInputs } from "./resolve-completion";
+
+// SEALING-PARTIAL-CLOSEOUT-1's reason vocabulary. Pure constants (the
+// module imports only sealing-segments.ts), and the ONLY list the
+// "Close sealing early" flow may draw its buttons from —
+// validateSealingPartialCloseInput refuses any reason outside it, so a
+// UI-local copy would be a screen that offers refusals.
+export {
+  SEALING_PARTIAL_CLOSE_REASONS,
+  SEALING_PARTIAL_CLOSE_REASON_LABELS,
+} from "@/lib/production/sealing-partial-closeout";
+export type { SealingPartialCloseReason } from "@/lib/production/sealing-partial-closeout";
 export { resolveProductChoice } from "./resolve-product-choice";
 export type { ProductChoice } from "./resolve-product-choice";
 export { operationHasBagCloseGesture, intentToEventType } from "./intent-events";

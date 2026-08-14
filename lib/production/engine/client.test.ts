@@ -38,6 +38,21 @@ function runtimeImportSpecifiers(src: string): string[] {
   return out;
 }
 
+/** The module literals that mean "this cannot run in a browser".
+ *
+ *  `@/lib/db` is the usual door, but it is not the only one: a module
+ *  could import the `postgres` driver directly, and drizzle's SUBPATHS
+ *  (drizzle-orm/pg-core, drizzle-orm/postgres-js) pull schema builders
+ *  and dialect code that have no business in a tablet bundle. Bare
+ *  "drizzle-orm" is deliberately NOT flagged — it is the tree-shakeable
+ *  expression helpers (eq, and, sql) and nothing more. */
+function isServerOnlySpecifier(spec: string): boolean {
+  if (spec === "@/lib/db" || spec.startsWith("@/lib/db/")) return true;
+  if (spec === "postgres" || spec.startsWith("postgres/")) return true;
+  if (spec.startsWith("drizzle-orm/")) return true;
+  return false;
+}
+
 function resolveSpecifier(fromFile: string, spec: string): string | null {
   let base: string | null = null;
   if (spec.startsWith("@/")) base = join(REPO_ROOT, spec.slice(2));
@@ -55,7 +70,7 @@ function resolveSpecifier(fromFile: string, spec: string): string | null {
 }
 
 describe("lib/production/engine/client.ts — client-safe barrel", () => {
-  it("reaches no module that imports the database", () => {
+  it("reaches no module that imports the database, the driver, or a drizzle subpath", () => {
     const seen = new Set<string>();
     const offenders: string[] = [];
     const walk = (file: string, trail: string[]): void => {
@@ -63,7 +78,7 @@ describe("lib/production/engine/client.ts — client-safe barrel", () => {
       seen.add(file);
       const src = readFileSync(file, "utf8");
       for (const spec of runtimeImportSpecifiers(src)) {
-        if (spec === "@/lib/db" || spec.startsWith("@/lib/db/")) {
+        if (isServerOnlySpecifier(spec)) {
           offenders.push([...trail, file, spec].join("\n  -> "));
           continue;
         }
@@ -73,6 +88,24 @@ describe("lib/production/engine/client.ts — client-safe barrel", () => {
     };
     walk(ENTRY, []);
     expect(offenders).toEqual([]);
+    // Non-vacuous: the walk must actually have visited the graph.
+    expect(seen.size).toBeGreaterThan(5);
+  });
+
+  it("flags the server-only module literals it is supposed to catch", () => {
+    // Guards the guard: a typo in isServerOnlySpecifier would make the
+    // test above pass by never matching anything.
+    for (const spec of [
+      "@/lib/db",
+      "@/lib/db/schema",
+      "postgres",
+      "drizzle-orm/pg-core",
+    ]) {
+      expect(isServerOnlySpecifier(spec)).toBe(true);
+    }
+    for (const spec of ["drizzle-orm", "react", "./types"]) {
+      expect(isServerOnlySpecifier(spec)).toBe(false);
+    }
   });
 
   it("still exports what the mounted client components import", () => {

@@ -68,9 +68,14 @@ function runStaticContracts(): void {
     actions.includes("isWorkflowBagResumableAtSealingAfterPartialPackaging"),
     "actions: assigned pickup filter for legacy PACKAGED",
   );
+  // P4a extraction: packagingCompleteAction's body lives in the engine
+  // now, so this assertion was reading a file the code had vacated (it
+  // had been FAILING since then).
   assert(
-    actions.includes("!emitPartialPackaging"),
-    "actions: skip auto-finalize on partial packaging",
+    read("lib/production/engine/record-packaging-complete.ts").includes(
+      "!emitPartialPackaging",
+    ),
+    "engine: skip auto-finalize on partial packaging",
   );
 
   console.log("[verify-partial-packaging-resume] PASS — static contracts OK");
