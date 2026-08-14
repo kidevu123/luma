@@ -33,10 +33,12 @@ import {
   raiseProductionException,
   raiseQaHoldRelease,
   raiseQaHoldStarted,
+  raiseStationReport,
   requireSupervisorSession,
   resolveFreshBagStart,
   resolveStationByToken,
   PRODUCTION_EXCEPTION_CATEGORIES,
+  STATION_REPORT_CATEGORIES,
   SUPERVISOR_GATE_REFUSAL_CODE,
   SUPERVISOR_GATE_REFUSAL_SENTENCE,
   type AdvanceInput,
@@ -104,10 +106,13 @@ const advanceSchema = z.object({
   // exactly the wrong default for "keep this bag open".
   keepBagPartial: z.literal("true").optional(),
   partialRemainingEstimate: countField,
-  /** RESOLVE_PARTIAL's lead gate — the badge code that closes a
-   *  raw-bag allocation ledger (same gate as
-   *  resolveScannedBagAllocationAction). Also the per-form
-   *  accountability override recordStageEvent already accepts. */
+  /** Per-form accountability override recordStageEvent accepts (a
+   *  supervisor stamping a submission on behalf of the operator on
+   *  shift). P5-SUPERVISOR Task 5 removed RESOLVE_PARTIAL's badge path
+   *  — the LOW-confidence branch now requires a station_supervisor
+   *  _sessions row, not a typed badge — so this field is no longer
+   *  forwarded on RESOLVE_PARTIAL; it stays for the other intents
+   *  that still accept it. */
   overrideEmployeeCode: z.string().max(40).optional(),
   /** SEALING-PARTIAL-CLOSEOUT-1 — "Close sealing early". Only read when
    *  the intent/operation pair resolves to SEALING_COMPLETE on a pure
@@ -666,6 +671,55 @@ export async function raiseQaHoldAction(
       detail: d.detail,
       clientEventId: d.clientEventId,
       ...(d.workflowBagId != null ? { workflowBagId: d.workflowBagId } : {}),
+    });
+    if (!result.ok) return fail(result.blocker);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not send this." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
+// P5-SUPERVISOR Task 5(b) — bagless station report. MACHINE and OTHER
+// categories only; the bagged categories keep their existing event
+// paths (raiseDowntimeAction, raiseProductionExceptionAction). Runs on
+// a station with no current bag pinned — the whole point of this
+// action is to record a machine-down / general-issue exception the
+// operator noticed BEFORE any bag reached the station.
+const stationReportSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  category: z.enum(STATION_REPORT_CATEGORIES),
+  detail: z.string().min(1).max(500),
+  clientEventId: z.string().regex(UUID_RE, "Invalid client event id."),
+});
+
+/** Report Problem's bagless path for MACHINE and OTHER. Delegates
+ *  entirely to raiseStationReport, which is total (every failure is a
+ *  Blocker) — so this action's only contribution is parse ->
+ *  authStation -> delegate -> translate refusal shape. */
+export async function raiseStationReportAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = stationReportSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    category: formData.get("category"),
+    detail: formData.get("detail"),
+    clientEventId: formData.get("clientEventId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    const result = await raiseStationReport({
+      stationId: d.stationId,
+      category: d.category,
+      detail: d.detail,
     });
     if (!result.ok) return fail(result.blocker);
   } catch (err) {

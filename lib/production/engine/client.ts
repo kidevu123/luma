@@ -109,6 +109,7 @@ export {
   REPORT_PROBLEM_CATEGORY_LAYOUT,
   reportProblemCategoryDisabled,
   reportProblemRouteFor,
+  reportProblemUsesStationReport,
   shouldSubmitAutoProduct,
   upNextSummary,
 } from "./operator-screen-model";

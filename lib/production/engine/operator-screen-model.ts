@@ -401,27 +401,51 @@ export function reportProblemRouteFor(
 /** Should this category's button be disabled when no bag is pinned at
  *  the station?
  *
- *  Fix round 1 (MED 4): uniform across all four routes, not just
- *  EXCEPTION (material/product/other) and PAUSE (bag). The original
- *  version left PAUSE_AND_DOWNTIME (machine) and QA_HOLD (quality)
- *  enabled on the theory that a machine or quality concern can predate
- *  any bag reaching the station — true in principle, but Report
- *  Problem's every write today (pauseBagAction, and both of
- *  emitStationedExceptionEvent's bag-resolution paths) still resolves
- *  through THIS station's current bag: there is no station-only,
- *  bagless recording path anywhere in the engine yet. A report an
- *  operator files with no bag pinned would either fail outright (BAG)
- *  or land as PRODUCTION_EXCEPTION_NO_BAG's blocker (MACHINE/QUALITY)
- *  — neither is "recorded automatically" the way the spec's one
- *  follow-up promises. Bagless MACHINE/QUALITY reporting is P5 scope,
- *  same as the rest — see report-problem.tsx's visible "Scan the bag
- *  this is about first." helper text for how the UI explains the gap
- *  today rather than papering over it. */
+ *  P5-SUPERVISOR Task 5(b) — MACHINE and OTHER now have a bagless
+ *  recording path via raiseStationReport (station_exception_reports),
+ *  so their buttons stay enabled without a bag. The bagged path for
+ *  MACHINE (pauseBagAction + DOWNTIME_STARTED) is unchanged and still
+ *  runs when a bag IS pinned — the choice happens inside report-
+ *  problem.tsx's submit handler, not here.
+ *
+ *  The other four routes still require a bag by construction:
+ *    - PAUSE (BAG): pauseBagAction refuses without a workflow bag.
+ *    - QA_HOLD (QUALITY): QA_HOLD_STARTED is an event that must attach
+ *      to a bag (its whole reason for existing is the isOnHold latch on
+ *      a specific bag's read_bag_state row).
+ *    - EXCEPTION (MATERIAL, PRODUCT): the material/product being wrong
+ *      is a statement about the WORK, which is bag-scoped by definition.
+ *  These four remain gated on `hasBag` and stay behind the visible
+ *  "Scan the bag this is about first." helper.
+ *
+ *  Fix round 1 (MED 4) history — this used to be a uniform `!hasBag`
+ *  across all four routes because bagless MACHINE/OTHER had no
+ *  recording path. P5 built the path; the enable-flag follows. */
 export function reportProblemCategoryDisabled(
-  _route: ReportProblemRoute,
+  route: ReportProblemRoute,
   hasBag: boolean,
 ): boolean {
-  return !hasBag;
+  if (hasBag) return false;
+  // Bagless MACHINE (PAUSE_AND_DOWNTIME route) and bagless OTHER
+  // (EXCEPTION route, category-checked inside report-problem.tsx) go
+  // through raiseStationReport now; keep them enabled.
+  if (route === "PAUSE_AND_DOWNTIME") return false;
+  if (route === "EXCEPTION") return false;
+  return true;
+}
+
+/** Would this category, without a bag, submit through the bagless
+ *  station-report path (raiseStationReport) rather than its normal
+ *  bagged event? MACHINE and OTHER only — MATERIAL and PRODUCT are
+ *  EXCEPTION-route too but stay bag-gated per reportProblemCategory
+ *  Disabled above. Called by report-problem.tsx to decide which action
+ *  to invoke on submit. */
+export function reportProblemUsesStationReport(
+  category: ProductionExceptionCategory,
+  hasBag: boolean,
+): boolean {
+  if (hasBag) return false;
+  return category === "MACHINE" || category === "OTHER";
 }
 
 // ── small display helpers ─────────────────────────────────────────────

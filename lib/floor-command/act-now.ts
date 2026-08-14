@@ -132,14 +132,18 @@ export function buildActNowPanel(
       // RAISED is the catch-all (material/product/other) — warn, same
       // bar as any other reported-but-not-yet-triaged item.
       //
-      // Fix round 1 (MED 2): capped at EXCEPTION_ROWS_MAX. There is no
-      // dismissal path yet (P5 — the supervisor inbox/badge the spec
-      // describes), so exception rows age off the rail purely by
-      // falling outside floor-command.ts's recency window; without a
-      // cap, two crit reports could fill most of the 6-slot rail
-      // (`.slice(0, 6)` below) for up to 4 hours, starving the
-      // waiting-bag / bottleneck / material-runway rows that matter
+      // Fix round 1 (MED 2): capped at EXCEPTION_ROWS_MAX. Rows age off
+      // the rail purely by falling outside floor-command.ts's recency
+      // window; without a cap, two crit reports could fill most of the
+      // 6-slot rail (`.slice(0, 6)` below) for up to 4 hours, starving
+      // the waiting-bag / bottleneck / material-runway rows that matter
       // just as much.
+      //
+      // P5-SUPERVISOR Task 5(b): the SAME cap-3 budget now also covers
+      // station_report rows below. They come from the SAME "operator
+      // just flagged a problem" bucket the operator experiences as one
+      // rail; a machine-down report shouldn't get separate budget just
+      // because the operator had no bag scanned yet.
       if (exceptionSeq >= EXCEPTION_ROWS_MAX) continue;
       exceptionSeq += 1;
       items.push({
@@ -150,6 +154,24 @@ export function buildActNowPanel(
         href: a.receiptNumber
           ? `/workflow-submissions?receipt=${encodeURIComponent(a.receiptNumber)}`
           : "/workflow-submissions",
+      });
+    }
+    if (a.type === "station_report") {
+      // P5-SUPERVISOR Task 5(b) — bagless MACHINE/OTHER reports.
+      // MACHINE = crit (matches the bagged DOWNTIME_STARTED severity
+      // above; a machine that won't cycle stops the line regardless of
+      // whether a bag was already on it). OTHER = warn (matches the
+      // catch-all PRODUCTION_EXCEPTION_RAISED severity). Rides the
+      // SAME EXCEPTION_ROWS_MAX budget as production_exception so the
+      // operator-flagged bucket cannot monopolise the 6-slot rail.
+      if (exceptionSeq >= EXCEPTION_ROWS_MAX) continue;
+      exceptionSeq += 1;
+      items.push({
+        id: `station-report-${exceptionSeq}-${a.stationReportId ?? a.label}`,
+        severity: a.stationReportCategory === "MACHINE" ? "crit" : "warn",
+        title: a.label,
+        detail: a.detail,
+        href: "/floor-board",
       });
     }
   }

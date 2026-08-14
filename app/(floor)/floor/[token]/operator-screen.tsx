@@ -576,18 +576,16 @@ export function OperatorScreen({
             pending={pending}
             quantity={partialQty}
             onQuantityChange={setPartialQty}
-            leadCode={leadCode}
-            onLeadCodeChange={setLeadCode}
+            isSupervisorUnlocked={view.supervisor != null}
+            onRequestSupervisor={() => setSheet("supervisor")}
             onUseEstimate={(estimate) =>
               void advance("RESOLVE_PARTIAL", {
                 partialRemainingEstimate: String(estimate),
-                overrideEmployeeCode: leadCode.trim(),
               })
             }
             onContinue={(qty) =>
               void advance("RESOLVE_PARTIAL", {
                 physicalQty: qty,
-                overrideEmployeeCode: leadCode.trim(),
               })
             }
             onInvalid={setError}
@@ -1458,19 +1456,17 @@ function HelpSheet({
   );
 }
 
-/** The lead badge both partial screens collect.
+/** The lead badge PartialReuseStart (P1-PARTIAL scan-time) collects.
  *
- *  Closing a raw-bag allocation ledger has asked for a badge since
- *  SPLIT-BAG-1 (resolveScannedBagAllocationAction resolves the code
- *  through resolveStationAccountability with SUPERVISOR_OVERRIDE), and
- *  resolvePartialAllocation reproduces that exactly.
- *
- *  BE HONEST ABOUT WHAT IT IS: not a refusal. An unrecognized code falls
- *  back to the station's open operator session, so with a shift running
- *  the write proceeds and is attributed to that operator — same as the
- *  legacy floor panel. It records WHO is answering for the number; it
- *  does not stop anyone. A real gate is a supervisor session, which is
- *  P5's station_supervisor_sessions. */
+ *  P5-SUPERVISOR Task 5 note: the RESOLVE_PARTIAL screens (PartialBag
+ *  below) no longer use this field — the LOW-confidence branch there
+ *  now requires an OPEN station_supervisor_sessions row (checked
+ *  server-side in resolvePartialAllocation) and the operator screen
+ *  opens the SupervisorSheet inline on that branch instead. The
+ *  scan-time PartialReuseStart flow keeps the badge because
+ *  scanCardAction enforces the LOW-confidence supervisor rule on its
+ *  own path (partial-bag-lifecycle.test.ts pins it there); that flow's
+ *  own P5 rework, if any, is out of Task 5 scope. */
 function LeadCodeField({
   value,
   pending,
@@ -1576,13 +1572,28 @@ function PartialReuseStart({
   );
 }
 
+/** RESOLVE_PARTIAL's two screens.
+ *
+ *  P5-SUPERVISOR Task 5 — replaces the P4b typed-lead badge with a real
+ *  supervisor session check:
+ *   - USE_ESTIMATE (HIGH/MEDIUM): no supervisor unlock needed. The
+ *     number is system-derived; the operator is accepting a derivation,
+ *     not entering one. One-button confirmation.
+ *   - ENTER_QUANTITY (LOW): the operator counts, which requires an OPEN
+ *     station_supervisor_sessions row. When the station is locked
+ *     (isSupervisorUnlocked === false), the [ Continue ] button opens
+ *     the SupervisorSheet inline (spec: "presents as one screen"); the
+ *     screen re-renders after unlock with view.supervisor populated and
+ *     the operator taps Continue again to submit. resolvePartialAllocation
+ *     enforces the same check server-side — a hand-crafted request
+ *     without a session is refused there. */
 function PartialBag({
   action,
   pending,
   quantity,
   onQuantityChange,
-  leadCode,
-  onLeadCodeChange,
+  isSupervisorUnlocked,
+  onRequestSupervisor,
   onUseEstimate,
   onContinue,
   onInvalid,
@@ -1591,8 +1602,8 @@ function PartialBag({
   pending: boolean;
   quantity: string;
   onQuantityChange: (value: string) => void;
-  leadCode: string;
-  onLeadCodeChange: (value: string) => void;
+  isSupervisorUnlocked: boolean;
+  onRequestSupervisor: () => void;
   onUseEstimate: (estimate: number) => void;
   onContinue: (quantity: string) => void;
   onInvalid: (message: string) => void;
@@ -1611,22 +1622,11 @@ function PartialBag({
             Estimated remaining: {screen.estimate.toLocaleString()} units
           </p>
         </div>
-        <LeadCodeField
-          value={leadCode}
-          pending={pending}
-          onChange={onLeadCodeChange}
-        />
         <button
           type="button"
           className={PRIMARY_BUTTON}
           disabled={pending}
-          onClick={() => {
-            if (leadCode.trim() === "") {
-              onInvalid("Enter the lead badge code to use this bag.");
-              return;
-            }
-            onUseEstimate(screen.estimate);
-          }}
+          onClick={() => onUseEstimate(screen.estimate)}
         >
           Use bag
         </button>
@@ -1659,11 +1659,11 @@ function PartialBag({
           placeholder="0"
         />
       </label>
-      <LeadCodeField
-        value={leadCode}
-        pending={pending}
-        onChange={onLeadCodeChange}
-      />
+      {!isSupervisorUnlocked ? (
+        <p className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          A supervisor needs to unlock this station to confirm the count.
+        </p>
+      ) : null}
       <button
         type="button"
         className={PRIMARY_BUTTON}
@@ -1673,8 +1673,12 @@ function PartialBag({
             onInvalid("Enter the physical quantity before continuing.");
             return;
           }
-          if (leadCode.trim() === "") {
-            onInvalid("Enter the lead badge code to save this count.");
+          if (!isSupervisorUnlocked) {
+            // Spec ("presents as one screen"): open the SupervisorSheet
+            // inline rather than surfacing a blocker. On successful
+            // unlock the page re-renders with view.supervisor populated
+            // and the operator taps Continue again to submit.
+            onRequestSupervisor();
             return;
           }
           onContinue(quantity.trim());

@@ -9,6 +9,7 @@ import {
   readBagState,
   readOperatorDaily,
   readBagMetrics,
+  stationExceptionReports,
   stations,
   workflowEvents,
   workflowBags,
@@ -271,6 +272,44 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
       detail: [kind, row.payload?.detail].filter(Boolean).join(" — "),
       exceptionEventType: row.event_type,
       receiptNumber: row.receipt_number,
+    });
+  }
+
+  // P5-SUPERVISOR Task 5(b) — unacknowledged bagless reports (MACHINE
+  // and OTHER only, per raiseStationReport's own contract). Distinct
+  // from the workflow_events exception rows above: those age off after
+  // 4 hours (no dismissal path), while these persist until an admin
+  // acknowledges them from the Act Now rail (Task 6 wires the ack
+  // action). Read is scoped to acknowledged_at IS NULL and ordered by
+  // recency so the most urgent (typically machine-down) surfaces first.
+  const reportRows = await db
+    .select({
+      id: stationExceptionReports.id,
+      category: stationExceptionReports.category,
+      detail: stationExceptionReports.detail,
+      createdAt: stationExceptionReports.createdAt,
+      stationLabel: stations.label,
+    })
+    .from(stationExceptionReports)
+    .innerJoin(stations, eq(stationExceptionReports.stationId, stations.id))
+    .where(isNull(stationExceptionReports.acknowledgedAt))
+    .orderBy(desc(stationExceptionReports.createdAt))
+    .limit(10);
+
+  for (const row of reportRows) {
+    // Category comes back as text (schema stores it as text to avoid
+    // ALTER TYPE); the engine layer validates the vocabulary on write,
+    // so a non-MACHINE/OTHER row here is a data-hygiene anomaly worth
+    // surfacing rather than silently dropping. Coerce to the union.
+    const cat: "MACHINE" | "OTHER" =
+      row.category === "OTHER" ? "OTHER" : "MACHINE";
+    const kind = cat === "MACHINE" ? "Machine down" : "Reported";
+    items.push({
+      type: "station_report",
+      label: row.stationLabel,
+      detail: [kind, row.detail].filter(Boolean).join(" — "),
+      stationReportCategory: cat,
+      stationReportId: row.id,
     });
   }
 
