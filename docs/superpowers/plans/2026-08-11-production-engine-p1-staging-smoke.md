@@ -151,3 +151,49 @@ Run these two FIRST, in order, before any floor behaviour check.
 - [ ] Pause a STARTED bag at blister; the sealing tablet's pickup list updates
       within ~2s (P4a: non-flow events carry stationKind via process cache,
       gap (a) closed). Reload confirms truth.
+
+## Phase 4b (v1.34.0) — THE OPERATOR SCREEN
+
+Per-station-kind operator-screen render and workflow checklist:
+
+- [ ] **Blister station:** open shift (operator picker) → station shows name + "No current work" → scan/enter bag QR → SCAN_TO_CLAIM state with camera + UP NEXT queue + "Enter code manually" option → claim picks bag → COMPLETE state shows "Blister count:" counter input field + DONE button → enter count (e.g., 1000) + submit DONE → bag auto-advances to sealing queue without release button. Auto-advance occurs within ~2s on sealing tablet's upNext.
+
+- [ ] **Sealing station:** open shift → SCAN_TO_CLAIM → claim → multi-segment workflow: COMPLETE with "Seal passes:" counter and "Pause" button under More → enter count (e.g., 500) + DONE → CONFIRM_BAG_EMPTY shows "[ Yes, bag empty ]" and "[ No, continue sealing ]" buttons. Answer "No" → bag returns to SCAN_TO_CLAIM (next sealing run). Answer "Yes" → bag auto-advances.
+
+- [ ] **Packaging station:** open shift → SCAN_TO_CLAIM → claim → COMPLETE shows three counters: "Cases:", "Displays:", "Loose units:" (or "Loose cards:" if handpack product) → enter counts (e.g., 9, 25, 0) + DONE → if loose cards damaged ("[ Yes ]" / "[ No ]"), enter damaged count if yes → bag auto-finalizes, queue row disappears.
+
+- [ ] **Handpack blister station:** same flow as blister (counter input "Blister count:"), but input emits HANDPACK_BLISTER_COMPLETE event.
+
+- [ ] **Bottle-fill station:** COMPLETE with counter "Fill count:" → auto-releases to both finishing stations (stickering + cap-seal) if pinned.
+
+- [ ] **PICK_PRODUCT (AUTO path):** Station with unambiguous product → scan bag → auto-submit happens silently, no PICK_PRODUCT case shown; bag proceeds directly to COMPLETE state.
+
+- [ ] **PICK_PRODUCT (PICK path):** Product ambiguous (2-3 candidates by station kind) → scan bag → PICK_PRODUCT shows 2-3 filtered buttons (e.g., "Hyroxi MIT A", "Hyroxi MIT B") → select one → proceeds to COMPLETE.
+
+- [ ] **Partial flow:** On a sealing bag mid-seal, under More → "Pause with reason" (reuse existing pause action) → reason dropdown → submit → bag pauses. On same station, scan the paused bag → "[ Why? ]" button (Help) under BLOCKED → shows pause reason in checklist. Resume via supervisor (P5 scope). Alternatively, under More → "Close sealing early" → sets sealing-close mode → COMPLETE counter now labeled "Final seal passes:" → enter count + DONE → CONFIRM_BAG_EMPTY (final yes/no) → if yes, bag advances; if no, cannot proceed (handoff to next sealer).
+
+- [ ] **RESOLVE_PARTIAL confirmation:** On a partial-close bag, does the field say "estimated remaining" (if entered by operator) or "system computed" (if not entered)? Both label variants must appear in the rendered flow (text matches spec).
+
+- [ ] **Exception workflow — six categories:**
+  - [ ] Machine: click "Report problem" under More → "[ Machine ]" category → select machine from list → submits machine=selected, emits DOWNTIME_STARTED event, bag shows on Act Now rail, stations see BLOCKED state "Machine <name> down". Supervisor clears machine later (P5).
+  - [ ] Quality: click "Report problem" → "[ Quality ]" → form optional fields (allow empty) → submits, emits QA_HOLD_STARTED event. Bag now shows BLOCKED "QA Hold: <detail or empty>". Supervisor can release hold (below).
+  - [ ] Bag: click "Report problem" → "[ Bag ]" category → emits BAG_PAUSED (reuse action), bag shows paused reason.
+  - [ ] Material: click "Report problem" → "[ Material ]" → brief reason text → emits PRODUCTION_EXCEPTION_RAISED, Act Now rail picks it up.
+  - [ ] Product: click "Report problem" → "[ Product ]" → reason → emits PRODUCTION_EXCEPTION_RAISED.
+  - [ ] Other: click "Report problem" → "[ Other ]" → reason → emits PRODUCTION_EXCEPTION_RAISED.
+
+- [ ] **QA hold round-trip:** Once a QA_HOLD_STARTED bag exists (bag shows BLOCKED), verify supervisor (or ops) can release it. Under More or via supervisor unlock (scope: P5 inline PIN or supervisor session), "Release QA hold" option appears → click → bag returns to previous state (was at COMPLETE, goes back to COMPLETE; was at SCAN_TO_CLAIM goes to SCAN_TO_CLAIM). Emit QA_HOLD_RELEASED event. Re-scan bag at same station confirms it is no longer blocked.
+
+- [ ] **Help checklist:** On BLOCKED state (or via "?" button anytime), checklist shows station-specific decision tree. Example: "Is machine running? → Yes/No → Did you check water flow? → Yes/No → Contact maintenance." Checklist content matches spec's evaluate-checks() results for that station and bag state.
+
+- [ ] **Fresh-bag start at first-op stations:** Station is first-in-route (e.g., blister for a TABLET batch). Scan a bag that has no prior workflow_events → SCAN_TO_CLAIM shows no UPSTREAM_RUNNING holder (upNext is empty) → claim → COMPLETE (not skipped). Before engine, this path would have errored or skipped SCAN_TO_CLAIM. After, the station can start fresh bags.
+
+- [ ] **End-shift counter:** Operator clicks "End shift" under More → counter shows total bags completed this shift (sum of final stage events, e.g., 3 blisters, 2 seals, 1 packaged) → message "Contact supervisor if count disagrees." Operator confirms/cancels.
+
+- [ ] **sseSubscribers visible:** GET /api/health returns JSON with `sseSubscribers: <number>` field. Open two tablets on the same floor server → `sseSubscribers` shows 2. Close one → next /api/health call shows 1. Refresh confirms subscriber count matches open connections.
+
+- [ ] **Packaging via COMBINED routing (preferOperation):** Combined station receives a bag with packaging inputs (cases/displays/loose). Engine picks PACKAGING operation (not BLISTER) from combined's available ops (verify via log or test). Packaging counter fields render, not blister segment. Inputs route to the packaging path, not blister-then-packaging.
+
+- [ ] **Legacy panel deletion:** Verify the old `stage-action-buttons.tsx` and `scan-card-form.tsx` are no longer in the main page render path. Main page code under ~200 lines. If those files still exist, they are only used by other routes (e.g., rolls page) or deleted. Scanner tests for those panels have been deleted or replaced by engine tests.
+
+- [ ] **Previously non-executable item now executable:** From the P4a smoke checklist, the box "Complete packaging on a bag via advanceBag" no longer carries "NOT EXECUTABLE until P4b" label. It is now checked as executable (OperatorScreen wires advanceBag for packaging complete). Verify the box is unlabeled.

@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.34.0] — 2026-08-14
+
+- Phase 4b: the operator screen lands. Single-screen workflow (station name, current work, one action, More/Help) rendered from NextAction cases, scanning as primary interaction. The engine now fully handles auto/pick product resolution; combined-at-packaging routing distinguishes blister from packaging gestures via preferOperation; production exception event (PRODUCTION_EXCEPTION_RAISED) emitted for workflow issues. Import boundary at zero enforced as error. Partial flows, QA holds (set, real, releasable), and exception workflow (six categories: machine/quality/bag/material/product/other) now live on the floor. Boundary ratchet flipped to severity error; the import probes assert floor-to-engine-only access. SSE subscriber count exposed at /api/health for monitoring.
+
 ## [1.33.0] — 2026-08-13
 
 - Phase 4a: advanceBag reaches full fidelity — packaging counts and loose-unit damage, partial-close and override passthrough, filtered product picking, stationKind on every notify. No visible change; the new operator screen lands in 4b.
