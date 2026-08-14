@@ -273,6 +273,9 @@ export async function resolvePartialAllocation(
   // for the P4b typed-lead badge. Server-side check, so a hand-crafted
   // request without a session is refused here even when the UI would
   // otherwise render the SupervisorSheet inline before submitting.
+  // Note: the supervisor check and the ledger-close write run in separate
+  // transactions — a TTL expiry between them is tolerated (sub-second
+  // window; the audit record still names the supervisor session).
   const supSession = await db.transaction((tx) =>
     requireSupervisorSession(tx, input.stationId),
   );

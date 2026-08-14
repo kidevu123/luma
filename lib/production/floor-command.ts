@@ -259,6 +259,20 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
     receipt_number: string | null;
   }>;
 
+  // P5 fix-round (MED Task 5): merge both operator-flagged buckets
+  // (production_exception workflow events + station_report rows) into a
+  // single list sorted by recency, THEN apply the EXCEPTION_ROWS_MAX=3
+  // cap. Without this, older bagged DOWNTIME/QA rows in exceptionRows
+  // consumed the full cap before any newer bagless MACHINE crit in
+  // reportRows could enter the budget — starvation by insertion order.
+  const EXCEPTION_ROWS_MAX = 3;
+
+  // Build a unified intermediate list with an ISO timestamp for sorting.
+  type ExceptionCandidate =
+    | { source: "exception"; ts: string; item: AttentionItem }
+    | { source: "report"; ts: string; item: AttentionItem };
+  const candidates: ExceptionCandidate[] = [];
+
   for (const row of exceptionRows) {
     const kind =
       row.event_type === "DOWNTIME_STARTED"
@@ -266,12 +280,16 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
         : row.event_type === "QA_HOLD_STARTED"
           ? "Quality hold"
           : (row.payload?.category ?? "Reported");
-    items.push({
-      type: "production_exception",
-      label: row.station_label ?? "Unknown station",
-      detail: [kind, row.payload?.detail].filter(Boolean).join(" — "),
-      exceptionEventType: row.event_type,
-      receiptNumber: row.receipt_number,
+    candidates.push({
+      source: "exception",
+      ts: row.occurred_at,
+      item: {
+        type: "production_exception",
+        label: row.station_label ?? "Unknown station",
+        detail: [kind, row.payload?.detail].filter(Boolean).join(" — "),
+        exceptionEventType: row.event_type,
+        receiptNumber: row.receipt_number,
+      },
     });
   }
 
@@ -304,13 +322,25 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
     const cat: "MACHINE" | "OTHER" =
       row.category === "OTHER" ? "OTHER" : "MACHINE";
     const kind = cat === "MACHINE" ? "Machine down" : "Reported";
-    items.push({
-      type: "station_report",
-      label: row.stationLabel,
-      detail: [kind, row.detail].filter(Boolean).join(" — "),
-      stationReportCategory: cat,
-      stationReportId: row.id,
+    candidates.push({
+      source: "report",
+      ts: row.createdAt.toISOString(),
+      item: {
+        type: "station_report",
+        label: row.stationLabel,
+        detail: [kind, row.detail].filter(Boolean).join(" — "),
+        stationReportCategory: cat,
+        stationReportId: row.id,
+      },
     });
+  }
+
+  // Sort merged bucket newest-first and admit only the cap-3 most recent
+  // entries. This ensures a fresh bagless MACHINE crit is never starved
+  // by older bagged DOWNTIME/QA rows that happen to have arrived earlier.
+  candidates.sort((a, b) => b.ts.localeCompare(a.ts));
+  for (const c of candidates.slice(0, EXCEPTION_ROWS_MAX)) {
+    items.push(c.item);
   }
 
   return items;
