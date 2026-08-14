@@ -37,6 +37,7 @@ import {
   PauseCircle,
   PlayCircle,
   ScanLine,
+  Shield,
   SkipForward,
   X,
   XCircle,
@@ -74,6 +75,7 @@ import {
   claimScannedBagAction,
   raiseProductionExceptionAction,
 } from "./operator-actions";
+import { SupervisorBanner, SupervisorSheet } from "./supervisor-sheet";
 
 // crypto.randomUUID() is only available in secure contexts. Floor PWA
 // runs over plain HTTP on the LAN — mirror the fallback that
@@ -144,7 +146,7 @@ export function OperatorScreen({
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [sheet, setSheet] = React.useState<
-    "none" | "more" | "help" | "pause" | "code" | "sealingPartial"
+    "none" | "more" | "help" | "pause" | "code" | "sealingPartial" | "supervisor"
   >("none");
   const [scannerOpen, setScannerOpen] = React.useState(false);
   const [values, setValues] = React.useState<Record<string, string>>({});
@@ -357,6 +359,14 @@ export function OperatorScreen({
         operatorName={view.operator?.name ?? null}
         onHelp={() => setSheet("help")}
       />
+
+      {view.supervisor ? (
+        <SupervisorBanner
+          supervisor={view.supervisor}
+          token={token}
+          stationId={stationId}
+        />
+      ) : null}
 
       <main className="flex-1 space-y-5 px-4 pb-28 pt-4">
         <ErrorAlert message={error} />
@@ -671,6 +681,7 @@ export function OperatorScreen({
           onPause={() => setSheet("pause")}
           onEnterCode={() => setSheet("code")}
           onCloseSealingEarly={() => setSheet("sealingPartial")}
+          onOpenSupervisor={() => setSheet("supervisor")}
           onResume={() =>
             void run(async () => {
               // Silence here would look like a successful resume. The bag
@@ -739,6 +750,14 @@ export function OperatorScreen({
             // can fix the code they typed.
             if (await claim({ scanToken: code })) setSheet("none");
           }}
+        />
+      ) : null}
+
+      {sheet === "supervisor" && !view.supervisor ? (
+        <SupervisorSheet
+          token={token}
+          stationId={stationId}
+          onClose={() => setSheet("none")}
         />
       ) : null}
 
@@ -958,6 +977,7 @@ function MoreSheet({
   onResume,
   onEnterCode,
   onCloseSealingEarly,
+  onOpenSupervisor,
 }: {
   view: StationView;
   token: string;
@@ -974,6 +994,7 @@ function MoreSheet({
   onResume: () => void;
   onEnterCode: () => void;
   onCloseSealingEarly: () => void;
+  onOpenSupervisor: () => void;
 }) {
   const isPaused =
     view.nextAction.kind === "BLOCKED" &&
@@ -1045,6 +1066,39 @@ function MoreSheet({
         </span>
         <ChevronRight className="h-5 w-5 text-text-muted" />
       </button>
+
+      {view.supervisor ? (
+        // Session is open: the banner above the screen shows name +
+        // countdown + Exit. The entry here acknowledges the state and
+        // closes More so the banner is visible.
+        <button
+          type="button"
+          className={SHEET_ITEM}
+          onClick={onClose}
+        >
+          <span className="flex items-center gap-3">
+            <Shield className="h-5 w-5 text-amber-600" />
+            <span>
+              Supervisor active
+              <span className="block text-xs text-text-muted">
+                {view.supervisor.employeeName}
+              </span>
+            </span>
+          </span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={SHEET_ITEM}
+          onClick={onOpenSupervisor}
+        >
+          <span className="flex items-center gap-3">
+            <Shield className="h-5 w-5 text-text-muted" />
+            Supervisor
+          </span>
+          <ChevronRight className="h-5 w-5 text-text-muted" />
+        </button>
+      )}
 
       {offerCloseSealingEarly ? (
         <button

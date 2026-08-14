@@ -27,6 +27,8 @@ import {
   advanceBag,
   assertStationActiveForFloorActions,
   claimQueuedBag,
+  closeSupervisorSession,
+  openSupervisorSession,
   raiseDowntimeStarted,
   raiseProductionException,
   raiseQaHoldRelease,
@@ -630,6 +632,88 @@ export async function releaseQaHoldAction(
     if (!result.ok) return fail(result.blocker);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not release this." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
+// ── supervisor session ────────────────────────────────────────────────
+
+const supervisorUnlockSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  employeeCode: z.string().min(1).max(40),
+  /** Cleartext PIN from the sheet. Never logged, never in error strings.
+   *  The server barrel's openSupervisorSession applies argon2id verify. */
+  pin: z.string().min(1).max(100),
+});
+
+/** Supervisor sheet: unlock a 15-minute supervisor session for the
+ *  station. Delegates entirely to openSupervisorSession — no stage
+ *  rules, no session management logic. The action's only contribution
+ *  is parse -> authStation -> delegate -> translate refusal shape.
+ *
+ *  PIN DISCIPLINE: the `pin` field never appears in any error string,
+ *  any log, or any audit payload. openSupervisorSession writes all of
+ *  that and the guarantee is in that module. This action's only PIN
+ *  contact is the schema field and the delegate argument — same rule
+ *  supervisor-session.ts enforces via its source-scan test. */
+export async function supervisorUnlockAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = supervisorUnlockSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    employeeCode: formData.get("employeeCode"),
+    pin: formData.get("pin"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    const result = await openSupervisorSession({
+      stationId: d.stationId,
+      employeeCode: d.employeeCode,
+      pin: d.pin,
+    });
+    if (!result.ok) return fail(result.blocker);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not unlock supervisor mode." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
+const supervisorLockSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+});
+
+/** Supervisor banner: [ Exit ] closes the open session and re-renders
+ *  the screen in locked state. A no-open-session call is a harmless
+ *  no-op (closeSupervisorSession returns { closed: false }). */
+export async function supervisorLockAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = supervisorLockSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    await closeSupervisorSession(d.stationId);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not exit supervisor mode." };
   }
 
   revalidateFloor(d.token);
