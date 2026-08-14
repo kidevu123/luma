@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.35.0] — 2026-08-14
+
+- Phase 5: supervisor PIN unlock with 15-minute audited sessions. Server-side gating of QC, rolls, bag-allocation, and variety-pack mutations; manual bag pick; real low-confidence supervisor check on RESOLVE_PARTIAL. Bagless MACHINE/OTHER reports via station_exception_reports with Act Now rail acknowledgment. Supervisor sheet (employee code + PIN) on the floor tablet; persistent banner with live countdown; Exit action. Each gated refusal returns one generic sentence regardless of whether the session is missing, expired, or the PIN was wrong — no oracle. Admin: PIN set and is_supervisor toggle at settings/employees (audit SUPERVISOR_PIN_SET, hash only). Act Now rail: unacknowledged station_exception_reports rows show [ Acknowledge ] (admin session; audit STATION_REPORT_ACKNOWLEDGED); acknowledged rows leave the rail. Workflow-event exceptions (DOWNTIME/QA) are not acknowledgeable — they resolve through their own flows.
+
 ## [1.34.0] — 2026-08-14
 
 - Phase 4b: the operator screen lands. Single-screen workflow (station name, current work, one action, More/Help) rendered from NextAction cases, scanning as primary interaction. The engine now fully handles auto/pick product resolution; combined-at-packaging routing distinguishes blister from packaging gestures via preferOperation; production exception event (PRODUCTION_EXCEPTION_RAISED) emitted for workflow issues. Import boundary at zero enforced as error. Partial flows, QA holds (set, real, releasable), and exception workflow (six categories: machine/quality/bag/material/product/other) now live on the floor. Boundary ratchet flipped to severity error; the import probes assert floor-to-engine-only access. SSE subscriber count exposed at /api/health for monitoring.
