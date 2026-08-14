@@ -16,60 +16,9 @@ import {
   rawBagAllocationSessions,
   workflowEvents,
 } from "@/lib/db/schema";
-import { canResumeFinalizedWorkflowOnInventoryBag } from "@/lib/production/partial-bag-restart";
-import {
-  loadPartialReuseContext,
-  type PartialBagSession,
-  type PartialReuseContext,
-} from "@/lib/production/partial-bags";
-import { classifyFloorScanCard } from "@/lib/production/floor-scan-eligibility";
-import { batchProductionBlockReason } from "@/lib/production/batch-production-guard";
-import { loadRawBagStartClassificationForScan, RAW_BAG_START_OPERATOR_MESSAGES } from "@/lib/production/floor-partial-bag-start-resolution";
-import {
-  floorScanInputMatchesCard,
-  pickBestFloorScanCard,
-  type FloorScanCardCandidate,
-} from "@/lib/production/floor-scan-resolve";
-import { numericSuffix } from "@/lib/production/qr-sort";
-import { floorReadinessOperatorMessage } from "@/lib/production/floor-readiness";
-import { evaluateQrCardReadinessById } from "@/lib/production/floor-readiness-loaders";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
-import {
-  STATION_RELEASE_FROM_STAGE,
-  STATION_PICKUP_FROM_STAGE,
-  STATION_STARTED_RESUME_FROM_STAGE,
-  formatFloorStationBagOpenError,
-  STATIONS_THAT_FINALIZE,
-  bothBottleFinishingDone,
-  missingBottleFinishingSteps,
-  BOTTLE_FINISHING_EVENTS,
-} from "@/lib/production/stage-progression";
-import { coercePartialRemainingEstimate } from "@/lib/production/partial-remaining-input";
-import {
-  computeSystemDerivedResolutionForBag,
-  buildFloorOpenAllocationBlock,
-  resolveAllocationFromProductionOutput,
-  type FloorOpenAllocationBlock,
-} from "@/lib/production/system-derived-allocation-resolution";
 import { refreshMaterialReadModelsAfterBlister } from "@/lib/projector/material-read-model-refresh";
-import { resolveStationAccountability } from "@/lib/production/station-operator-session";
-import { ensureOpenRawBagAllocationSessionForWorkflowBag } from "@/lib/production/raw-bag-allocation-lifecycle";
-import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
-import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
-import {
-  SEALING_PARTIAL_CLOSE_REASONS,
-  deriveSealedPartialCountFromSegments,
-  isWorkflowBagResumableAtSealingAfterPartialPackaging,
-} from "@/lib/production/sealing-partial-closeout";
-import { lookupInventoryBagByQrScanToken } from "@/lib/production/workflow-bag-tablet-context";
-import {
-  parseNonnegativeIntegerInput,
-  pauseCounterSnapshotMissingError,
-  stationRequiresBlisterCounterSnapshot,
-} from "@/lib/production/blister-counter-snapshot";
-import { recordBlisterCounterRollSegment } from "@/lib/production/blister-roll-segments";
-import { assertCounterSnapshotAllowed } from "@/lib/production/counter-snapshot-guard-loader";
 // The engine barrel is the ONLY permitted entry point from app/(floor)/
 // into lib/production — deep paths are restricted too (eslint.config.mjs).
 import {
@@ -82,6 +31,46 @@ import {
   resolveDeferredQrReleaseAfterPackaging,
   projectBagReleasedEvent,
   resolveStationByToken,
+  canResumeFinalizedWorkflowOnInventoryBag,
+  loadPartialReuseContext,
+  type PartialBagSession,
+  type PartialReuseContext,
+  classifyFloorScanCard,
+  batchProductionBlockReason,
+  loadRawBagStartClassificationForScan,
+  RAW_BAG_START_OPERATOR_MESSAGES,
+  floorScanInputMatchesCard,
+  pickBestFloorScanCard,
+  type FloorScanCardCandidate,
+  numericSuffix,
+  floorReadinessOperatorMessage,
+  evaluateQrCardReadinessById,
+  STATION_RELEASE_FROM_STAGE,
+  STATION_PICKUP_FROM_STAGE,
+  STATION_STARTED_RESUME_FROM_STAGE,
+  formatFloorStationBagOpenError,
+  STATIONS_THAT_FINALIZE,
+  bothBottleFinishingDone,
+  missingBottleFinishingSteps,
+  BOTTLE_FINISHING_EVENTS,
+  coercePartialRemainingEstimate,
+  computeSystemDerivedResolutionForBag,
+  buildFloorOpenAllocationBlock,
+  resolveAllocationFromProductionOutput,
+  type FloorOpenAllocationBlock,
+  resolveStationAccountability,
+  ensureOpenRawBagAllocationSessionForWorkflowBag,
+  assertStationActiveForFloorActions,
+  SEALING_SEGMENT_EVENT,
+  SEALING_PARTIAL_CLOSE_REASONS,
+  isWorkflowBagResumableAtSealingAfterPartialPackaging,
+  lookupInventoryBagByQrScanToken,
+  parseNonnegativeIntegerInput,
+  pauseCounterSnapshotMissingError,
+  stationRequiresBlisterCounterSnapshot,
+  recordBlisterCounterRollSegment,
+  assertCounterSnapshotAllowed,
+  checkFirstOpProductSelection,
 } from "@/lib/production/engine";
 
 // Canonical source: lib/production/first-op-product.ts FIRST_OP_STATION_KINDS.
@@ -1066,11 +1055,6 @@ const eventSchema = z.object({
   partialCloseReason: z.enum(SEALING_PARTIAL_CLOSE_REASONS).optional(),
   partialCloseReasonNote: z.string().max(200).optional().nullable(),
 });
-
-import {
-  FIRST_OP_STATION_KINDS,
-  checkFirstOpProductSelection,
-} from "@/lib/production/first-op-product";
 
 const saveSealingProductSchema = z.object({
   token: z.string().uuid(),

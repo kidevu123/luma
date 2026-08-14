@@ -65,7 +65,7 @@ export default [
     files: ["app/(floor)/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
-        "warn",
+        "error",
         {
           patterns: [
             {

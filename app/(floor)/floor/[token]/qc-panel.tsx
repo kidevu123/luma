@@ -61,7 +61,7 @@ import {
   QUICK_DAMAGE_ENTRIES,
   damageHasReworkShortcut,
   type QuickDamageType,
-} from "@/lib/production/qc-panel-helpers";
+} from "@/lib/production/engine/client";
 
 // crypto.randomUUID() is only available in secure contexts. Floor
 // PWA runs over plain HTTP on the LAN — mirror the fallback that

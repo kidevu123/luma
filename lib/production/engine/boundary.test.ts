@@ -1,31 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { ESLint } from "eslint";
 
-// Task 5 measured 82. Task 7's dead-import cleanup brought it to 80, so
-// the ratchet is pinned at the currently measured count rather than the
-// original baseline — at 82, two new violations could be added silently.
-// (Task 8 briefly reached 79 by sourcing page.tsx's bag label from the
-// engine; that rewire was reverted to Phase 4, so 80 is the real count.)
-// The final review closed the deep-path hole in the rule's group (a lone
-// "*" does not cross "/", so "@/lib/production/engine/<file>" imports were
-// unrestricted) and moved actions.ts onto the barrel. Re-measured after
-// both changes: still 80 — the only deep engine import in floor code was
-// that one line, and it now resolves to the permitted barrel.
-// P4a Task 1 took it to 75: extracting packagingCompleteAction's body to
-// lib/production/engine/record-packaging-complete.ts left 5 lib/production
-// imports in actions.ts with no remaining reference, and they went with
-// the body. Re-pinned, because a stale 80 leaves exactly the slack this
-// comment warns about. Trail: 82 -> 80 -> (79, reverted) -> 80 -> 75.
-// P4b Task 5 (THE CUTOVER) took it to 48. Three things moved it:
-// page.tsx dropped from 22 imports to 2 (getStationView is the only read
-// left, and everything it used to resolve inline went with the panels);
-// stage-action-buttons.tsx (9) and scan-card-form.tsx (3) were DELETED
-// outright, since no route uses them after the cutover. Re-pinned,
-// because a stale 60 leaves exactly the slack this comment warns about.
-// Trail: 82 -> 80 -> (79, reverted) -> 80 -> 75 -> 48.
-// Task 6 drives this to zero and flips the rule to "error"; until then
-// the only rule is that it must not grow.
-const BASELINE_VIOLATIONS = 48;
+// The ratchet that used to live here (BASELINE_VIOLATIONS, pinned at each
+// task's measured count: 82 -> 80 -> 75 -> 48) is gone. Task 6 drove the
+// floor's lib/production violations to zero and flipped the rule from
+// "warn" to "error" in eslint.config.mjs — `npm run lint` now fails
+// outright on a new deep import instead of merely not regressing a count,
+// which is strictly stronger than the ratchet it replaces. The four
+// probes below (two "blocked" shapes, two "allowed" shapes) plus the
+// severity check are what's left to guard the rule itself.
 
 describe("floor import boundary", () => {
   it("blocks a non-engine lib/production import from floor code", async () => {
@@ -91,12 +74,23 @@ describe("floor import boundary", () => {
     expect(restricted).toHaveLength(1);
   });
 
-  it("does not let the floor violation count grow", async () => {
+  it("enforces the boundary as an error, not a warning", async () => {
+    // Task 6: the floor's lib/production violations reached zero and
+    // eslint.config.mjs flipped the rule from "warn" to "error". ESLint's
+    // Linter.Severity is 1 = warn, 2 = error — a regression back to
+    // "warn" would still show messages (so the other probes here would
+    // stay green) but `npm run lint` would exit 0 on a real violation.
+    // This is the one assertion that would catch that regression.
     const eslint = new ESLint({ cwd: process.cwd() });
-    const results = await eslint.lintFiles(["app/(floor)/**/*.{ts,tsx}"]);
-    const count = results
-      .flatMap((r) => r.messages)
-      .filter((m) => m.ruleId === "no-restricted-imports").length;
-    expect(count).toBeLessThanOrEqual(BASELINE_VIOLATIONS);
+    const [result] = await eslint.lintText(
+      `import { loadPartialReuseContext } from "@/lib/production/partial-bags";\n` +
+        `export const x = loadPartialReuseContext;\n`,
+      { filePath: "app/(floor)/floor/[token]/boundary-probe.ts" },
+    );
+    const restricted = (result?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-imports",
+    );
+    expect(restricted).toHaveLength(1);
+    expect(restricted[0]?.severity).toBe(2);
   });
 });

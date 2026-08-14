@@ -58,6 +58,37 @@ export { operationHasBagCloseGesture, intentToEventType } from "./intent-events"
 // drift.
 export type { ProductionExceptionCategory } from "./raise-production-exception";
 
+// P4b Task 6 — floor import boundary at zero. Each of these backs a
+// mounted "use client" floor component (operator-session-form.tsx,
+// qc-panel.tsx, rolls-forms.tsx, open-allocation-calc-panel.tsx) that
+// was reaching past the barrel. All are pure logic — no module in
+// their import graph touches @/lib/db — per client.test.ts's walk.
+
+// TYPE ONLY: system-derived-allocation-resolution.ts reaches the
+// database (computeSystemDerivedResolutionForBag etc., server barrel
+// only), but FloorOpenAllocationBlock is a plain data shape and the
+// type import is erased at compile time.
+export type { FloorOpenAllocationBlock } from "@/lib/production/system-derived-allocation-resolution";
+
+export {
+  isBlisterCounterSnapshotStation,
+  parseNonnegativeIntegerInput,
+  shiftEndCounterSnapshotHelperText,
+  shiftEndCounterSnapshotMissingError,
+} from "@/lib/production/blister-counter-snapshot";
+
+export {
+  QUICK_DAMAGE_ENTRIES,
+  damageHasReworkShortcut,
+  type QuickDamageType,
+} from "@/lib/production/qc-panel-helpers";
+
+export {
+  filterIdleRollLotsForRole,
+  idleRollLotMatchesRole,
+} from "@/lib/production/idle-roll-lots";
+export { sortRollLotsForPicker } from "@/lib/production/roll-lot-sort";
+
 export {
   assembleCompletionInputs,
   autoProductSubmission,

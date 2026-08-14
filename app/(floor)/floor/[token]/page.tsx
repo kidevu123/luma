@@ -40,9 +40,9 @@ import {
   getStationView,
   resolveStationByToken,
   STATION_INACTIVE_FLOOR_MESSAGE,
+  getActiveStationSession,
+  shouldRenderQcPanel,
 } from "@/lib/production/engine";
-import { getActiveStationSession } from "@/lib/production/station-operator-session";
-import { shouldRenderQcPanel } from "@/lib/production/qc-panel-helpers";
 import { FloorLiveRefresh } from "./floor-live-refresh";
 import { IdleOperatorGuard } from "./idle-operator-guard";
 import { OperatorScreen } from "./operator-screen";

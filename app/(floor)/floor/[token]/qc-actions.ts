@@ -35,17 +35,17 @@ import { db } from "@/lib/db";
 import { stations, workflowEvents } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { projectEvent } from "@/lib/projector";
-import { resolveStationAccountability } from "@/lib/production/station-operator-session";
-import { assertStationActiveForFloorActions } from "@/lib/production/station-management";
-import { resolveStationByToken } from "@/lib/production/engine";
 import {
+  resolveStationAccountability,
+  assertStationActiveForFloorActions,
+  resolveStationByToken,
   validateQcPayload,
   type PackagingDamageReturnPayload,
   type ReworkSentPayload,
   type ReworkReceivedPayload,
   type QCReasonCode,
   type QCUnit,
-} from "@/lib/production/qc-events";
+} from "@/lib/production/engine";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -25,16 +25,16 @@ import {
   rawBagAllocationEvents,
   qrCards,
 } from "@/lib/db/schema";
+import { writeAudit } from "@/lib/db/audit";
 import {
   resolveStationAccountability,
   withAccountabilityPayload,
-} from "@/lib/production/station-operator-session";
-import { resolveNewSessionStartingBalance, checkOverAllocation, deriveBagStatusAfterClose } from "@/lib/production/bag-allocation";
-import {
+  resolveNewSessionStartingBalance,
+  checkOverAllocation,
+  deriveBagStatusAfterClose,
   AllocationOpenBlockedError,
   openAllocationSessionForBagStart,
-} from "@/lib/production/bag-allocation-auto-open";
-import { writeAudit } from "@/lib/db/audit";
+} from "@/lib/production/engine";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
