@@ -193,17 +193,7 @@
       "Bash(awk 'NR>=48 && NR<=75' /Users/sahilkhatri/Work/luma/lib/production/engine/assign-bag-product.ts)",
       "Bash(perl -pi -e 's/<Sheet title=\"\\(More|Pause|Enter code manually|Why can.t I continue\\\\?\\)\" onClose=\\\\{onClose\\\\}>/<Sheet title=\"$1\" error={error} onClose={onClose}>/' \"app/\\(floor\\)/floor/[token]/operator-screen.tsx\")",
       "Bash(awk *)",
-      "Bash(wait)",
-      "Read(//Users/sahilkhatri/Work/luma/**)",
-      "Bash($S *)",
-      "Bash(grep -rn \"_pilot-sweet-trip\" package.json docs/ scripts/ .github/ Makefile)",
-      "Bash(ls scripts/archive/pilot/)",
-      "Bash(cat scripts/archive/README.md)",
-      "Bash(cat scripts/archive/pilot/README.md)",
-      "Bash(ls lib/production/engine/record-*.ts)",
-      "Bash(find lib *)",
-      "Bash(ls .superpowers/sdd/)",
-      "Bash(ls .superpowers/sdd/2026-08-17-production-engine-p6/)"
+      "Bash(wait)"
     ]
   }
 }

@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 export const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 
 const DEFAULT_INCLUDES = ["*.ts", "*.tsx"];
-const DEFAULT_EXCLUDE_FRAGMENTS = ["node_modules/", ".next/", "coverage/"];
+const DEFAULT_EXCLUDE_FRAGMENTS = ["node_modules/", ".next/", "coverage/", ".claude/worktrees/"]; // worktree copies are not runtime code
 
 export type GrepRepoOptions = {
   includes?: string[];

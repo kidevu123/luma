@@ -8,7 +8,7 @@ describe("source-scan helpers", () => {
 
   it("grepRepoSymbol finds a known export in a pinned module", () => {
     const hits = grepRepoSymbol("readRepoSource", {
-      excludePathFragments: ["node_modules/", ".next/", "coverage/", "lib/test/source-scan.test.ts:"],
+      excludePathFragments: ["node_modules/", ".next/", "coverage/", ".claude/worktrees/", "lib/test/source-scan.test.ts:"],
     });
     expect(hits.some((line) => line.startsWith("lib/test/source-scan.ts:"))).toBe(true);
   });
@@ -16,7 +16,7 @@ describe("source-scan helpers", () => {
   it("grepRepo supports literal pattern search", () => {
     const hits = grepRepo("zoho-live-commit-eligibility", {
       includes: ["*.ts"],
-      excludePathFragments: ["node_modules/", ".next/", "coverage/"],
+      excludePathFragments: ["node_modules/", ".next/", "coverage/", ".claude/worktrees/"],
     });
     expect(hits.some((line) => line.includes("zoho-live-commit-eligibility.ts"))).toBe(true);
   });
@@ -28,6 +28,7 @@ describe("source-scan helpers", () => {
           "node_modules/",
           ".next/",
           "coverage/",
+          ".claude/worktrees/",
           "lib/test/source-scan.test.ts:",
         ],
       }),

@@ -8,7 +8,7 @@ import { grepRepo, readRepoSource, REPO_ROOT } from "@/lib/test/source-scan";
 function runtimeHits(pattern: string): string[] {
   return grepRepo(pattern, { includes: ["*.ts", "*.tsx"] }).filter((line) => {
     if (line.includes(".test.ts:") || line.includes(".test.tsx:")) return false;
-    if (line.includes("node_modules/") || line.includes(".next/")) return false;
+    if (line.includes("node_modules/") || line.includes(".next/") || line.includes(".claude/worktrees/")) return false;
     return true;
   });
 }
