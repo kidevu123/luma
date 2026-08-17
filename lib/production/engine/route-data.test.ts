@@ -1,106 +1,52 @@
-// P6 Task 2 — exhaustive parity pins for the data-driven route twins.
+// P6 Task 3 — RETARGETED honest guard for the data-driven route graph.
 //
-// This is the CORE parity guard: for every (route × station kind ×
-// bottle-priors subset), the three twins must produce IDENTICAL output
-// to the hardcoded functions in queue-transitions.ts and
-// floor-event-relevance.ts. Task 3 relies on this to delete the
-// hardcoded tables safely.
+// TASK 2 HISTORY (now removed): this file used to assert `twin(graph) ===
+// hardcoded(no-graph)` for every (route × station kind × bottle-priors
+// subset). Task 3 deleted the hardcoded tables — queueAfterWorkAt,
+// queueRank, and queueKeysForStationKind now ALL resolve from the graph.
+// The old parity assertion would be tautological (both sides call the
+// same code path).
 //
-// The RouteGraph is built from a fixture transcribed from migrations
-// 0013 + 0071 + 0074 — same substring guard pattern as
-// station-event-mapping.test.ts. No DB.
+// WHAT THIS NOW GUARDS
+//   1. The transcribed migration fixture (lib/production/engine/
+//      __fixtures__/seeded-routes.ts) survives buildRouteGraph -> graph
+//      twins without distortion — enumerated across the same matrix the
+//      Task-2 parity used (325 combinations).
+//   2. The loader mechanism (loadRouteGraph with an injectable loader
+//      returning the same fixture rows) produces a graph IDENTICAL to
+//      the direct build. This is what the DB path exercises in prod;
+//      the injectable loader is the DB-free stand-in.
+//   3. Migration-text substring guards keep the fixture honest: if a
+//      migration renames or drops a seeded op code, the fixture drifts
+//      and the guard trips.
+//   4. The build-time stage-key/next-stage-key invariant fires on ops
+//      that violate it (additive safety, cannot fire on seeded data).
+//
+// WHAT THIS DOES NOT GUARD
+//   - The fixture's exact stage keys, sequence values, allowed station
+//     kinds — a migration that only changes those fields (without
+//     renaming an op code) passes the substring guard silently. Same
+//     limitation as station-event-mapping.test.ts.
+//   - Live DB parity — that is a staging-smoke concern; the
+//     transcription is the pre-deploy check.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  queueAfterWorkAt,
-  queueRank,
-} from "./queue-transitions";
-import { queueKeysForStationKind } from "./floor-event-relevance";
-import {
   buildRouteGraph,
+  loadRouteGraph,
   queueAfterWorkAtFromGraph,
   queueRankFromGraph,
   queueKeysForStationKindFromGraph,
+  __resetRouteGraphCacheForTests,
 } from "./route-data";
-import type { RouteOperationView } from "@/lib/production/routes";
-
-// ─── Fixture: transcribed from migrations 0013 + 0071 + 0074 ────────
-//
-// Field order matches drizzle/0013_route_operation_compat.sql
-// (VALUES rows starting at line 173) and drizzle/0074_handpack_route_operation.sql.
-// The BOTTLE route's order_independent_group column is set by
-// drizzle/0071_read_bag_queue_and_bottle_flex.sql (BOTTLE_FINISHING on
-// STICKERING + INDUCTION_SEAL).
-
-type Seed = {
-  routeCode: string;
-  sequence: number;
-  operationCode: string;
-  stageKey: string;
-  nextStageKey: string | null;
-  allowedStationKind: string | null;
-  orderIndependentGroup: string | null;
-};
-
-const SEED: readonly Seed[] = [
-  // CARD_BLISTER (0013 lines 173-179)
-  { routeCode: "CARD_BLISTER", sequence: 1, operationCode: "RECEIVING",           stageKey: "RECEIVING_QUEUE",       nextStageKey: "BLISTER_QUEUE",        allowedStationKind: null,         orderIndependentGroup: null },
-  { routeCode: "CARD_BLISTER", sequence: 2, operationCode: "BLISTER",             stageKey: "BLISTER_QUEUE",         nextStageKey: "POST_BLISTER_STAGING", allowedStationKind: "BLISTER",    orderIndependentGroup: null },
-  { routeCode: "CARD_BLISTER", sequence: 3, operationCode: "POST_BLISTER_STAGING", stageKey: "POST_BLISTER_STAGING",  nextStageKey: "SEALING_QUEUE",        allowedStationKind: null,         orderIndependentGroup: null },
-  { routeCode: "CARD_BLISTER", sequence: 4, operationCode: "HEAT_SEAL",           stageKey: "SEALING_QUEUE",         nextStageKey: "POST_SEAL_STAGING",    allowedStationKind: "SEALING",    orderIndependentGroup: null },
-  { routeCode: "CARD_BLISTER", sequence: 5, operationCode: "POST_SEAL_STAGING",   stageKey: "POST_SEAL_STAGING",     nextStageKey: "PACKAGING_QUEUE",      allowedStationKind: null,         orderIndependentGroup: null },
-  { routeCode: "CARD_BLISTER", sequence: 6, operationCode: "PACKAGING",           stageKey: "PACKAGING_QUEUE",       nextStageKey: "FINISHED_GOODS_QUEUE", allowedStationKind: "PACKAGING",  orderIndependentGroup: null },
-  { routeCode: "CARD_BLISTER", sequence: 7, operationCode: "FINISHED_GOODS",      stageKey: "FINISHED_GOODS_QUEUE",  nextStageKey: null,                    allowedStationKind: null,         orderIndependentGroup: null },
-  // 0074: HANDPACK_BLISTER row on CARD_BLISTER (seq 8), same stage/next as BLISTER.
-  { routeCode: "CARD_BLISTER", sequence: 8, operationCode: "HANDPACK_BLISTER",    stageKey: "BLISTER_QUEUE",         nextStageKey: "POST_BLISTER_STAGING", allowedStationKind: "HANDPACK_BLISTER", orderIndependentGroup: null },
-
-  // BOTTLE (0013 lines 191-196)
-  { routeCode: "BOTTLE", sequence: 1, operationCode: "RECEIVING",       stageKey: "RECEIVING_QUEUE",     nextStageKey: "BOTTLE_FILL_QUEUE",      allowedStationKind: null,               orderIndependentGroup: null },
-  { routeCode: "BOTTLE", sequence: 2, operationCode: "BOTTLE_FILL",     stageKey: "BOTTLE_FILL_QUEUE",   nextStageKey: "BOTTLE_STICKER_QUEUE",   allowedStationKind: "BOTTLE_HANDPACK",  orderIndependentGroup: null },
-  // 0071: STICKERING + INDUCTION_SEAL get order_independent_group='BOTTLE_FINISHING'.
-  { routeCode: "BOTTLE", sequence: 3, operationCode: "STICKERING",      stageKey: "BOTTLE_STICKER_QUEUE",   nextStageKey: "BOTTLE_INDUCTION_QUEUE", allowedStationKind: "BOTTLE_STICKER",   orderIndependentGroup: "BOTTLE_FINISHING" },
-  { routeCode: "BOTTLE", sequence: 4, operationCode: "INDUCTION_SEAL",  stageKey: "BOTTLE_INDUCTION_QUEUE", nextStageKey: "PACKAGING_QUEUE",        allowedStationKind: "BOTTLE_CAP_SEAL",  orderIndependentGroup: "BOTTLE_FINISHING" },
-  { routeCode: "BOTTLE", sequence: 5, operationCode: "PACKAGING",       stageKey: "PACKAGING_QUEUE",     nextStageKey: "FINISHED_GOODS_QUEUE",   allowedStationKind: "PACKAGING",        orderIndependentGroup: null },
-  { routeCode: "BOTTLE", sequence: 6, operationCode: "FINISHED_GOODS",  stageKey: "FINISHED_GOODS_QUEUE", nextStageKey: null,                    allowedStationKind: null,               orderIndependentGroup: null },
-
-  // STICKER_ONLY (0013 lines 208-211)
-  { routeCode: "STICKER_ONLY", sequence: 1, operationCode: "RECEIVING",       stageKey: "RECEIVING_QUEUE",       nextStageKey: "BOTTLE_STICKER_QUEUE", allowedStationKind: null,             orderIndependentGroup: null },
-  { routeCode: "STICKER_ONLY", sequence: 2, operationCode: "STICKERING",      stageKey: "BOTTLE_STICKER_QUEUE",  nextStageKey: "PACKAGING_QUEUE",      allowedStationKind: "BOTTLE_STICKER", orderIndependentGroup: null },
-  { routeCode: "STICKER_ONLY", sequence: 3, operationCode: "PACKAGING",       stageKey: "PACKAGING_QUEUE",       nextStageKey: "FINISHED_GOODS_QUEUE", allowedStationKind: "PACKAGING",      orderIndependentGroup: null },
-  { routeCode: "STICKER_ONLY", sequence: 4, operationCode: "FINISHED_GOODS",  stageKey: "FINISHED_GOODS_QUEUE",  nextStageKey: null,                    allowedStationKind: null,             orderIndependentGroup: null },
-];
-
-function toRouteOperationView(s: Seed): RouteOperationView {
-  return {
-    routeCode: s.routeCode,
-    routeName: s.routeCode,
-    sequence: s.sequence,
-    operationCode: s.operationCode,
-    operationName: s.operationCode,
-    stageKey: s.stageKey,
-    nextStageKey: s.nextStageKey,
-    reworkStageKey: null,
-    allowedStationKind: s.allowedStationKind,
-    allowedMachineKind: s.allowedStationKind,
-    requiresScan: false,
-    requiresCounter: false,
-    requiresTimer: false,
-    outputUnit: null,
-    orderIndependentGroup: s.orderIndependentGroup,
-  };
-}
-
-function makeGraph(): ReturnType<typeof buildRouteGraph> {
-  const perRoute = new Map<string, RouteOperationView[]>();
-  for (const s of SEED) {
-    const bucket = perRoute.get(s.routeCode) ?? [];
-    bucket.push(toRouteOperationView(s));
-    perRoute.set(s.routeCode, bucket);
-  }
-  return buildRouteGraph(Array.from(perRoute.values()));
-}
+import {
+  SEEDED_ROUTE_OPS,
+  SEEDED_ROUTES_BY_CODE,
+  makeSeededRouteGraph,
+  toRouteOperationView,
+} from "./__fixtures__/seeded-routes";
 
 // ─── Migration-text guards ──────────────────────────────────────────
 //
@@ -112,11 +58,11 @@ const MIGRATION_0013 = join(process.cwd(), "drizzle", "0013_route_operation_comp
 const MIGRATION_0071 = join(process.cwd(), "drizzle", "0071_read_bag_queue_and_bottle_flex.sql");
 const MIGRATION_0074 = join(process.cwd(), "drizzle", "0074_handpack_route_operation.sql");
 
-describe("route-data fixture is grounded in the seed migrations", () => {
-  it("every SEED op code appears in its source migration", () => {
+describe("shared seeded-routes fixture is grounded in the seed migrations", () => {
+  it("every fixture op code appears in its source migration", () => {
     const sql0013 = readFileSync(MIGRATION_0013, "utf8");
     const sql0074 = readFileSync(MIGRATION_0074, "utf8");
-    for (const s of SEED) {
+    for (const s of SEEDED_ROUTE_OPS) {
       const sql = s.operationCode === "HANDPACK_BLISTER" ? sql0074 : sql0013;
       expect(sql).toContain(`'${s.operationCode}'`);
     }
@@ -129,11 +75,15 @@ describe("route-data fixture is grounded in the seed migrations", () => {
   });
 });
 
-// ─── Enumerated parity matrix ───────────────────────────────────────
+// ─── Enumerated matrix — graph twin outputs vs shared fixture ───────
 //
-// Routes × station kinds × bottle-priors powerset.
-// Station kinds include HANDPACK_BLISTER (post-0074), COMBINED (no
-// op — must return null/[]), and an unknown kind ("NOT_A_KIND").
+// Now that hardcoded is gone, we enumerate the graph twin's outputs
+// against the graph built two ways:
+//   - Direct: buildRouteGraph(fixture rows)         (makeSeededRouteGraph)
+//   - Loader: loadRouteGraph(fixture-returning fn)  (production DB shape,
+//                                                   just DB-free here)
+// A discrepancy would mean the loader path (default DB shape) distorts
+// what buildRouteGraph produces — the honest guard for the DB pipeline.
 
 const ROUTES = ["CARD_BLISTER", "BOTTLE", "STICKER_ONLY", "NOT_A_ROUTE"] as const;
 
@@ -149,11 +99,6 @@ const STATION_KINDS = [
   "NOT_A_KIND",
 ] as const;
 
-// Bottle-priors powerset. Every parity assertion is repeated for each
-// subset; non-bottle stations are unaffected but we still enumerate to
-// catch any accidental prior-dependence in card / sticker-only kinds.
-// Plus the "BOTTLE_HANDPACK_COMPLETE only" baseline (fill has run,
-// finishing has not) so the both-eligible narrowing is exercised.
 const PRIOR_SUBSETS: ReadonlyArray<readonly string[]> = [
   [],
   ["BOTTLE_STICKER_COMPLETE"],
@@ -169,8 +114,6 @@ const PRIOR_SUBSETS: ReadonlyArray<readonly string[]> = [
   ],
 ];
 
-// Queues to rank-check. Includes every queue key referenced by
-// QUEUE_RANK in queue-transitions.ts plus an unknown queue.
 const QUEUES_FOR_RANK = [
   "SEALING_QUEUE",
   "PACKAGING_QUEUE",
@@ -181,35 +124,44 @@ const QUEUES_FOR_RANK = [
   "NOT_A_QUEUE",
 ] as const;
 
-describe("queueAfterWorkAtFromGraph is a parity twin", () => {
-  const graph = makeGraph();
-  let asserted = 0;
+/** loadRouteGraph with an injectable loader returning the shared
+ *  fixture rows — same shape a DB query would produce. Reset the
+ *  process cache before each use so the loader actually runs. */
+async function graphViaLoader() {
+  __resetRouteGraphCacheForTests();
+  return loadRouteGraph(async () =>
+    Object.values(SEEDED_ROUTES_BY_CODE).map((ops) => ops.map((op) => ({ ...op }))),
+  );
+}
+
+describe("queueAfterWorkAtFromGraph agrees between direct-build and loader graphs", () => {
+  const directGraph = makeSeededRouteGraph();
 
   for (const routeCode of ROUTES) {
     for (const stationKind of STATION_KINDS) {
       for (const priors of PRIOR_SUBSETS) {
-        it(`route=${routeCode} kind=${stationKind} priors=[${priors.join(",")}]`, () => {
-          const hardcoded = queueAfterWorkAt({
+        it(`route=${routeCode} kind=${stationKind} priors=[${priors.join(",")}]`, async () => {
+          const loaderGraph = await graphViaLoader();
+          const direct = queueAfterWorkAtFromGraph(directGraph, {
             routeCode,
             stationKind,
             priorEventTypes: priors,
           });
-          const twin = queueAfterWorkAtFromGraph(graph, {
+          const viaLoader = queueAfterWorkAtFromGraph(loaderGraph, {
             routeCode,
             stationKind,
             priorEventTypes: priors,
           });
-          if (hardcoded === null) {
-            expect(twin).toBeNull();
+          if (direct === null) {
+            expect(viaLoader).toBeNull();
           } else {
-            expect(twin).not.toBeNull();
-            expect(twin!.queueStageKey).toBe(hardcoded.queueStageKey);
+            expect(viaLoader).not.toBeNull();
+            expect(viaLoader!.queueStageKey).toBe(direct.queueStageKey);
             // eligibleStationKinds is a set — order-insensitive compare.
-            expect([...twin!.eligibleStationKinds].sort()).toEqual(
-              [...hardcoded.eligibleStationKinds].sort(),
+            expect([...viaLoader!.eligibleStationKinds].sort()).toEqual(
+              [...direct.eligibleStationKinds].sort(),
             );
           }
-          asserted++;
         });
       }
     }
@@ -221,14 +173,15 @@ describe("queueAfterWorkAtFromGraph is a parity twin", () => {
   });
 });
 
-describe("queueRankFromGraph is a parity twin", () => {
-  const graph = makeGraph();
+describe("queueRankFromGraph agrees between direct-build and loader graphs", () => {
+  const directGraph = makeSeededRouteGraph();
 
   for (const routeCode of ROUTES) {
     for (const q of QUEUES_FOR_RANK) {
-      it(`route=${routeCode} queue=${q}`, () => {
-        expect(queueRankFromGraph(graph, routeCode, q)).toBe(
-          queueRank(routeCode, q),
+      it(`route=${routeCode} queue=${q}`, async () => {
+        const loaderGraph = await graphViaLoader();
+        expect(queueRankFromGraph(loaderGraph, routeCode, q)).toBe(
+          queueRankFromGraph(directGraph, routeCode, q),
         );
       });
     }
@@ -239,16 +192,16 @@ describe("queueRankFromGraph is a parity twin", () => {
   });
 });
 
-describe("queueKeysForStationKindFromGraph is a parity twin", () => {
-  const graph = makeGraph();
+describe("queueKeysForStationKindFromGraph agrees between direct-build and loader graphs", () => {
+  const directGraph = makeSeededRouteGraph();
 
   for (const stationKind of STATION_KINDS) {
-    it(`kind=${stationKind}`, () => {
-      const twin = queueKeysForStationKindFromGraph(graph, stationKind);
-      const hardcoded = queueKeysForStationKind(stationKind);
-      // Order matters for hardcoded — the twin must produce the same
-      // ordering (see comment in route-data.ts for the emission order rule).
-      expect([...twin]).toEqual([...hardcoded]);
+    it(`kind=${stationKind}`, async () => {
+      const loaderGraph = await graphViaLoader();
+      const direct = queueKeysForStationKindFromGraph(directGraph, stationKind);
+      const viaLoader = queueKeysForStationKindFromGraph(loaderGraph, stationKind);
+      // Ordering is significant (see route-data.ts's emission rule).
+      expect([...viaLoader]).toEqual([...direct]);
     });
   }
 
@@ -259,12 +212,48 @@ describe("queueKeysForStationKindFromGraph is a parity twin", () => {
 
 // ─── Grand total ────────────────────────────────────────────────────
 
-describe("parity matrix — grand total", () => {
-  it("288 + 28 + 9 = 325 twin-vs-hardcoded assertions", () => {
+describe("graph-behavior matrix — grand total", () => {
+  it("288 + 28 + 9 = 325 loader-vs-direct assertions", () => {
     const total =
       ROUTES.length * STATION_KINDS.length * PRIOR_SUBSETS.length +
       ROUTES.length * QUEUES_FOR_RANK.length +
       STATION_KINDS.length;
     expect(total).toBe(325);
+  });
+});
+
+// ─── Stage-key/next invariant (Task 3 addition) ─────────────────────
+
+describe("buildRouteGraph enforces stage-key -> next-stage-key consistency", () => {
+  it("accepts the seeded fixture (BLISTER + HANDPACK_BLISTER share BLISTER_QUEUE, same next)", () => {
+    // Sanity: the fixture is the exact case the invariant was written
+    // to accept. Should never throw.
+    expect(() => makeSeededRouteGraph()).not.toThrow();
+  });
+
+  it("throws when two ops on the same route share a stage_key but differ on next_stage_key", () => {
+    const bad = [
+      [
+        toRouteOperationView({
+          routeCode: "CARD_BLISTER",
+          sequence: 1,
+          operationCode: "BLISTER",
+          stageKey: "BLISTER_QUEUE",
+          nextStageKey: "POST_BLISTER_STAGING",
+          allowedStationKind: "BLISTER",
+          orderIndependentGroup: null,
+        }),
+        toRouteOperationView({
+          routeCode: "CARD_BLISTER",
+          sequence: 2,
+          operationCode: "HANDPACK_BLISTER",
+          stageKey: "BLISTER_QUEUE", // same stage_key
+          nextStageKey: "SEALING_QUEUE", // DIFFERENT next
+          allowedStationKind: "HANDPACK_BLISTER",
+          orderIndependentGroup: null,
+        }),
+      ],
+    ];
+    expect(() => buildRouteGraph(bad)).toThrow(/differing next_stage_key/);
   });
 });

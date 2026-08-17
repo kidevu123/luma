@@ -1,13 +1,24 @@
-// P2-QUEUE-1 — pure queue-row decisions. The read_bag_queue row always
-// describes a bag's NEXT destination; this module decides how each
-// workflow event mutates it. The projector (lib/projector/bag-queue.ts)
+// P2-QUEUE-1 / P6-TASK-3 — pure queue-row decisions. The read_bag_queue
+// row always describes a bag's NEXT destination; this module decides how
+// each workflow event mutates it. The projector (lib/projector/bag-queue.ts)
 // is the only writer.
 //
-// Route knowledge is a hardcoded table for the three seeded routes,
-// mirroring drizzle/0013 + 0071. Phase 6 replaces it with a
-// route_operations lookup once the data-driven path is universal.
+// Phase 6 Task 3: route knowledge now comes from the data-driven
+// RouteGraph (built from route_operations rows via lib/production/engine/
+// route-data.ts). The hardcoded per-route switch cases and QUEUE_RANK
+// table that used to live in this file are gone; this module is now a
+// pure orchestrator over the graph twins.
+//
+// Purity contract: every exported function is a pure value transform —
+// callers pass the RouteGraph in. The projector loads it once via the
+// process-lifetime cached loader (loadRouteGraph) and threads the value
+// through; deriveQueueTransition never touches the DB or the cache.
 
-import { bothBottleFinishingDone } from "@/lib/production/stage-progression";
+import {
+  queueAfterWorkAtFromGraph,
+  queueRankFromGraph,
+  type RouteGraph,
+} from "@/lib/production/engine/route-data";
 
 export type QueueDestination = {
   queueStageKey: string;
@@ -34,117 +45,49 @@ const COMPLETION_EVENTS = new Set([
   "BOTTLE_STICKER_COMPLETE",
 ]);
 
-const BOTTLE_FINISHING_KINDS = ["BOTTLE_STICKER", "BOTTLE_CAP_SEAL"] as const;
+/** Where does a bag being worked at this station go next? Null when the
+ *  station finalizes in place (no next queue) or inputs are unknown.
+ *
+ *  Graph-backed. Bottle-finishing narrowing (self-implication for the
+ *  working station and the both-eligible / one-done cases) lives in the
+ *  graph twin — see route-data.ts. */
+export function queueAfterWorkAt(
+  graph: RouteGraph,
+  args: {
+    routeCode: string;
+    stationKind: string;
+    priorEventTypes: readonly string[];
+  },
+): QueueDestination | null {
+  return queueAfterWorkAtFromGraph(graph, args);
+}
 
 /** Rank of each queue along a route — higher is further downstream.
  *  Used to reject stale upstream echoes: a transition whose computed
  *  destination ranks BELOW the row's current queue is an out-of-order
- *  arrival (overlap scanning) and must not clobber the row. The two
- *  bottle finishing queues share a rank because the steps are
- *  order-independent (P2-BOTTLE-FLEX-1). */
-const QUEUE_RANK: Readonly<Record<string, Readonly<Record<string, number>>>> = {
-  CARD_BLISTER: { SEALING_QUEUE: 1, PACKAGING_QUEUE: 2, FINISHED_GOODS_QUEUE: 3 },
-  BOTTLE: {
-    BOTTLE_STICKER_QUEUE: 1,
-    BOTTLE_INDUCTION_QUEUE: 1,
-    PACKAGING_QUEUE: 2,
-    FINISHED_GOODS_QUEUE: 3,
+ *  arrival (overlap scanning) and must not clobber the row. Order-
+ *  independent group members share a rank (finishing queues on BOTTLE).
+ *
+ *  Graph-backed. See queueRankFromGraph in route-data.ts. */
+export function queueRank(
+  graph: RouteGraph,
+  routeCode: string,
+  queueStageKey: string,
+): number | null {
+  return queueRankFromGraph(graph, routeCode, queueStageKey);
+}
+
+export function deriveQueueTransition(
+  graph: RouteGraph,
+  args: {
+    eventType: string;
+    stationId: string | null;
+    stationKind: string | null;
+    routeCode: string | null;
+    priorEventTypes: readonly string[];
+    currentRow: { queueStageKey: string; claimedByStationId: string | null } | null;
   },
-  STICKER_ONLY: { PACKAGING_QUEUE: 1, FINISHED_GOODS_QUEUE: 2 },
-};
-
-export function queueRank(routeCode: string, queueStageKey: string): number | null {
-  return QUEUE_RANK[routeCode]?.[queueStageKey] ?? null;
-}
-
-const FINISHING_COMPLETION_FOR_KIND: Readonly<Record<string, string>> = {
-  BOTTLE_STICKER: "BOTTLE_STICKER_COMPLETE",
-  BOTTLE_CAP_SEAL: "BOTTLE_CAP_SEAL_COMPLETE",
-};
-
-function bottleFinishingDestination(
-  priorEventTypes: readonly string[],
-): QueueDestination {
-  const stickerDone = priorEventTypes.includes("BOTTLE_STICKER_COMPLETE");
-  const capSealDone = priorEventTypes.includes("BOTTLE_CAP_SEAL_COMPLETE");
-  if (bothBottleFinishingDone(priorEventTypes)) {
-    return { queueStageKey: "PACKAGING_QUEUE", eligibleStationKinds: ["PACKAGING"] };
-  }
-  if (capSealDone) {
-    return { queueStageKey: "BOTTLE_STICKER_QUEUE", eligibleStationKinds: ["BOTTLE_STICKER"] };
-  }
-  if (stickerDone) {
-    return { queueStageKey: "BOTTLE_INDUCTION_QUEUE", eligibleStationKinds: ["BOTTLE_CAP_SEAL"] };
-  }
-  return {
-    queueStageKey: "BOTTLE_STICKER_QUEUE",
-    eligibleStationKinds: [...BOTTLE_FINISHING_KINDS],
-  };
-}
-
-/** Where does a bag being worked at this station go next? Null when the
- *  station finalizes in place (no next queue) or inputs are unknown. */
-export function queueAfterWorkAt(args: {
-  routeCode: string;
-  stationKind: string;
-  priorEventTypes: readonly string[];
-}): QueueDestination | null {
-  const { routeCode, stationKind } = args;
-  if (routeCode === "CARD_BLISTER") {
-    if (stationKind === "BLISTER" || stationKind === "HANDPACK_BLISTER") {
-      return { queueStageKey: "SEALING_QUEUE", eligibleStationKinds: ["SEALING"] };
-    }
-    if (stationKind === "SEALING") {
-      return { queueStageKey: "PACKAGING_QUEUE", eligibleStationKinds: ["PACKAGING"] };
-    }
-    if (stationKind === "PACKAGING") {
-      return { queueStageKey: "FINISHED_GOODS_QUEUE", eligibleStationKinds: [] };
-    }
-    // COMBINED finalizes in place — no next queue.
-    return null;
-  }
-  if (routeCode === "BOTTLE") {
-    if (stationKind === "BOTTLE_HANDPACK") {
-      return bottleFinishingDestination(args.priorEventTypes);
-    }
-    if (stationKind === "BOTTLE_STICKER" || stationKind === "BOTTLE_CAP_SEAL") {
-      // The destination is where the bag goes AFTER this station's own
-      // step — so treat that step as done even when computing at pickup
-      // time (before its completion event exists). Keeps the row from
-      // listing the working station as eligible for its own output, and
-      // makes pickup-time and completion-time destinations agree.
-      const implied = FINISHING_COMPLETION_FOR_KIND[stationKind];
-      const effective =
-        implied && !args.priorEventTypes.includes(implied)
-          ? [...args.priorEventTypes, implied]
-          : args.priorEventTypes;
-      return bottleFinishingDestination(effective);
-    }
-    if (stationKind === "PACKAGING") {
-      return { queueStageKey: "FINISHED_GOODS_QUEUE", eligibleStationKinds: [] };
-    }
-    return null;
-  }
-  if (routeCode === "STICKER_ONLY") {
-    if (stationKind === "BOTTLE_STICKER") {
-      return { queueStageKey: "PACKAGING_QUEUE", eligibleStationKinds: ["PACKAGING"] };
-    }
-    if (stationKind === "PACKAGING") {
-      return { queueStageKey: "FINISHED_GOODS_QUEUE", eligibleStationKinds: [] };
-    }
-    return null;
-  }
-  return null;
-}
-
-export function deriveQueueTransition(args: {
-  eventType: string;
-  stationId: string | null;
-  stationKind: string | null;
-  routeCode: string | null;
-  priorEventTypes: readonly string[];
-  currentRow: { queueStageKey: string; claimedByStationId: string | null } | null;
-}): QueueTransition {
+): QueueTransition {
   const { eventType } = args;
 
   if (eventType === "BAG_FINALIZED") return { kind: "REMOVE" };
@@ -152,7 +95,7 @@ export function deriveQueueTransition(args: {
 
   if (START_EVENTS.has(eventType) || eventType === "BAG_PICKED_UP") {
     if (!args.stationId || !args.stationKind || !args.routeCode) return { kind: "NONE" };
-    const destination = queueAfterWorkAt({
+    const destination = queueAfterWorkAt(graph, {
       routeCode: args.routeCode,
       stationKind: args.stationKind,
       priorEventTypes: args.priorEventTypes,
@@ -163,7 +106,7 @@ export function deriveQueueTransition(args: {
 
   if (COMPLETION_EVENTS.has(eventType)) {
     if (!args.stationKind || !args.routeCode) return { kind: "NONE" };
-    const destination = queueAfterWorkAt({
+    const destination = queueAfterWorkAt(graph, {
       routeCode: args.routeCode,
       stationKind: args.stationKind,
       priorEventTypes: args.priorEventTypes,
@@ -175,8 +118,8 @@ export function deriveQueueTransition(args: {
     // row's current queue, this event is out of date for queue purposes
     // — applying it would clobber the downstream claim.
     if (args.currentRow) {
-      const currentRank = queueRank(args.routeCode, args.currentRow.queueStageKey);
-      const nextRank = queueRank(args.routeCode, destination.queueStageKey);
+      const currentRank = queueRank(graph, args.routeCode, args.currentRow.queueStageKey);
+      const nextRank = queueRank(graph, args.routeCode, destination.queueStageKey);
       if (currentRank != null && nextRank != null && nextRank < currentRank) {
         return { kind: "NONE" };
       }

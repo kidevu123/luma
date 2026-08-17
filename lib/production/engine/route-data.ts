@@ -72,9 +72,39 @@ export function buildRouteGraph(ops: RouteOperationView[][]): RouteGraph {
   }
   for (const code of Object.keys(routes)) {
     const arr = routes[code];
-    if (arr) arr.sort((a, b) => a.sequence - b.sequence);
+    if (arr) {
+      arr.sort((a, b) => a.sequence - b.sequence);
+      assertStageKeyNextConsistency(code, arr);
+    }
   }
   return { routes };
+}
+
+/** Build-time invariant: within a route, two ops that share `stageKey`
+ *  must share `nextStageKey` too. The BLISTER + HANDPACK_BLISTER pair
+ *  in CARD_BLISTER (both BLISTER_QUEUE → POST_BLISTER_STAGING) is the
+ *  seeded case that motivates this. If a future migration ever places
+ *  two ops at the same stage_key with different downstreams, the twins'
+ *  downstream walk (opsByStageKey's last-wins map) would silently pick
+ *  one branch — throwing here forces the migration author to reconcile
+ *  the graph explicitly. Additive safety: cannot fire on seeded data. */
+function assertStageKeyNextConsistency(
+  routeCode: string,
+  ops: readonly RouteGraphOp[],
+): void {
+  const byStage = new Map<string, string | null>();
+  for (const op of ops) {
+    if (byStage.has(op.stageKey)) {
+      const prior = byStage.get(op.stageKey);
+      if (prior !== op.nextStageKey) {
+        throw new Error(
+          `route-data: route=${routeCode} stage_key=${op.stageKey} has ops with differing next_stage_key (${String(prior)} vs ${String(op.nextStageKey)}); the graph's downstream walk is ambiguous — reconcile in the migration.`,
+        );
+      }
+    } else {
+      byStage.set(op.stageKey, op.nextStageKey);
+    }
+  }
 }
 
 // ─── Cached loader ──────────────────────────────────────────────────
@@ -143,7 +173,12 @@ const FINISHING_COMPLETION_FOR_KIND: Readonly<Record<string, string>> = {
   BOTTLE_CAP_SEAL: "BOTTLE_CAP_SEAL_COMPLETE",
 };
 
-/** Ops in the route indexed by stage_key. */
+/** Ops in the route indexed by stage_key. Last-op-wins on collision —
+ *  safe today because `buildRouteGraph` asserts that any two ops
+ *  sharing a stage_key also share their nextStageKey (see
+ *  assertStageKeyNextConsistency). The BLISTER + HANDPACK_BLISTER pair
+ *  in CARD_BLISTER both use BLISTER_QUEUE → POST_BLISTER_STAGING, so
+ *  the twin's downstream walk is stable regardless of which peer wins. */
 function opsByStageKey(
   ops: readonly RouteGraphOp[],
 ): Map<string, RouteGraphOp> {

@@ -139,6 +139,11 @@ export {
   STATION_INACTIVE_FLOOR_MESSAGE,
 } from "../station-management";
 export { floorEventRelevantToStation, queueKeysForStationKind } from "./floor-event-relevance";
+// P6 Task 3 — floor SSE route needs to load the RouteGraph at connect
+// time to thread into floorEventRelevantToStation. Cached loader; one
+// DB hit per process; production callers omit the loader arg.
+export { loadRouteGraph } from "./route-data";
+export type { RouteGraph } from "./route-data";
 
 // P4b Task 6 — floor import boundary at zero. Everything below backs a
 // real read or write in a floor "use server" file (actions.ts,

@@ -40,68 +40,15 @@ import {
   EVENT_STAGE_PREREQ,
   STATION_PICKUP_FROM_STAGE,
 } from "@/lib/production/stage-progression";
-import type { RouteOperationView } from "@/lib/production/routes";
+import { SEEDED_ROUTES_BY_CODE as SEEDED_ROUTES } from "./__fixtures__/seeded-routes";
+
+// P6 Task 3 — the seeded routes fixture is now shared with
+// route-data.test.ts + the consumer tests (queue-transitions,
+// floor-event-relevance). See lib/production/engine/__fixtures__/
+// seeded-routes.ts. The migration-text guard below stays intact.
 
 const MIGRATION_0013 = join(process.cwd(), "drizzle", "0013_route_operation_compat.sql");
 const MIGRATION_0074 = join(process.cwd(), "drizzle", "0074_handpack_route_operation.sql");
-
-function op(
-  sequence: number,
-  operationCode: string,
-  allowedStationKind: string | null,
-): RouteOperationView {
-  return {
-    routeCode: "FIXTURE",
-    routeName: "Fixture",
-    sequence,
-    operationCode,
-    operationName: operationCode,
-    stageKey: "FIXTURE_QUEUE",
-    nextStageKey: null,
-    reworkStageKey: null,
-    allowedStationKind,
-    allowedMachineKind: allowedStationKind,
-    requiresScan: true,
-    requiresCounter: true,
-    requiresTimer: false,
-    outputUnit: "cards",
-    orderIndependentGroup: null,
-  };
-}
-
-// Transcribed from drizzle/0013_route_operation_compat.sql:168-215 and
-// drizzle/0074_handpack_route_operation.sql (HANDPACK_BLISTER row, seq 8).
-// Note the stage keys are NOT transcribed — op() stubs them — so any
-// assertion about the stage chain must read the migration text instead.
-const SEEDED_ROUTES: Readonly<Record<string, RouteOperationView[]>> = {
-  CARD_BLISTER: [
-    op(1, "RECEIVING", null),
-    op(2, "BLISTER", "BLISTER"),
-    op(3, "POST_BLISTER_STAGING", null),
-    op(4, "HEAT_SEAL", "SEALING"),
-    op(5, "POST_SEAL_STAGING", null),
-    op(6, "PACKAGING", "PACKAGING"),
-    op(7, "FINISHED_GOODS", null),
-    // Migration 0074: HANDPACK_BLISTER gets its own real route_operations
-    // row (sequence 8). Same stage keys as BLISTER (BLISTER_QUEUE ->
-    // POST_BLISTER_STAGING); entry ops are rank-equivalent via stage keys.
-    op(8, "HANDPACK_BLISTER", "HANDPACK_BLISTER"),
-  ],
-  BOTTLE: [
-    op(1, "RECEIVING", null),
-    op(2, "BOTTLE_FILL", "BOTTLE_HANDPACK"),
-    op(3, "STICKERING", "BOTTLE_STICKER"),
-    op(4, "INDUCTION_SEAL", "BOTTLE_CAP_SEAL"),
-    op(5, "PACKAGING", "PACKAGING"),
-    op(6, "FINISHED_GOODS", null),
-  ],
-  STICKER_ONLY: [
-    op(1, "RECEIVING", null),
-    op(2, "STICKERING", "BOTTLE_STICKER"),
-    op(3, "PACKAGING", "PACKAGING"),
-    op(4, "FINISHED_GOODS", null),
-  ],
-};
 
 // Hand-typed from ALLOWED_EVENTS_BY_KIND in
 // lib/production/engine/record-stage-event.ts (moved verbatim from

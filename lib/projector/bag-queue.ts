@@ -17,6 +17,7 @@ import {
   workflowEvents,
 } from "@/lib/db/schema";
 import { deriveQueueTransition } from "@/lib/production/engine/queue-transitions";
+import { loadRouteGraph } from "@/lib/production/engine/route-data";
 import { legacyProductKindToRoute } from "@/lib/production/routes";
 import { buildCurrentBagDisplayLabel } from "@/lib/production/current-bag-display-label";
 import { getStationKind } from "./station-kind-cache";
@@ -70,6 +71,12 @@ export async function applyBagQueueTransition(
   // is a floor-layout fact, not a runtime one); no behaviour change.
   const stationKind = ev.stationId ? await getStationKind(tx, ev.stationId) : null;
 
+  // P6 Task 3 — load the RouteGraph via the process-lifetime cached
+  // loader. route_operations rows change only by migration (== deploy
+  // == fresh process == fresh cache), so this is at most one DB hit
+  // per worker process — NEVER per event on the hot path.
+  const graph = await loadRouteGraph();
+
   const [bagRow] = await tx
     .select({
       productId: workflowBags.productId,
@@ -120,7 +127,7 @@ export async function applyBagQueueTransition(
     .from(readBagQueue)
     .where(eq(readBagQueue.workflowBagId, ev.workflowBagId));
 
-  const transition = deriveQueueTransition({
+  const transition = deriveQueueTransition(graph, {
     eventType: ev.eventType,
     stationId: ev.stationId ?? null,
     stationKind,
