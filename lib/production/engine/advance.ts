@@ -161,14 +161,16 @@ export function buildRecordPackagingCompleteInput(args: {
     masterCases: args.inputs.cases ?? 0,
     displaysMade: args.inputs.displays ?? 0,
     looseCards: args.inputs.loose ?? 0,
-    // Operator-counted damage (AdvanceInput.inputs.damaged) is loose
-    // units — ripped cards — per the 2026-08-13 decision, so it maps to
-    // rippedCards. damagedPackaging is packaging-MATERIAL damage (foil,
-    // cases, labels), which stays an exception-flow concern raised by a
-    // supervisor, not something this operator gesture reports; always 0
-    // through this path.
-    damagedPackaging: 0,
+    // Operator-counted loose-unit damage (cards ripped, bottles cracked)
+    // maps to rippedCards per the 2026-08-13 decision.
     rippedCards: args.inputs.damaged ?? 0,
+    // 2026-08-17 user decision: packaging-material damage (foil, cases,
+    // labels) is now reported by the operator via the damagedPackaging
+    // CompletionInput field. Absent → 0, following the counterPresses
+    // precedent (a real reading of 0 must survive as 0, not as
+    // "field absent"). The P4b follow-up tracking this as a missing-as-zero
+    // mistake is now closed — the input exists and is mapped here.
+    damagedPackaging: args.inputs.damagedPackaging ?? 0,
     // Partial-close fields: absent AdvanceInput.keepBagPartial /
     // partialRemainingEstimate keeps today's default — a bottle bag
     // closed through advanceBag finalizes as fully empty.

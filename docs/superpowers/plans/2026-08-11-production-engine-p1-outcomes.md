@@ -264,19 +264,16 @@ Branch `feat/production-engine-p4b`. The operator screen lands.
 
 **Tracked follow-ups (post-cutover, filed for P5 decision):**
 
-- **`damagedPackaging` always writes 0 through advanceBag.** The
-  operator screen collects an operator-counted damaged-loose-cards
-  number (mapped to `rippedCards` per the P4a decision) but has no
-  input for packaging-material damage — foil, cases, labels. The
-  advanceBag path hardcodes `damagedPackaging: 0`
-  (`lib/production/engine/advance.ts:170`) which flows into the
-  projector's `damageCount` and the Zoho receive payload's damage
-  fields. This is currently a missing-as-zero mistake the operator
-  cannot correct on-screen: a torn foil roll or crushed case gets
-  recorded as no damage at all. The deleted `rework` field's
-  replacement (whether damage lives on the operator gesture, on a
-  supervisor exception, or both) is a P5 decision — do not treat 0 as
-  ground truth on any packaging bag until then.
+- **`damagedPackaging` always writes 0 through advanceBag.** [CLOSED — P6
+  Task 5, 2026-08-17 user decision] The operator screen now collects a
+  `damagedPackaging` count (packaging-material damage: foil, cases, labels)
+  alongside the existing `damaged` count (loose-unit/card damage). Added to
+  `resolve-completion.ts`'s PACKAGING_OPERATIONS branch as
+  `{key:"damagedPackaging", label:"Damaged packaging", unit:"units", required:false}`;
+  extended in `types.ts` (`CompletionInput` key union + `AdvanceInput.inputs`);
+  mapped in `advance.ts`'s `buildRecordPackagingCompleteInput` replacing the
+  hardcoded 0 (absent → 0, counterPresses precedent). Screen renders it via the
+  same CompletionInput-driven loop; no special-casing.
 
 - **QA-hold rollback trap.** Any bag held via `QA_HOLD_STARTED` under
   1.34 sets `read_bag_state.is_on_hold = true`. Rolling back to 1.33
@@ -352,6 +349,6 @@ Version: `1.34.0` → `1.35.0`.
 - Unlock throttle if tablets leave the LAN: per-station attempt counter with exponential back-off. Current mitigation: station scan-token boundary + LAN-only deployment + audit trail. PIN-set may also move to OWNER-only role if role tiers tighten.
 - Post-commit audit outside transaction: `supervisorClaimBagAction` writes the `floor.supervisor.manual_bag_claim` audit row after the claim transaction commits, matching the `releaseQaHold` precedent. This is a pre-existing design class — the audit is still reliable but not atomically coupled to the write. Refactor when the class is addressed broadly in P6.
 - Downtime-end flow: `DOWNTIME_ENDED` event type exists but nothing emits it. Downtime exceptions age off the rail after 4 hours rather than being resolved. Full flow (operator reports end, supervisor acks) is P6.
-- `damagedPackaging` rework-field decision (carried from P4b): the operator screen still hardcodes `damagedPackaging: 0`; the packaging-material damage input is P6 scope.
-- Data-driven routes, barrel curation, `read_queue_state` double-count fix (carried from P4b P6 list).
+- `damagedPackaging` rework-field decision (carried from P4b): CLOSED — P6 Task 5 (2026-08-17 user decision). The operator screen now collects packaging-material damage via the `damagedPackaging` CompletionInput field.
+- Data-driven routes, barrel curation (carried from P4b P6 list). `read_queue_state` double-count: CLOSED — P6 Task 5; SEALING_QUEUE/POST_BLISTER_STAGING and PACKAGING_QUEUE/POST_SEAL_STAGING now use read_bag_queue.queue_stage_key for disambiguation.
 - Value-pinned duplication guards (carried from P4b P6 list).

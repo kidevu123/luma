@@ -39,13 +39,16 @@ describe("resolveCompletionInputs", () => {
     expect(inputs.find((i) => i.key === "counter")).toBeUndefined();
   });
 
-  it("asks packaging for cases, displays and loose units", () => {
+  it("asks packaging for cases, displays, loose units, and damaged packaging (2026-08-17)", () => {
     const inputs = resolveCompletionInputs(
       op({ operationCode: "PACKAGING", allowedStationKind: "PACKAGING", outputUnit: "cases" }),
     );
-    expect(inputs.map((i) => i.key)).toEqual(
-      expect.arrayContaining(["cases", "displays", "loose"]),
-    );
+    const keys = inputs.map((i) => i.key);
+    expect(keys).toEqual(expect.arrayContaining(["cases", "displays", "loose", "damagedPackaging"]));
+    const dp = inputs.find((i) => i.key === "damagedPackaging");
+    expect(dp).toBeDefined();
+    expect(dp?.required).toBe(false);
+    expect(dp?.unit).toBe("units");
   });
 
   it("always offers an optional damaged count", () => {

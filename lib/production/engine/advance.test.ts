@@ -289,11 +289,35 @@ describe("buildRecordPackagingCompleteInput", () => {
     expect(out.rippedCards).toBe(3);
   });
 
-  it("always sends damagedPackaging as zero regardless of input", () => {
+  it("routes damagedPackaging input to damagedPackaging (2026-08-17 user decision)", () => {
+    // The P4b hardcode of 0 is replaced: the operator's count of damaged
+    // packaging material (foil, cases, labels) is now mapped through.
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1, damagedPackaging: 5 },
+      clientEventId: "cid-1",
+    });
+    expect(out.damagedPackaging).toBe(5);
+  });
+
+  it("defaults damagedPackaging to zero when absent (counterPresses precedent)", () => {
+    // Absent → 0, following the same presence-not-truthiness discipline:
+    // a real reading of 0 is not "field absent", and absent means 0.
     const out = buildRecordPackagingCompleteInput({
       station: PACKAGING_STATION,
       workflowBagId: "bag-1",
       inputs: { damaged: 3, cases: 1, displays: 2, loose: 5 },
+      clientEventId: "cid-1",
+    });
+    expect(out.damagedPackaging).toBe(0);
+  });
+
+  it("keeps damagedPackaging at zero when explicitly zero", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1, damagedPackaging: 0 },
       clientEventId: "cid-1",
     });
     expect(out.damagedPackaging).toBe(0);
