@@ -2,24 +2,27 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-// STAGE-EVENT-EXTRACT-1: fireStageEventAction's guard sequence and
-// transaction body moved verbatim to
-// lib/production/engine/record-stage-event.ts (actions.ts is "use server",
-// so the shared implementation cannot be exported from it). The scanners
-// below assert on the floor stage-event path as a whole, so the extracted
-// module is stitched back in where the body used to sit — every assertion
-// is unchanged from before the extraction.
-const actionsFileSrc = readFileSync(join(__dirname, "actions.ts"), "utf8");
+// P6 Task 4 — legacy floor actions retired:
+//   fireStageEventAction, packagingCompleteAction, lookupCardByTokenAction,
+//   finalizeBagAction, releaseSealingHandoffAction, releaseBagAction,
+//   setOperatorAction, verifyVendorBarcodeAction
+// After the P4a extractions (STAGE-EVENT-EXTRACT-1, PACKAGING-COMPLETE-
+// EXTRACT-1, ASSIGN-PRODUCT-EXTRACT-1) these actions were thin forwarders
+// to engine modules; P4b's operator screen cut them off completely. The
+// scanners that used to assert on the moved bodies now read the engine
+// source DIRECTLY instead of splicing it back into actions.ts. The dead
+// actions' shells (finalizeBagAction, releaseBagAction, releaseSealing
+// HandoffAction, setOperatorAction, verifyVendorBarcodeAction, lookupCard
+// ByTokenAction) had no independent semantics worth pinning — the shells'
+// disappearance is verified by the deletion itself.
+const actionsSrc = readFileSync(
+  join(__dirname, "actions.ts"),
+  "utf8",
+);
 const recordStageEventSrc = readFileSync(
   join(__dirname, "../../../../lib/production/engine/record-stage-event.ts"),
   "utf8",
 );
-// PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's guard sequence,
-// transaction body and its auto-finalize / deferred-QR helpers moved
-// verbatim to lib/production/engine/record-packaging-complete.ts for the
-// same "use server" reason. Same treatment: stitched back in where the
-// body used to sit (immediately after packagingCompleteAction, before
-// lookupCardByTokenAction) so every assertion below is unchanged.
 const recordPackagingCompleteSrc = readFileSync(
   join(
     __dirname,
@@ -27,66 +30,50 @@ const recordPackagingCompleteSrc = readFileSync(
   ),
   "utf8",
 );
-// ASSIGN-PRODUCT-EXTRACT-1: saveSealingProductAction's guard sequence,
-// transaction body and the OpenAllocationBlockError / raiseAllocationOpen
-// Failure pair it throws through moved verbatim to
-// lib/production/engine/assign-bag-product.ts for the same "use server"
-// reason. Same treatment: stitched back in where the body used to sit
-// (immediately after saveSealingProductAction, before the SPLIT-BAG-1
-// section) so every assertion below is unchanged.
 const assignBagProductSrc = readFileSync(
   join(__dirname, "../../../../lib/production/engine/assign-bag-product.ts"),
   "utf8",
 );
-const actionsSrc = actionsFileSrc
-  .replace(
-    "// ── pause / resume",
-    `${recordStageEventSrc}\n// ── pause / resume`,
-  )
-  .replace(
-    "// ── lookup card by scan token",
-    `${recordPackagingCompleteSrc}\n// ── lookup card by scan token`,
-  )
-  .replace(
-    `// ── SPLIT-BAG-1 — floor "Use calculated remaining"`,
-    `${assignBagProductSrc}\n// ── SPLIT-BAG-1 — floor "Use calculated remaining"`,
-  );
 const projectorSrc = readFileSync(
   join(__dirname, "../../../../lib/projector/index.ts"),
   "utf8",
 );
 
-describe("SEALING-COUNTER-1 · fireStageEventAction sealing path", () => {
+describe("SEALING-COUNTER-1 · sealing counter path (engine)", () => {
   it("imports sealing-counter helpers", () => {
-    expect(actionsSrc).toMatch(/from "@\/lib\/production\/sealing-counter"/);
-    expect(actionsSrc).toMatch(/computeSealedCountFromCounter/);
-    expect(actionsSrc).toMatch(/resolveSealingCardsPerPress/);
-    expect(actionsSrc).toMatch(/stationUsesSealingCounter/);
+    expect(recordStageEventSrc).toMatch(
+      /from "@\/lib\/production\/sealing-counter"/,
+    );
+    expect(recordStageEventSrc).toMatch(/computeSealedCountFromCounter/);
+    expect(recordStageEventSrc).toMatch(/resolveSealingCardsPerPress/);
+    expect(recordStageEventSrc).toMatch(/stationUsesSealingCounter/);
   });
 
   it("SEALING_COMPLETE accepts counterPresses and computes count server-side", () => {
-    expect(actionsSrc).toMatch(/counterPresses/);
-    expect(actionsSrc).toMatch(/eventType === "SEALING_COMPLETE"/);
-    expect(actionsSrc).toMatch(/computeSealedCountFromCounter/);
-    expect(actionsSrc).toMatch(/counter_presses/);
-    expect(actionsSrc).toMatch(/cards_per_press/);
+    expect(recordStageEventSrc).toMatch(/counterPresses/);
+    expect(recordStageEventSrc).toMatch(/eventType === "SEALING_COMPLETE"/);
+    expect(recordStageEventSrc).toMatch(/computeSealedCountFromCounter/);
+    expect(recordStageEventSrc).toMatch(/counter_presses/);
+    expect(recordStageEventSrc).toMatch(/cards_per_press/);
   });
 
   it("rejects SEALING_COMPLETE when machine cards-per-press is missing", () => {
-    expect(actionsSrc).toMatch(/SEALING_COUNTER_CONFIG_ERROR/);
+    expect(recordStageEventSrc).toMatch(/SEALING_COUNTER_CONFIG_ERROR/);
   });
 
   it("does not import stage-progression changes", () => {
-    expect(actionsSrc).not.toMatch(/EVENT_STAGE_PREREQ\s*=/);
+    expect(recordStageEventSrc).not.toMatch(/EVENT_STAGE_PREREQ\s*=/);
   });
 });
 
-describe("SEALING-FLOW-CLARITY-2 · unified hand-pack sealing", () => {
+describe("SEALING-FLOW-CLARITY-2 · unified hand-pack sealing (engine)", () => {
   it("uses hand-pack material helper after SEALING_COMPLETE", () => {
-    expect(actionsSrc).toMatch(/from "@\/lib\/production\/handpack-seal-material"/);
-    expect(actionsSrc).toMatch(/workflowBagHasHandpackBlisterComplete/);
-    expect(actionsSrc).toMatch(/issueHandpackBlisterCardMaterial/);
-    expect(actionsSrc).toMatch(/needsHandpackBlisterMaterial/);
+    expect(recordStageEventSrc).toMatch(
+      /from "@\/lib\/production\/handpack-seal-material"/,
+    );
+    expect(recordStageEventSrc).toMatch(/workflowBagHasHandpackBlisterComplete/);
+    expect(recordStageEventSrc).toMatch(/issueHandpackBlisterCardMaterial/);
+    expect(recordStageEventSrc).toMatch(/needsHandpackBlisterMaterial/);
   });
 
   it("sealHandpackBagAction removed", () => {
@@ -95,76 +82,87 @@ describe("SEALING-FLOW-CLARITY-2 · unified hand-pack sealing", () => {
   });
 });
 
-describe("SEALING-COUNTER-UI-2 · server payload unchanged for material path", () => {
+describe("SEALING-COUNTER-UI-2 · server payload unchanged for material path (engine)", () => {
   it("SEALING_COMPLETE still records counter_presses, cards_per_press, count_total", () => {
-    expect(actionsSrc).toMatch(/counter_presses/);
-    expect(actionsSrc).toMatch(/cards_per_press/);
-    expect(actionsSrc).toMatch(/count_total/);
+    expect(recordStageEventSrc).toMatch(/counter_presses/);
+    expect(recordStageEventSrc).toMatch(/cards_per_press/);
+    expect(recordStageEventSrc).toMatch(/count_total/);
   });
 
   it("hand-pack BLISTER_CARD issuance still keyed on count_total", () => {
-    expect(actionsSrc).toMatch(/issueHandpackBlisterCardMaterial/);
-    expect(actionsSrc).toMatch(/needsHandpackBlisterMaterial/);
+    expect(recordStageEventSrc).toMatch(/issueHandpackBlisterCardMaterial/);
+    expect(recordStageEventSrc).toMatch(/needsHandpackBlisterMaterial/);
   });
 });
 
-describe("SEALING-MATERIAL-NONBLOCKING-1 · sealing never blocked by blister lot", () => {
+describe("SEALING-MATERIAL-NONBLOCKING-1 · sealing never blocked by blister lot (engine)", () => {
   it("uses product-matched lot lookup — not global oldest", () => {
-    expect(actionsSrc).toMatch(/lookupProductMatchedBlisterCardLot/);
-    expect(actionsSrc).not.toMatch(/findOldestAvailableBlisterCardLot/);
+    expect(recordStageEventSrc).toMatch(/lookupProductMatchedBlisterCardLot/);
+    expect(recordStageEventSrc).not.toMatch(
+      /findOldestAvailableBlisterCardLot/,
+    );
   });
 
   it("does not return pre-made blister lot error to floor UI", () => {
-    expect(actionsSrc).not.toMatch(/No available pre-made blister lot found/);
-    expect(actionsSrc).not.toMatch(/Receive stock first/);
+    expect(recordStageEventSrc).not.toMatch(
+      /No available pre-made blister lot found/,
+    );
+    expect(recordStageEventSrc).not.toMatch(/Receive stock first/);
   });
 
   it("records skip audit fields when material lot unavailable", () => {
-    expect(actionsSrc).toMatch(/handpack_blister_material_skipped/);
-    expect(actionsSrc).toMatch(/handpack_blister_material_skip_reason/);
+    expect(recordStageEventSrc).toMatch(/handpack_blister_material_skipped/);
+    expect(recordStageEventSrc).toMatch(
+      /handpack_blister_material_skip_reason/,
+    );
   });
 });
 
-describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases", () => {
+describe("BLISTER-AUTO-RELEASE-1 · blister complete auto-releases (engine)", () => {
   it("chains maybeAutoReleaseAfterComplete after BLISTER_COMPLETE on BLISTER stations", () => {
-    expect(actionsSrc).toMatch(
+    expect(recordStageEventSrc).toMatch(
       /eventType === "BLISTER_COMPLETE" && station\.kind === "BLISTER"/,
     );
-    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
-    const blisterIdx = actionsSrc.indexOf(
+    expect(recordStageEventSrc).toMatch(/maybeAutoReleaseAfterComplete/);
+    const blisterIdx = recordStageEventSrc.indexOf(
       'eventType === "BLISTER_COMPLETE" && station.kind === "BLISTER"',
     );
-    const autoIdx = actionsSrc.indexOf("await maybeAutoReleaseAfterComplete");
+    const autoIdx = recordStageEventSrc.indexOf(
+      "await maybeAutoReleaseAfterComplete",
+    );
     expect(autoIdx).toBeGreaterThan(blisterIdx);
   });
 
   it("does not auto-release on COMBINED BLISTER_COMPLETE", () => {
-    expect(actionsSrc).toMatch(
+    expect(recordStageEventSrc).toMatch(
       /eventType === "BLISTER_COMPLETE" && station\.kind === "BLISTER"/,
     );
-    expect(actionsSrc).not.toMatch(
+    expect(recordStageEventSrc).not.toMatch(
       /eventType === "BLISTER_COMPLETE" && station\.kind === "COMBINED"/,
     );
   });
 
   it("BLISTER is in AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS with BLISTERED release stage", () => {
-    expect(actionsSrc).toMatch(/AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*"BLISTER"/);
-    const helperIdx = actionsSrc.indexOf("function maybeAutoReleaseAfterComplete");
-    const helperBlock = actionsSrc.slice(helperIdx, helperIdx + 1200);
+    expect(recordStageEventSrc).toMatch(
+      /AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS[\s\S]*"BLISTER"/,
+    );
+    const helperIdx = recordStageEventSrc.indexOf(
+      "function maybeAutoReleaseAfterComplete",
+    );
+    const helperBlock = recordStageEventSrc.slice(helperIdx, helperIdx + 1200);
     expect(helperBlock).toMatch(/STATION_RELEASE_FROM_STAGE\[args\.stationKind\]/);
     expect(helperBlock).toMatch(/-auto-release/);
   });
 
   it("BLISTER_COMPLETE payload still records count_total", () => {
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).toMatch(/count_total/);
-    expect(block).not.toMatch(/BLISTER_COMPLETE[\s\S]{0,200}packs_remaining/s);
+    expect(recordStageEventSrc).toMatch(/count_total/);
+    expect(recordStageEventSrc).not.toMatch(
+      /BLISTER_COMPLETE[\s\S]{0,200}packs_remaining/s,
+    );
   });
 
   it("first-op count guard unchanged for BLISTER_COMPLETE", () => {
-    expect(actionsSrc).toMatch(
+    expect(recordStageEventSrc).toMatch(
       /FIRST_OP_COUNT_EVENTS\.has\(eventType\) &&\s*!accountability\.accountableEmployeeId/,
     );
   });
@@ -207,9 +205,18 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause counter snapshots", () => {
   });
 
   it("resume remains a plain BAG_RESUMED action without counter segment emission", () => {
-    const resumeIdx = actionsSrc.indexOf("export async function resumeBagAction");
-    const operatorIdx = actionsSrc.indexOf("// ── operator handoff");
-    const block = actionsSrc.slice(resumeIdx, operatorIdx);
+    // resumeBagAction is the last exported action in the file — scope to
+    // its body by pinning to the next non-action anchor (there is none),
+    // so we scan the tail from resumeBagAction to end-of-file.
+    const resumeIdx = actionsSrc.indexOf(
+      "export async function resumeBagAction",
+    );
+    const block = actionsSrc.slice(
+      resumeIdx,
+      resumeIdx +
+        actionsSrc.slice(resumeIdx).indexOf("\n}\n") +
+        3,
+    );
     expect(block).toMatch(/eventType: "BAG_RESUMED"/);
     expect(block).not.toMatch(/recordBlisterCounterRollSegment/);
     expect(block).not.toMatch(/counterSnapshotCount/);
@@ -218,10 +225,12 @@ describe("BLISTER-PAUSE-COUNT-SNAPSHOT-1 · pause counter snapshots", () => {
 
 describe("COUNTER-SNAPSHOT-GUARD-1 · server-side counter guards", () => {
   it("pause and blister close-out call assertCounterSnapshotAllowed before segments", () => {
+    // pause path lives in actions.ts (pauseBagAction); blister close-out lives
+    // in the engine (record-stage-event.ts).
     expect(actionsSrc).toMatch(/assertCounterSnapshotAllowed/);
-    expect(actionsSrc).toMatch(/"blister_close_out"/);
     expect(actionsSrc).toMatch(/"pause_shift_end"/);
     expect(actionsSrc).toMatch(/"pause_machine_jam"/);
+    expect(recordStageEventSrc).toMatch(/"blister_close_out"/);
   });
 
   it("does not replace recordBlisterCounterRollSegment for valid pause paths", () => {
@@ -234,168 +243,152 @@ describe("COUNTER-SNAPSHOT-GUARD-1 · server-side counter guards", () => {
   });
 });
 
-describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases", () => {
+describe("SEALING-AUTO-RELEASE-1 · sealing complete auto-releases (engine)", () => {
   it("chains maybeAutoReleaseAfterComplete after final SEALING on SEALING stations", () => {
-    expect(actionsSrc).toMatch(/isSealingFinal && station\.kind === "SEALING"/);
-    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterComplete/);
+    expect(recordStageEventSrc).toMatch(
+      /isSealingFinal && station\.kind === "SEALING"/,
+    );
+    expect(recordStageEventSrc).toMatch(/maybeAutoReleaseAfterComplete/);
   });
 
   it("does not auto-release on COMBINED SEALING_COMPLETE", () => {
-    // P2-QUEUE-1 added bottle station OR-clauses to the same else-if
-    // condition list, so a fixed-width proximity window is no longer a
-    // safe check (a future edit could close the block early and insert
-    // an unconditional call within a loose window and still pass).
-    // Anchor structurally instead: match unbounded across the OR-clause
-    // list up to the block's closing "?) {" and then require the call
-    // within a TIGHT window of that brace, so it must be the block's
-    // first statement regardless of how many OR-clauses precede it.
-    const match = actionsSrc.match(
+    // Anchor on the OR-clause list up to its closing "?) {" then require the
+    // auto-release call within a tight window of that brace, so it must be
+    // the block's first statement regardless of how many OR-clauses precede.
+    const match = recordStageEventSrc.match(
       /\(isSealingFinal && station\.kind === "SEALING"\)[\s\S]*?\)\s*\{\s{0,20}await maybeAutoReleaseAfterComplete/,
     );
     expect(match?.[0]).toBeTruthy();
   });
 });
 
-describe("MULTI-SEALING-SAME-BAG-1 · segment vs final sealing", () => {
+describe("MULTI-SEALING-SAME-BAG-1 · segment vs final sealing (engine)", () => {
+  // P6 Task 4 — releaseSealingHandoffAction retired; its stage/segment
+  // guard checks moved into the engine's auto-release/segment logic. Kept
+  // scanners target the engine's segment-vs-final gating directly.
   it("allows SEALING_SEGMENT_COMPLETE on SEALING stations", () => {
-    expect(actionsSrc).toMatch(/SEALING: \["SEALING_SEGMENT_COMPLETE", "SEALING_COMPLETE"\]/);
-    expect(actionsSrc).toMatch(/"SEALING_SEGMENT_COMPLETE"/);
-  });
-
-  it("segment submit keeps bag pinned — handoff is explicit", () => {
-    expect(actionsSrc).toMatch(/projectSealingStationHandoff/);
-    expect(actionsSrc).toMatch(/releaseSealingHandoffAction/);
-    expect(actionsSrc).not.toMatch(
-      /isSealingSegment && isPureSealingStation[\s\S]{0,120}maybeAutoReleaseAfterSegment/,
+    expect(recordStageEventSrc).toMatch(
+      /SEALING: \["SEALING_SEGMENT_COMPLETE", "SEALING_COMPLETE"\]/,
     );
-    expect(actionsSrc).toMatch(/SEALING_SEGMENT_EVENT/);
-  });
-
-  it("releaseSealingHandoffAction requires BLISTERED stage and prior segment", () => {
-    expect(actionsSrc).toMatch(
-      /Record a sealing segment on this machine before handing the bag off/,
-    );
-    expect(actionsSrc).toMatch(/Bag must be blistered before handoff/);
+    expect(recordStageEventSrc).toMatch(/"SEALING_SEGMENT_COMPLETE"/);
   });
 
   it("final SEALING_COMPLETE on pure sealing requires prior segment", () => {
-    expect(actionsSrc).toMatch(
+    expect(recordStageEventSrc).toMatch(
       /Record at least one sealing segment before marking sealing complete/,
     );
-    expect(actionsSrc).toMatch(/lane_close: true/);
+    expect(recordStageEventSrc).toMatch(/lane_close: true/);
   });
 
   it("partial SEALING_COMPLETE validates reason and segment totals", () => {
-    expect(actionsSrc).toMatch(/sealingCloseMode/);
-    expect(actionsSrc).toMatch(/validateSealingPartialCloseInput/);
-    expect(actionsSrc).toMatch(/buildPartialSealingClosePayload/);
-    expect(actionsSrc).toMatch(/buildPartialSealingClosePayload/);
-    expect(actionsSrc).toMatch(/maybeAutoReleaseAfterPartialSealingClose/);
+    expect(recordStageEventSrc).toMatch(/sealingCloseMode/);
+    expect(recordStageEventSrc).toMatch(/validateSealingPartialCloseInput/);
+    expect(recordStageEventSrc).toMatch(/buildPartialSealingClosePayload/);
+    expect(recordStageEventSrc).toMatch(/maybeAutoReleaseAfterPartialSealingClose/);
   });
 
   it("partial SEALING_COMPLETE skips counter presses on pure sealing station", () => {
-    expect(actionsSrc).toMatch(/sealingFinalOnPureStation/);
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("export async function pauseBagAction");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).toMatch(
+    expect(recordStageEventSrc).toMatch(/sealingFinalOnPureStation/);
+    expect(recordStageEventSrc).toMatch(
       /if \(sealingUsesCounter && !sealingFinalOnPureStation\)/,
     );
-    expect(block).toMatch(
+    expect(recordStageEventSrc).toMatch(
       /sealingUsesCounter && !sealingFinalOnPureStation[\s\S]*buildPartialSealingClosePayload/,
     );
-    expect(block).not.toMatch(
+    expect(recordStageEventSrc).not.toMatch(
       /isPartialSealingClose[\s\S]{0,120}SEALING_COUNTER_PRESS_ERROR/,
     );
   });
 
   it("partial close with no segments returns segment error not counter error", () => {
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("export async function pauseBagAction");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    // Anchored on the CALL SITES, not the bare identifiers: the stage-event
-    // source now carries its own import list, and a bare needle would match
-    // the import line instead — leaving this ordering assertion vacuous.
     const partialValNeedle =
       "const partialValidation = validateSealingPartialCloseInput";
     const counterNeedle = "return { error: SEALING_COUNTER_PRESS_ERROR };";
-    expect(block.split(partialValNeedle).length - 1).toBe(1);
-    expect(block.split(counterNeedle).length - 1).toBe(1);
-    const partialValIdx = block.indexOf(partialValNeedle);
-    const counterIdx = block.indexOf(counterNeedle);
+    expect(recordStageEventSrc.split(partialValNeedle).length - 1).toBe(1);
+    expect(recordStageEventSrc.split(counterNeedle).length - 1).toBe(1);
+    const partialValIdx = recordStageEventSrc.indexOf(partialValNeedle);
+    const counterIdx = recordStageEventSrc.indexOf(counterNeedle);
     expect(partialValIdx).toBeGreaterThan(-1);
     expect(counterIdx).toBeGreaterThan(partialValIdx);
   });
 
   it("packaging complete allows BLISTERED when partial sealing close-out exists", () => {
-    expect(actionsSrc).toMatch(/packagingPartialSealedReady/);
-    expect(actionsSrc).toMatch(/allowsPackagingCompleteAtBlistered/);
+    expect(recordPackagingCompleteSrc).toMatch(/packagingPartialSealedReady/);
+    expect(recordPackagingCompleteSrc).toMatch(/allowsPackagingCompleteAtBlistered/);
   });
 
   it("handpack material runs on segment not final close-only", () => {
-    expect(actionsSrc).toMatch(/isSealingSegment \|\|\s*\(isSealingFinal && !isPureSealingStation\)/);
+    expect(recordStageEventSrc).toMatch(
+      /isSealingSegment \|\|\s*\(isSealingFinal && !isPureSealingStation\)/,
+    );
   });
 });
 
-describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () => {
+describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes (engine)", () => {
   it("chains maybeAutoFinalizeAfterPackagingComplete after PACKAGING_COMPLETE on PACKAGING stations", () => {
-    expect(actionsSrc).toMatch(/station\.kind === "PACKAGING"/);
-    expect(actionsSrc).toMatch(/maybeAutoFinalizeAfterPackagingComplete/);
-    expect(actionsSrc).toMatch(/autoCreateAndReleaseFinishedLotForWorkflowBag/);
-    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
-    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
-    const block = actionsSrc.slice(pkgIdx, lookupIdx);
-    expect(block).toMatch(/maybeAutoFinalizeAfterPackagingComplete/);
-    expect(block).toMatch(/runFinishedLotPostCommitEffects/);
-    expect(block).toMatch(/emitCountBasedPackagingConsumption/);
+    expect(recordPackagingCompleteSrc).toMatch(/station\.kind === "PACKAGING"/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /maybeAutoFinalizeAfterPackagingComplete/,
+    );
+    expect(recordPackagingCompleteSrc).toMatch(
+      /autoCreateAndReleaseFinishedLotForWorkflowBag/,
+    );
+    expect(recordPackagingCompleteSrc).toMatch(/runFinishedLotPostCommitEffects/);
+    expect(recordPackagingCompleteSrc).toMatch(/emitCountBasedPackagingConsumption/);
   });
 
-  it("uses shared projectBagFinalizedEvent for manual finalize and auto-finalize", () => {
-    expect(actionsSrc).toMatch(/function projectBagFinalizedEvent/);
-    expect(actionsSrc).toMatch(/projectBagFinalizedEvent[\s\S]*BAG_FINALIZED/);
-    const finalizeIdx = actionsSrc.indexOf("export async function finalizeBagAction");
-    const releaseIdx = actionsSrc.indexOf("// ── release to next station");
-    const finalizeBlock = actionsSrc.slice(finalizeIdx, releaseIdx);
-    expect(finalizeBlock).toMatch(/projectBagFinalizedEvent/);
+  it("exports projectBagFinalizedEvent for shared use", () => {
+    expect(recordPackagingCompleteSrc).toMatch(/function projectBagFinalizedEvent/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /projectBagFinalizedEvent[\s\S]*BAG_FINALIZED/,
+    );
   });
 
   it("auto-finalize is idempotent with -auto-finalize clientEventId suffix", () => {
-    expect(actionsSrc).toMatch(/-auto-finalize/);
-    expect(actionsSrc).toMatch(/AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS/);
+    expect(recordPackagingCompleteSrc).toMatch(/-auto-finalize/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS/,
+    );
   });
 
   it("does not auto-finalize on COMBINED PACKAGING_COMPLETE", () => {
-    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
-    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
-    const block = actionsSrc.slice(pkgIdx, lookupIdx);
-    expect(block).toMatch(
+    expect(recordPackagingCompleteSrc).toMatch(
       /if \(station\.kind === "PACKAGING" && !emitPartialPackaging\)/,
     );
-    expect(block).not.toMatch(/COMBINED[\s\S]{0,40}maybeAutoFinalizeAfterPackagingComplete/);
+    expect(recordPackagingCompleteSrc).not.toMatch(
+      /COMBINED[\s\S]{0,40}maybeAutoFinalizeAfterPackagingComplete/,
+    );
   });
 
   it("only auto-creates and releases finished lots after successful full packaging auto-finalize", () => {
-    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
-    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
-    const block = actionsSrc.slice(pkgIdx, lookupIdx);
-    expect(block).toMatch(/if \(station\.kind === "PACKAGING" && !emitPartialPackaging\)/);
-    expect(block).toMatch(/const didFinalize = await maybeAutoFinalizeAfterPackagingComplete/);
-    expect(block).toMatch(/if \(didFinalize\)[\s\S]*autoCreateAndReleaseFinishedLotForWorkflowBag/);
-    expect(block).not.toMatch(/emitPartialPackaging[\s\S]{0,120}autoCreateAndReleaseFinishedLotForWorkflowBag/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /if \(station\.kind === "PACKAGING" && !emitPartialPackaging\)/,
+    );
+    expect(recordPackagingCompleteSrc).toMatch(
+      /const didFinalize = await maybeAutoFinalizeAfterPackagingComplete/,
+    );
+    expect(recordPackagingCompleteSrc).toMatch(
+      /if \(didFinalize\)[\s\S]*autoCreateAndReleaseFinishedLotForWorkflowBag/,
+    );
+    expect(recordPackagingCompleteSrc).not.toMatch(
+      /emitPartialPackaging[\s\S]{0,120}autoCreateAndReleaseFinishedLotForWorkflowBag/,
+    );
   });
 
   it("audits auto finished lot exceptions without rolling back packaging completion", () => {
-    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
-    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
-    const block = actionsSrc.slice(pkgIdx, lookupIdx);
-    expect(block).toMatch(/finished_lot\.auto_create_blocked/);
-    expect(block).toMatch(/targetType: "WorkflowBag"/);
-    expect(block).toMatch(/reason: autoLot\.reason/);
+    expect(recordPackagingCompleteSrc).toMatch(/finished_lot\.auto_create_blocked/);
+    expect(recordPackagingCompleteSrc).toMatch(/targetType: "WorkflowBag"/);
+    expect(recordPackagingCompleteSrc).toMatch(/reason: autoLot\.reason/);
   });
 
   it("auto-finalize guards on PACKAGED stage, not finalized, and station pin", () => {
-    const helperIdx = actionsSrc.indexOf("function maybeAutoFinalizeAfterPackagingComplete");
-    const helperBlock = actionsSrc.slice(helperIdx, helperIdx + 1800);
+    const helperIdx = recordPackagingCompleteSrc.indexOf(
+      "function maybeAutoFinalizeAfterPackagingComplete",
+    );
+    const helperBlock = recordPackagingCompleteSrc.slice(
+      helperIdx,
+      helperIdx + 1800,
+    );
     expect(helperBlock).toMatch(/stage !== "PACKAGED"/);
     expect(helperBlock).toMatch(/isFinalized/);
     expect(helperBlock).toMatch(/currentWorkflowBagId/);
@@ -404,121 +397,105 @@ describe("PACKAGING-AUTO-FINALIZE-1 · packaging close-out auto-finalizes", () =
   });
 
   it("packaging payload keys unchanged", () => {
-    const pkgIdx = actionsSrc.indexOf("export async function packagingCompleteAction");
-    const lookupIdx = actionsSrc.indexOf("export async function lookupCardByTokenAction");
-    const block = actionsSrc.slice(pkgIdx, lookupIdx);
-    expect(block).toMatch(/master_cases/);
-    expect(block).toMatch(/displays_made/);
-    expect(block).toMatch(/loose_cards/);
-    expect(block).toMatch(/damaged_packaging/);
-    expect(block).toMatch(/ripped_cards/);
-    expect(block).toMatch(/buildPartialPackagingCompletePayload/);
-    expect(block).toMatch(/shouldEmitPartialPackagingComplete/);
+    expect(recordPackagingCompleteSrc).toMatch(/master_cases/);
+    expect(recordPackagingCompleteSrc).toMatch(/displays_made/);
+    expect(recordPackagingCompleteSrc).toMatch(/loose_cards/);
+    expect(recordPackagingCompleteSrc).toMatch(/damaged_packaging/);
+    expect(recordPackagingCompleteSrc).toMatch(/ripped_cards/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /buildPartialPackagingCompletePayload/,
+    );
+    expect(recordPackagingCompleteSrc).toMatch(
+      /shouldEmitPartialPackagingComplete/,
+    );
   });
 });
 
-describe("P2-PARTIAL-KEEP · QR is never dropped for a partial bottle bag", () => {
-  const finalizeBlock = (() => {
-    const i = actionsSrc.indexOf("export async function finalizeBagAction");
-    const j = actionsSrc.indexOf("// ── release to next station");
-    return actionsSrc.slice(i, j);
-  })();
-  const pkgBlock = (() => {
-    const i = actionsSrc.indexOf("export async function packagingCompleteAction");
-    const j = actionsSrc.indexOf("export async function lookupCardByTokenAction");
-    return actionsSrc.slice(i, j);
-  })();
-
+describe("P2-PARTIAL-KEEP · QR is never dropped for a partial bottle bag (engine)", () => {
+  // P6 Task 4 — finalizeBagAction retired; its keep-partial + defer logic
+  // was already delegated to the engine's projectBagFinalizedEvent /
+  // resolveDeferredQrReleaseAfterPackaging (record-packaging-complete.ts).
+  // The remaining scanners target the engine module directly.
   it("projector releases the QR through the intent-aware guard, not the raw session rule", () => {
     expect(projectorSrc).toMatch(/shouldReleaseQrAtFinalizationWithIntent/);
-    // The old un-guarded helper must not be the one wired into the finalize branch.
     expect(projectorSrc).not.toMatch(
       /if \(shouldReleaseQrAtFinalization\(wfSession/,
     );
   });
 
-  it("MANUAL finalizeBagAction defers + re-decides QR release for bottle bags (A2 gap closed)", () => {
-    // Determines the product kind and only defers for bottles.
-    expect(finalizeBlock).toMatch(/products\.kind/);
-    expect(finalizeBlock).toMatch(/const isBottleBag = bagProduct\?\.kind === "BOTTLE"/);
-    // Defers the projector release and re-resolves after, never a bare finalize.
-    expect(finalizeBlock).toMatch(/deferQrRelease: isBottleBag/);
-    expect(finalizeBlock).toMatch(/if \(isBottleBag\)[\s\S]*resolveDeferredQrReleaseAfterPackaging/);
-    // Carries the explicit operator keep-partial override.
-    expect(finalizeBlock).toMatch(/keepPartial: keepBagPartial && isBottleBag/);
-  });
-
-  it("manual finalize is still a no-op deferral for card/variety (release behavior unchanged)", () => {
-    // deferQrRelease is gated on isBottleBag, so non-bottle bags keep the
-    // existing immediate session-rule release.
-    expect(finalizeBlock).toMatch(/deferQrRelease: isBottleBag/);
-    expect(finalizeBlock).not.toMatch(/deferQrRelease: true(?![\s\S]*isBottleBag)/);
-  });
-
   it("packaging keep-partial + defer is scoped to bottle products only", () => {
-    expect(pkgBlock).toMatch(/const isBottleBag = productRow\?\.kind === "BOTTLE"/);
-    expect(pkgBlock).toMatch(/deferQrRelease: isBottleBag/);
-    expect(pkgBlock).toMatch(/keepPartial: keepBagPartial && isBottleBag/);
-    expect(pkgBlock).toMatch(/if \(isBottleBag\)[\s\S]*resolveDeferredQrReleaseAfterPackaging/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /const isBottleBag = productRow\?\.kind === "BOTTLE"/,
+    );
+    expect(recordPackagingCompleteSrc).toMatch(/deferQrRelease: isBottleBag/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /keepPartial: keepBagPartial && isBottleBag/,
+    );
+    expect(recordPackagingCompleteSrc).toMatch(
+      /if \(isBottleBag\)[\s\S]*resolveDeferredQrReleaseAfterPackaging/,
+    );
   });
 
   it("deferred release only drops the QR when the bag is confirmed empty", () => {
-    const i = actionsSrc.indexOf("function resolveDeferredQrReleaseAfterPackaging");
-    const block = actionsSrc.slice(i, i + 2400);
+    const i = recordPackagingCompleteSrc.indexOf(
+      "function resolveDeferredQrReleaseAfterPackaging",
+    );
+    const block = recordPackagingCompleteSrc.slice(i, i + 2400);
     expect(block).toMatch(/shouldReleaseQrAfterPackagingClose/);
     expect(block).toMatch(/status: "IDLE", assignedWorkflowBagId: null/);
-    // Both outcomes are audited with a distinct, understandable reason.
     expect(block).toMatch(/floor\.bag_qr_released_empty/);
     expect(block).toMatch(/floor\.bag_kept_partial/);
   });
 
   it("operator remaining estimate is stored as a labelled estimate, never as the reconciliation balance", () => {
-    expect(actionsSrc).toMatch(/operator_remaining_estimate/);
-    expect(actionsSrc).toMatch(/operator_remaining_estimate_source/);
-    // The estimate rides the BAG_FINALIZED payload only — it must not be wired
-    // into endingBalanceQty / the OUTPUT_DERIVED allocation close.
-    expect(actionsSrc).not.toMatch(/endingBalanceQty:\s*partialRemainingEstimate/);
-    expect(actionsSrc).not.toMatch(/endingBalanceQty:\s*remainingEstimate/);
+    expect(recordPackagingCompleteSrc).toMatch(/operator_remaining_estimate/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /operator_remaining_estimate_source/,
+    );
+    expect(recordPackagingCompleteSrc).not.toMatch(
+      /endingBalanceQty:\s*partialRemainingEstimate/,
+    );
+    expect(recordPackagingCompleteSrc).not.toMatch(
+      /endingBalanceQty:\s*remainingEstimate/,
+    );
   });
 });
 
 describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
   it("imports sealing product helpers", () => {
-    expect(actionsSrc).toMatch(/from "@\/lib\/production\/sealing-product"/);
-    expect(actionsSrc).toMatch(/validateSealingProductPick/);
-    expect(actionsSrc).toMatch(/SEALING_STATION_KINDS/);
-    expect(actionsSrc).toMatch(/SEALING_SAVE_PRODUCT_FIRST_ERROR/);
+    // assign-bag-product owns the save-first path;
+    // record-stage-event owns the SEALING_SAVE_PRODUCT_FIRST_ERROR gate.
+    expect(assignBagProductSrc).toMatch(
+      /from "@\/lib\/production\/sealing-product"/,
+    );
+    expect(assignBagProductSrc).toMatch(/validateSealingProductPick/);
+    expect(assignBagProductSrc).toMatch(/SEALING_STATION_KINDS/);
+    expect(recordStageEventSrc).toMatch(/SEALING_SAVE_PRODUCT_FIRST_ERROR/);
   });
 
   it("saveSealingProductAction persists product before segment work", () => {
     expect(actionsSrc).toMatch(/export async function saveSealingProductAction/);
-    expect(actionsSrc).toMatch(/floor\.sealing_product_saved/);
-    expect(actionsSrc).toMatch(/source: "SEALING_SELECTION"/);
-    expect(actionsSrc).toMatch(/SEALING_PRODUCT_ALREADY_SAVED_ERROR/);
+    expect(assignBagProductSrc).toMatch(/floor\.sealing_product_saved/);
+    expect(assignBagProductSrc).toMatch(/source: "SEALING_SELECTION"/);
+    expect(assignBagProductSrc).toMatch(/SEALING_PRODUCT_ALREADY_SAVED_ERROR/);
   });
 
   it("saveSealingProductAction idempotently accepts same product re-save", () => {
-    const saveIdx = actionsSrc.indexOf("export async function saveSealingProductAction");
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const block = actionsSrc.slice(saveIdx, fireIdx);
     // ASSIGN-PRODUCT-EXTRACT-1: the picked product is read off the input
-    // type now (`productId`) instead of `parsed.data.productId` — the
-    // mechanical rename the relocation required. Both halves stay pinned:
-    // the action passes parsed.data.productId in, the moved body reads it.
-    expect(block).toMatch(/productId: parsed\.data\.productId/);
-    expect(block).toMatch(/bagProductRow\.productId === productId/);
-    expect(block).toMatch(/return \{ ok: true \}/);
-  });
-
-  it("fireStageEventAction still accepts optional productId for legacy FormData only", () => {
-    expect(actionsSrc).toMatch(/productId: z\.string\(\)\.uuid\(\)/);
-    expect(actionsSrc).toMatch(/pickedSealingProductId/);
+    // type in the engine module (`productId`) while the action forwards
+    // `parsed.data.productId`. Both halves pinned.
+    expect(actionsSrc).toMatch(/productId: parsed\.data\.productId/);
+    expect(assignBagProductSrc).toMatch(/bagProductRow\.productId === productId/);
+    expect(assignBagProductSrc).toMatch(/return \{ ok: true \}/);
   });
 
   it("scanCardAction links inventory bag from QR scan token at first-op start", () => {
     const scanIdx = actionsSrc.indexOf("export async function scanCardAction");
-    const stageIdx = actionsSrc.indexOf("// ── stage events");
-    const block = actionsSrc.slice(scanIdx, stageIdx);
+    const nextExportIdx = actionsSrc.indexOf(
+      "export async function",
+      scanIdx + "export async function scanCardAction".length,
+    );
+    const block = actionsSrc.slice(scanIdx, nextExportIdx);
     expect(block).toMatch(/lookupInventoryBagByQrScanToken/);
     expect(block).toMatch(/inventoryBagId: inventoryLink\.inventoryBagId/);
     expect(block).toMatch(/inventory_bag_id: inventoryLink\.inventoryBagId/);
@@ -527,8 +504,11 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
 
   it("scanCardAction blocks fresh start when floor readiness is BLOCKED", () => {
     const scanIdx = actionsSrc.indexOf("export async function scanCardAction");
-    const stageIdx = actionsSrc.indexOf("// ── stage events");
-    const block = actionsSrc.slice(scanIdx, stageIdx);
+    const nextExportIdx = actionsSrc.indexOf(
+      "export async function",
+      scanIdx + "export async function scanCardAction".length,
+    );
+    const block = actionsSrc.slice(scanIdx, nextExportIdx);
     expect(block).toMatch(/evaluateQrCardReadinessById/);
     expect(block).toMatch(/floorReadinessOperatorMessage/);
     expect(block).not.toMatch(/override.*lineage/i);
@@ -537,52 +517,40 @@ describe("PRODUCT-SELECTION-AT-SEALING-1 · floor actions", () => {
 
   it("does not emit PRODUCT_MAPPED at scan when first-op returns null product", () => {
     const scanIdx = actionsSrc.indexOf("export async function scanCardAction");
-    const stageIdx = actionsSrc.indexOf("// ── stage events");
-    const block = actionsSrc.slice(scanIdx, stageIdx);
+    const nextExportIdx = actionsSrc.indexOf(
+      "export async function",
+      scanIdx + "export async function scanCardAction".length,
+    );
+    const block = actionsSrc.slice(scanIdx, nextExportIdx);
     expect(block).toMatch(/if \(productIdToSet && productLookup\)/);
   });
 
-  it("saveSealingProductAction emits PRODUCT_MAPPED before segment events", () => {
-    const saveIdx = actionsSrc.indexOf("export async function saveSealingProductAction");
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const saveBlock = actionsSrc.slice(saveIdx, fireIdx);
-    expect(saveBlock).toMatch(/eventType: "PRODUCT_MAPPED"/);
-    expect(saveBlock).toMatch(/source: "SEALING_SELECTION"/);
-
-    const fireIdx2 = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const fireBlock = actionsSrc.slice(fireIdx2, pauseIdx);
-    expect(fireBlock).not.toMatch(
+  it("saveSealingProductAction emits PRODUCT_MAPPED and stage-event body no longer double-saves", () => {
+    expect(assignBagProductSrc).toMatch(/eventType: "PRODUCT_MAPPED"/);
+    expect(assignBagProductSrc).toMatch(/source: "SEALING_SELECTION"/);
+    // The engine's stage-event body must NOT also save the picked product on SEALING_COMPLETE.
+    expect(recordStageEventSrc).not.toMatch(
       /!bagProductRow\?\.productId &&\s*pickedSealingProductId/,
     );
   });
 
   it("handpack lot lookup runs inside transaction after product map", () => {
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).toMatch(/lookupProductMatchedBlisterCardLot\(\s*workflowBagId,\s*tx/);
+    expect(recordStageEventSrc).toMatch(
+      /lookupProductMatchedBlisterCardLot\(\s*workflowBagId,\s*tx/,
+    );
   });
 
   it("rejects routine remapping when product already set", () => {
-    expect(actionsSrc).toMatch(/SEALING_PRODUCT_ALREADY_SAVED_ERROR/);
+    expect(assignBagProductSrc).toMatch(/SEALING_PRODUCT_ALREADY_SAVED_ERROR/);
   });
 
   it("requires saved product before sealing segment or close-out", () => {
-    expect(actionsSrc).toMatch(/SEALING_SAVE_PRODUCT_FIRST_ERROR/);
+    expect(recordStageEventSrc).toMatch(/SEALING_SAVE_PRODUCT_FIRST_ERROR/);
   });
 
   it("resolves tablet type via shared workflow bag resolver for sealing pick", () => {
-    const saveIdx = actionsSrc.indexOf("export async function saveSealingProductAction");
-    // Scope to saveSealingProductAction's body only — end at the next exported
-    // action (other floor actions legitimately reference bagQrCode).
-    const nextIdx = actionsSrc.indexOf(
-      "export async function",
-      saveIdx + "export async function saveSealingProductAction".length,
-    );
-    const block = actionsSrc.slice(saveIdx, nextIdx);
-    expect(block).toMatch(/resolveWorkflowBagTabletTypeId/);
-    expect(block).not.toMatch(/bagQrCode/);
+    expect(assignBagProductSrc).toMatch(/resolveWorkflowBagTabletTypeId/);
+    expect(assignBagProductSrc).not.toMatch(/bagQrCode/);
   });
 });
 
@@ -594,46 +562,38 @@ describe("SEALING-PRODUCT-PERSIST-1 · projector read model", () => {
   });
 });
 
-describe("HANDPACK-TABLET-CONTEXT-1 · floor actions", () => {
-  it("eventSchema no longer accepts normal-operator tabletTypeId", () => {
-    expect(actionsSrc).not.toMatch(/tabletTypeId: z\.string\(\)\.uuid\(\)/);
+describe("HANDPACK-TABLET-CONTEXT-1 · engine actions", () => {
+  it("stage-event body no longer accepts normal-operator tabletTypeId", () => {
+    expect(recordStageEventSrc).not.toMatch(/tabletTypeId: z\.string\(\)\.uuid\(\)/);
   });
 
-  it("fireStageEventAction does not read tabletTypeId from FormData", () => {
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).not.toMatch(/formData\.get\("tabletTypeId"\)/);
-    expect(block).not.toMatch(/pickedHandpackTabletTypeId/);
+  it("stage-event body does not read tabletTypeId from FormData", () => {
+    expect(recordStageEventSrc).not.toMatch(/formData\.get\("tabletTypeId"\)/);
+    expect(recordStageEventSrc).not.toMatch(/pickedHandpackTabletTypeId/);
   });
 
   it("HANDPACK_BLISTER_COMPLETE re-resolves received tablet context server-side", () => {
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).toMatch(/resolveWorkflowBagReceivedTabletContext/);
-    expect(block).toMatch(/missing received tablet context/);
-    expect(block).toMatch(/fix receiving\/admin lineage/);
+    expect(recordStageEventSrc).toMatch(/resolveWorkflowBagReceivedTabletContext/);
+    expect(recordStageEventSrc).toMatch(/missing received tablet context/);
+    expect(recordStageEventSrc).toMatch(/fix receiving\/admin lineage/);
   });
 
   it("HANDPACK_BLISTER_COMPLETE payload records resolved lineage, not client-supplied tablet", () => {
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    expect(block).toMatch(/HANDPACK_BLISTER_COMPLETE.*tablet_type_id/s);
-    expect(block).toMatch(/handpackTabletContext\.tabletTypeId/);
-    expect(block).toMatch(/tablet_type_source/);
-    expect(block).toMatch(/inventory_bag_id/);
+    expect(recordStageEventSrc).toMatch(/HANDPACK_BLISTER_COMPLETE.*tablet_type_id/s);
+    expect(recordStageEventSrc).toMatch(/handpackTabletContext\.tabletTypeId/);
+    expect(recordStageEventSrc).toMatch(/tablet_type_source/);
+    expect(recordStageEventSrc).toMatch(/inventory_bag_id/);
   });
 
   it("product selection still happens at sealing, not hand-pack", () => {
-    const fireIdx = actionsSrc.indexOf("export async function fireStageEventAction");
-    const pauseIdx = actionsSrc.indexOf("// ── pause / resume");
-    const block = actionsSrc.slice(fireIdx, pauseIdx);
-    // PRODUCT_MAPPED is only emitted for SEALING_COMPLETE, not HANDPACK_BLISTER_COMPLETE
-    expect(block).toMatch(/eventType === "SEALING_COMPLETE".*pickedSealingProductId/s);
-    // No product_id in HANDPACK_BLISTER payload
-    expect(block).not.toMatch(/HANDPACK_BLISTER_COMPLETE.*product_id/s);
+    // PRODUCT_MAPPED is only emitted for SEALING_COMPLETE (assign-bag-product /
+    // record-stage-event), not HANDPACK_BLISTER_COMPLETE.
+    expect(recordStageEventSrc).toMatch(
+      /eventType === "SEALING_COMPLETE".*pickedSealingProductId/s,
+    );
+    expect(recordStageEventSrc).not.toMatch(
+      /HANDPACK_BLISTER_COMPLETE.*product_id/s,
+    );
   });
 });
 
@@ -660,10 +620,10 @@ describe("P3-FLOOR-UX · pause schema rejects roll swap reasons", () => {
   });
 });
 
-describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · first-op count guard", () => {
+describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · first-op count guard (engine)", () => {
   it("FIRST_OP_COUNT_EVENTS includes BLISTER_COMPLETE and BOTTLE_HANDPACK_COMPLETE only", () => {
     const setMatch =
-      actionsSrc.match(
+      recordStageEventSrc.match(
         /const FIRST_OP_COUNT_EVENTS[^=]*=\s*new Set\(\[([\s\S]*?)\]\)/,
       )?.[1] ?? "";
     expect(setMatch).toMatch(/"BLISTER_COMPLETE"/);
@@ -673,52 +633,39 @@ describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · first-op count guard", () => {
   });
 
   it("refuses first-op count when accountableEmployeeId is null", () => {
-    expect(actionsSrc).toMatch(
+    expect(recordStageEventSrc).toMatch(
       /FIRST_OP_COUNT_EVENTS\.has\(eventType\) &&\s*!accountability\.accountableEmployeeId/,
     );
-    expect(actionsSrc).toMatch(
+    expect(recordStageEventSrc).toMatch(
       /No operator on shift\. Open a shift on this station before submitting the first count/,
     );
   });
 
   it("does not weaken guard for LEGACY_TEXT sessions", () => {
-    expect(actionsSrc).not.toMatch(/LEGACY_TEXT.*accountableEmployeeId/s);
+    expect(recordStageEventSrc).not.toMatch(/LEGACY_TEXT.*accountableEmployeeId/s);
   });
 });
 
-describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · packaging complete accountability", () => {
-  it("packagingCompleteAction resolves accountability via resolveStationAccountability", () => {
-    const idx = actionsSrc.indexOf("export async function packagingCompleteAction");
-    expect(idx).toBeGreaterThan(-1);
-    // PACKAGING-COMPLETE-EXTRACT-1: the fixed 7200-char window no longer
-    // reaches the transaction now that the extracted module's header sits
-    // between the two, so this uses the same block boundary the rest of
-    // this file uses for the packaging path.
-    const chunk = actionsSrc.slice(
-      idx,
-      actionsSrc.indexOf("export async function lookupCardByTokenAction"),
-    );
-    expect(chunk).toMatch(/resolveStationAccountability\(tx,/);
+describe("OPERATOR-PACKAGING-UUID-CLOSEOUT-1 · packaging complete accountability (engine)", () => {
+  it("engine packaging body resolves accountability via resolveStationAccountability", () => {
+    expect(recordPackagingCompleteSrc).toMatch(/resolveStationAccountability\(tx,/);
     // PACKAGING-COMPLETE-EXTRACT-1: the override is read off the input type
-    // now (`operatorCode`) instead of `parsed.data.operatorCode` — the
-    // mechanical rename the relocation required. Both halves stay pinned:
-    // the action passes parsed.data.operatorCode in, the moved body reads it.
-    expect(chunk).toMatch(/operatorCode: parsed\.data\.operatorCode/);
-    expect(chunk).toMatch(/overrideEmployeeCode: operatorCode/);
-    expect(chunk).toMatch(
+    // (`operatorCode`) inside the moved body.
+    expect(recordPackagingCompleteSrc).toMatch(/overrideEmployeeCode: operatorCode/);
+    expect(recordPackagingCompleteSrc).toMatch(
       /accountableEmployeeId: accountability\.accountableEmployeeId/,
     );
   });
 
-  it("packaging complete does not compare employee_id UUID against employee_code text in actions", () => {
-    expect(actionsSrc).not.toMatch(/loadActiveEmployeeByCode/);
-    expect(actionsSrc).not.toMatch(/employees\.employeeCode.*operatorCode/s);
+  it("packaging complete does not compare employee_id UUID against employee_code text", () => {
+    expect(recordPackagingCompleteSrc).not.toMatch(/loadActiveEmployeeByCode/);
+    expect(recordPackagingCompleteSrc).not.toMatch(
+      /employees\.employeeCode.*operatorCode/s,
+    );
   });
 
-  it("BLISTER_COMPLETE and SEALING paths still use resolveStationAccountability", () => {
-    expect(actionsSrc).toMatch(
-      /export async function fireStageEventAction[\s\S]*resolveStationAccountability\(tx,/,
-    );
-    expect(actionsSrc).toMatch(/overrideEmployeeCode: overrideEmployeeCode/);
+  it("BLISTER and SEALING paths in the stage-event engine still use resolveStationAccountability", () => {
+    expect(recordStageEventSrc).toMatch(/resolveStationAccountability\(tx,/);
+    expect(recordStageEventSrc).toMatch(/overrideEmployeeCode: overrideEmployeeCode/);
   });
 });

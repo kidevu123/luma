@@ -10,24 +10,24 @@ const outputPageSrc = readFileSync(
   join(import.meta.dirname, "../packaging-output/page.tsx"),
   "utf8",
 );
-// STAGE-EVENT-EXTRACT-1: fireStageEventAction's body moved verbatim to
-// lib/production/engine/record-stage-event.ts. Stitch it back in where it
-// used to sit so these scanners keep covering the whole stage-event path.
-const actionsSrc = readFileSync(
-  join(import.meta.dirname, "../../(floor)/floor/[token]/actions.ts"),
+// P6 Task 4 — fireStageEventAction and packagingCompleteAction were
+// retired (thin forwarders with zero non-test callers post P4b). The
+// scanners below now read the engine sources DIRECTLY instead of splicing
+// them back into actions.ts.
+const recordStageEventSrc = readFileSync(
+  join(
+    import.meta.dirname,
+    "../../../lib/production/engine/record-stage-event.ts",
+  ),
   "utf8",
-)
-  .replace(
-    "// ── pause / resume",
-    `${readFileSync(join(import.meta.dirname, "../../../lib/production/engine/record-stage-event.ts"), "utf8")}\n// ── pause / resume`,
-  )
-  // PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's body moved
-  // verbatim to lib/production/engine/record-packaging-complete.ts. Same
-  // treatment — stitched back in where it used to sit.
-  .replace(
-    "// ── lookup card by scan token",
-    `${readFileSync(join(import.meta.dirname, "../../../lib/production/engine/record-packaging-complete.ts"), "utf8")}\n// ── lookup card by scan token`,
-  );
+);
+const recordPackagingCompleteSrc = readFileSync(
+  join(
+    import.meta.dirname,
+    "../../../lib/production/engine/record-packaging-complete.ts",
+  ),
+  "utf8",
+);
 const materialSrc = readFileSync(
   join(import.meta.dirname, "../../../lib/production/handpack-seal-material.ts"),
   "utf8",
@@ -49,28 +49,26 @@ describe("PACKAGING-PENDING-CONSUMPTION-HONESTY-1 · admin UI", () => {
   });
 });
 
-describe("PACKAGING-PENDING-CONSUMPTION-HONESTY-1 · packaging close-out", () => {
+describe("PACKAGING-PENDING-CONSUMPTION-HONESTY-1 · packaging close-out (engine)", () => {
   it("persists consumption summary and refreshes read models", () => {
-    const block = actionsSrc.slice(
-      actionsSrc.indexOf("export async function packagingCompleteAction"),
-      actionsSrc.indexOf("export async function lookupCardByTokenAction"),
+    expect(recordPackagingCompleteSrc).toMatch(
+      /buildPackagingConsumptionPayloadSummary/,
     );
-    expect(block).toMatch(/buildPackagingConsumptionPayloadSummary/);
-    expect(block).toMatch(/patchPackagingCompleteConsumptionSummary/);
-    expect(block).toMatch(/refreshMaterialReadModelsAfterConsumption/);
-    expect(block).not.toMatch(/void consumption/);
+    expect(recordPackagingCompleteSrc).toMatch(
+      /patchPackagingCompleteConsumptionSummary/,
+    );
+    expect(recordPackagingCompleteSrc).toMatch(
+      /refreshMaterialReadModelsAfterConsumption/,
+    );
+    expect(recordPackagingCompleteSrc).not.toMatch(/void consumption/);
   });
 
   it("does not rename existing PACKAGING_COMPLETE payload keys", () => {
-    const block = actionsSrc.slice(
-      actionsSrc.indexOf("export async function packagingCompleteAction"),
-      actionsSrc.indexOf("export async function lookupCardByTokenAction"),
-    );
-    expect(block).toMatch(/master_cases:/);
-    expect(block).toMatch(/displays_made:/);
-    expect(block).toMatch(/loose_cards:/);
-    expect(block).toMatch(/damaged_packaging:/);
-    expect(block).toMatch(/ripped_cards:/);
+    expect(recordPackagingCompleteSrc).toMatch(/master_cases:/);
+    expect(recordPackagingCompleteSrc).toMatch(/displays_made:/);
+    expect(recordPackagingCompleteSrc).toMatch(/loose_cards:/);
+    expect(recordPackagingCompleteSrc).toMatch(/damaged_packaging:/);
+    expect(recordPackagingCompleteSrc).toMatch(/ripped_cards:/);
   });
 });
 
@@ -81,13 +79,17 @@ describe("PACKAGING-PENDING-CONSUMPTION-HONESTY-1 · hand-pack seal material", (
     expect(materialSrc).toMatch(/no_lot_reason/);
   });
 
-  it("actions emit estimated material on no_available_lot skip", () => {
-    expect(actionsSrc).toMatch(/emitHandpackBlisterEstimatedMaterial/);
-    expect(actionsSrc).toMatch(/handpackMaterialSkip === "no_available_lot"/);
+  it("engine stage-event body emits estimated material on no_available_lot skip", () => {
+    expect(recordStageEventSrc).toMatch(/emitHandpackBlisterEstimatedMaterial/);
+    expect(recordStageEventSrc).toMatch(
+      /handpackMaterialSkip === "no_available_lot"/,
+    );
   });
 
   it("preserves skip audit flags on SEALING_COMPLETE", () => {
-    expect(actionsSrc).toMatch(/handpack_blister_material_skipped/);
-    expect(actionsSrc).toMatch(/handpack_blister_material_skip_reason/);
+    expect(recordStageEventSrc).toMatch(/handpack_blister_material_skipped/);
+    expect(recordStageEventSrc).toMatch(
+      /handpack_blister_material_skip_reason/,
+    );
   });
 });

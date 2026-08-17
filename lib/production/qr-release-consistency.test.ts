@@ -11,14 +11,12 @@ const repo = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const closeActionsSrc = repo("app/(floor)/floor/[token]/bag-allocation-actions.ts");
 const adminCorrectionsSrc = repo("lib/production/partial-bag-admin-corrections.ts");
 const lifecycleSrc = repo("lib/production/raw-bag-allocation-lifecycle.ts");
-// PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's body and
-// resolveDeferredQrReleaseAfterPackaging moved verbatim to
-// lib/production/engine/record-packaging-complete.ts (actions.ts is
-// "use server"). Stitched back in where the body used to sit so this
-// scanner keeps covering the whole packaging QR-release path unchanged.
-const packagingActionsSrc = repo("app/(floor)/floor/[token]/actions.ts").replace(
-  "// ── lookup card by scan token",
-  `${repo("lib/production/engine/record-packaging-complete.ts")}\n// ── lookup card by scan token`,
+// P6 Task 4 — packagingCompleteAction retired (thin forwarder with zero
+// non-test callers post P4b). The deferred-QR scanner below now reads the
+// engine source (record-packaging-complete.ts) DIRECTLY instead of
+// splicing it into actions.ts.
+const packagingEngineSrc = repo(
+  "lib/production/engine/record-packaging-complete.ts",
 );
 const varietyActionsSrc = repo("app/(floor)/floor/[token]/variety-run-actions.ts");
 const bagEditsSrc = repo("lib/db/queries/bag-edits.ts");
@@ -74,10 +72,10 @@ describe("QR release consistency — releasing a RAW_BAG QR clears assignedWorkf
   });
 
   it("held-partial packaging path holds the QR (releases ONLY inside the confirmed-empty branch)", () => {
-    const i = packagingActionsSrc.indexOf(
+    const i = packagingEngineSrc.indexOf(
       "function resolveDeferredQrReleaseAfterPackaging",
     );
-    const block = packagingActionsSrc.slice(i, i + 2400);
+    const block = packagingEngineSrc.slice(i, i + 2400);
     // The only IDLE release is inside the `if (release)` branch; the held
     // branch writes an audit and never touches the card.
     expect(block).toMatch(/if \(release\)\s*\{[\s\S]*status: "IDLE", assignedWorkflowBagId: null/);

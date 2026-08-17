@@ -97,7 +97,13 @@ const ACCOUNTABLE_EVENTS: ReadonlyArray<string> = [
   "BAG_RESUMED",
   "BAG_RELEASED",
   "BAG_FINALIZED",
-  "OPERATOR_CHANGE",
+  // P6 Task 4 — OPERATOR_CHANGE removed from the accountable-events
+  // coverage list: setOperatorAction was retired (zero non-test callers
+  // post P4b; operator handoff runs through operator-session-actions.ts
+  // openOperatorSessionAction / closeOperatorSessionAction, which emit
+  // STATION_OPERATOR_* events). The projector still handles the type for
+  // historical events, and the DB enum still carries it — but no live
+  // action emits it today, so the coverage assertion moved off it.
   "PRODUCTION_EXCEPTION_RAISED",
   "DOWNTIME_STARTED",
   "QA_HOLD_STARTED",

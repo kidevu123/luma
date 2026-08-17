@@ -2,14 +2,13 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, and, or, sql, desc, isNotNull, inArray, ne } from "drizzle-orm";
+import { eq, and, sql, desc, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   qrCards,
   stations,
   workflowBags,
   inventoryBags,
-  batches,
   readBagState,
   readStationLive,
   products,
@@ -22,30 +21,18 @@ import { refreshMaterialReadModelsAfterBlister } from "@/lib/projector/material-
 // The engine barrel is the ONLY permitted entry point from app/(floor)/
 // into lib/production — deep paths are restricted too (eslint.config.mjs).
 import {
-  recordStageEvent,
-  recordPackagingComplete,
   assignBagProduct,
   OpenAllocationBlockError,
   raiseAllocationOpenFailure,
-  projectBagFinalizedEvent,
-  resolveDeferredQrReleaseAfterPackaging,
-  projectBagReleasedEvent,
   resolveStationByToken,
   canResumeFinalizedWorkflowOnInventoryBag,
   loadPartialReuseContext,
   type PartialBagSession,
   type PartialReuseContext,
-  classifyFloorScanCard,
-  batchProductionBlockReason,
   loadRawBagStartClassificationForScan,
   RAW_BAG_START_OPERATOR_MESSAGES,
-  floorScanInputMatchesCard,
-  pickBestFloorScanCard,
-  type FloorScanCardCandidate,
-  numericSuffix,
   floorReadinessOperatorMessage,
   evaluateQrCardReadinessById,
-  STATION_RELEASE_FROM_STAGE,
   STATION_PICKUP_FROM_STAGE,
   STATION_STARTED_RESUME_FROM_STAGE,
   formatFloorStationBagOpenError,
@@ -53,7 +40,6 @@ import {
   bothBottleFinishingDone,
   missingBottleFinishingSteps,
   BOTTLE_FINISHING_EVENTS,
-  coercePartialRemainingEstimate,
   computeSystemDerivedResolutionForBag,
   buildFloorOpenAllocationBlock,
   resolveAllocationFromProductionOutput,
@@ -61,8 +47,6 @@ import {
   resolveStationAccountability,
   ensureOpenRawBagAllocationSessionForWorkflowBag,
   assertStationActiveForFloorActions,
-  SEALING_SEGMENT_EVENT,
-  SEALING_PARTIAL_CLOSE_REASONS,
   isWorkflowBagResumableAtSealingAfterPartialPackaging,
   lookupInventoryBagByQrScanToken,
   parseNonnegativeIntegerInput,
@@ -1016,45 +1000,7 @@ export async function scanCardAction(
   return { ok: true };
 }
 
-// ── stage events ───────────────────────────────────────────────────────────
-
-const eventSchema = z.object({
-  token: z.string(),
-  workflowBagId: z.string().uuid(),
-  stationId: z.string().uuid(),
-  eventType: z.enum([
-    "BLISTER_COMPLETE",
-    "HANDPACK_BLISTER_COMPLETE",
-    "SEALING_SEGMENT_COMPLETE",
-    "SEALING_COMPLETE",
-    "PACKAGING_SNAPSHOT",
-    "BOTTLE_HANDPACK_COMPLETE",
-    "BOTTLE_CAP_SEAL_COMPLETE",
-    "BOTTLE_STICKER_COMPLETE",
-  ]),
-  countTotal: z.coerce.number().int().min(0).max(100000).optional(),
-  /** SEALING-COUNTER-1: machine counter presses for SEALING_COMPLETE. */
-  counterPresses: z.coerce.number().int().min(0).max(100000).optional(),
-  /** Cards/packs that started the station run but weren't completed
-   *  into a full unit — loose cards at sealing, partial blister sheets,
-   *  etc. Stored in the event payload for reconciliation. */
-  packsRemaining: z.coerce.number().int().min(0).max(100000).optional(),
-  /** Cards that were opened/damaged and returned to the prior stage
-   *  or scrapped. Stored in the event payload for loss tracking. */
-  cardsReopened: z.coerce.number().int().min(0).max(100000).optional(),
-  /** PRODUCT-SELECTION-AT-SEALING-1: required on SEALING_COMPLETE when
-   *  workflow_bags.product_id is still null. Ignored when product exists. */
-  productId: z.string().uuid().optional().nullable().or(z.literal("")),
-  clientEventId: clientEventIdField,
-  /** OP-1C per-form supervisor override. Resolved by the
-   *  station-operator-session helper; falls back to the active
-   *  session when omitted. */
-  overrideEmployeeCode: z.string().max(40).optional().nullable(),
-  /** SEALING-PARTIAL-CLOSEOUT-1: whole (lane_close) vs partial close-out. */
-  sealingCloseMode: z.enum(["whole", "partial"]).optional(),
-  partialCloseReason: z.enum(SEALING_PARTIAL_CLOSE_REASONS).optional(),
-  partialCloseReasonNote: z.string().max(200).optional().nullable(),
-});
+// ── sealing product save ──────────────────────────────────────────────────
 
 const saveSealingProductSchema = z.object({
   token: z.string().uuid(),
@@ -1354,72 +1300,13 @@ export async function recoverBottleSealingHoldAction(
   }
 }
 
-export async function fireStageEventAction(
-  formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
-  const parsed = eventSchema.safeParse({
-    token: formData.get("token"),
-    workflowBagId: formData.get("workflowBagId"),
-    stationId: formData.get("stationId"),
-    eventType: formData.get("eventType"),
-    countTotal: formData.get("countTotal") || 0,
-    counterPresses: formData.get("counterPresses") ?? undefined,
-    packsRemaining: formData.get("packsRemaining") || 0,
-    cardsReopened: formData.get("cardsReopened") || 0,
-    clientEventId: pickClientEventId(formData),
-    productId: formData.get("productId") || undefined,
-    overrideEmployeeCode: formData.get("overrideEmployeeCode") || undefined,
-    sealingCloseMode: formData.get("sealingCloseMode") || undefined,
-    partialCloseReason: formData.get("partialCloseReason") || undefined,
-    partialCloseReasonNote: formData.get("partialCloseReasonNote") || undefined,
-  });
-  if (!parsed.success) return { error: "Invalid input." };
-  const {
-    token,
-    workflowBagId,
-    stationId,
-    eventType,
-    countTotal,
-    counterPresses,
-    packsRemaining,
-    cardsReopened,
-    clientEventId,
-    overrideEmployeeCode,
-  } = parsed.data;
-  const pickedSealingProductId =
-    parsed.data.productId && parsed.data.productId !== ""
-      ? parsed.data.productId
-      : null;
-
-  try {
-    const station = await authStation(token, stationId);
-    // STAGE-EVENT-EXTRACT-1: the guard sequence + transaction body now
-    // lives in lib/production/engine/record-stage-event.ts so the
-    // production engine and this action run one implementation. Moved
-    // verbatim — see that module's header.
-    const result = await recordStageEvent({
-      station,
-      workflowBagId,
-      eventType,
-      countTotal: countTotal ?? 0,
-      counterPresses,
-      packsRemaining: packsRemaining ?? 0,
-      cardsReopened: cardsReopened ?? 0,
-      clientEventId,
-      overrideEmployeeCode: overrideEmployeeCode ?? undefined,
-      pickedSealingProductId,
-      sealingCloseMode: parsed.data.sealingCloseMode,
-      partialCloseReason: parsed.data.partialCloseReason,
-      partialCloseReasonNote: parsed.data.partialCloseReasonNote ?? undefined,
-    });
-    if ("error" in result) return { error: result.error };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Event failed." };
-  }
-  revalidatePath(`/floor/${token}`);
-  revalidatePath(`/floor-board`);
-  return { ok: true };
-}
+// P6 Task 4 — fireStageEventAction retired. It was a forwarder to
+// recordStageEvent (lib/production/engine/record-stage-event.ts) after the
+// P4a extraction and had no live callers post P4b cutover. All stage-event
+// gestures now flow through operator-actions / operator-screen to
+// recordStageEvent directly; the engine module owns the guard sequence and
+// transaction body plus its own tests. See docs/superpowers/plans/2026-08-17
+// -production-engine-p6.md Task 4.
 
 // ── pause / resume ─────────────────────────────────────────────────────────
 
@@ -1645,830 +1532,46 @@ export async function resumeBagAction(
   return { ok: true };
 }
 
-// ── operator handoff ───────────────────────────────────────────────────────
+// P6 Task 4 — setOperatorAction retired (no callers post P4b; operator
+// handoff runs through operator-session-actions.ts openOperatorSessionAction
+// / closeOperatorSessionAction, which emit STATION_OPERATOR_* events with
+// full accountability). No engine module owns this shell — the write-path
+// safety net for OPERATOR_CHANGE remains in the projector.
 
-const operatorSchema = z.object({
-  token: z.string(),
-  workflowBagId: z.string().uuid(),
-  stationId: z.string().uuid(),
-  operatorCode: z.string().min(1).max(40),
-});
+// P6 Task 4 — verifyVendorBarcodeAction retired. Zero references anywhere
+// (no UI form ever wired to it, no test, no script). If a vendor-barcode
+// preflight is later needed it should be built against
+// lookupInventoryBagByQrScanToken / batchProductionBlockReason directly
+// in the caller.
 
-export async function setOperatorAction(
-  formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
-  const parsed = operatorSchema.safeParse({
-    token: formData.get("token"),
-    workflowBagId: formData.get("workflowBagId"),
-    stationId: formData.get("stationId"),
-    operatorCode: formData.get("operatorCode"),
-  });
-  if (!parsed.success)
-    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  try {
-    await authStation(parsed.data.token, parsed.data.stationId);
-    await db.transaction(async (tx) => {
-      const accountability = await resolveStationAccountability(tx, {
-        stationId: parsed.data.stationId,
-        overrideEmployeeCode: parsed.data.operatorCode,
-      });
-      await projectEvent(tx, {
-        workflowBagId: parsed.data.workflowBagId,
-        stationId: parsed.data.stationId,
-        eventType: "OPERATOR_CHANGE",
-        payload: { operator_code: parsed.data.operatorCode },
-        enteredByUserId: accountability.enteredByUserId,
-        accountableEmployeeId: accountability.accountableEmployeeId,
-        accountabilitySource: accountability.accountabilitySource,
-        accountableEmployeeNameSnapshot:
-          accountability.accountableEmployeeNameSnapshot,
-      });
-    });
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Failed." };
-  }
-  revalidatePath(`/floor/${parsed.data.token}`);
-  return { ok: true };
-}
+// P6 Task 4 — packagingCompleteAction retired. It was a forwarder to
+// recordPackagingComplete (lib/production/engine/record-packaging-complete
+// .ts) after the P4a extraction and had no live callers post P4b cutover.
+// Packaging close-out now flows through operator-actions to the engine
+// module directly; the engine module owns the guard sequence, transaction
+// body, and its own tests. See docs/superpowers/plans/2026-08-17
+// -production-engine-p6.md Task 4.
 
-// ── vendor barcode verify (read-only lookup) ──────────────────────────────
+// P6 Task 4 — lookupCardByTokenAction retired along with its private
+// loadAssignedPickupScanCandidates / resolveFloorScanLookupRow helpers and
+// the FloorScanLookupRow type. Zero non-test callers repo-wide (the operator
+// screen's fresh-scan path lives in operator-actions.ts resolveFreshBagStart
+// and delegates to scanCardAction). Camera-scanner submissions on the floor
+// take the QR scanToken directly to scanCardAction — no server-side text
+// lookup step is on the live path.
 
-const verifySchema = z.object({
-  token: z.string(),
-  vendorBarcode: z.string().min(1).max(120),
-});
+// P6 Task 4 — finalizeBagAction retired. Zero non-test callers post P4b
+// cutover; the packaging close-out engine (record-packaging-complete.ts)
+// owns finalize semantics (projectBagFinalizedEvent +
+// resolveDeferredQrReleaseAfterPackaging) and drives them via the auto-
+// finalize hook after PACKAGING_COMPLETE. Manual finalize as a floor
+// gesture no longer exists in the P4b UI.
 
-export async function verifyVendorBarcodeAction(
-  formData: FormData,
-): Promise<
-  | {
-      ok: true;
-      inventoryBagId: string;
-      tabletName?: string;
-      batchNumber?: string;
-      batchStatus:
-        | "RELEASED"
-        | "QUARANTINE"
-        | "ON_HOLD"
-        | "RECALLED"
-        | "EXPIRED"
-        | "DEPLETED";
-      blocked: boolean;
-      reason?: string;
-    }
-  | { error: string }
-> {
-  const parsed = verifySchema.safeParse({
-    token: formData.get("token"),
-    vendorBarcode: formData.get("vendorBarcode"),
-  });
-  if (!parsed.success) return { error: "Invalid input." };
-  const station = await resolveStation(parsed.data.token);
-  if (!station) return { error: "Invalid station." };
-  const code = parsed.data.vendorBarcode.trim();
-  let hit = (
-    await db
-      .select({
-        inventoryBagId: inventoryBags.id,
-        bagStatus: inventoryBags.status,
-        batchId: inventoryBags.batchId,
-      })
-      .from(inventoryBags)
-      .where(eq(inventoryBags.vendorBarcode, code))
-      .limit(1)
-  )[0];
-  if (!hit) {
-    const lotMatch = await db
-      .select({
-        inventoryBagId: inventoryBags.id,
-        bagStatus: inventoryBags.status,
-        batchId: inventoryBags.batchId,
-      })
-      .from(inventoryBags)
-      .innerJoin(batches, eq(inventoryBags.batchId, batches.id))
-      .where(
-        and(
-          eq(batches.vendorLotNumber, code),
-          eq(inventoryBags.status, "AVAILABLE"),
-        ),
-      )
-      .limit(1);
-    hit = lotMatch[0];
-  }
-  if (!hit) return { error: "No inventory bag matches that barcode/lot." };
-  if (hit.bagStatus !== "AVAILABLE") {
-    return {
-      ok: true,
-      inventoryBagId: hit.inventoryBagId,
-      batchStatus: "QUARANTINE",
-      blocked: true,
-      reason: `Bag status is ${hit.bagStatus}, not AVAILABLE.`,
-    };
-  }
-  let batchStatus:
-    | "RELEASED"
-    | "QUARANTINE"
-    | "ON_HOLD"
-    | "RECALLED"
-    | "EXPIRED"
-    | "DEPLETED" = "QUARANTINE";
-  let batchNumber: string | undefined;
-  if (hit.batchId) {
-    const [b] = await db
-      .select({ status: batches.status, batchNumber: batches.batchNumber })
-      .from(batches)
-      .where(eq(batches.id, hit.batchId))
-      .limit(1);
-    if (b) {
-      batchStatus = b.status;
-      batchNumber = b.batchNumber;
-    }
-  }
-  const blocked = batchStatus !== "RELEASED";
-  const blockReason = batchProductionBlockReason(batchStatus, batchNumber);
-  return {
-    ok: true,
-    inventoryBagId: hit.inventoryBagId,
-    ...(batchNumber ? { batchNumber } : {}),
-    batchStatus,
-    blocked,
-    ...(blocked && blockReason ? { reason: blockReason } : {}),
-  };
-}
-
-// ── packaging close-out ────────────────────────────────────────────────────
-
-const packagingCompleteSchema = z.object({
-  token: z.string(),
-  workflowBagId: z.string().uuid(),
-  stationId: z.string().uuid(),
-  masterCases: z.coerce.number().int().min(0).max(100000),
-  displaysMade: z.coerce.number().int().min(0).max(100000),
-  looseCards: z.coerce.number().int().min(0).max(100000),
-  damagedPackaging: z.coerce.number().int().min(0).max(100000),
-  rippedCards: z.coerce.number().int().min(0).max(100000),
-  operatorCode: z.string().max(40).optional(),
-  // P2-PARTIAL-KEEP: operator explicitly keeps the physical bag as a partial
-  // (still has product) at run end. Forces the QR to stay assigned to the bag
-  // for reuse in a later run, even if the computed remaining looks empty.
-  keepBagPartial: z
-    .union([z.literal("true"), z.literal("1"), z.literal("on")])
-    .optional(),
-  // Optional operator estimate of tablets remaining when keeping partial.
-  // Recorded on the BAG_FINALIZED event as a labelled estimate only — it never
-  // overwrites the OUTPUT_DERIVED allocation balance used by reconciliation.
-  // Coerced defensively: a malformed/out-of-range value is DROPPED (not a hard
-  // error), so this optional field can never block the packaging close-out.
-  partialRemainingEstimate: z.preprocess(
-    coercePartialRemainingEstimate,
-    z.number().int().min(0).max(100000).optional(),
-  ),
-  clientEventId: clientEventIdField,
-});
-
-export async function packagingCompleteAction(
-  formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
-  const parsed = packagingCompleteSchema.safeParse({
-    token: formData.get("token"),
-    workflowBagId: formData.get("workflowBagId"),
-    stationId: formData.get("stationId"),
-    masterCases: formData.get("masterCases") || 0,
-    displaysMade: formData.get("displaysMade") || 0,
-    looseCards: formData.get("looseCards") || 0,
-    damagedPackaging: formData.get("damagedPackaging") || 0,
-    rippedCards: formData.get("rippedCards") || 0,
-    operatorCode: formData.get("operatorCode") || undefined,
-    keepBagPartial: formData.get("keepBagPartial") || undefined,
-    partialRemainingEstimate:
-      formData.get("partialRemainingEstimate") || undefined,
-    clientEventId: pickClientEventId(formData),
-  });
-  if (!parsed.success)
-    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  const keepBagPartial = parsed.data.keepBagPartial != null;
-  // Only honor the estimate when the operator is actually keeping the bag partial.
-  const partialRemainingEstimate = keepBagPartial
-    ? parsed.data.partialRemainingEstimate ?? null
-    : null;
-  try {
-    const station = await authStation(parsed.data.token, parsed.data.stationId);
-    // PACKAGING-COMPLETE-EXTRACT-1: the guard sequence + transaction body
-    // now lives in lib/production/engine/record-packaging-complete.ts so
-    // the production engine and this action run one implementation. Moved
-    // verbatim — see that module's header.
-    const result = await recordPackagingComplete({
-      station,
-      workflowBagId: parsed.data.workflowBagId,
-      masterCases: parsed.data.masterCases,
-      displaysMade: parsed.data.displaysMade,
-      looseCards: parsed.data.looseCards,
-      damagedPackaging: parsed.data.damagedPackaging,
-      rippedCards: parsed.data.rippedCards,
-      operatorCode: parsed.data.operatorCode,
-      clientEventId: parsed.data.clientEventId,
-      keepBagPartial,
-      partialRemainingEstimate,
-    });
-    if ("error" in result) return { error: result.error };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Failed." };
-  }
-  revalidatePath(`/floor/${parsed.data.token}`);
-  revalidatePath(`/floor-board`);
-  revalidatePath("/partial-bags");
-  return { ok: true };
-}
-
-// ── lookup card by scan token (floor scanner text input) ───────────────────
-
-type FloorScanLookupRow = FloorScanCardCandidate & {
-  tabletTypeId: string | null;
-  bagStage: string | null;
-};
-
-async function loadAssignedPickupScanCandidates(args: {
-  token: string;
-  stationId: string | null;
-}): Promise<FloorScanLookupRow[]> {
-  let pickupStages: readonly string[] = [];
-  let resumeStages: readonly string[] = [];
-  let stationKind = "";
-  if (args.stationId) {
-    const [stationRow] = await db
-      .select({ kind: stations.kind })
-      .from(stations)
-      .where(eq(stations.id, args.stationId))
-      .limit(1);
-    stationKind = stationRow?.kind ?? "";
-    pickupStages = STATION_PICKUP_FROM_STAGE[stationKind] ?? [];
-    resumeStages = STATION_STARTED_RESUME_FROM_STAGE[stationKind] ?? [];
-  }
-
-  const cardHashMatch = args.token.match(/^card\s*#\s*(\d+)\s*$/i);
-  const suffix = cardHashMatch
-    ? parseInt(cardHashMatch[1]!, 10)
-    : numericSuffix(args.token);
-  const labelPatterns: ReturnType<typeof sql>[] = [];
-  if (suffix > 0) {
-    if (/bag[-\s]?card/i.test(args.token)) {
-      labelPatterns.push(
-        sql`${qrCards.label} ~* ${`^Bag\\s+Card\\s+${suffix}\\s*$`}`,
-        sql`${qrCards.label} ~* ${`^bag-card-${suffix}\\s*$`}`,
-      );
-    }
-    if (cardHashMatch) {
-      labelPatterns.push(
-        sql`${qrCards.label} ~* ${`^Card\\s*#\\s*${suffix}\\s*$`}`,
-        sql`${qrCards.label} ~* ${`^Bag\\s+Card\\s+${suffix}\\s*$`}`,
-        sql`${qrCards.label} ~* ${`^bag-card-${suffix}\\s*$`}`,
-      );
-    }
-  }
-
-  const stageFilter = [
-    ...new Set([
-      ...pickupStages,
-      ...resumeStages,
-      ...(stationKind === "SEALING" ? ["PACKAGED"] : []),
-    ]),
-  ];
-
-  const tokenMatch = or(
-    sql`lower(${qrCards.label}) = lower(${args.token})`,
-    eq(qrCards.scanToken, args.token),
-    ...(UUID_RE.test(args.token) ? [eq(qrCards.id, args.token)] : []),
-    ...labelPatterns,
-  );
-
-  const rows = await db
-    .select({
-      id: qrCards.id,
-      label: qrCards.label,
-      scanToken: qrCards.scanToken,
-      cardType: qrCards.cardType,
-      status: qrCards.status,
-      assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
-      tabletTypeId: inventoryBags.tabletTypeId,
-      bagStage: readBagState.stage,
-    })
-    .from(qrCards)
-    .innerJoin(
-      readBagState,
-      eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
-    )
-    .leftJoin(workflowBags, eq(workflowBags.id, qrCards.assignedWorkflowBagId))
-    .leftJoin(inventoryBags, eq(inventoryBags.id, workflowBags.inventoryBagId))
-    .where(
-      and(
-        eq(qrCards.cardType, "RAW_BAG"),
-        eq(qrCards.status, "ASSIGNED"),
-        isNotNull(qrCards.assignedWorkflowBagId),
-        eq(readBagState.isFinalized, false),
-        eq(readBagState.isPaused, false),
-        ...(stageFilter.length > 0
-          ? [inArray(readBagState.stage, stageFilter as string[])]
-          : []),
-        tokenMatch,
-      ),
-    );
-
-  let matched = rows.filter((row) => floorScanInputMatchesCard(args.token, row));
-  if (stationKind === "SEALING") {
-    const packagedRows = matched.filter(
-      (row) => row.bagStage === "PACKAGED" && row.assignedWorkflowBagId,
-    );
-    if (packagedRows.length > 0) {
-      const bagIds = packagedRows
-        .map((row) => row.assignedWorkflowBagId)
-        .filter((id): id is string => id != null);
-      const eventRows = await db
-        .select({
-          workflowBagId: workflowEvents.workflowBagId,
-          eventType: workflowEvents.eventType,
-          payload: workflowEvents.payload,
-        })
-        .from(workflowEvents)
-        .where(inArray(workflowEvents.workflowBagId, bagIds));
-      const eventsByBag = new Map<
-        string,
-        Array<{ eventType: string; payload: Record<string, unknown> | null }>
-      >();
-      for (const row of eventRows) {
-        const list = eventsByBag.get(row.workflowBagId) ?? [];
-        list.push({
-          eventType: row.eventType,
-          payload: (row.payload as Record<string, unknown> | null) ?? null,
-        });
-        eventsByBag.set(row.workflowBagId, list);
-      }
-      matched = matched.filter((row) => {
-        if (row.bagStage !== "PACKAGED" || !row.assignedWorkflowBagId) {
-          return true;
-        }
-        return isWorkflowBagResumableAtSealingAfterPartialPackaging(
-          eventsByBag.get(row.assignedWorkflowBagId) ?? [],
-          { stage: row.bagStage, isFinalized: false },
-        );
-      });
-    }
-  }
-  return matched;
-}
-
-async function resolveFloorScanLookupRow(args: {
-  token: string;
-  stationId: string | null;
-}): Promise<FloorScanLookupRow | null> {
-  const [primary] = await db
-    .select({
-      id: qrCards.id,
-      label: qrCards.label,
-      scanToken: qrCards.scanToken,
-      cardType: qrCards.cardType,
-      status: qrCards.status,
-      assignedWorkflowBagId: qrCards.assignedWorkflowBagId,
-      tabletTypeId: inventoryBags.tabletTypeId,
-      bagStage: readBagState.stage,
-    })
-    .from(qrCards)
-    .leftJoin(inventoryBags, eq(inventoryBags.bagQrCode, qrCards.scanToken))
-    .leftJoin(
-      readBagState,
-      eq(readBagState.workflowBagId, qrCards.assignedWorkflowBagId),
-    )
-    .where(
-      UUID_RE.test(args.token)
-        ? or(eq(qrCards.scanToken, args.token), eq(qrCards.id, args.token))
-        : eq(qrCards.scanToken, args.token),
-    )
-    .limit(1);
-
-  const candidates: FloorScanLookupRow[] = [];
-  if (primary) {
-    candidates.push({
-      ...primary,
-      bagStage: primary.bagStage ?? null,
-    });
-  }
-
-  const assignedPickups = await loadAssignedPickupScanCandidates(args);
-  for (const row of assignedPickups) {
-    if (!candidates.some((c) => c.id === row.id)) {
-      candidates.push(row);
-    }
-  }
-
-  let pickupStages: readonly string[] = [];
-  let resumeStages: readonly string[] = [];
-  if (args.stationId) {
-    const [stationRow] = await db
-      .select({ kind: stations.kind })
-      .from(stations)
-      .where(eq(stations.id, args.stationId))
-      .limit(1);
-    const kind = stationRow?.kind ?? "";
-    pickupStages = STATION_PICKUP_FROM_STAGE[kind] ?? [];
-    resumeStages = STATION_STARTED_RESUME_FROM_STAGE[kind] ?? [];
-  }
-
-  const pickupStageByBagId = new Map<string, string | null | undefined>();
-  for (const c of candidates) {
-    if (c.assignedWorkflowBagId) {
-      pickupStageByBagId.set(c.assignedWorkflowBagId, c.bagStage);
-    }
-  }
-
-  const best = pickBestFloorScanCard(candidates, args.token, {
-    pickupStages,
-    resumeStages,
-    pickupStageByBagId,
-  });
-  if (!best) return null;
-
-  return candidates.find((c) => c.id === best.id) ?? null;
-}
-
-export async function lookupCardByTokenAction(
-  formData: FormData,
-): Promise<
-  | { ok: true; cardId: string; cardLabel: string; isIntakeReserved: boolean; tabletTypeId: string | null }
-  | { error: string }
-> {
-  const scanToken = formData.get("scanToken");
-  if (typeof scanToken !== "string" || !scanToken.trim()) {
-    return { error: "No scan token provided." };
-  }
-
-  const stationIdRaw = formData.get("stationId");
-  const stationId =
-    typeof stationIdRaw === "string" && UUID_RE.test(stationIdRaw)
-      ? stationIdRaw
-      : null;
-
-  const token = scanToken.trim();
-  // QR-SCAN-PAYLOAD-1: new labels encode scanToken (e.g. "bag-card-117").
-  // Legacy labels printed before QR-SCAN-PAYLOAD-1 encode qrCards.id (a UUID).
-  // Gate the id fallback on UUID format — passing a non-UUID to the UUID id
-  // column throws PostgresError 22P02 (string_to_uuid, digest 2676337210).
-  // TODO: remove the id fallback once legacy labels are reprinted.
-  try {
-    const card = await resolveFloorScanLookupRow({ token, stationId });
-    if (!card) return { error: "Bag QR not found." };
-
-    if (card.status === "IDLE" && card.cardType === "RAW_BAG") {
-      const partialStart = await loadRawBagStartClassificationForScan(db, {
-        scannedToken: token,
-        cardScanToken: card.scanToken,
-      });
-      if (!partialStart.canStart) {
-        return { error: partialStart.operatorMessage };
-      }
-      return {
-        ok: true,
-        cardId: card.id,
-        cardLabel: card.label,
-        isIntakeReserved: true,
-        tabletTypeId: card.tabletTypeId ?? null,
-      };
-    }
-
-    if (card.status === "ASSIGNED" && card.cardType === "RAW_BAG") {
-      const partialStart = await loadRawBagStartClassificationForScan(db, {
-        scannedToken: token,
-        cardScanToken: card.scanToken,
-      });
-      if (
-        partialStart.status === "PARTIAL_NEEDS_REVIEW" ||
-        partialStart.status === "PARTIAL_NEEDS_ALLOCATION_CLOSEOUT"
-      ) {
-        return { error: partialStart.operatorMessage };
-      }
-      if (partialStart.status === "PARTIAL_READY") {
-        return {
-          ok: true,
-          cardId: card.id,
-          cardLabel: card.label,
-          isIntakeReserved: true,
-          tabletTypeId: card.tabletTypeId ?? null,
-        };
-      }
-    }
-
-    const classification = classifyFloorScanCard(card);
-    if (!classification.eligible) {
-      return { error: classification.reason };
-    }
-
-    return {
-      ok: true,
-      cardId: card.id,
-      cardLabel: card.label,
-      isIntakeReserved: classification.isIntakeReserved,
-      tabletTypeId: card.tabletTypeId ?? null,
-    };
-  } catch (err) {
-    console.error("[lookupCardByTokenAction] DB error:", err);
-    return { error: "Bag QR lookup failed — please try again." };
-  }
-}
-
-// ── finalize ───────────────────────────────────────────────────────────────
-
-const finalizeSchema = z.object({
-  token: z.string(),
-  workflowBagId: z.string().uuid(),
-  stationId: z.string().uuid(),
-  // P2-PARTIAL-KEEP: explicit operator keep-partial on the manual finalize
-  // fallback (mirrors the packaging close-out control).
-  keepBagPartial: z
-    .union([z.literal("true"), z.literal("1"), z.literal("on")])
-    .optional(),
-  clientEventId: clientEventIdField,
-});
-
-export async function finalizeBagAction(
-  formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
-  const parsed = finalizeSchema.safeParse({
-    token: formData.get("token"),
-    workflowBagId: formData.get("workflowBagId"),
-    stationId: formData.get("stationId"),
-    keepBagPartial: formData.get("keepBagPartial") || undefined,
-    clientEventId: pickClientEventId(formData),
-  });
-  if (!parsed.success) return { error: "Invalid input." };
-  const keepBagPartial = parsed.data.keepBagPartial != null;
-  try {
-    const station = await authStation(parsed.data.token, parsed.data.stationId);
-    // Finalize is the END of the production cycle — only stations that
-    // close the bag may fire it. Other stations must use Release.
-    if (!STATIONS_THAT_FINALIZE.has(station.kind)) {
-      return {
-        error: `${station.kind} station does not finalize bags. Use "Release to next stage" instead.`,
-      };
-    }
-    const [state] = await db
-      .select({
-        isFinalized: readBagState.isFinalized,
-        stage: readBagState.stage,
-      })
-      .from(readBagState)
-      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
-    if (state?.isFinalized) return { error: "Bag is already finalized." };
-    if (state?.stage !== "PACKAGED") {
-      return {
-        error: `Bag must be packaged before finalize (currently ${state?.stage ?? "unknown"}).`,
-      };
-    }
-
-    // P2-PARTIAL-KEEP: the manual Finalize fallback must not drop a partial
-    // bottle bag's QR. Unlike the packaging path there is no production-output
-    // close here, so we decide the release from the CURRENT allocation session:
-    // hold the QR whenever the remaining is unknown or > 0 (or the operator
-    // kept it partial), release only when the session proves the bag empty.
-    // Card/variety finalize keeps its existing immediate-release behavior.
-    const [bagProduct] = await db
-      .select({ kind: products.kind })
-      .from(workflowBags)
-      .leftJoin(products, eq(products.id, workflowBags.productId))
-      .where(eq(workflowBags.id, parsed.data.workflowBagId));
-    const isBottleBag = bagProduct?.kind === "BOTTLE";
-
-    await db.transaction(async (tx) => {
-      const accountability = await resolveStationAccountability(tx, {
-        stationId: parsed.data.stationId,
-      });
-      await projectBagFinalizedEvent(tx, {
-        workflowBagId: parsed.data.workflowBagId,
-        stationId: parsed.data.stationId,
-        accountability,
-        deferQrRelease: isBottleBag,
-        keepPartial: keepBagPartial && isBottleBag,
-        ...(parsed.data.clientEventId
-          ? { clientEventId: parsed.data.clientEventId }
-          : {}),
-      });
-      if (isBottleBag) {
-        await resolveDeferredQrReleaseAfterPackaging(tx, {
-          workflowBagId: parsed.data.workflowBagId,
-          keepPartial: keepBagPartial,
-          accountability,
-        });
-      }
-    });
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Finalize failed." };
-  }
-  revalidatePath(`/floor/${parsed.data.token}`);
-  revalidatePath(`/floor-board`);
-  return { ok: true };
-}
-
-// ── release to next station ─────────────────────────────────────────────────
-
-type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-type StationAccountability = Awaited<
-  ReturnType<typeof resolveStationAccountability>
->;
-/** SEALING handoff — release this station without advancing bag stage. */
-async function projectSealingStationHandoff(
-  tx: DbTx,
-  args: {
-    workflowBagId: string;
-    stationId: string;
-    stationKind: string;
-    clientEventId?: string | null | undefined;
-    accountability: StationAccountability;
-  },
-): Promise<void> {
-  const [live] = await tx
-    .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
-    .from(readStationLive)
-    .where(eq(readStationLive.stationId, args.stationId));
-  if (live?.currentWorkflowBagId !== args.workflowBagId) return;
-
-  const [bagState] = await tx
-    .select({ stage: readBagState.stage })
-    .from(readBagState)
-    .where(eq(readBagState.workflowBagId, args.workflowBagId));
-
-  const releaseClientEventId = args.clientEventId
-    ? `${args.clientEventId}-segment-release`
-    : undefined;
-
-  await projectBagReleasedEvent(tx, {
-    workflowBagId: args.workflowBagId,
-    stationId: args.stationId,
-    stationKind: args.stationKind,
-    releasedAtStage: bagState?.stage ?? "BLISTERED",
-    accountability: args.accountability,
-    ...(releaseClientEventId ? { clientEventId: releaseClientEventId } : {}),
-  });
-}
-
-// STAGE-EVENT-EXTRACT-1: projectBagReleasedEvent,
-// AUTO_RELEASE_AFTER_COMPLETE_STATION_KINDS,
-// maybeAutoReleaseAfterPartialSealingClose and
-// maybeAutoReleaseAfterComplete moved verbatim to
-// lib/production/engine/record-stage-event.ts alongside the stage-event
-// body that is their only caller. projectBagReleasedEvent is imported
-// back here for releaseBagAction / projectSealingStationHandoff.
-
-// PACKAGING-COMPLETE-EXTRACT-1: projectBagFinalizedEvent,
-// AUTO_FINALIZE_AFTER_PACKAGING_COMPLETE_STATION_KINDS,
-// maybeAutoFinalizeAfterPackagingComplete and
-// resolveDeferredQrReleaseAfterPackaging moved verbatim to
-// lib/production/engine/record-packaging-complete.ts alongside the
-// packaging close-out body that is their main caller.
-// projectBagFinalizedEvent and resolveDeferredQrReleaseAfterPackaging are
-// imported back here for finalizeBagAction, which shares them.
-
-const releaseSchema = z.object({
-  token: z.string(),
-  workflowBagId: z.string().uuid(),
-  stationId: z.string().uuid(),
-  clientEventId: clientEventIdField,
-});
-
-const sealingHandoffSchema = releaseSchema;
-
-/** SEALING only — hand the bag to the next sealing machine after a
- *  segment without lane-close. Clears this station's pin; bag stays
- *  BLISTERED until SEALING_COMPLETE with lane_close. */
-export async function releaseSealingHandoffAction(
-  formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
-  const parsed = sealingHandoffSchema.safeParse({
-    token: formData.get("token"),
-    workflowBagId: formData.get("workflowBagId"),
-    stationId: formData.get("stationId"),
-    clientEventId: pickClientEventId(formData),
-  });
-  if (!parsed.success) return { error: "Invalid input." };
-  try {
-    const station = await authStation(parsed.data.token, parsed.data.stationId);
-    if (station.kind !== "SEALING") {
-      return { error: "Only sealing stations can hand off mid-lane." };
-    }
-    const [state] = await db
-      .select({
-        isFinalized: readBagState.isFinalized,
-        isPaused: readBagState.isPaused,
-        stage: readBagState.stage,
-      })
-      .from(readBagState)
-      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
-    if (state?.isFinalized) return { error: "Bag is already finalized." };
-    if (state?.isPaused) {
-      return { error: "Bag is paused — resume before handing off." };
-    }
-    if (state?.stage !== "BLISTERED") {
-      return {
-        error: `Bag must be blistered before handoff (currently ${state?.stage ?? "unknown"}).`,
-      };
-    }
-    const [segmentRow] = await db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(workflowEvents)
-      .where(
-        and(
-          eq(workflowEvents.workflowBagId, parsed.data.workflowBagId),
-          eq(workflowEvents.eventType, SEALING_SEGMENT_EVENT),
-        ),
-      );
-    if ((segmentRow?.n ?? 0) < 1) {
-      return {
-        error:
-          "Record a sealing segment on this machine before handing the bag off.",
-      };
-    }
-    const [live] = await db
-      .select({ currentWorkflowBagId: readStationLive.currentWorkflowBagId })
-      .from(readStationLive)
-      .where(eq(readStationLive.stationId, parsed.data.stationId));
-    if (live?.currentWorkflowBagId !== parsed.data.workflowBagId) {
-      return { error: "This bag is not active at this sealing station." };
-    }
-
-    await db.transaction(async (tx) => {
-      const accountability = await resolveStationAccountability(tx, {
-        stationId: parsed.data.stationId,
-      });
-      await projectSealingStationHandoff(tx, {
-        workflowBagId: parsed.data.workflowBagId,
-        stationId: parsed.data.stationId,
-        stationKind: station.kind,
-        clientEventId: parsed.data.clientEventId ?? null,
-        accountability,
-      });
-    });
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Handoff failed." };
-  }
-  revalidatePath(`/floor/${parsed.data.token}`);
-  revalidatePath(`/floor-board`);
-  return { ok: true };
-}
-
-/** Hand the bag forward without finalizing it. Clears this station's
- *  read_station_live entry. The QR card stays ASSIGNED to travel
- *  with the bag. The next station picks the bag up by scanning the
- *  same card (scanCardAction handles the ASSIGNED-card path). */
-export async function releaseBagAction(
-  formData: FormData,
-): Promise<{ error?: string; ok?: true } | void> {
-  const parsed = releaseSchema.safeParse({
-    token: formData.get("token"),
-    workflowBagId: formData.get("workflowBagId"),
-    stationId: formData.get("stationId"),
-    clientEventId: pickClientEventId(formData),
-  });
-  if (!parsed.success) return { error: "Invalid input." };
-  try {
-    const station = await authStation(parsed.data.token, parsed.data.stationId);
-    const releaseAtStage = STATION_RELEASE_FROM_STAGE[station.kind];
-    if (!releaseAtStage) {
-      return {
-        error: `${station.kind} station does not release bags forward.`,
-      };
-    }
-    const [state] = await db
-      .select({
-        isFinalized: readBagState.isFinalized,
-        isPaused: readBagState.isPaused,
-        stage: readBagState.stage,
-      })
-      .from(readBagState)
-      .where(eq(readBagState.workflowBagId, parsed.data.workflowBagId));
-    if (state?.isFinalized) return { error: "Bag is already finalized." };
-    if (state?.isPaused) {
-      return { error: "Bag is paused — resume before releasing." };
-    }
-    if (state?.stage !== releaseAtStage) {
-      return {
-        error: `Bag must be at ${releaseAtStage} before release (currently ${state?.stage ?? "unknown"}).`,
-      };
-    }
-
-    await db.transaction(async (tx) => {
-      const accountability = await resolveStationAccountability(tx, {
-        stationId: parsed.data.stationId,
-      });
-      await projectBagReleasedEvent(tx, {
-        workflowBagId: parsed.data.workflowBagId,
-        stationId: parsed.data.stationId,
-        stationKind: station.kind,
-        releasedAtStage: state.stage ?? releaseAtStage,
-        accountability,
-        clientEventId: parsed.data.clientEventId ?? null,
-      });
-    });
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Release failed." };
-  }
-  revalidatePath(`/floor/${parsed.data.token}`);
-  revalidatePath(`/floor-board`);
-  return { ok: true };
-}
+// P6 Task 4 — releaseSealingHandoffAction, releaseBagAction, and the
+// private projectSealingStationHandoff / releaseSchema / sealingHandoffSchema
+// / DbTx / StationAccountability helpers retired. Zero non-test callers repo-
+// wide (P4b's operator screen releases through the engine's auto-release
+// hooks after each stage event; sealing hand-off is emitted from
+// recordStageEvent's segment path, not a separate action). BAG_RELEASED
+// projections still live in record-stage-event.ts and are chained
+// automatically on completion.
