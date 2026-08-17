@@ -18,6 +18,7 @@ import {
   REPORT_PROBLEM_CATEGORY_LAYOUT,
   reportProblemCategoryDisabled,
   reportProblemRouteFor,
+  reportProblemUsesStationReport,
   shouldSubmitAutoProduct,
   upNextSummary,
 } from "./operator-screen-model";
@@ -456,9 +457,41 @@ describe("report problem (P4b Task 4)", () => {
     }
   });
 
-  it("disables every route without a bag (fix round 1, MED 4) — no route has a bagless recording path yet", () => {
-    for (const route of ["PAUSE_AND_DOWNTIME", "QA_HOLD", "PAUSE", "EXCEPTION"] as const) {
-      expect(reportProblemCategoryDisabled(route, false)).toBe(true);
+  it("keeps MACHINE (PAUSE_AND_DOWNTIME) and MATERIAL/PRODUCT/OTHER (EXCEPTION) routes enabled without a bag (P5-SUPERVISOR Task 5b — bagless station-report path)", () => {
+    // PAUSE_AND_DOWNTIME and EXCEPTION now route through
+    // raiseStationReport when no bag is pinned (MACHINE/OTHER only —
+    // reportProblemUsesStationReport gates MATERIAL/PRODUCT out at the
+    // category level, but the route-level enable stays on because
+    // MACHINE and OTHER both live under those two routes).
+    expect(reportProblemCategoryDisabled("PAUSE_AND_DOWNTIME", false)).toBe(false);
+    expect(reportProblemCategoryDisabled("EXCEPTION", false)).toBe(false);
+  });
+
+  it("still disables PAUSE (BAG) and QA_HOLD (QUALITY) without a bag — those two need a bag by construction", () => {
+    expect(reportProblemCategoryDisabled("PAUSE", false)).toBe(true);
+    expect(reportProblemCategoryDisabled("QA_HOLD", false)).toBe(true);
+  });
+
+  it("routes bagless MACHINE and OTHER through the station-report path (P5-SUPERVISOR Task 5b)", () => {
+    // With no bag, MACHINE and OTHER become bagless station reports;
+    // MATERIAL/PRODUCT do NOT (they stay bag-gated even though they
+    // share the EXCEPTION route), and every category with a bag pinned
+    // keeps its existing bagged event path.
+    expect(reportProblemUsesStationReport("MACHINE", false)).toBe(true);
+    expect(reportProblemUsesStationReport("OTHER", false)).toBe(true);
+    expect(reportProblemUsesStationReport("MATERIAL", false)).toBe(false);
+    expect(reportProblemUsesStationReport("PRODUCT", false)).toBe(false);
+    expect(reportProblemUsesStationReport("BAG", false)).toBe(false);
+    expect(reportProblemUsesStationReport("QUALITY", false)).toBe(false);
+    for (const category of [
+      "MACHINE",
+      "OTHER",
+      "MATERIAL",
+      "PRODUCT",
+      "BAG",
+      "QUALITY",
+    ] as const) {
+      expect(reportProblemUsesStationReport(category, true)).toBe(false);
     }
   });
 });

@@ -37,6 +37,7 @@ import {
   PauseCircle,
   PlayCircle,
   ScanLine,
+  Shield,
   SkipForward,
   X,
   XCircle,
@@ -72,8 +73,10 @@ import { pauseBagAction, resumeBagAction, saveSealingProductAction } from "./act
 import {
   advanceBagAction,
   claimScannedBagAction,
+  supervisorClaimBagAction,
   raiseProductionExceptionAction,
 } from "./operator-actions";
+import { SupervisorBanner, SupervisorSheet } from "./supervisor-sheet";
 
 // crypto.randomUUID() is only available in secure contexts. Floor PWA
 // runs over plain HTTP on the LAN — mirror the fallback that
@@ -144,7 +147,7 @@ export function OperatorScreen({
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [sheet, setSheet] = React.useState<
-    "none" | "more" | "help" | "pause" | "code" | "sealingPartial"
+    "none" | "more" | "help" | "pause" | "code" | "sealingPartial" | "supervisor"
   >("none");
   const [scannerOpen, setScannerOpen] = React.useState(false);
   const [values, setValues] = React.useState<Record<string, string>>({});
@@ -358,6 +361,14 @@ export function OperatorScreen({
         onHelp={() => setSheet("help")}
       />
 
+      {view.supervisor ? (
+        <SupervisorBanner
+          supervisor={view.supervisor}
+          token={token}
+          stationId={stationId}
+        />
+      ) : null}
+
       <main className="flex-1 space-y-5 px-4 pb-28 pt-4">
         <ErrorAlert message={error} />
 
@@ -565,18 +576,16 @@ export function OperatorScreen({
             pending={pending}
             quantity={partialQty}
             onQuantityChange={setPartialQty}
-            leadCode={leadCode}
-            onLeadCodeChange={setLeadCode}
+            isSupervisorUnlocked={view.supervisor != null}
+            onRequestSupervisor={() => setSheet("supervisor")}
             onUseEstimate={(estimate) =>
               void advance("RESOLVE_PARTIAL", {
                 partialRemainingEstimate: String(estimate),
-                overrideEmployeeCode: leadCode.trim(),
               })
             }
             onContinue={(qty) =>
               void advance("RESOLVE_PARTIAL", {
                 physicalQty: qty,
-                overrideEmployeeCode: leadCode.trim(),
               })
             }
             onInvalid={setError}
@@ -671,6 +680,7 @@ export function OperatorScreen({
           onPause={() => setSheet("pause")}
           onEnterCode={() => setSheet("code")}
           onCloseSealingEarly={() => setSheet("sealingPartial")}
+          onOpenSupervisor={() => setSheet("supervisor")}
           onResume={() =>
             void run(async () => {
               // Silence here would look like a successful resume. The bag
@@ -739,6 +749,14 @@ export function OperatorScreen({
             // can fix the code they typed.
             if (await claim({ scanToken: code })) setSheet("none");
           }}
+        />
+      ) : null}
+
+      {sheet === "supervisor" && !view.supervisor ? (
+        <SupervisorSheet
+          token={token}
+          stationId={stationId}
+          onClose={() => setSheet("none")}
         />
       ) : null}
 
@@ -958,6 +976,7 @@ function MoreSheet({
   onResume,
   onEnterCode,
   onCloseSealingEarly,
+  onOpenSupervisor,
 }: {
   view: StationView;
   token: string;
@@ -974,6 +993,7 @@ function MoreSheet({
   onResume: () => void;
   onEnterCode: () => void;
   onCloseSealingEarly: () => void;
+  onOpenSupervisor: () => void;
 }) {
   const isPaused =
     view.nextAction.kind === "BLOCKED" &&
@@ -1046,6 +1066,39 @@ function MoreSheet({
         <ChevronRight className="h-5 w-5 text-text-muted" />
       </button>
 
+      {view.supervisor ? (
+        // Session is open: the banner above the screen shows name +
+        // countdown + Exit. The entry here acknowledges the state and
+        // closes More so the banner is visible.
+        <button
+          type="button"
+          className={SHEET_ITEM}
+          onClick={onClose}
+        >
+          <span className="flex items-center gap-3">
+            <Shield className="h-5 w-5 text-amber-600" />
+            <span>
+              Supervisor active
+              <span className="block text-xs text-text-muted">
+                {view.supervisor.employeeName}
+              </span>
+            </span>
+          </span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={SHEET_ITEM}
+          onClick={onOpenSupervisor}
+        >
+          <span className="flex items-center gap-3">
+            <Shield className="h-5 w-5 text-text-muted" />
+            Supervisor
+          </span>
+          <ChevronRight className="h-5 w-5 text-text-muted" />
+        </button>
+      )}
+
       {offerCloseSealingEarly ? (
         <button
           type="button"
@@ -1070,6 +1123,39 @@ function MoreSheet({
       ) : null}
 
       {qcPanel}
+
+      {/* P5-SUPERVISOR Task 4 — supervisor-only tools inside More.
+          Rendered ONLY when a session is open (cosmetic); the real
+          gates are server-side in supervisorClaimBagAction and the
+          QC / roll / bag-allocation / variety action families. Manual
+          bag pick routes through supervisorClaimBagAction which
+          requires a live supervisor session and delegates to the
+          same P4b claim path (claimQueuedBag) — no bespoke claim
+          logic here. Corrections is a plain deep-link to the admin
+          correction wizard: the floor does not build voiding. */}
+      {view.supervisor ? (
+        <ManualBagPickPanel
+          token={token}
+          stationId={view.station.id}
+          upNext={view.upNext}
+          pending={pending}
+        />
+      ) : null}
+
+      {view.supervisor ? (
+        <a
+          href="/workflow-submissions"
+          className={SHEET_ITEM}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          <span className="flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-text-muted" />
+            Corrections
+          </span>
+          <ChevronRight className="h-5 w-5 text-text-muted" />
+        </a>
+      ) : null}
 
       {/* End shift is the PANEL, not a bare button. BLISTER-PAUSE-COUNT-
           SNAPSHOT-1 refuses to close a shift on a counting station whose
@@ -1370,19 +1456,17 @@ function HelpSheet({
   );
 }
 
-/** The lead badge both partial screens collect.
+/** The lead badge PartialReuseStart (P1-PARTIAL scan-time) collects.
  *
- *  Closing a raw-bag allocation ledger has asked for a badge since
- *  SPLIT-BAG-1 (resolveScannedBagAllocationAction resolves the code
- *  through resolveStationAccountability with SUPERVISOR_OVERRIDE), and
- *  resolvePartialAllocation reproduces that exactly.
- *
- *  BE HONEST ABOUT WHAT IT IS: not a refusal. An unrecognized code falls
- *  back to the station's open operator session, so with a shift running
- *  the write proceeds and is attributed to that operator — same as the
- *  legacy floor panel. It records WHO is answering for the number; it
- *  does not stop anyone. A real gate is a supervisor session, which is
- *  P5's station_supervisor_sessions. */
+ *  P5-SUPERVISOR Task 5 note: the RESOLVE_PARTIAL screens (PartialBag
+ *  below) no longer use this field — the LOW-confidence branch there
+ *  now requires an OPEN station_supervisor_sessions row (checked
+ *  server-side in resolvePartialAllocation) and the operator screen
+ *  opens the SupervisorSheet inline on that branch instead. The
+ *  scan-time PartialReuseStart flow keeps the badge because
+ *  scanCardAction enforces the LOW-confidence supervisor rule on its
+ *  own path (partial-bag-lifecycle.test.ts pins it there); that flow's
+ *  own P5 rework, if any, is out of Task 5 scope. */
 function LeadCodeField({
   value,
   pending,
@@ -1488,13 +1572,28 @@ function PartialReuseStart({
   );
 }
 
+/** RESOLVE_PARTIAL's two screens.
+ *
+ *  P5-SUPERVISOR Task 5 — replaces the P4b typed-lead badge with a real
+ *  supervisor session check:
+ *   - USE_ESTIMATE (HIGH/MEDIUM): no supervisor unlock needed. The
+ *     number is system-derived; the operator is accepting a derivation,
+ *     not entering one. One-button confirmation.
+ *   - ENTER_QUANTITY (LOW): the operator counts, which requires an OPEN
+ *     station_supervisor_sessions row. When the station is locked
+ *     (isSupervisorUnlocked === false), the [ Continue ] button opens
+ *     the SupervisorSheet inline (spec: "presents as one screen"); the
+ *     screen re-renders after unlock with view.supervisor populated and
+ *     the operator taps Continue again to submit. resolvePartialAllocation
+ *     enforces the same check server-side — a hand-crafted request
+ *     without a session is refused there. */
 function PartialBag({
   action,
   pending,
   quantity,
   onQuantityChange,
-  leadCode,
-  onLeadCodeChange,
+  isSupervisorUnlocked,
+  onRequestSupervisor,
   onUseEstimate,
   onContinue,
   onInvalid,
@@ -1503,8 +1602,8 @@ function PartialBag({
   pending: boolean;
   quantity: string;
   onQuantityChange: (value: string) => void;
-  leadCode: string;
-  onLeadCodeChange: (value: string) => void;
+  isSupervisorUnlocked: boolean;
+  onRequestSupervisor: () => void;
   onUseEstimate: (estimate: number) => void;
   onContinue: (quantity: string) => void;
   onInvalid: (message: string) => void;
@@ -1523,22 +1622,11 @@ function PartialBag({
             Estimated remaining: {screen.estimate.toLocaleString()} units
           </p>
         </div>
-        <LeadCodeField
-          value={leadCode}
-          pending={pending}
-          onChange={onLeadCodeChange}
-        />
         <button
           type="button"
           className={PRIMARY_BUTTON}
           disabled={pending}
-          onClick={() => {
-            if (leadCode.trim() === "") {
-              onInvalid("Enter the lead badge code to use this bag.");
-              return;
-            }
-            onUseEstimate(screen.estimate);
-          }}
+          onClick={() => onUseEstimate(screen.estimate)}
         >
           Use bag
         </button>
@@ -1571,11 +1659,11 @@ function PartialBag({
           placeholder="0"
         />
       </label>
-      <LeadCodeField
-        value={leadCode}
-        pending={pending}
-        onChange={onLeadCodeChange}
-      />
+      {!isSupervisorUnlocked ? (
+        <p className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          A supervisor needs to unlock this station to confirm the count.
+        </p>
+      ) : null}
       <button
         type="button"
         className={PRIMARY_BUTTON}
@@ -1585,8 +1673,12 @@ function PartialBag({
             onInvalid("Enter the physical quantity before continuing.");
             return;
           }
-          if (leadCode.trim() === "") {
-            onInvalid("Enter the lead badge code to save this count.");
+          if (!isSupervisorUnlocked) {
+            // Spec ("presents as one screen"): open the SupervisorSheet
+            // inline rather than surfacing a blocker. On successful
+            // unlock the page re-renders with view.supervisor populated
+            // and the operator taps Continue again to submit.
+            onRequestSupervisor();
             return;
           }
           onContinue(quantity.trim());
@@ -1595,5 +1687,122 @@ function PartialBag({
         Continue
       </button>
     </section>
+  );
+}
+
+// ── ManualBagPickPanel (P5-SUPERVISOR Task 4) ────────────────────────
+//
+// The "old dropdown reborn". Renders the queue of bags that can start
+// or resume at THIS station (view.upNext, which loadStationViewRows
+// already scopes to eligibleStationKinds and drops rows held by a
+// non-eligible station). Each row submits supervisorClaimBagAction —
+// the ONLY server entry that claims a queued bag without a scan.
+// That action gates on requireSupervisorSession server-side and
+// delegates the actual write to the same P4b claim path
+// (claimQueuedBag); the refusal sentence is the same one an operator
+// would see on any other gated action when the station is locked.
+//
+// Rendering this section from view.supervisor is COSMETIC — the real
+// control is the server-side gate. Fix round 1 for Task 4: the
+// original wiring called claimScannedBagAction with workflowBagId
+// only, which was ungated on that action, so the "supervisor-only"
+// affordance was hand-crafted-request bypassable. The new
+// supervisorClaimBagAction requires a live supervisor session.
+function ManualBagPickPanel({
+  token,
+  stationId,
+  upNext,
+  pending: outerPending,
+}: {
+  token: string;
+  stationId: string;
+  upNext: StationView["upNext"];
+  pending: boolean;
+}) {
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const handleClaim = React.useCallback(
+    async (workflowBagId: string) => {
+      if (pending || outerPending) return;
+      setPending(true);
+      setError(null);
+      try {
+        const fd = new FormData();
+        fd.set("token", token);
+        fd.set("stationId", stationId);
+        fd.set("workflowBagId", workflowBagId);
+        fd.set("clientEventId", newClientEventId());
+        const r = await supervisorClaimBagAction(fd);
+        if (r && "error" in r && r.error) {
+          setError(r.error);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not pick up this bag.");
+      } finally {
+        setPending(false);
+      }
+    },
+    [pending, outerPending, token, stationId],
+  );
+
+  if (upNext.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-1">
+          Manual bag pick
+        </p>
+        <p className="text-sm text-text-muted">
+          No bags waiting for this station.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-surface p-3 space-y-2">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-1">
+          Manual bag pick
+        </p>
+        <p className="text-xs text-text-muted">
+          Supervisor override — claim uses the same scan path.
+        </p>
+      </div>
+      {error ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-900"
+        >
+          {error}
+        </p>
+      ) : null}
+      <ul className="space-y-1">
+        {upNext.slice(0, 8).map((bag) => (
+          <li key={bag.workflowBagId}>
+            <button
+              type="button"
+              disabled={pending || outerPending}
+              onClick={() => void handleClaim(bag.workflowBagId)}
+              className="flex w-full items-center justify-between rounded-lg border border-border bg-surface-2 px-3 py-2 text-left text-sm hover:bg-surface disabled:opacity-60"
+            >
+              <span className="truncate">
+                <span className="font-medium">{bag.bagLabel}</span>
+                {bag.productName ? (
+                  <span className="text-text-muted"> · {bag.productName}</span>
+                ) : null}
+              </span>
+              <span className="ml-2 whitespace-nowrap text-xs text-text-muted">
+                {bag.readyState === "READY"
+                  ? "ready"
+                  : bag.etaMinutes != null
+                    ? `~${bag.etaMinutes}m`
+                    : "upstream"}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

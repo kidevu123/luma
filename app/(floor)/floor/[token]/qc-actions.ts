@@ -39,6 +39,8 @@ import {
   resolveStationAccountability,
   assertStationActiveForFloorActions,
   resolveStationByToken,
+  requireSupervisorSession,
+  SUPERVISOR_GATE_REFUSAL_SENTENCE,
   validateQcPayload,
   type PackagingDamageReturnPayload,
   type ReworkSentPayload,
@@ -181,6 +183,13 @@ export async function reportPackagingDamageAction(
   try {
     const station = await authStation(input.token, input.stationId);
     const result = await db.transaction(async (tx) => {
+      // P5-SUPERVISOR Task 4 — server-side gate. Every QC mutation is a
+      // supervisor-only surface (view.supervisor hides the panel; this
+      // is the real check that a hand-crafted request cannot bypass).
+      const supSession = await requireSupervisorSession(tx, station.id);
+      if (!supSession) {
+        return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE } as ActionResult;
+      }
       const accountability = await resolveStationAccountability(tx, {
         stationId: station.id,
         overrideEmployeeCode: input.overrideEmployeeCode ?? null,
@@ -249,6 +258,10 @@ export async function reportPackagingDamageAction(
             quantity: input.quantity,
             unit: input.unit,
             accountable_employee_id: accountability.accountableEmployeeId,
+            // P5-SUPERVISOR Task 4 — supervisor session accountability
+            // on every gated write.
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
           },
         },
         tx,
@@ -302,6 +315,13 @@ export async function reworkSentAction(
   try {
     const station = await authStation(input.token, input.stationId);
     const result = await db.transaction(async (tx) => {
+      // P5-SUPERVISOR Task 4 — server-side supervisor gate. See
+      // reportPackagingDamageAction for the rationale; every QC
+      // mutation is behind the same session check.
+      const supSession = await requireSupervisorSession(tx, station.id);
+      if (!supSession) {
+        return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE } as ActionResult;
+      }
       const accountability = await resolveStationAccountability(tx, {
         stationId: station.id,
         overrideEmployeeCode: input.overrideEmployeeCode ?? null,
@@ -376,6 +396,8 @@ export async function reworkSentAction(
             unit: input.unit,
             linked_event_id: input.linkedEventId ?? null,
             accountable_employee_id: accountability.accountableEmployeeId,
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
           },
         },
         tx,
@@ -438,6 +460,11 @@ export async function reworkReceivedAction(
   try {
     const station = await authStation(input.token, input.stationId);
     const result = await db.transaction(async (tx) => {
+      // P5-SUPERVISOR Task 4 — server-side supervisor gate.
+      const supSession = await requireSupervisorSession(tx, station.id);
+      if (!supSession) {
+        return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE } as ActionResult;
+      }
       const accountability = await resolveStationAccountability(tx, {
         stationId: station.id,
         overrideEmployeeCode: input.overrideEmployeeCode ?? null,
@@ -513,6 +540,8 @@ export async function reworkReceivedAction(
             partial: input.partial,
             linked_event_id: input.linkedEventId,
             accountable_employee_id: accountability.accountableEmployeeId,
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
           },
         },
         tx,

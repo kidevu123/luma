@@ -286,8 +286,72 @@ Branch `feat/production-engine-p4b`. The operator screen lands.
   "Rollback (Phase 4b)" block with the SQL one-liner to run BEFORE any
   revert. Mirror when this note relocates.
 
-**Deferred to P6:**
+**Deferred to P6 (from P4b):**
 
 - Data-driven routes: `queueAfterWorkAt` and `resolve-operation` sourced from `route_operations` (vs. hardcoded legacy table). Legacy table deletion and `read_queue_state` double-count fix.
 - Barrel curation: legacy action deletion (once no UI calls them).
 - Value-pinned duplication guards: `dup_guard_count` tests on high-risk writes.
+
+## Phase 5 outcomes
+
+Branch `worktree-production-engine-p5` (merged to `feat/production-engine-p5`).
+Version: `1.34.0` → `1.35.0`.
+
+**What shipped:**
+
+- **Migration 0073** (`drizzle/0073_supervisor_and_reports.sql`): `employees.supervisor_pin_hash` + `employees.is_supervisor`; `station_supervisor_sessions` (15-min TTL, one-OPEN-per-station partial unique index); `station_exception_reports` (bagless MACHINE/OTHER reports with acknowledged_at/acknowledged_by).
+
+- **Supervisor session engine** (`lib/production/engine/supervisor-session.ts`): `openSupervisorSession` (argon2id verify, dummy-hash timing-oracle hardening on all rejection legs, one generic refusal sentence — no oracle); `closeSupervisorSession`; `requireSupervisorSession` (lazy expiry); pure `supervisorSessionRemainingSeconds`. Source-scan test pins that `pin` appears only as the input-type field and in the verify call. Admin PIN setter at `settings/employees` (hash via lib/auth.ts, audit `SUPERVISOR_PIN_SET`, no hash in payload).
+
+- **Floor unlock UI** (`app/(floor)/floor/[token]/supervisor-sheet.tsx`): employee code + PIN inputs, server action via `operator-actions.ts`; persistent banner with name, live countdown, and `[ Exit ]` on success. `getStationView` populates `StationView.supervisor` from the open session.
+
+- **Server-side gating** (`requireSupervisorSession` inside each flow): `qc-actions.ts`, `roll-actions.ts`, `bag-allocation-actions.ts`, `variety-run-actions.ts`. Manual bag pick routes through `supervisorClaimBagAction` (supervisor gate + claim path + audit `floor.supervisor.manual_bag_claim`). Bag-allocation and variety-pack pages render a locked state when no open session. Hand-crafted requests refused without a valid session.
+
+- **RESOLVE_PARTIAL inline supervisor check**: LOW-confidence resolution requires an OPEN supervisor session (server-side `requireSupervisorSession`); blocker `PARTIAL_SUPERVISOR_REQUIRED`. Screen opens the supervisor sheet inline when the case is RESOLVE_PARTIAL-low and `view.supervisor` is null. `LeadCodeField` legacy badge removed.
+
+- **Bagless station reports** (`lib/production/engine/raise-station-report.ts`): `raiseStationReport({stationId, category, detail})`, MACHINE and OTHER categories only. Report Problem: machine/other without a pinned bag submit through it (disabled-state removed). Act Now: unacknowledged reports union into the rail (MACHINE crit, OTHER warn) within the same EXCEPTION_ROWS_MAX=3 budget as workflow-event exceptions, sorted by recency.
+
+- **Act Now acknowledgment**: unacknowledged `station_exception_reports` rows render `[ Acknowledge ]` on the admin floor-board rail (server action `acknowledgeStationReportAction`; requireAdmin; audit `STATION_REPORT_ACKNOWLEDGED`; `acknowledged_at` + `acknowledged_by` written). Acknowledged rows leave the rail (query filters `acknowledged_at IS NULL`). Workflow-event exceptions (DOWNTIME/QA) NOT acknowledgeable — they resolve through their own flows.
+
+**Smoke section (Phase 5 / v1.35.0):**
+
+1. **Supervisor unlock, 15-min expiry, exit:**
+   - On the floor tablet's More menu, tap Supervisor. Enter supervisor employee code + PIN. On success the banner appears ("Supervisor: [name] — N:NN remaining"). Wait for the TTL to elapse: banner disappears and gated pages return locked. Tap Exit to close the session early — banner disappears immediately.
+
+2. **Wrong PIN — generic refusal, no oracle:**
+   - On the unlock sheet enter a correct employee code but wrong PIN. You receive: "That code and PIN combination does not unlock this station." Enter a non-existent employee code + any PIN. You receive the same sentence. The two responses are indistinguishable to the caller.
+
+3. **Gated action refused server-side — hand-crafted request:**
+   ```
+   curl -X POST https://<floor-host>/floor/api/<token>/qc-actions \
+     -H 'Content-Type: application/json' \
+     -d '{"action":"releaseHold","bagId":"<any-uuid>"}' \
+   ```
+   Without a valid supervisor session the response is `{"error":"Supervisor unlock required for this."}`.
+
+4. **Manual pick requires unlock:**
+   - Without a supervisor session open, the Manual bag pick panel in More is hidden or disabled. After unlock the panel appears; selecting a bag claims it through the standard scan path.
+
+5. **RESOLVE_PARTIAL-low prompts the sheet inline:**
+   - Navigate a bag to a partial-resolution with LOW confidence. When `view.supervisor` is null the supervisor sheet opens automatically before allowing the override. With a session open the override submits directly.
+
+6. **Bagless MACHINE report reaches the rail and acknowledges:**
+   - At a floor tablet with no bag scanned, tap Report Problem → Machine. Submit a detail. The report appears on `/floor-board` Act Now as a CRIT row with `[ Acknowledge ]`. Click it — the row disappears on next render.
+
+7. **Gated pages show locked state:**
+   - Navigate to `/floor/<token>/bag-allocation` or `/floor/<token>/variety-pack` without a supervisor session. The page renders "Supervisor unlock required for this." In both cases unlock first and the page shows its normal content.
+
+8. **`scripts/verify-bottle-partial-qr-release-e2e.ts` requires a supervisor session now:**
+   Whoever runs this script must first open a supervisor session for the station under test (or stub `requireSupervisorSession` to return a mock session in the test environment). The script is unchanged but the RESOLVE_PARTIAL-LOW gate it exercises now enforces a real check.
+
+9. **Admin PIN set:**
+   - In the admin UI at `settings/employees`, select a supervisor employee, set `is_supervisor = true`, and enter a new PIN. The PIN is hashed via argon2id; the audit row records action `SUPERVISOR_PIN_SET` with no hash in the payload.
+
+**Deferred to P6 (from P5):**
+
+- Unlock throttle if tablets leave the LAN: per-station attempt counter with exponential back-off. Current mitigation: station scan-token boundary + LAN-only deployment + audit trail. PIN-set may also move to OWNER-only role if role tiers tighten.
+- Post-commit audit outside transaction: `supervisorClaimBagAction` writes the `floor.supervisor.manual_bag_claim` audit row after the claim transaction commits, matching the `releaseQaHold` precedent. This is a pre-existing design class — the audit is still reliable but not atomically coupled to the write. Refactor when the class is addressed broadly in P6.
+- Downtime-end flow: `DOWNTIME_ENDED` event type exists but nothing emits it. Downtime exceptions age off the rail after 4 hours rather than being resolved. Full flow (operator reports end, supervisor acks) is P6.
+- `damagedPackaging` rework-field decision (carried from P4b): the operator screen still hardcodes `damagedPackaging: 0`; the packaging-material damage input is P6 scope.
+- Data-driven routes, barrel curation, `read_queue_state` double-count fix (carried from P4b P6 list).
+- Value-pinned duplication guards (carried from P4b P6 list).

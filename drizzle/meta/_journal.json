@@ -505,6 +505,13 @@
       "when": 1785100000000,
       "tag": "0072_production_exception_event",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1785200000000,
+      "tag": "0073_supervisor_and_reports",
+      "breakpoints": true
     }
   ]
 }

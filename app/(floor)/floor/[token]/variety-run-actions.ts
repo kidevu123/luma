@@ -16,7 +16,11 @@ import { eq, and, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { stations, varietyRuns, rawBagAllocationSessions, qrCards } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
-import { resolveStationAccountability } from "@/lib/production/engine";
+import {
+  resolveStationAccountability,
+  requireSupervisorSession,
+  SUPERVISOR_GATE_REFUSAL_SENTENCE,
+} from "@/lib/production/engine";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -99,6 +103,14 @@ export async function startOrResumeVarietyRunAction(
       )
       .limit(1);
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate. Variety-run
+    // start/resume is a supervisor action; hides behind view.supervisor
+    // in the UI, refused server-side here.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     if (existing[0]) {
       // Resume path — card is already ASSIGNED. Just write audit.
       await db.transaction(async (tx) => {
@@ -112,6 +124,10 @@ export async function startOrResumeVarietyRunAction(
             action: "RESUME_VARIETY_RUN",
             targetType: "variety_run",
             targetId: existing[0]!.id,
+            after: {
+              supervisor_session_id: supSession.id,
+              supervisor_employee_id: supSession.employeeId,
+            },
           },
           tx,
         );
@@ -161,6 +177,10 @@ export async function startOrResumeVarietyRunAction(
           action: "START_VARIETY_RUN",
           targetType: "variety_run",
           targetId: newId,
+          after: {
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
+          },
         },
         tx,
       );
@@ -232,6 +252,12 @@ export async function closeVarietyRunAction(
       };
     }
 
+    // P5-SUPERVISOR Task 4 — server-side supervisor gate.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) return { error: SUPERVISOR_GATE_REFUSAL_SENTENCE };
+
     // Close the run inside a transaction and write audit.
     await db.transaction(async (tx) => {
       const accountability = await resolveStationAccountability(tx, {
@@ -293,6 +319,10 @@ export async function closeVarietyRunAction(
           action: "CLOSE_VARIETY_RUN",
           targetType: "variety_run",
           targetId: d.varietyRunId,
+          after: {
+            supervisor_session_id: supSession.id,
+            supervisor_employee_id: supSession.employeeId,
+          },
         },
         tx,
       );

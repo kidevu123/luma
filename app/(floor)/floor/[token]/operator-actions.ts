@@ -27,17 +27,25 @@ import {
   advanceBag,
   assertStationActiveForFloorActions,
   claimQueuedBag,
+  closeSupervisorSession,
+  openSupervisorSession,
   raiseDowntimeStarted,
   raiseProductionException,
   raiseQaHoldRelease,
   raiseQaHoldStarted,
+  raiseStationReport,
+  requireSupervisorSession,
   resolveFreshBagStart,
   resolveStationByToken,
   PRODUCTION_EXCEPTION_CATEGORIES,
+  STATION_REPORT_CATEGORIES,
+  SUPERVISOR_GATE_REFUSAL_CODE,
+  SUPERVISOR_GATE_REFUSAL_SENTENCE,
   type AdvanceInput,
   type Blocker,
   type FreshBagStart,
 } from "@/lib/production/engine";
+import { writeAudit } from "@/lib/db/audit";
 // SCAN-FIRST-1 — the fresh-bag start transaction stays where it is.
 // scanCardAction is a "use server" export, so calling it from this
 // module is a server-to-server call, not a second implementation.
@@ -98,10 +106,13 @@ const advanceSchema = z.object({
   // exactly the wrong default for "keep this bag open".
   keepBagPartial: z.literal("true").optional(),
   partialRemainingEstimate: countField,
-  /** RESOLVE_PARTIAL's lead gate — the badge code that closes a
-   *  raw-bag allocation ledger (same gate as
-   *  resolveScannedBagAllocationAction). Also the per-form
-   *  accountability override recordStageEvent already accepts. */
+  /** Per-form accountability override recordStageEvent accepts (a
+   *  supervisor stamping a submission on behalf of the operator on
+   *  shift). P5-SUPERVISOR Task 5 removed RESOLVE_PARTIAL's badge path
+   *  — the LOW-confidence branch now requires a station_supervisor
+   *  _sessions row, not a typed badge — so this field is no longer
+   *  forwarded on RESOLVE_PARTIAL; it stays for the other intents
+   *  that still accept it. */
   overrideEmployeeCode: z.string().max(40).optional(),
   /** SEALING-PARTIAL-CLOSEOUT-1 — "Close sealing early". Only read when
    *  the intent/operation pair resolves to SEALING_COMPLETE on a pure
@@ -227,14 +238,29 @@ export async function advanceBagAction(
 
 // ── claim ─────────────────────────────────────────────────────────────
 
+// P5-SUPERVISOR Task 4 fix round 1 — scanToken is REQUIRED. Physical
+// possession of the QR IS the control on the scan path; before this
+// round the schema accepted a workflowBagId-only request as a
+// fallback, and the P5 manual-bag-pick tool became the first caller
+// to exercise that path — turning "supervisor-only" into a cosmetic
+// affordance (a hand-crafted request against the ungated action
+// would claim a queued bag while the station was locked). The manual
+// override now goes through supervisorClaimBagAction, which requires
+// a live supervisor session server-side. workflowBagId remains only
+// as an expected-bag HINT that MUST accompany a scan (pre-P5 call
+// sites always sent both); a workflowBagId-only request is refused
+// with the standard invalid-input shape.
 const claimSchema = z
   .object({
     token: z.string(),
     stationId: z.string().uuid(),
     clientEventId: z.string().regex(UUID_RE, "Invalid client event id."),
-    /** The camera's decoded string, or the code typed under More. */
-    scanToken: z.string().min(1).max(200).optional(),
-    /** The expected bag, when the screen already knows which one. */
+    /** The camera's decoded string, or the code typed under More.
+     *  REQUIRED — physical possession is the control on this path. */
+    scanToken: z.string().min(1).max(200),
+    /** Expected-bag hint that accompanies a scan (pre-P5 callers
+     *  always sent it alongside scanToken). Never used on its own —
+     *  the resolved scan wins over the hint anyway. */
     workflowBagId: z.string().uuid().optional(),
     /** SCAN-FIRST-1 — the fresh-start half. Only read when the scanned
      *  card has no workflow bag yet and this station kind must record a
@@ -246,9 +272,6 @@ const claimSchema = z
      *  scanCardAction, which owns both gates. */
     confirmPartialReuse: z.literal("true").optional(),
     partialReuseSupervisorCode: z.string().max(40).optional(),
-  })
-  .refine((d) => d.scanToken != null || d.workflowBagId != null, {
-    message: "Scan a bag QR or enter its code.",
   });
 
 /** Resolve a scanned/typed QR string to the workflow bag it is carrying.
@@ -341,30 +364,26 @@ export async function claimScannedBagAction(
   let workflowBagId: string;
   try {
     const station = await authStation(d.token, d.stationId);
-    // A scan wins over the expected bag: the operator is holding what
-    // they scanned, and claiming the queue head instead would attribute
-    // work to the wrong bag.
-    const resolved = d.scanToken
-      ? await resolveScannedWorkflowBagId(d.scanToken)
-      : (d.workflowBagId ?? null);
+    // A scan wins over the expected bag hint: the operator is holding
+    // what they scanned, and claiming the queue head instead would
+    // attribute work to the wrong bag.
+    const resolved = await resolveScannedWorkflowBagId(d.scanToken);
     if (!resolved) {
-      if (d.scanToken) {
-        const fresh = await resolveFreshBagStart({
-          scanToken: d.scanToken,
-          stationKind: station.kind,
+      const fresh = await resolveFreshBagStart({
+        scanToken: d.scanToken,
+        stationKind: station.kind,
+      });
+      if (fresh) {
+        return startFreshBag({
+          token: d.token,
+          stationId: d.stationId,
+          fresh,
+          ...(d.productId != null ? { productId: d.productId } : {}),
+          confirmPartialReuse: d.confirmPartialReuse === "true",
+          ...(d.partialReuseSupervisorCode != null
+            ? { partialReuseSupervisorCode: d.partialReuseSupervisorCode }
+            : {}),
         });
-        if (fresh) {
-          return startFreshBag({
-            token: d.token,
-            stationId: d.stationId,
-            fresh,
-            ...(d.productId != null ? { productId: d.productId } : {}),
-            confirmPartialReuse: d.confirmPartialReuse === "true",
-            ...(d.partialReuseSupervisorCode != null
-              ? { partialReuseSupervisorCode: d.partialReuseSupervisorCode }
-              : {}),
-          });
-        }
       }
       return {
         error: "This code was not recognized. Try scanning again.",
@@ -385,6 +404,82 @@ export async function claimScannedBagAction(
 
   revalidateFloor(d.token);
   return { ok: true, workflowBagId };
+}
+
+// ── supervisor claim (manual bag pick) ───────────────────────────────
+//
+// P5-SUPERVISOR Task 4 fix round 1 — the manual override for
+// "operator can't scan the QR, pick from the queue". This is the
+// ONLY server entry that claims a queued bag without a scan; every
+// other path (camera, typed code) goes through claimScannedBagAction
+// which requires scanToken. The gate here is a LIVE supervisor
+// session for this station (view.supervisor hides the panel; this
+// check refuses hand-crafted requests when locked). Delegates the
+// write to the same P4b claim path (claimQueuedBag) — no bespoke
+// claim logic.
+
+const supervisorClaimSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  workflowBagId: z.string().uuid(),
+  clientEventId: z.string().regex(UUID_RE, "Invalid client event id."),
+});
+
+/** Manual bag pick from the More sheet's supervisor tools. Gate:
+ *  requireSupervisorSession refuses without a live session; audit
+ *  row records the supervisor session + employee that authorised
+ *  the pick (no secrets). */
+export async function supervisorClaimBagAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = supervisorClaimSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    workflowBagId: formData.get("workflowBagId"),
+    clientEventId: formData.get("clientEventId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    // Read-only tx for the gate — claimQueuedBag opens its own
+    // write tx afterwards, matching the releaseQaHoldAction pattern.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) {
+      return {
+        error: SUPERVISOR_GATE_REFUSAL_SENTENCE,
+        code: SUPERVISOR_GATE_REFUSAL_CODE,
+      };
+    }
+    const result = await claimQueuedBag({
+      stationId: d.stationId,
+      workflowBagId: d.workflowBagId,
+      clientEventId: d.clientEventId,
+    });
+    if (!result.ok) return fail(result.blocker);
+    await writeAudit({
+      actorId: null,
+      actorRole: null,
+      action: "floor.supervisor.manual_bag_claim",
+      targetType: "WorkflowBag",
+      targetId: d.workflowBagId,
+      after: {
+        station_id: d.stationId,
+        supervisor_session_id: supSession.id,
+        supervisor_employee_id: supSession.employeeId,
+      },
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not pick up this bag." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
 }
 
 /** SCAN-FIRST-1's start half. Delegates the whole write to
@@ -586,6 +681,55 @@ export async function raiseQaHoldAction(
   return { ok: true };
 }
 
+// P5-SUPERVISOR Task 5(b) — bagless station report. MACHINE and OTHER
+// categories only; the bagged categories keep their existing event
+// paths (raiseDowntimeAction, raiseProductionExceptionAction). Runs on
+// a station with no current bag pinned — the whole point of this
+// action is to record a machine-down / general-issue exception the
+// operator noticed BEFORE any bag reached the station.
+const stationReportSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  category: z.enum(STATION_REPORT_CATEGORIES),
+  detail: z.string().min(1).max(500),
+  clientEventId: z.string().regex(UUID_RE, "Invalid client event id."),
+});
+
+/** Report Problem's bagless path for MACHINE and OTHER. Delegates
+ *  entirely to raiseStationReport, which is total (every failure is a
+ *  Blocker) — so this action's only contribution is parse ->
+ *  authStation -> delegate -> translate refusal shape. */
+export async function raiseStationReportAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = stationReportSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    category: formData.get("category"),
+    detail: formData.get("detail"),
+    clientEventId: formData.get("clientEventId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    const result = await raiseStationReport({
+      stationId: d.stationId,
+      category: d.category,
+      detail: d.detail,
+    });
+    if (!result.ok) return fail(result.blocker);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not send this." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
 // P4b Task 4 fix round 2 (N1) — the release half. workflowBagId is
 // REQUIRED (unlike reportDetailSchema's optional one): this action is
 // reached only from qc-panel.tsx, which already knows the bag it is
@@ -621,6 +765,20 @@ export async function releaseQaHoldAction(
 
   try {
     await authStation(d.token, d.stationId);
+    // P5-SUPERVISOR Task 4 — server-side gate. Release hold is a QC
+    // supervisor action (view.supervisor hides the qc-panel button;
+    // this check refuses a hand-crafted request when locked). Runs a
+    // dedicated read-only tx because raiseQaHoldRelease opens its own
+    // write tx afterward.
+    const supSession = await db.transaction((tx) =>
+      requireSupervisorSession(tx, d.stationId),
+    );
+    if (!supSession) {
+      return {
+        error: SUPERVISOR_GATE_REFUSAL_SENTENCE,
+        code: SUPERVISOR_GATE_REFUSAL_CODE,
+      };
+    }
     const result = await raiseQaHoldRelease({
       stationId: d.stationId,
       workflowBagId: d.workflowBagId,
@@ -628,8 +786,105 @@ export async function releaseQaHoldAction(
       ...(d.detail != null ? { detail: d.detail } : {}),
     });
     if (!result.ok) return fail(result.blocker);
+    // P5-SUPERVISOR Task 4 — audit the gated write. QA_HOLD_RELEASED is
+    // written as a workflow_events row by raiseQaHoldRelease; this
+    // audit_log row records the supervisor session that authorised it.
+    await writeAudit({
+      actorId: null,
+      actorRole: null,
+      action: "floor.supervisor.qa_hold_release",
+      targetType: "WorkflowBag",
+      targetId: d.workflowBagId,
+      after: {
+        station_id: d.stationId,
+        supervisor_session_id: supSession.id,
+        supervisor_employee_id: supSession.employeeId,
+      },
+    });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Could not release this." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
+// ── supervisor session ────────────────────────────────────────────────
+
+const supervisorUnlockSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+  employeeCode: z.string().min(1).max(40),
+  /** Cleartext PIN from the sheet. Never logged, never in error strings.
+   *  The server barrel's openSupervisorSession applies argon2id verify. */
+  pin: z.string().min(1).max(100),
+});
+
+/** Supervisor sheet: unlock a 15-minute supervisor session for the
+ *  station. Delegates entirely to openSupervisorSession — no stage
+ *  rules, no session management logic. The action's only contribution
+ *  is parse -> authStation -> delegate -> translate refusal shape.
+ *
+ *  PIN DISCIPLINE: the `pin` field never appears in any error string,
+ *  any log, or any audit payload. openSupervisorSession writes all of
+ *  that and the guarantee is in that module. This action's only PIN
+ *  contact is the schema field and the delegate argument — same rule
+ *  supervisor-session.ts enforces via its source-scan test. */
+export async function supervisorUnlockAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = supervisorUnlockSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+    employeeCode: formData.get("employeeCode"),
+    pin: formData.get("pin"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    const result = await openSupervisorSession({
+      stationId: d.stationId,
+      employeeCode: d.employeeCode,
+      pin: d.pin,
+    });
+    if (!result.ok) return fail(result.blocker);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not unlock supervisor mode." };
+  }
+
+  revalidateFloor(d.token);
+  return { ok: true };
+}
+
+const supervisorLockSchema = z.object({
+  token: z.string(),
+  stationId: z.string().uuid(),
+});
+
+/** Supervisor banner: [ Exit ] closes the open session and re-renders
+ *  the screen in locked state. A no-open-session call is a harmless
+ *  no-op (closeSupervisorSession returns { closed: false }). */
+export async function supervisorLockAction(
+  formData: FormData,
+): Promise<OperatorActionResult> {
+  const parsed = supervisorLockSchema.safeParse({
+    token: formData.get("token"),
+    stationId: formData.get("stationId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+  const d = parsed.data;
+
+  try {
+    await authStation(d.token, d.stationId);
+    await closeSupervisorSession(d.stationId);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not exit supervisor mode." };
   }
 
   revalidateFloor(d.token);

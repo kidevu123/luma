@@ -9,6 +9,7 @@ import {
   readBagState,
   readOperatorDaily,
   readBagMetrics,
+  stationExceptionReports,
   stations,
   workflowEvents,
   workflowBags,
@@ -258,6 +259,20 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
     receipt_number: string | null;
   }>;
 
+  // P5 fix-round (MED Task 5): merge both operator-flagged buckets
+  // (production_exception workflow events + station_report rows) into a
+  // single list sorted by recency, THEN apply the EXCEPTION_ROWS_MAX=3
+  // cap. Without this, older bagged DOWNTIME/QA rows in exceptionRows
+  // consumed the full cap before any newer bagless MACHINE crit in
+  // reportRows could enter the budget — starvation by insertion order.
+  const EXCEPTION_ROWS_MAX = 3;
+
+  // Build a unified intermediate list with an ISO timestamp for sorting.
+  type ExceptionCandidate =
+    | { source: "exception"; ts: string; item: AttentionItem }
+    | { source: "report"; ts: string; item: AttentionItem };
+  const candidates: ExceptionCandidate[] = [];
+
   for (const row of exceptionRows) {
     const kind =
       row.event_type === "DOWNTIME_STARTED"
@@ -265,13 +280,67 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
         : row.event_type === "QA_HOLD_STARTED"
           ? "Quality hold"
           : (row.payload?.category ?? "Reported");
-    items.push({
-      type: "production_exception",
-      label: row.station_label ?? "Unknown station",
-      detail: [kind, row.payload?.detail].filter(Boolean).join(" — "),
-      exceptionEventType: row.event_type,
-      receiptNumber: row.receipt_number,
+    candidates.push({
+      source: "exception",
+      ts: row.occurred_at,
+      item: {
+        type: "production_exception",
+        label: row.station_label ?? "Unknown station",
+        detail: [kind, row.payload?.detail].filter(Boolean).join(" — "),
+        exceptionEventType: row.event_type,
+        receiptNumber: row.receipt_number,
+      },
     });
+  }
+
+  // P5-SUPERVISOR Task 5(b) — unacknowledged bagless reports (MACHINE
+  // and OTHER only, per raiseStationReport's own contract). Distinct
+  // from the workflow_events exception rows above: those age off after
+  // 4 hours (no dismissal path), while these persist until an admin
+  // acknowledges them from the Act Now rail (Task 6 wires the ack
+  // action). Read is scoped to acknowledged_at IS NULL and ordered by
+  // recency so the most urgent (typically machine-down) surfaces first.
+  const reportRows = await db
+    .select({
+      id: stationExceptionReports.id,
+      category: stationExceptionReports.category,
+      detail: stationExceptionReports.detail,
+      createdAt: stationExceptionReports.createdAt,
+      stationLabel: stations.label,
+    })
+    .from(stationExceptionReports)
+    .innerJoin(stations, eq(stationExceptionReports.stationId, stations.id))
+    .where(isNull(stationExceptionReports.acknowledgedAt))
+    .orderBy(desc(stationExceptionReports.createdAt))
+    .limit(10);
+
+  for (const row of reportRows) {
+    // Category comes back as text (schema stores it as text to avoid
+    // ALTER TYPE); the engine layer validates the vocabulary on write,
+    // so a non-MACHINE/OTHER row here is a data-hygiene anomaly worth
+    // surfacing rather than silently dropping. Coerce to the union.
+    const cat: "MACHINE" | "OTHER" =
+      row.category === "OTHER" ? "OTHER" : "MACHINE";
+    const kind = cat === "MACHINE" ? "Machine down" : "Reported";
+    candidates.push({
+      source: "report",
+      ts: row.createdAt.toISOString(),
+      item: {
+        type: "station_report",
+        label: row.stationLabel,
+        detail: [kind, row.detail].filter(Boolean).join(" — "),
+        stationReportCategory: cat,
+        stationReportId: row.id,
+      },
+    });
+  }
+
+  // Sort merged bucket newest-first and admit only the cap-3 most recent
+  // entries. This ensures a fresh bagless MACHINE crit is never starved
+  // by older bagged DOWNTIME/QA rows that happen to have arrived earlier.
+  candidates.sort((a, b) => b.ts.localeCompare(a.ts));
+  for (const c of candidates.slice(0, EXCEPTION_ROWS_MAX)) {
+    items.push(c.item);
   }
 
   return items;

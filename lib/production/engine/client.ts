@@ -109,6 +109,7 @@ export {
   REPORT_PROBLEM_CATEGORY_LAYOUT,
   reportProblemCategoryDisabled,
   reportProblemRouteFor,
+  reportProblemUsesStationReport,
   shouldSubmitAutoProduct,
   upNextSummary,
 } from "./operator-screen-model";
@@ -121,3 +122,14 @@ export type {
   PauseReason,
   ReportProblemRoute,
 } from "./operator-screen-model";
+
+// P5-SUPERVISOR Task 2 — the ONLY two supervisor-session exports the
+// client bundle may see. The pure ticker function is what the tablet
+// banner counts down against; the snapshot TYPE is erased at compile
+// time. Sourced from supervisor-session-remaining.ts, which is
+// deliberately free of @/lib/db and @/lib/db/audit imports — the
+// full supervisor-session.ts pulls those in for the unlock / lock /
+// require entry points and cannot ride the browser bundle.
+// client.test.ts walks the import graph and enforces this.
+export { supervisorSessionRemainingSeconds } from "./supervisor-session-remaining";
+export type { SupervisorSessionSnapshot } from "./supervisor-session-remaining";

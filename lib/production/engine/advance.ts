@@ -299,6 +299,12 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
   // count was dropped and the screen showed OPERATION_UNRESOLVED.
   if (input.intent === "RESOLVE_PARTIAL") {
     if (!bag) return { ok: false, blocker: blockerFor("BAG_UNRECOGNIZED") };
+    // P5-SUPERVISOR Task 5 — overrideEmployeeCode is deliberately NOT
+    // forwarded to resolvePartialAllocation. The typed-lead badge path
+    // that this input backed was removed; the LOW-confidence branch now
+    // requires an OPEN supervisor session (checked server-side inside
+    // resolvePartialAllocation), and the HIGH/MEDIUM branch resolves
+    // accountability from the station's own operator session.
     const resolvedPartial = await resolvePartialAllocation({
       stationId: input.stationId,
       workflowBagId: input.workflowBagId,
@@ -308,9 +314,6 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
         : {}),
       ...(input.partialRemainingEstimate != null
         ? { estimate: input.partialRemainingEstimate }
-        : {}),
-      ...(input.overrideEmployeeCode != null
-        ? { overrideEmployeeCode: input.overrideEmployeeCode }
         : {}),
     });
     if (!resolvedPartial.ok) {

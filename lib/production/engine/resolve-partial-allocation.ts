@@ -29,27 +29,40 @@
 // dropped and nothing is invented: an operator count is never labelled
 // system-derived (luma-data-honesty).
 //
-// THE BADGE IS PARITY WITH LEGACY, NOT A REFUSAL. Say plainly what this
-// does, because the name "lead gate" oversells it:
-// resolveScannedBagAllocationAction asks resolveStationAccountability
-// for a SUPERVISOR_OVERRIDE badge and then refuses only when NOTHING
-// resolved. resolveStationAccountability tries the badge FIRST and, when
-// it does not match an employee, FALLS BACK to the station's open
-// operator session (station-operator-session.ts step 2). So with a shift
-// open, an unrecognized badge does not refuse — the write proceeds and
-// is attributed to the operator on shift, exactly as the legacy floor
-// action behaves today. The refusal below therefore fires only when
-// there is no valid badge AND no open session.
+// P5-SUPERVISOR Task 5 — the confidence-tiered supervisor gate.
 //
-// This module reproduces that behaviour deliberately rather than
-// tightening it: a real gate is a supervisor SESSION, which is P5's
-// station_supervisor_sessions, and inventing a stricter rule here would
-// make the same gesture behave differently depending on which screen the
-// operator reached it from.
+// P4b documented the typed-lead badge as a legacy-parity fallback: with a
+// shift open, an unrecognized badge fell back to the station's operator
+// session, so the badge was accountability provenance, not a refusal.
+// P5 REPLACES that honor-system control with a real check:
+//
+//   HIGH / MEDIUM confidence (system-derived, facts.needsEntry === false)
+//     No supervisor session needed. The number came from production
+//     output; the operator is accepting a derivation, not entering one.
+//     Accountability is the station's open operator session (via
+//     resolveStationAccountability's step-2 fallback).
+//
+//   LOW confidence (facts.needsEntry === true, i.e. Luma cannot derive
+//     the remaining balance and the operator must count)
+//     Requires an OPEN, unexpired station_supervisor_sessions row for
+//     this station. Enforced server-side inside this module — a hand-
+//     crafted request cannot bypass it. The screen (operator-screen.tsx)
+//     opens the SupervisorSheet inline before submitting on this branch;
+//     the server check is what makes the UI cosmetic.
+//     Accountability is the supervisor session's employee, resolved
+//     through resolveStationAccountability's SUPERVISOR_OVERRIDE path so
+//     the audit trail records who authorised the count.
+//
+// The badge field (input.overrideEmployeeCode) is intentionally gone —
+// nothing here accepts one, and the operator screen removed the
+// LeadCodeField that used to collect it.
 
 import { and, asc, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { rawBagAllocationSessions } from "@/lib/db/schema";
+import {
+  employees,
+  rawBagAllocationSessions,
+} from "@/lib/db/schema";
 import { writeAudit } from "@/lib/db/audit";
 import { closeAllocationSessionInTx } from "@/lib/production/raw-bag-allocation-lifecycle";
 import { resolveStationAccountability } from "@/lib/production/station-operator-session";
@@ -57,6 +70,7 @@ import {
   computeSystemDerivedResolutionForBag,
   resolveAllocationFromProductionOutput,
 } from "@/lib/production/system-derived-allocation-resolution";
+import { requireSupervisorSession } from "./supervisor-session";
 import type { Blocker } from "./types";
 
 /** What the RESOLVE_PARTIAL screen needs, or null when this bag has no
@@ -149,12 +163,20 @@ const PARTIAL_BLOCKERS: Readonly<Record<string, Blocker>> = {
       "No OPEN raw_bag_allocation_sessions row from a prior workflow bag on this inventory bag.",
     suggestedAction: "NONE",
   },
+  // P5-SUPERVISOR Task 5 — reworded from the P4b legacy-badge message to
+  // point at the unlock. The check itself is now a live station_supervisor
+  // _sessions row (see requireSupervisorSession below), so the sentence
+  // matches the action the operator must take: get a supervisor to unlock
+  // the station. The screen opens the SupervisorSheet inline before
+  // submitting on the LOW branch, so an operator who reads this sentence
+  // is usually the caller of a hand-crafted request or someone whose
+  // supervisor session expired mid-count.
   PARTIAL_SUPERVISOR_REQUIRED: {
     code: "PARTIAL_SUPERVISOR_REQUIRED",
     operatorSentence:
-      "A lead has to confirm this bag's remaining count. Ask a supervisor.",
+      "A supervisor needs to unlock this station to confirm the count.",
     supervisorDetail:
-      "Closing a raw-bag allocation session asks for a badge code, matching resolveScannedBagAllocationAction. Either none was supplied, or it matched no employee AND the station has no open operator session to fall back to — resolveStationAccountability returned no accountable employee at all.",
+      "LOW-confidence RESOLVE_PARTIAL (facts.needsEntry === true) requires an OPEN station_supervisor_sessions row for this station. requireSupervisorSession returned null — either no supervisor unlocked, or the 15-minute session expired before the submission landed.",
     suggestedAction: "NOTIFY_SUPERVISOR",
   },
   PARTIAL_QUANTITY_REQUIRED: {
@@ -187,16 +209,20 @@ export type ResolvePartialAllocationInput = {
    *  accepted. Recorded as provenance; the close still uses the
    *  derivation so the ledger and the audit agree. */
   estimate?: number;
-  /** Lead badge code — the gate resolveScannedBagAllocationAction
-   *  enforces. */
-  overrideEmployeeCode?: string;
 };
 
 /** Total: every rejection is a Blocker. Called only from advanceBag,
  *  which wraps unexpected throws as ADVANCE_FAILED.
  *
  *  PRECONDITION — the caller MUST have authenticated the station, the
- *  same guarantee recordStageEvent and claimQueuedBag require. */
+ *  same guarantee recordStageEvent and claimQueuedBag require.
+ *
+ *  P5-SUPERVISOR Task 5: on the LOW-confidence path (facts.needsEntry
+ *  === true), this function refuses without an OPEN station_supervisor
+ *  _sessions row for the station. HIGH/MEDIUM (system-derived) does not
+ *  require an unlock — the operator is accepting a derivation, not
+ *  entering one — and continues to use the station's open operator
+ *  session for accountability. */
 export async function resolvePartialAllocation(
   input: ResolvePartialAllocationInput,
 ): Promise<{ ok: true } | { ok: false; blocker: Blocker }> {
@@ -208,39 +234,24 @@ export async function resolvePartialAllocation(
     return { ok: false, blocker: PARTIAL_BLOCKERS.PARTIAL_NOTHING_TO_RESOLVE as Blocker };
   }
 
-  const badge = input.overrideEmployeeCode?.trim();
-  if (!badge) {
-    return {
-      ok: false,
-      blocker: PARTIAL_BLOCKERS.PARTIAL_SUPERVISOR_REQUIRED as Blocker,
-    };
-  }
-
-  // Same resolver, same fallback, same refusal shape as the legacy floor
-  // action. NOT a hard gate — see this module's header: an unrecognized
-  // badge falls back to the open operator session, and only the absence
-  // of BOTH refuses.
-  let leadEmployeeId: string | null = null;
-  await db.transaction(async (tx) => {
-    const accountability = await resolveStationAccountability(tx, {
-      stationId: input.stationId,
-      overrideEmployeeCode: badge,
-      sourceHint: "SUPERVISOR_OVERRIDE",
-    });
-    leadEmployeeId = accountability.accountableEmployeeId;
-  });
-  if (!leadEmployeeId) {
-    return {
-      ok: false,
-      blocker: PARTIAL_BLOCKERS.PARTIAL_SUPERVISOR_REQUIRED as Blocker,
-    };
-  }
-  const actor = { id: leadEmployeeId as string | null, role: null };
-
   if (!facts.needsEntry) {
-    // The derivation is available: close from production output, exactly
-    // as resolveScannedBagAllocationAction does, carrying the operator's
-    // number (whichever screen supplied one) as supporting provenance.
+    // HIGH/MEDIUM confidence — the derivation is available. No
+    // supervisor unlock required (spec: LOW is the only confidence
+    // level that gets gated). Accountability falls to the station's
+    // open operator session via resolveStationAccountability's step-2
+    // path; a station with no session at all still surfaces the write's
+    // downstream refusal shape rather than being rejected here for
+    // "no accountable employee" — the HIGH/MEDIUM path used to accept
+    // any-badge-plus-session-fallback and we preserve that surface.
+    let derivedEmployeeId: string | null = null;
+    await db.transaction(async (tx) => {
+      const accountability = await resolveStationAccountability(tx, {
+        stationId: input.stationId,
+      });
+      derivedEmployeeId = accountability.accountableEmployeeId;
+    });
+    const actor = { id: derivedEmployeeId as string | null, role: null };
+
     const operatorEstimate = input.physicalQty ?? input.estimate ?? null;
     const result = await resolveAllocationFromProductionOutput({
       inventoryBagId: facts.inventoryBagId,
@@ -256,6 +267,51 @@ export async function resolvePartialAllocation(
     if (!result.ok) return rejected(result.error);
     return { ok: true };
   }
+
+  // LOW confidence (facts.needsEntry === true). Requires a live
+  // supervisor session for this station — this is the P5 replacement
+  // for the P4b typed-lead badge. Server-side check, so a hand-crafted
+  // request without a session is refused here even when the UI would
+  // otherwise render the SupervisorSheet inline before submitting.
+  // Note: the supervisor check and the ledger-close write run in separate
+  // transactions — a TTL expiry between them is tolerated (sub-second
+  // window; the audit record still names the supervisor session).
+  const supSession = await db.transaction((tx) =>
+    requireSupervisorSession(tx, input.stationId),
+  );
+  if (!supSession) {
+    return {
+      ok: false,
+      blocker: PARTIAL_BLOCKERS.PARTIAL_SUPERVISOR_REQUIRED as Blocker,
+    };
+  }
+
+  // Resolve the supervisor's employee code and hand it to
+  // resolveStationAccountability so the accountability provenance
+  // carries the SUPERVISOR_OVERRIDE hint on the manual-count write.
+  // The session's employeeId is authoritative — the code lookup is
+  // purely so the accountability resolver can honour its normal
+  // employee-code shape without a second code path. If the code is
+  // missing (a data-hygiene edge case), we still attribute the write
+  // to the supervisor session's employeeId directly.
+  const [supEmp] = await db
+    .select({ code: employees.employeeCode })
+    .from(employees)
+    .where(eq(employees.id, supSession.employeeId))
+    .limit(1);
+  const supervisorCode = supEmp?.code ?? null;
+
+  let leadEmployeeId: string | null = null;
+  await db.transaction(async (tx) => {
+    const accountability = await resolveStationAccountability(tx, {
+      stationId: input.stationId,
+      ...(supervisorCode ? { overrideEmployeeCode: supervisorCode } : {}),
+      sourceHint: "SUPERVISOR_OVERRIDE",
+    });
+    leadEmployeeId =
+      accountability.accountableEmployeeId ?? supSession.employeeId;
+  });
+  const actor = { id: leadEmployeeId as string | null, role: null };
 
   // No derivation. The operator's physical count is the only honest
   // number, so it must be present — never defaulted to zero, which would

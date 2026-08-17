@@ -89,6 +89,7 @@ export {
   REPORT_PROBLEM_CATEGORY_LAYOUT,
   reportProblemCategoryDisabled,
   reportProblemRouteFor,
+  reportProblemUsesStationReport,
   shouldSubmitAutoProduct,
   upNextSummary,
 } from "./operator-screen-model";
@@ -230,3 +231,42 @@ export {
 } from "../qc-events";
 export { nextLotStatusForUnmount, getActiveRollsForMachine } from "../active-rolls";
 export { filterSelectableIdleRollLots } from "../idle-roll-lots";
+
+// P5-SUPERVISOR Task 2 — station supervisor session engine. Server
+// barrel exports the whole surface (open/close/require/remaining),
+// including the input + result types the floor action layer needs
+// to shape its FormData handler. The client barrel below exports
+// ONLY the pure ticker + type, because the module transitively
+// imports @/lib/db and @/lib/db/audit.
+export {
+  SUPERVISOR_SESSION_TTL_MS,
+  SUPERVISOR_GATE_REFUSAL_CODE,
+  SUPERVISOR_GATE_REFUSAL_SENTENCE,
+  openSupervisorSession,
+  closeSupervisorSession,
+  requireSupervisorSession,
+  supervisorSessionRemainingSeconds,
+} from "./supervisor-session";
+export type {
+  OpenSupervisorSessionInput,
+  OpenSupervisorSessionResult,
+  SupervisorSessionSnapshot,
+} from "./supervisor-session";
+
+// P5-SUPERVISOR Task 5(b) — bagless station exception reports. Server
+// barrel export only (the module reaches @/lib/db + @/lib/db/audit);
+// the floor action layer imports raiseStationReport + the category
+// constant here. The client bundle never touches this — bagless-report
+// UI just chooses a category from the layout constant already in the
+// client barrel (STATION_REPORT_CATEGORIES is a strict subset of
+// PRODUCTION_EXCEPTION_CATEGORIES).
+export {
+  raiseStationReport,
+  STATION_REPORT_CATEGORIES,
+  STATION_REPORT_DETAIL_MAX_LENGTH,
+} from "./raise-station-report";
+export type {
+  RaiseStationReportInput,
+  RaiseStationReportResult,
+  StationReportCategory,
+} from "./raise-station-report";

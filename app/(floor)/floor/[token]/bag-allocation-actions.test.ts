@@ -140,6 +140,28 @@ vi.mock("@/lib/db/audit", () => ({
   writeAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
+// P5-SUPERVISOR Task 4 — supervisor gate is exercised in staging smoke
+// tests (a hand-crafted request against a locked station must refuse).
+// These unit tests keep their prior fixture shape by stubbing the gate
+// to return an OPEN session unconditionally. Every gated action also
+// runs its own pre-flight db.transaction((tx) => requireSupervisorSession),
+// which the db mock's transaction shim runs against mockTx — so the
+// stubbed session lands on the correct code path.
+vi.mock("@/lib/production/engine/supervisor-session", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/lib/production/engine/supervisor-session")
+  >("@/lib/production/engine/supervisor-session");
+  return {
+    ...actual,
+    requireSupervisorSession: vi.fn().mockResolvedValue({
+      id: "00000000-0000-0000-0000-0000000000ff",
+      employeeId: "00000000-0000-0000-0000-0000000000fe",
+      openedAt: new Date(),
+      expiresAt: new Date(Date.now() + 900_000),
+    }),
+  };
+});
+
 // ── Import actions AFTER mocks ────────────────────────────────────────
 import {
   closeAllocationSessionAction,

@@ -377,6 +377,14 @@ export const employees = pgTable(
     hiredOn: date("hired_on"),
     birthday: date("birthday"),
     notes: text("notes"),
+    /** P5-SUPERVISOR — argon2id hash of the supervisor PIN. Null when no
+     *  PIN has been set. Never returned to the client; only used server-side
+     *  inside the supervisor-session engine module. */
+    supervisorPinHash: text("supervisor_pin_hash"),
+    /** P5-SUPERVISOR — true only for employees authorised to open a
+     *  supervisor session. Must be true AND supervisorPinHash non-null
+     *  for an unlock attempt to succeed. */
+    isSupervisor: boolean("is_supervisor").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -541,6 +549,82 @@ export const stationOperatorSessions = pgTable(
       .on(t.employeeId)
       .where(sql`employee_id IS NOT NULL`),
     index("station_operator_sessions_opened_idx").on(t.openedAt),
+  ],
+);
+
+/** P5-SUPERVISOR: per-station supervisor unlock session. One row per
+ *  supervisor PIN unlock at a station. The 15-minute TTL is enforced by
+ *  the supervisor-session engine module (expires_at). Only one OPEN
+ *  session per station is allowed via the partial unique index below —
+ *  the same invariant that stationOperatorSessions holds for operators. */
+export const stationSupervisorSessions = pgTable(
+  "station_supervisor_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stationId: uuid("station_id")
+      .notNull()
+      .references(() => stations.id, { onDelete: "cascade" }),
+    /** Supervisor who unlocked this session. NOT NULL: an unlock always
+     *  has a verified employee identity (unlike operator sessions which
+     *  tolerate free-text fallbacks). */
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id),
+    openedAt: timestamp("opened_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Absolute expiry computed as openedAt + 15 minutes. The engine
+     *  closes expired sessions lazily on next access. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** Set when the supervisor explicitly exits or a new unlock closes
+     *  this session. Null means the session is still open. */
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("station_supervisor_sessions_active_unique")
+      .on(t.stationId)
+      .where(sql`closed_at IS NULL`),
+    index("station_supervisor_sessions_employee_idx").on(t.employeeId),
+    index("station_supervisor_sessions_opened_idx").on(t.openedAt),
+  ],
+);
+
+/** P5-SUPERVISOR: bagless station exception reports. For machine-down or
+ *  other incidents that have no workflow bag to attach to. A dedicated
+ *  table preserves the workflow_events append-only invariant (a nullable
+ *  bag_id on that table would break it). The active operator's identity
+ *  is snapshotted at report time so audit reads stay readable after
+ *  employee renames. Acknowledged by admin users via the Act Now rail. */
+export const stationExceptionReports = pgTable(
+  "station_exception_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stationId: uuid("station_id")
+      .notNull()
+      .references(() => stations.id, { onDelete: "cascade" }),
+    /** MACHINE or OTHER. Stored as text to avoid ALTER TYPE per new
+     *  category; validated at the engine layer. */
+    category: text("category").notNull(),
+    detail: text("detail").notNull(),
+    /** Active operator at the time of reporting. Nullable because a
+     *  report can arrive before an operator session is open. */
+    employeeId: uuid("employee_id").references(() => employees.id),
+    /** Frozen at report time so audit reads stay readable even if the
+     *  employees row is later renamed. */
+    employeeNameSnapshot: text("employee_name_snapshot"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Set when an admin acknowledges the report on the Act Now rail. */
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    /** Admin user who acknowledged the report. */
+    acknowledgedBy: uuid("acknowledged_by").references(() => users.id),
+  },
+  (t) => [
+    index("station_exception_reports_unack_idx")
+      .on(t.stationId)
+      .where(sql`acknowledged_at IS NULL`),
+    index("station_exception_reports_created_idx").on(t.createdAt),
   ],
 );
 
@@ -4037,6 +4121,8 @@ export type Product = typeof products.$inferSelect;
 export type Machine = typeof machines.$inferSelect;
 export type Station = typeof stations.$inferSelect;
 export type StationOperatorSession = typeof stationOperatorSessions.$inferSelect;
+export type StationSupervisorSession = typeof stationSupervisorSessions.$inferSelect;
+export type StationExceptionReport = typeof stationExceptionReports.$inferSelect;
 export type ReadMaterialReconciliationV2 = typeof readMaterialReconciliationV2.$inferSelect;
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 export type PoLine = typeof poLines.$inferSelect;

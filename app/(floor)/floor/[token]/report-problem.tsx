@@ -35,6 +35,7 @@ import {
   REPORT_PROBLEM_CATEGORY_LAYOUT,
   reportProblemCategoryDisabled,
   reportProblemRouteFor,
+  reportProblemUsesStationReport,
   type ProductionExceptionCategory,
 } from "@/lib/production/engine/client";
 import { pauseBagAction } from "./actions";
@@ -42,6 +43,7 @@ import {
   raiseDowntimeAction,
   raiseProductionExceptionAction,
   raiseQaHoldAction,
+  raiseStationReportAction,
   type OperatorActionResult,
 } from "./operator-actions";
 
@@ -97,10 +99,14 @@ export function ReportProblem({
   token: string;
   stationId: string;
   /** The bag currently pinned at this station (view.current?.workflowBagId),
-   *  or null. Every category is disabled without one — see
-   *  reportProblemCategoryDisabled's own comment (fix round 1): no
-   *  route has a bagless recording path today, so a bagless report is
-   *  P5 scope across the board, not just MATERIAL/PRODUCT/OTHER/BAG. */
+   *  or null.
+   *
+   *  P5-SUPERVISOR Task 5(b) — MACHINE and OTHER now have a bagless
+   *  recording path (raiseStationReportAction ->
+   *  station_exception_reports), so their buttons stay enabled without
+   *  a bag; MATERIAL, PRODUCT, BAG, QUALITY remain gated on a pinned
+   *  bag by construction. reportProblemCategoryDisabled encodes both
+   *  rules and this component reads it. */
   workflowBagId: string | null;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -140,7 +146,17 @@ export function ReportProblem({
     try {
       const route = reportProblemRouteFor(category);
       let result: OperatorActionResult | PauseActionResult;
-      if (route === "PAUSE_AND_DOWNTIME") {
+      // P5-SUPERVISOR Task 5(b) — bagless MACHINE/OTHER now have a
+      // recording path (station_exception_reports). Route these two
+      // categories to raiseStationReportAction when no bag is pinned;
+      // the bagged path below (PAUSE_AND_DOWNTIME / EXCEPTION) is
+      // unchanged for the with-a-bag case.
+      if (reportProblemUsesStationReport(category, workflowBagId != null)) {
+        const fd = baseForm();
+        fd.set("category", category);
+        fd.set("detail", trimmed);
+        result = await raiseStationReportAction(fd);
+      } else if (route === "PAUSE_AND_DOWNTIME") {
         // Best-effort: a bag already paused for another reason (shift
         // break, an earlier report) must not block the downtime
         // record itself, so this call's own outcome is not checked.
@@ -260,12 +276,15 @@ export function ReportProblem({
                   })}
                 </div>
                 {workflowBagId == null ? (
-                  // Fix round 1 (MED 4 + LOW copy): a `title` attribute
-                  // is a hover tooltip — invisible on a touchscreen,
-                  // where every operator interaction is a tap. Visible
-                  // text under the grid instead.
+                  // P5-SUPERVISOR Task 5(b) — the two enabled buttons
+                  // (Machine and Other) now record a bagless report;
+                  // the four bag-scoped categories stay disabled. Copy
+                  // reflects both. Visible text under the grid rather
+                  // than a `title` tooltip — tooltips are invisible on
+                  // a touchscreen.
                   <p className="text-center text-sm text-text-muted">
-                    Scan the bag this is about first.
+                    No bag scanned. Machine and Other file a bagless report;
+                    the rest need the bag they are about.
                   </p>
                 ) : null}
               </div>

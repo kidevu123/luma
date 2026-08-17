@@ -93,7 +93,16 @@ export type ShiftTargetStatus = {
 };
 
 export type AttentionItem = {
-  type: "idle_machine" | "rework_pending" | "production_exception";
+  type:
+    | "idle_machine"
+    | "rework_pending"
+    | "production_exception"
+    /** P5-SUPERVISOR Task 5(b) — a bagless station_exception_reports
+     *  row that has not yet been acknowledged on the admin Act Now
+     *  rail. Distinct from production_exception (which reads workflow
+     *  _events) because the acknowledgement path is different and the
+     *  severity mapping is category-only (MACHINE crit, OTHER warn). */
+    | "station_report";
   label: string;
   detail: string;
   /** production_exception only — which of Report Problem's three
@@ -107,6 +116,12 @@ export type AttentionItem = {
   /** production_exception only — for the Act Now row's href, same
    *  pattern as the waiting-bag rows below. */
   receiptNumber?: string | null;
+  /** station_report only — the report row's category. MACHINE lands
+   *  as crit; OTHER as warn (report-problem's own two-tier ranking). */
+  stationReportCategory?: "MACHINE" | "OTHER";
+  /** station_report only — the report row's id, for the [ Acknowledge ]
+   *  button's deep link on the admin rail (Task 6 wires the ack action). */
+  stationReportId?: string;
 };
 
 export type OperatorDailyRow = {

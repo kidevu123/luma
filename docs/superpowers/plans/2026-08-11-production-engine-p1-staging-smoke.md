@@ -111,10 +111,12 @@ Post on the floor before the first shift after the cutover:
   its own once a stage completes; there is no button to press.
 - **Pause, Report problem, Enter code, End shift** all live under the
   More button in the top-right of the station screen.
-- **Bagless machine-down cannot be filed on the screen.** Every Report
-  Problem write today needs a bag pinned at the station — a
-  machine-down report with no bag will not go through. Tell a
-  supervisor in person until P5 ships the bagless path.
+- **Bagless machine-down NOW files from the screen.** As of P5, Report
+  Problem's Machine and Other buttons stay enabled without a bag; they
+  file a bagless station report that reaches the floor-board Act Now
+  rail (Machine crit, Other warn) for a supervisor to acknowledge. The
+  other four categories (Material, Product, Bag, Quality) still need a
+  bag pinned first — scan the bag they are about.
 
 ## Phase 2 (v1.31.0) — queue and auto-advance
 

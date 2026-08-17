@@ -140,4 +140,48 @@ describe("buildActNowPanel", () => {
       "STATION 2",
     ]);
   });
+
+  it("recency-interleaved budget (P5 fix-round MED Task 5) — newer station_report crit beats older production_exception rows for the last cap slot", () => {
+    // Simulates what getAttentionItems returns after merging both buckets
+    // and sorting by recency DESC before slicing to EXCEPTION_ROWS_MAX=3:
+    // two older bagged exception rows followed by a newer bagless MACHINE
+    // crit. The cap-3 should admit all three (the crit is NOT starved).
+    const attention = [
+      // oldest — bagged DOWNTIME exception (would have consumed cap slot 1)
+      {
+        type: "production_exception" as const,
+        label: "SEALING 1",
+        detail: "Machine down — old.",
+        exceptionEventType: "DOWNTIME_STARTED" as const,
+        receiptNumber: "R-001",
+      },
+      // second — bagged QA exception (would have consumed cap slot 2)
+      {
+        type: "production_exception" as const,
+        label: "BLISTER 2",
+        detail: "Quality hold — old.",
+        exceptionEventType: "QA_HOLD_STARTED" as const,
+        receiptNumber: null,
+      },
+      // newest — bagless MACHINE crit (must win the third and final slot)
+      {
+        type: "station_report" as const,
+        label: "PACKAGING 3",
+        detail: "Machine down — new crit.",
+        stationReportCategory: "MACHINE" as const,
+        stationReportId: "sr-abc",
+      },
+    ];
+    const items = buildActNowPanel(minimalSnapshot([]), attention, emptyIntel);
+    const exSlots = items.filter(
+      (i) => i.id.startsWith("exception-") || i.id.startsWith("station-report-"),
+    );
+    // All three admitted (total = cap-3)
+    expect(exSlots).toHaveLength(3);
+    // The last slot is the newest bagless MACHINE crit — not starved
+    const lastSlot = exSlots[2]!;
+    expect(lastSlot.id).toMatch(/^station-report-/);
+    expect(lastSlot.severity).toBe("crit");
+    expect(lastSlot.title).toBe("PACKAGING 3");
+  });
 });

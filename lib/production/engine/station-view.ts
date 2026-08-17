@@ -17,6 +17,7 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
+  employees,
   inventoryBags,
   machines,
   productAllowedTablets,
@@ -33,6 +34,7 @@ import {
   workflowBags,
   workflowEvents,
 } from "@/lib/db/schema";
+import { requireSupervisorSession } from "./supervisor-session";
 import { STATION_KIND_TO_PRODUCT_KINDS } from "@/lib/production/first-op-product";
 import type { RouteOperationView } from "@/lib/production/routes";
 import { getActiveStationSession } from "@/lib/production/station-operator-session";
@@ -444,7 +446,14 @@ export async function getStationView(stationId: string): Promise<StationView> {
     .where(eq(stations.id, stationId));
   if (!stationRow) throw new Error("Station not found.");
 
-  const session = await getActiveStationSession(db, stationId);
+  const [session, supervisorSessionRow] = await Promise.all([
+    getActiveStationSession(db, stationId),
+    // P5-SUPERVISOR: read the OPEN, unexpired supervisor session row for
+    // the banner. requireSupervisorSession lazily closes expired rows, which
+    // needs a transaction handle; run it in a small transaction so the
+    // lazy update and the read are consistent.
+    db.transaction((tx) => requireSupervisorSession(tx, stationId)),
+  ]);
 
   // Moved verbatim from app/(floor)/floor/[token]/page.tsx:125-145 — do
   // not redesign the joins or select shape.
@@ -599,6 +608,29 @@ export async function getStationView(stationId: string): Promise<StationView> {
       })
     : null;
 
+  // P5-SUPERVISOR Task 3 — supervisor banner. Look up the employee name
+  // for the open session row requireSupervisorSession returned. The row
+  // only carries employeeId; the display name lives in employees.
+  // Null when no session is open (the common case — no extra query).
+  let supervisorForView: { employeeName: string; expiresAt: string } | null =
+    null;
+  if (supervisorSessionRow) {
+    const [empRow] = await db
+      .select({
+        fullName: employees.fullName,
+        preferredName: employees.preferredName,
+      })
+      .from(employees)
+      .where(eq(employees.id, supervisorSessionRow.employeeId));
+    const displayName = empRow
+      ? (empRow.preferredName?.trim() || empRow.fullName).trim()
+      : "Supervisor";
+    supervisorForView = {
+      employeeName: displayName,
+      expiresAt: supervisorSessionRow.expiresAt.toISOString(),
+    };
+  }
+
   return assembleStationView({
     station: {
       id: stationRow.station.id,
@@ -609,6 +641,7 @@ export async function getStationView(stationId: string): Promise<StationView> {
     session: session
       ? { id: session.id, employeeNameSnapshot: session.employeeNameSnapshot }
       : null,
+    supervisorSession: supervisorForView,
     current: currentAtStation && currentBagLabel
       ? {
           workflowBagId: currentAtStation.bag.id,
@@ -641,6 +674,11 @@ export async function getStationView(stationId: string): Promise<StationView> {
 export type StationViewRows = {
   station: { id: string; label: string; kind: string; machineName: string | null };
   session: { id: string; employeeNameSnapshot: string | null } | null;
+  /** P5-SUPERVISOR Task 3 — open supervisor session, name + ISO expiry,
+   *  or null when no session is open. Populated by getStationView from
+   *  requireSupervisorSession + the employee name lookup. Assembled into
+   *  StationView.supervisor by assembleStationView. */
+  supervisorSession?: { employeeName: string; expiresAt: string } | null;
   current: {
     workflowBagId: string;
     bagLabel: string;
@@ -710,8 +748,10 @@ export function assembleStationView(rows: StationViewRows): StationView {
           name: rows.session.employeeNameSnapshot ?? "Operator",
         }
       : null,
-    // Supervisor sessions arrive in Phase 5.
-    supervisor: null,
+    // P5-SUPERVISOR Task 3: populated from requireSupervisorSession via
+    // getStationView. Null when no session is open or when assembleStation-
+    // View is called from a test without the supervisorSession key.
+    supervisor: rows.supervisorSession ?? null,
     current,
     upNext: rows.upNext,
     nextAction: buildNextAction({
