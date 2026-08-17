@@ -285,9 +285,9 @@ Branch `feat/production-engine-p4b`. The operator screen lands.
 
 **Deferred to P6 (from P4b):**
 
-- Data-driven routes: `queueAfterWorkAt` and `resolve-operation` sourced from `route_operations` (vs. hardcoded legacy table). Legacy table deletion and `read_queue_state` double-count fix.
-- Barrel curation: legacy action deletion (once no UI calls them).
-- Value-pinned duplication guards: `dup_guard_count` tests on high-risk writes.
+- Data-driven routes: `queueAfterWorkAt` and `resolve-operation` sourced from `route_operations` (vs. hardcoded legacy table). Legacy table deletion and `read_queue_state` double-count fix. CLOSED — P6 Tasks 2+3.
+- Barrel curation: legacy action deletion (once no UI calls them). CLOSED — P6 Task 4 (8 dead actions retired).
+- Value-pinned duplication guards: `dup_guard_count` tests on high-risk writes. CLOSED — P6 Task 6 (`FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS` and `FRESH_BAG_STATION_KINDS` source-literal parity tests added).
 
 ## Phase 5 outcomes
 
@@ -346,9 +346,34 @@ Version: `1.34.0` → `1.35.0`.
 
 **Deferred to P6 (from P5):**
 
-- Unlock throttle if tablets leave the LAN: per-station attempt counter with exponential back-off. Current mitigation: station scan-token boundary + LAN-only deployment + audit trail. PIN-set may also move to OWNER-only role if role tiers tighten.
-- Post-commit audit outside transaction: `supervisorClaimBagAction` writes the `floor.supervisor.manual_bag_claim` audit row after the claim transaction commits, matching the `releaseQaHold` precedent. This is a pre-existing design class — the audit is still reliable but not atomically coupled to the write. Refactor when the class is addressed broadly in P6.
-- Downtime-end flow: `DOWNTIME_ENDED` event type exists but nothing emits it. Downtime exceptions age off the rail after 4 hours rather than being resolved. Full flow (operator reports end, supervisor acks) is P6.
+- Unlock throttle if tablets leave the LAN: per-station attempt counter with exponential back-off. Current mitigation: station scan-token boundary + LAN-only deployment + audit trail. PIN-set may also move to OWNER-only role if role tiers tighten. OPEN — moved to post-overhaul backlog.
+- Post-commit audit outside transaction: `supervisorClaimBagAction` writes the `floor.supervisor.manual_bag_claim` audit row after the claim transaction commits, matching the `releaseQaHold` precedent. This is a pre-existing design class — the audit is still reliable but not atomically coupled to the write. OPEN — moved to post-overhaul backlog.
+- Downtime-end flow: `DOWNTIME_ENDED` event type exists but nothing emits it. Downtime exceptions age off the rail after 4 hours rather than being resolved. CLOSED — P6 Task 6; `raiseDowntimeEnded` + `resolveDowntimeAction` + `[ Resolved ]` button on admin Act Now rail.
 - `damagedPackaging` rework-field decision (carried from P4b): CLOSED — P6 Task 5 (2026-08-17 user decision). The operator screen now collects packaging-material damage via the `damagedPackaging` CompletionInput field.
 - Data-driven routes, barrel curation (carried from P4b P6 list). `read_queue_state` double-count: CLOSED — P6 Task 5; SEALING_QUEUE/POST_BLISTER_STAGING and PACKAGING_QUEUE/POST_SEAL_STAGING now use read_bag_queue.queue_stage_key for disambiguation.
-- Value-pinned duplication guards (carried from P4b P6 list).
+- Value-pinned duplication guards (carried from P4b P6 list). CLOSED — P6 Task 6.
+
+## Phase 6 outcomes
+
+Branch `worktree-production-engine-p6`. Version: `1.35.0` → `1.36.0`.
+
+**What shipped:**
+
+- **Migration 0074** (`drizzle/0074_handpack_route_operation.sql`): `HANDPACK_BLISTER` operation type row and route_operations row on CARD_BLISTER. `resolve-operation.ts` drops the HANDPACK_BLISTER alias from `STATION_KIND_ALIAS`; `COMPLETE_EVENT_FOR_OPERATION` maps it to `HANDPACK_BLISTER_COMPLETE`. Station-event-mapping pins extended to 0074.
+
+- **Data-driven route twins** (`lib/production/engine/route-data.ts`): `loadRouteGraph()` (process-lifetime cache); pure twins `queueAfterWorkAtFromGraph`, `queueRankFromGraph`, `queueKeysForStationKindFromGraph`. Parity pins against transcribed fixtures (0013+0071+0074 migration-text guards) prove twin === hardcoded for every (route, stationKind) in the enumerated matrix including bottle narrowing and sticker-only cases.
+
+- **Consumers switched; subsumed tables deleted** (P6 Task 3): `queue-transitions.ts` and `floor-event-relevance.ts` resolve from the graph. Deleted: `queueAfterWorkAt` route map, `QUEUE_RANK`, `queueKeysForStationKind` table. Survivors with why-comments: `EVENT_STAGE_PREREQ`, `STATION_PICKUP_FROM_STAGE`, `STATIONS_THAT_FINALIZE`, `bothBottleFinishingDone`.
+
+- **Legacy action retirement** (P6 Task 4): 8 dead actions removed (`fireStageEventAction`, `releaseBagAction`, `finalizeBagAction`, `packagingCompleteAction`, `saveSealingProductAction`, `resolveScannedBagAllocationAction`, `lookupCardByTokenAction`, `verifyVendorBarcodeAction`). Survivors listed with reasons.
+
+- **Damaged-packaging field + queue-state disambiguation** (P6 Task 5): `damagedPackaging` CompletionInput key added to PACKAGING_OPERATIONS branch; `buildRecordPackagingCompleteInput` maps it (absent → 0). `read_queue_state` SEALING_QUEUE/POST_BLISTER_STAGING and PACKAGING_QUEUE/POST_SEAL_STAGING use `read_bag_queue.queue_stage_key` for non-overlapping counts.
+
+- **Cleanup ledger closeout** (P6 Task 6): `blockerForWithDetail` parameterized factory in `resolve-exceptions.ts` (4 dynamic-detail codes — ADVANCE_FAILED, ADVANCE_REJECTED, OPEN_ALLOCATION_ON_BAG, PRODUCT_ASSIGN_REJECTED — moved from inline literals to catalogue-backed construction); value-pin tests for `FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS` and `FRESH_BAG_STATION_KINDS` extract set literals from source and assert equality; `raiseDowntimeEnded` engine function + `resolveDowntimeAction` admin server action + `[ Resolved ]` button on Act Now rail; DOWNTIME_ENDED added to non-progression pin; STAGE_DEFS structural pin added.
+
+**Post-overhaul backlog (honest opens):**
+
+- Unlock throttle off-LAN: no per-station attempt counter or exponential back-off yet. Current mitigation is station scan-token boundary + LAN-only deployment + audit trail.
+- Post-commit audit outside transaction: `supervisorClaimBagAction` and `releaseQaHold` write their audit rows after the transaction commits. Reliable but not atomically coupled to the write. Belongs to a broader refactor pass.
+- Camera-scanner DOM harness: the floor PWA has no automated browser test exercising the QR scanner input pathway; coverage relies on manual smoke checks.
+- Inactive-station self-recovery: the inactive-station page does not mount the SSE refresher, so re-activating a station requires a manual reload rather than self-recovering within 60s.

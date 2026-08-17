@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 
 const actionsSrc = readFileSync(
   join(__dirname, "operator-session-actions.ts"),
@@ -193,5 +193,72 @@ describe("OPERATOR-SHIFT-SUBMIT-BLOCK-1 · openOperatorSessionAction behavior", 
     expect(r.ok).toBeUndefined();
     expect(r.error).toMatch(/Free-text name alone cannot open a shift/);
     expect(insertValues).toBeNull();
+  });
+});
+
+// ── P4b inline-duplication value-pins ────────────────────────────────────────
+// The plan's exact critique: tests must extract the LITERALS from both
+// modules' source and assert equality — not name-mentions. Two sets are
+// intentionally duplicated for bundle-isolation reasons (see each file's
+// comment), but they must stay in sync. These tests catch drift without
+// requiring a deduplicated import that would break the Next build.
+
+/** Extract the set-literal members from a `new Set([...])` construction in source. */
+function extractSetLiterals(src: string, varName: string): string[] {
+  // Match: const VAR: ... = new Set([ "A", "B", ... ]);
+  const re = new RegExp(
+    `(?:const|export const)\\s+${varName}[^=]*=\\s*new Set\\(\\[([^\\]]+)\\]`,
+  );
+  const m = re.exec(src);
+  if (!m?.[1]) throw new Error(`${varName} set literal not found in source`);
+  return m[1]
+    .split(",")
+    .map((s) => s.replace(/\/\/[^\n]*/g, "").replace(/["'\s]/g, ""))
+    .filter(Boolean)
+    .sort();
+}
+
+describe("VALUE-PIN · FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS parity", () => {
+  // Canonical: lib/production/station-operator-session.ts
+  // Duplicate: app/(floor)/floor/[token]/operator-session-form.tsx
+  // Reason for duplication: operator-session-form.tsx is "use client"; importing
+  // station-operator-session.ts would pull DB schema objects into the client bundle.
+  it("the duplicate in operator-session-form.tsx carries the same members as the canonical set", () => {
+    const canonicalSrc = readFileSync(
+      resolve(process.cwd(), "lib", "production", "station-operator-session.ts"),
+      "utf8",
+    );
+    const duplicateSrc = readFileSync(
+      join(__dirname, "operator-session-form.tsx"),
+      "utf8",
+    );
+    const canonical = extractSetLiterals(
+      canonicalSrc,
+      "FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS",
+    );
+    const duplicate = extractSetLiterals(
+      duplicateSrc,
+      "FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS",
+    );
+    expect(duplicate).toEqual(canonical);
+  });
+});
+
+describe("VALUE-PIN · FRESH_BAG_STATION_KINDS parity", () => {
+  // Canonical: lib/production/first-op-product.ts (FIRST_OP_STATION_KINDS)
+  // Duplicate: app/(floor)/floor/[token]/actions.ts (FRESH_BAG_STATION_KINDS)
+  // Reason for duplication: floor actions are isolated from lib DB imports.
+  it("the duplicate FRESH_BAG_STATION_KINDS in actions.ts carries the same members as FIRST_OP_STATION_KINDS", () => {
+    const canonicalSrc = readFileSync(
+      resolve(process.cwd(), "lib", "production", "first-op-product.ts"),
+      "utf8",
+    );
+    const duplicateSrc = readFileSync(
+      join(__dirname, "actions.ts"),
+      "utf8",
+    );
+    const canonical = extractSetLiterals(canonicalSrc, "FIRST_OP_STATION_KINDS");
+    const duplicate = extractSetLiterals(duplicateSrc, "FRESH_BAG_STATION_KINDS");
+    expect(duplicate).toEqual(canonical);
   });
 });

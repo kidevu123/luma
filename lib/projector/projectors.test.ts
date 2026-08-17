@@ -141,7 +141,7 @@ describe("PRODUCTION_EXCEPTION_RAISED — non-progression", () => {
 // branch, added alongside this test — that's a deliberate, separate
 // write pinned in qa-hold-projection.test.ts, not a stage/throughput/
 // queue effect, so it does not contradict the assertions below.
-describe.each(["DOWNTIME_STARTED", "QA_HOLD_STARTED", "QA_HOLD_RELEASED"] as const)(
+describe.each(["DOWNTIME_STARTED", "DOWNTIME_ENDED", "QA_HOLD_STARTED", "QA_HOLD_RELEASED"] as const)(
   "%s — non-progression (stage / throughput / queue)",
   (eventType) => {
     it("has no STAGE_FOR_EVENT entry — resolveStageForWorkflowEvent returns undefined", () => {
@@ -313,5 +313,57 @@ describe("no fake bottle activity contract", () => {
     // Whether a row exists at all, or it exists with wip=0, the queue
     // status is EMPTY — never invented activity.
     expect(classifyQueueStatus(0, null)).toBe("EMPTY");
+  });
+});
+
+// ─── STAGE_DEFS structural pin (P6 Task 6 carried item) ───────────────────────
+// Pure source-text test: STAGE_DEFS is module-private and DB-bound, so we read
+// queue-state.ts directly and assert the structural properties the disambiguation
+// design requires. The plan specifies: SEALING_QUEUE carries queueStageFilter,
+// POST_BLISTER_STAGING carries excludeQueueStageKey, and the four disambiguated
+// stages (POST_BLISTER_STAGING, SEALING_QUEUE, POST_SEAL_STAGING, PACKAGING_QUEUE)
+// are all enumerated.
+describe("STAGE_DEFS structural pin", () => {
+  const src = readFileSync(join(__dirname, "queue-state.ts"), "utf8");
+
+  it("SEALING_QUEUE carries queueStageFilter (not excludeQueueStageKey)", () => {
+    // Find the SEALING_QUEUE block in STAGE_DEFS
+    const sealingMatch = /SEALING_QUEUE:\s*\{([^}]+)\}/.exec(src);
+    expect(sealingMatch).not.toBeNull();
+    const block = sealingMatch![1]!;
+    expect(block).toContain("queueStageFilter");
+    expect(block).not.toContain("excludeQueueStageKey");
+  });
+
+  it("POST_BLISTER_STAGING carries excludeQueueStageKey (not queueStageFilter)", () => {
+    const match = /POST_BLISTER_STAGING:\s*\{([^}]+)\}/.exec(src);
+    expect(match).not.toBeNull();
+    const block = match![1]!;
+    expect(block).toContain("excludeQueueStageKey");
+    expect(block).not.toContain("queueStageFilter");
+  });
+
+  it("POST_SEAL_STAGING carries excludeQueueStageKey", () => {
+    const match = /POST_SEAL_STAGING:\s*\{([^}]+)\}/.exec(src);
+    expect(match).not.toBeNull();
+    expect(match![1]!).toContain("excludeQueueStageKey");
+  });
+
+  it("PACKAGING_QUEUE carries queueStageFilter", () => {
+    const match = /PACKAGING_QUEUE:\s*\{([^}]+)\}/.exec(src);
+    expect(match).not.toBeNull();
+    expect(match![1]!).toContain("queueStageFilter");
+  });
+
+  it("all four disambiguated stages are enumerated in STAGE_DEFS", () => {
+    const disambiguatedStages = [
+      "POST_BLISTER_STAGING",
+      "SEALING_QUEUE",
+      "POST_SEAL_STAGING",
+      "PACKAGING_QUEUE",
+    ];
+    for (const stage of disambiguatedStages) {
+      expect(src).toContain(stage);
+    }
   });
 });

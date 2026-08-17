@@ -7,6 +7,7 @@ import type { ActNowItem } from "@/lib/floor-command/act-now";
 import type { FloorManagerSnapshot } from "@/lib/production/floor-manager-snapshot-types";
 import { board } from "./board-ui";
 import { AcknowledgeButton } from "./acknowledge-button";
+import { ResolveDowntimeButton } from "./resolve-downtime-button";
 
 const SEVERITY_STYLES = {
   crit: "border-red-400/30 bg-red-400/[0.06]",
@@ -69,12 +70,13 @@ export function ActNowRail({
                   </p>
                   {item.stationReportId ? (
                     // station_exception_reports rows are acknowledged here.
-                    // Workflow-event exceptions (DOWNTIME/QA) are deliberately
-                    // NOT acknowledgeable — they resolve through their own flows
-                    // (QA via Release hold; downtime-end is a P6 flow). Providing
-                    // a generic ack button on those rows would bypass the
-                    // resolution accounting those flows maintain.
                     <AcknowledgeButton reportId={item.stationReportId} />
+                  ) : item.downtimeEventId ? (
+                    // DOWNTIME_STARTED workflow-event rows are resolved here
+                    // (P6 Task 6). Emits DOWNTIME_ENDED on the same bag.
+                    // QA-hold rows are NOT resolved here — they resolve via
+                    // Release Hold on the floor, preserving hold accounting.
+                    <ResolveDowntimeButton downtimeEventId={item.downtimeEventId} />
                   ) : null}
                 </div>
               );

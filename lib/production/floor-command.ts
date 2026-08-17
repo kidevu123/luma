@@ -238,6 +238,7 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
   // ages off the rail after a few hours instead of being dismissed.
   const exceptionRows = (await db.execute(sql`
     SELECT
+      we.id AS id,
       we.event_type AS event_type,
       we.payload AS payload,
       we.occurred_at AS occurred_at,
@@ -252,6 +253,7 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
     ORDER BY we.occurred_at DESC
     LIMIT 10
   `)) as unknown as Array<{
+    id: string;
     event_type: "PRODUCTION_EXCEPTION_RAISED" | "DOWNTIME_STARTED" | "QA_HOLD_STARTED";
     payload: { category?: string; detail?: string } | null;
     occurred_at: string;
@@ -289,6 +291,11 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
         detail: [kind, row.payload?.detail].filter(Boolean).join(" — "),
         exceptionEventType: row.event_type,
         receiptNumber: row.receipt_number,
+        // P6 Task 6(c): carry the event id so the admin rail can render
+        // [ Resolved ] for DOWNTIME_STARTED rows.
+        ...(row.event_type === "DOWNTIME_STARTED"
+          ? { downtimeEventId: row.id }
+          : {}),
       },
     });
   }

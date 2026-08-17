@@ -122,6 +122,9 @@ export type AttentionItem = {
   /** station_report only — the report row's id, for the [ Acknowledge ]
    *  button's deep link on the admin rail (Task 6 wires the ack action). */
   stationReportId?: string;
+  /** DOWNTIME_STARTED production_exception only — the workflow_event.id,
+   *  for the [ Resolved ] button on the admin Act Now rail (P6 Task 6). */
+  downtimeEventId?: string;
 };
 
 export type OperatorDailyRow = {

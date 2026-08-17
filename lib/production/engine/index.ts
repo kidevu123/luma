@@ -39,7 +39,7 @@ export type {
   AssignBagProductInput,
   AssignBagProductResult,
 } from "./assign-bag-product";
-export { evaluateChecks, blockersFromChecks, blockerFor } from "./resolve-exceptions";
+export { evaluateChecks, blockersFromChecks, blockerFor, blockerForWithDetail } from "./resolve-exceptions";
 export type { CheckResult, EngineFacts } from "./resolve-exceptions";
 export {
   raiseProductionException,
@@ -52,6 +52,8 @@ export type {
 } from "./raise-production-exception";
 export { raiseDowntimeStarted } from "./raise-downtime";
 export type { RaiseDowntimeInput, RaiseDowntimeResult } from "./raise-downtime";
+export { raiseDowntimeEnded } from "./raise-downtime-ended";
+export type { RaiseDowntimeEndedInput, RaiseDowntimeEndedResult } from "./raise-downtime-ended";
 export { raiseQaHoldStarted } from "./raise-qa-hold";
 export type { RaiseQaHoldInput, RaiseQaHoldResult } from "./raise-qa-hold";
 export { raiseQaHoldRelease } from "./raise-qa-hold-release";

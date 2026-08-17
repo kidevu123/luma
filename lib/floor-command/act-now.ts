@@ -26,11 +26,14 @@ export type ActNowItem = {
   href?: string;
   /** Populated only for station_report items (P5 Task 6). The admin
    *  Act Now rail renders [ Acknowledge ] for rows that carry this id.
-   *  Workflow-event exceptions (DOWNTIME/QA) deliberately do NOT carry
-   *  this field — they resolve through their own flows (QA via Release
-   *  hold; downtime-end is P6) and must not be short-circuited by a
-   *  generic acknowledgement button. */
+   *  QA-hold items do NOT carry this field — they resolve through the
+   *  floor Release Hold flow. */
   stationReportId?: string;
+  /** Populated only for DOWNTIME_STARTED workflow-event items (P6 Task 6).
+   *  The admin Act Now rail renders [ Resolved ] for rows that carry this id.
+   *  Emits DOWNTIME_ENDED on the same bag via resolveDowntimeAction in
+   *  floor-board/actions.ts. */
+  downtimeEventId?: string;
 };
 
 /** Report Problem (P4b Task 4) rows admitted into one Act Now build —
@@ -161,6 +164,9 @@ export function buildActNowPanel(
         href: a.receiptNumber
           ? `/workflow-submissions?receipt=${encodeURIComponent(a.receiptNumber)}`
           : "/workflow-submissions",
+        // P6 Task 6(c): carry downtimeEventId so the admin rail can render
+        // [ Resolved ] for DOWNTIME_STARTED items.
+        ...(a.downtimeEventId != null ? { downtimeEventId: a.downtimeEventId } : {}),
       });
     }
     if (a.type === "station_report") {
