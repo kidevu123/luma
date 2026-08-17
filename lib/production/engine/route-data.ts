@@ -156,6 +156,11 @@ export async function loadRouteGraph(
   if (cachedGraph) return cachedGraph;
   const raw = await loader();
   cachedGraph = buildRouteGraph(raw);
+  if (Object.keys(cachedGraph.routes).length === 0) {
+    console.warn(
+      "[route-data] route graph is EMPTY — route_operations unseeded? queue transitions will be inert until restart after migration",
+    );
+  }
   return cachedGraph;
 }
 
