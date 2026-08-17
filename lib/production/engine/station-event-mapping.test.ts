@@ -42,7 +42,8 @@ import {
 } from "@/lib/production/stage-progression";
 import type { RouteOperationView } from "@/lib/production/routes";
 
-const MIGRATION = join(process.cwd(), "drizzle", "0013_route_operation_compat.sql");
+const MIGRATION_0013 = join(process.cwd(), "drizzle", "0013_route_operation_compat.sql");
+const MIGRATION_0074 = join(process.cwd(), "drizzle", "0074_handpack_route_operation.sql");
 
 function op(
   sequence: number,
@@ -68,7 +69,8 @@ function op(
   };
 }
 
-// Transcribed from drizzle/0013_route_operation_compat.sql:168-215.
+// Transcribed from drizzle/0013_route_operation_compat.sql:168-215 and
+// drizzle/0074_handpack_route_operation.sql (HANDPACK_BLISTER row, seq 8).
 // Note the stage keys are NOT transcribed — op() stubs them — so any
 // assertion about the stage chain must read the migration text instead.
 const SEEDED_ROUTES: Readonly<Record<string, RouteOperationView[]>> = {
@@ -80,6 +82,10 @@ const SEEDED_ROUTES: Readonly<Record<string, RouteOperationView[]>> = {
     op(5, "POST_SEAL_STAGING", null),
     op(6, "PACKAGING", "PACKAGING"),
     op(7, "FINISHED_GOODS", null),
+    // Migration 0074: HANDPACK_BLISTER gets its own real route_operations
+    // row (sequence 8). Same stage keys as BLISTER (BLISTER_QUEUE ->
+    // POST_BLISTER_STAGING); entry ops are rank-equivalent via stage keys.
+    op(8, "HANDPACK_BLISTER", "HANDPACK_BLISTER"),
   ],
   BOTTLE: [
     op(1, "RECEIVING", null),
@@ -109,12 +115,13 @@ const LEGACY_STATION_EVENT: ReadonlyArray<[string, string, string]> = [
   ["BOTTLE_HANDPACK", "BOTTLE", "BOTTLE_HANDPACK_COMPLETE"],
   ["BOTTLE_STICKER", "BOTTLE", "BOTTLE_STICKER_COMPLETE"],
   ["BOTTLE_CAP_SEAL", "BOTTLE", "BOTTLE_CAP_SEAL_COMPLETE"],
-  // Task 7: intentToEventType takes the STATION kind, so the two kinds
-  // that alias onto the BLISTER operation are no longer indistinguishable
-  // and can finally be pinned. HANDPACK_BLISTER fires its own event;
-  // COMBINED keeps the aliased one (ALLOWED_EVENTS_BY_KIND.COMBINED
-  // permits BLISTER_COMPLETE, ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER
-  // does not).
+  // Migration 0074: HANDPACK_BLISTER now has its own real route_operations
+  // row (operation code HANDPACK_BLISTER, allowed_station_kind HANDPACK_BLISTER).
+  // pickOperationForStationKind resolves directly — no alias, no
+  // station-kind override. COMPLETE_EVENT_FOR_OPERATION['HANDPACK_BLISTER']
+  // = 'HANDPACK_BLISTER_COMPLETE' without going through BLISTER at all.
+  // COMBINED still aliases onto BLISTER; BLISTER_COMPLETE is exactly what
+  // ALLOWED_EVENTS_BY_KIND.COMBINED accepts.
   ["HANDPACK_BLISTER", "CARD_BLISTER", "HANDPACK_BLISTER_COMPLETE"],
   ["COMBINED", "CARD_BLISTER", "BLISTER_COMPLETE"],
 ];
@@ -155,12 +162,15 @@ describe("station kind to workflow event mapping", () => {
   });
 
   it("the transcribed fixture still names operations the migration seeds", () => {
-    const sql = readFileSync(MIGRATION, "utf8");
+    const sql0013 = readFileSync(MIGRATION_0013, "utf8");
+    const sql0074 = readFileSync(MIGRATION_0074, "utf8");
     // A guard, not a parser: if someone renames or drops a seeded
     // operation, this fails and forces the fixture to be re-checked by
     // hand. It does NOT notice a changed sequence or stage key.
+    // HANDPACK_BLISTER (seq 8) comes from migration 0074; all others from 0013.
     for (const ops of Object.values(SEEDED_ROUTES)) {
       for (const o of ops) {
+        const sql = o.operationCode === "HANDPACK_BLISTER" ? sql0074 : sql0013;
         expect(sql).toContain(`'${o.operationCode}'`);
       }
     }

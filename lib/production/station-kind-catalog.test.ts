@@ -91,20 +91,20 @@ describe("STATION-KIND-FIX-1 · HANDPACK_BLISTER floor expectations (regression)
     expect(getDefaultPauseReasonForStation("BLISTER")).toBe("shift_end");
   });
 
-  // P4b Task 5 (THE CUTOVER) — stage-action-buttons.tsx is DELETED, and
-  // with it the per-station form catalogue this scanned. The fact it
-  // protected — a HANDPACK_BLISTER station fires
-  // HANDPACK_BLISTER_COMPLETE and not the blister-count event — is now
-  // the engine's intentToEventType override, covered by
-  // lib/production/engine/advance.test.ts against real output rather
-  // than by matching a form's constant table.
-  it("HANDPACK_BLISTER completes with its own event, not the blister one", () => {
+  // Migration 0074 (P6 Task 1) — HANDPACK_BLISTER has its own real
+  // route_operations row. The station-kind override table
+  // (COMPLETE_EVENT_FOR_STATION_KIND) no longer needed: HANDPACK_BLISTER
+  // maps directly in COMPLETE_EVENT_FOR_OPERATION without aliasing through
+  // BLISTER first. The engine test (advance.test.ts) covers live output;
+  // this source-text guard verifies the mapping is present in the operation
+  // table rather than being patched in the station-kind override.
+  it("HANDPACK_BLISTER completes with its own event via its own operation (migration 0074)", () => {
     const src = readFileSync(
       join(__dirname, "engine/intent-events.ts"),
       "utf8",
     );
     expect(src).toMatch(
-      /HANDPACK_BLISTER: \{ BLISTER: "HANDPACK_BLISTER_COMPLETE" \}/,
+      /HANDPACK_BLISTER: "HANDPACK_BLISTER_COMPLETE"/,
     );
   });
 });

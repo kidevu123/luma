@@ -512,6 +512,13 @@
       "when": 1785200000000,
       "tag": "0073_supervisor_and_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1785300000000,
+      "tag": "0074_handpack_route_operation",
+      "breakpoints": true
     }
   ]
 }

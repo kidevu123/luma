@@ -46,16 +46,20 @@ describe("intentToEventType", () => {
     expect(intentToEventType("COMPLETE", "POST_BLISTER_STAGING", "BLISTER")).toBeNull();
   });
 
-  it("maps COMPLETE at a handpack-blister station to its own event, not the alias's", () => {
-    expect(intentToEventType("COMPLETE", "BLISTER", "HANDPACK_BLISTER")).toBe(
+  it("maps COMPLETE at a handpack-blister station to its own event via its own operation (migration 0074)", () => {
+    // Migration 0074: HANDPACK_BLISTER has its own route_operations row, so
+    // resolve-operation returns operationCode 'HANDPACK_BLISTER' (not 'BLISTER').
+    // COMPLETE_EVENT_FOR_OPERATION['HANDPACK_BLISTER'] maps directly to
+    // HANDPACK_BLISTER_COMPLETE — no station-kind override table needed.
+    expect(intentToEventType("COMPLETE", "HANDPACK_BLISTER", "HANDPACK_BLISTER")).toBe(
       "HANDPACK_BLISTER_COMPLETE",
     );
   });
 
   it("leaves a COMBINED station on the aliased blister event", () => {
-    // COMBINED also aliases to the BLISTER operation, but
-    // ALLOWED_EVENTS_BY_KIND.COMBINED permits BLISTER_COMPLETE — only
-    // HANDPACK_BLISTER needed the station-kind override.
+    // COMBINED aliases to the BLISTER operation (STATION_KIND_ALIAS still
+    // has COMBINED -> BLISTER). ALLOWED_EVENTS_BY_KIND.COMBINED permits
+    // BLISTER_COMPLETE, so no station-kind override is needed here.
     expect(intentToEventType("COMPLETE", "BLISTER", "COMBINED")).toBe("BLISTER_COMPLETE");
   });
 
