@@ -65,9 +65,11 @@ describe("recoverBottleSealingHoldAction — product-kind aware, lead-gated, saf
   });
 
   it("does NOT release the QR, close/deplete allocation, or finalize the bag", () => {
-    // Scope the assertions to the recovery action body.
+    // Scope the assertions to the recovery action body. P6 Task 4 retired
+    // fireStageEventAction; the next exported action after recover is now
+    // pauseBagAction (see actions.ts).
     const start = actionsSrc.indexOf("export async function recoverBottleSealingHoldAction");
-    const end = actionsSrc.indexOf("export async function fireStageEventAction");
+    const end = actionsSrc.indexOf("export async function pauseBagAction");
     const body = actionsSrc.slice(start, end);
     expect(body).not.toMatch(/status: "IDLE"/); // no QR release
     expect(body).not.toMatch(/assignedWorkflowBagId: null/);

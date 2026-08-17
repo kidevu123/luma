@@ -46,16 +46,20 @@ describe("intentToEventType", () => {
     expect(intentToEventType("COMPLETE", "POST_BLISTER_STAGING", "BLISTER")).toBeNull();
   });
 
-  it("maps COMPLETE at a handpack-blister station to its own event, not the alias's", () => {
-    expect(intentToEventType("COMPLETE", "BLISTER", "HANDPACK_BLISTER")).toBe(
+  it("maps COMPLETE at a handpack-blister station to its own event via its own operation (migration 0074)", () => {
+    // Migration 0074: HANDPACK_BLISTER has its own route_operations row, so
+    // resolve-operation returns operationCode 'HANDPACK_BLISTER' (not 'BLISTER').
+    // COMPLETE_EVENT_FOR_OPERATION['HANDPACK_BLISTER'] maps directly to
+    // HANDPACK_BLISTER_COMPLETE — no station-kind override table needed.
+    expect(intentToEventType("COMPLETE", "HANDPACK_BLISTER", "HANDPACK_BLISTER")).toBe(
       "HANDPACK_BLISTER_COMPLETE",
     );
   });
 
   it("leaves a COMBINED station on the aliased blister event", () => {
-    // COMBINED also aliases to the BLISTER operation, but
-    // ALLOWED_EVENTS_BY_KIND.COMBINED permits BLISTER_COMPLETE — only
-    // HANDPACK_BLISTER needed the station-kind override.
+    // COMBINED aliases to the BLISTER operation (STATION_KIND_ALIAS still
+    // has COMBINED -> BLISTER). ALLOWED_EVENTS_BY_KIND.COMBINED permits
+    // BLISTER_COMPLETE, so no station-kind override is needed here.
     expect(intentToEventType("COMPLETE", "BLISTER", "COMBINED")).toBe("BLISTER_COMPLETE");
   });
 
@@ -285,11 +289,35 @@ describe("buildRecordPackagingCompleteInput", () => {
     expect(out.rippedCards).toBe(3);
   });
 
-  it("always sends damagedPackaging as zero regardless of input", () => {
+  it("routes damagedPackaging input to damagedPackaging (2026-08-17 user decision)", () => {
+    // The P4b hardcode of 0 is replaced: the operator's count of damaged
+    // packaging material (foil, cases, labels) is now mapped through.
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1, damagedPackaging: 5 },
+      clientEventId: "cid-1",
+    });
+    expect(out.damagedPackaging).toBe(5);
+  });
+
+  it("defaults damagedPackaging to zero when absent (counterPresses precedent)", () => {
+    // Absent → 0, following the same presence-not-truthiness discipline:
+    // a real reading of 0 is not "field absent", and absent means 0.
     const out = buildRecordPackagingCompleteInput({
       station: PACKAGING_STATION,
       workflowBagId: "bag-1",
       inputs: { damaged: 3, cases: 1, displays: 2, loose: 5 },
+      clientEventId: "cid-1",
+    });
+    expect(out.damagedPackaging).toBe(0);
+  });
+
+  it("keeps damagedPackaging at zero when explicitly zero", () => {
+    const out = buildRecordPackagingCompleteInput({
+      station: PACKAGING_STATION,
+      workflowBagId: "bag-1",
+      inputs: { cases: 1, damagedPackaging: 0 },
       clientEventId: "cid-1",
     });
     expect(out.damagedPackaging).toBe(0);

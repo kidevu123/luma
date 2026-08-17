@@ -12,6 +12,7 @@ import { NextRequest } from "next/server";
 import {
   resolveStationByToken,
   floorEventRelevantToStation,
+  loadRouteGraph,
 } from "@/lib/production/engine";
 import { subscribe, type FloorEvent } from "@/lib/projector/notify-bus";
 
@@ -28,6 +29,11 @@ export async function GET(
   if (!station || !station.isActive) {
     return new Response("Not found", { status: 404 });
   }
+
+  // P6 Task 3 — load the RouteGraph once at connect time (cached
+  // process-wide by loadRouteGraph); every subsequent relevance check
+  // for this connection reuses the same value, purely in-memory.
+  const graph = await loadRouteGraph();
 
   const stream = new ReadableStream({
     start(controller) {
@@ -51,7 +57,7 @@ export async function GET(
       send(JSON.stringify({ ok: true, ts: Date.now() }), "hello");
 
       const unsub = subscribe((ev: FloorEvent) => {
-        if (!floorEventRelevantToStation(ev, { id: station.id, kind: station.kind })) return;
+        if (!floorEventRelevantToStation(graph, ev, { id: station.id, kind: station.kind })) return;
         send(JSON.stringify(ev), "floor");
       });
 

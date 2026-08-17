@@ -39,7 +39,7 @@ export type {
   AssignBagProductInput,
   AssignBagProductResult,
 } from "./assign-bag-product";
-export { evaluateChecks, blockersFromChecks, blockerFor } from "./resolve-exceptions";
+export { evaluateChecks, blockersFromChecks, blockerFor, blockerForWithDetail } from "./resolve-exceptions";
 export type { CheckResult, EngineFacts } from "./resolve-exceptions";
 export {
   raiseProductionException,
@@ -52,6 +52,8 @@ export type {
 } from "./raise-production-exception";
 export { raiseDowntimeStarted } from "./raise-downtime";
 export type { RaiseDowntimeInput, RaiseDowntimeResult } from "./raise-downtime";
+export { raiseDowntimeEnded } from "./raise-downtime-ended";
+export type { RaiseDowntimeEndedInput, RaiseDowntimeEndedResult } from "./raise-downtime-ended";
 export { raiseQaHoldStarted } from "./raise-qa-hold";
 export type { RaiseQaHoldInput, RaiseQaHoldResult } from "./raise-qa-hold";
 export { raiseQaHoldRelease } from "./raise-qa-hold-release";
@@ -139,6 +141,11 @@ export {
   STATION_INACTIVE_FLOOR_MESSAGE,
 } from "../station-management";
 export { floorEventRelevantToStation, queueKeysForStationKind } from "./floor-event-relevance";
+// P6 Task 3 — floor SSE route needs to load the RouteGraph at connect
+// time to thread into floorEventRelevantToStation. Cached loader; one
+// DB hit per process; production callers omit the loader arg.
+export { loadRouteGraph } from "./route-data";
+export type { RouteGraph } from "./route-data";
 
 // P4b Task 6 — floor import boundary at zero. Everything below backs a
 // real read or write in a floor "use server" file (actions.ts,

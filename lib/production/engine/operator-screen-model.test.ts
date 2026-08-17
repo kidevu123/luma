@@ -167,6 +167,23 @@ describe("assembleCompletionInputs", () => {
     });
     expect(r).toEqual({ ok: true, inputs: { cases: 10, displays: 3, loose: 7 } });
   });
+
+  it("routes damagedPackaging to its own engine key (2026-08-17 user decision)", () => {
+    // Packaging stations emit damagedPackaging from resolve-completion.ts.
+    // assembleCompletionInputs must route it to AdvanceInput.inputs.damagedPackaging
+    // so buildRecordPackagingCompleteInput can replace its hardcoded 0.
+    const packaging: CompletionInput[] = [
+      { key: "cases", label: "Cases", unit: "cases", required: true },
+      {
+        key: "damagedPackaging",
+        label: "Damaged packaging",
+        unit: "units",
+        required: false,
+      },
+    ];
+    const r = assembleCompletionInputs(packaging, { cases: "4", damagedPackaging: "2" });
+    expect(r).toEqual({ ok: true, inputs: { cases: 4, damagedPackaging: 2 } });
+  });
 });
 
 describe("completionFieldLabel", () => {

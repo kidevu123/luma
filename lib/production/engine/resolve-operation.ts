@@ -26,26 +26,26 @@ export type ResolvedOperation = {
 };
 
 /** Station kinds that are not themselves route operations but behave
- *  as another kind. Both perform the blister operation, but only ONE of
- *  them is corroborated elsewhere:
+ *  as another kind.
  *
  *    COMBINED -> BLISTER matches LEGACY_MACHINE_KIND_TO_OPERATION in
- *    lib/production/routes.ts:58-69.
+ *    lib/production/routes.ts:58-69. A COMBINED station fires multiple
+ *    card-flow operations (blister, seal, packaging) and defaults to
+ *    BLISTER; COMBINED-AT-PACKAGING-1 in advance.ts handles the
+ *    packaging-shaped override via opts.preferOperation.
  *
- *    HANDPACK_BLISTER -> BLISTER is this module's own choice. That table
- *    has NO HANDPACK_BLISTER key at all, so nothing corroborates it.
- *
- *  The HANDPACK_BLISTER entry used to be the live cause of blocker 3 in
- *  the Phase 1 preconditions on advanceBag: aliasing to BLISTER yields
- *  BLISTER_COMPLETE, which ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER
- *  rejects. Task 7 works around it downstream —
- *  intentToEventType(intent, operationCode, stationKind) overrides the
- *  event for HANDPACK_BLISTER stations. The alias itself is still
- *  uncorroborated; the real fix is a HANDPACK_BLISTER route operation.
- *  Do not treat this alias as settled. */
+ *  HANDPACK_BLISTER was previously aliased here to BLISTER (migration
+ *  0074 gap). Migration 0074 inserts a real HANDPACK_BLISTER
+ *  route_operations row on CARD_BLISTER with allowed_station_kind =
+ *  'HANDPACK_BLISTER', so the alias is no longer needed. The
+ *  intentToEventType station-kind override table (COMPLETE_EVENT_FOR_STATION_KIND
+ *  in intent-events.ts) is also no longer needed for HANDPACK_BLISTER:
+ *  COMPLETE_EVENT_FOR_OPERATION['HANDPACK_BLISTER'] now maps directly to
+ *  HANDPACK_BLISTER_COMPLETE without a station-kind tiebreaker. */
 const STATION_KIND_ALIAS: Readonly<Record<string, string>> = {
   COMBINED: "BLISTER",
-  HANDPACK_BLISTER: "BLISTER",
+  // HANDPACK_BLISTER alias removed: migration 0074 provides a real
+  // route_operations row so no alias is needed.
 };
 
 /** Pure: choose the operation a station of this kind performs.

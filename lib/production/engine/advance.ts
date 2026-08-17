@@ -12,7 +12,7 @@ import type { AdvanceInput, AdvanceIntent, AdvanceResult } from "./types";
 import { assignBagProduct } from "./assign-bag-product";
 import { claimQueuedBag } from "./claim-queued-bag";
 import { intentToEventType } from "./intent-events";
-import { blockerFor } from "./resolve-exceptions";
+import { blockerFor, blockerForWithDetail } from "./resolve-exceptions";
 import { resolveOperation } from "./resolve-operation";
 import { resolvePartialAllocation } from "./resolve-partial-allocation";
 import { getStationView } from "./station-view";
@@ -161,14 +161,16 @@ export function buildRecordPackagingCompleteInput(args: {
     masterCases: args.inputs.cases ?? 0,
     displaysMade: args.inputs.displays ?? 0,
     looseCards: args.inputs.loose ?? 0,
-    // Operator-counted damage (AdvanceInput.inputs.damaged) is loose
-    // units — ripped cards — per the 2026-08-13 decision, so it maps to
-    // rippedCards. damagedPackaging is packaging-MATERIAL damage (foil,
-    // cases, labels), which stays an exception-flow concern raised by a
-    // supervisor, not something this operator gesture reports; always 0
-    // through this path.
-    damagedPackaging: 0,
+    // Operator-counted loose-unit damage (cards ripped, bottles cracked)
+    // maps to rippedCards per the 2026-08-13 decision.
     rippedCards: args.inputs.damaged ?? 0,
+    // 2026-08-17 user decision: packaging-material damage (foil, cases,
+    // labels) is now reported by the operator via the damagedPackaging
+    // CompletionInput field. Absent → 0, following the counterPresses
+    // precedent (a real reading of 0 must survive as 0, not as
+    // "field absent"). The P4b follow-up tracking this as a missing-as-zero
+    // mistake is now closed — the input exists and is mapped here.
+    damagedPackaging: args.inputs.damagedPackaging ?? 0,
     // Partial-close fields: absent AdvanceInput.keepBagPartial /
     // partialRemainingEstimate keeps today's default — a bottle bag
     // closed through advanceBag finalizes as fully empty.
@@ -245,12 +247,10 @@ export async function advanceBag(input: AdvanceInput): Promise<AdvanceResult> {
     // instead of a stack trace.
     return {
       ok: false,
-      blocker: {
-        code: "ADVANCE_FAILED",
-        operatorSentence: "Something went wrong recording this. Ask a supervisor.",
-        supervisorDetail: err instanceof Error ? err.message : String(err),
-        suggestedAction: "NOTIFY_SUPERVISOR",
-      },
+      blocker: blockerForWithDetail(
+        "ADVANCE_FAILED",
+        err instanceof Error ? err.message : String(err),
+      ),
     };
   }
 }
@@ -371,12 +371,7 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
     if ("error" in packagingResult) {
       return {
         ok: false,
-        blocker: {
-          code: "ADVANCE_REJECTED",
-          operatorSentence: "This step could not be recorded. Ask a supervisor.",
-          supervisorDetail: packagingResult.error,
-          suggestedAction: "NOTIFY_SUPERVISOR",
-        },
+        blocker: blockerForWithDetail("ADVANCE_REJECTED", packagingResult.error),
       };
     }
     return { ok: true, view: await getStationView(input.stationId) };
@@ -428,25 +423,16 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
       // silent no-op — the structured panel is P4b Task 5's to render.
       return {
         ok: false,
-        blocker: {
-          code: "OPEN_ALLOCATION_ON_BAG",
-          operatorSentence:
-            "This bag is still open from a previous run. Ask a supervisor.",
-          supervisorDetail: assigned.openAllocationBlock.message,
-          suggestedAction: "NOTIFY_SUPERVISOR",
-        },
+        blocker: blockerForWithDetail(
+          "OPEN_ALLOCATION_ON_BAG",
+          assigned.openAllocationBlock.message,
+        ),
       };
     }
     if ("error" in assigned) {
       return {
         ok: false,
-        blocker: {
-          code: "PRODUCT_ASSIGN_REJECTED",
-          operatorSentence:
-            "This product could not be saved on the bag. Ask a supervisor.",
-          supervisorDetail: assigned.error,
-          suggestedAction: "NOTIFY_SUPERVISOR",
-        },
+        blocker: blockerForWithDetail("PRODUCT_ASSIGN_REJECTED", assigned.error),
       };
     }
   }
@@ -469,12 +455,7 @@ async function advanceBagInner(input: AdvanceInput): Promise<AdvanceResult> {
   if ("error" in result) {
     return {
       ok: false,
-      blocker: {
-        code: "ADVANCE_REJECTED",
-        operatorSentence: "This step could not be recorded. Ask a supervisor.",
-        supervisorDetail: result.error,
-        suggestedAction: "NOTIFY_SUPERVISOR",
-      },
+      blocker: blockerForWithDetail("ADVANCE_REJECTED", result.error),
     };
   }
 

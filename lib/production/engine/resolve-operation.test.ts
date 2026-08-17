@@ -53,9 +53,18 @@ describe("pickOperationForStationKind", () => {
     expect(pickOperationForStationKind(ops, "COMBINED")?.operationCode).toBe("BLISTER");
   });
 
-  it("maps HANDPACK_BLISTER stations to the blister operation", () => {
-    const ops = [op({ sequence: 2, operationCode: "BLISTER", allowedStationKind: "BLISTER" })];
-    expect(pickOperationForStationKind(ops, "HANDPACK_BLISTER")?.operationCode).toBe("BLISTER");
+  it("maps HANDPACK_BLISTER stations to the HANDPACK_BLISTER operation (migration 0074)", () => {
+    // Migration 0074 adds a real route_operations row with
+    // allowed_station_kind = 'HANDPACK_BLISTER'. The old STATION_KIND_ALIAS
+    // (HANDPACK_BLISTER -> BLISTER) is gone; the station now resolves its
+    // own operation directly without aliasing.
+    const ops = [
+      op({ sequence: 2, operationCode: "BLISTER", allowedStationKind: "BLISTER" }),
+      op({ sequence: 8, operationCode: "HANDPACK_BLISTER", allowedStationKind: "HANDPACK_BLISTER" }),
+    ];
+    expect(pickOperationForStationKind(ops, "HANDPACK_BLISTER")?.operationCode).toBe(
+      "HANDPACK_BLISTER",
+    );
   });
 
   it("picks the lowest sequence when two operations accept the kind", () => {
@@ -111,16 +120,24 @@ describe("pickOperationForStationKind", () => {
       ).toBe("HEAT_SEAL");
     });
 
-    it("refuses the preference for HANDPACK_BLISTER — aliases onto BLISTER but is not COMBINED", () => {
+    it("refuses the preference for HANDPACK_BLISTER — has its own real op, is not COMBINED", () => {
+      // Migration 0074: HANDPACK_BLISTER no longer aliases onto BLISTER.
+      // It has its own route_operations row, so pickOperationForStationKind
+      // resolves it directly by allowedStationKind match. The preferOperation
+      // gate is COMBINED-only (the raw stationKind guard in
+      // pickOperationForStationKind), so a HANDPACK_BLISTER station asking
+      // for PACKAGING must still get its own HANDPACK_BLISTER match,
+      // never PACKAGING.
       const handpackRoute = [
         op({ sequence: 2, operationCode: "BLISTER", allowedStationKind: "BLISTER" }),
         op({ sequence: 6, operationCode: "PACKAGING", allowedStationKind: "PACKAGING" }),
+        op({ sequence: 8, operationCode: "HANDPACK_BLISTER", allowedStationKind: "HANDPACK_BLISTER" }),
       ];
       expect(
         pickOperationForStationKind(handpackRoute, "HANDPACK_BLISTER", {
           preferOperation: "PACKAGING",
         })?.operationCode,
-      ).toBe("BLISTER");
+      ).toBe("HANDPACK_BLISTER");
     });
   });
 });

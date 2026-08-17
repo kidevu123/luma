@@ -14,9 +14,18 @@ import { SEALING_SEGMENT_EVENT } from "@/lib/production/sealing-segments";
 import type { AdvanceIntent } from "./types";
 
 /** Operation code -> the completion event it fires. Mirrors
- *  LEGACY_EVENT_TYPE_TO_OPERATION in lib/production/routes.ts, inverted. */
+ *  LEGACY_EVENT_TYPE_TO_OPERATION in lib/production/routes.ts, inverted.
+ *
+ *  HANDPACK_BLISTER was previously absent here (it was aliased onto the
+ *  BLISTER operation in resolve-operation.ts, yielding BLISTER_COMPLETE,
+ *  which then required the COMPLETE_EVENT_FOR_STATION_KIND override table
+ *  below to produce HANDPACK_BLISTER_COMPLETE instead). Migration 0074
+ *  gives HANDPACK_BLISTER its own real route_operations row, so the alias
+ *  is gone and the operation code now resolves directly from the DB row.
+ *  HANDPACK_BLISTER maps here without any station-kind tiebreaker needed. */
 const COMPLETE_EVENT_FOR_OPERATION: Readonly<Record<string, string>> = {
   BLISTER: "BLISTER_COMPLETE",
+  HANDPACK_BLISTER: "HANDPACK_BLISTER_COMPLETE",
   HEAT_SEAL: SEALING_SEGMENT_EVENT,
   PACKAGING: "PACKAGING_COMPLETE",
   BOTTLE_FILL: "BOTTLE_HANDPACK_COMPLETE",
@@ -31,18 +40,22 @@ const BAG_CLOSE_EVENT_FOR_OPERATION: Readonly<Record<string, string>> = {
   HEAT_SEAL: "SEALING_COMPLETE",
 };
 
-/** Station kinds whose completion event is NOT the one their aliased
- *  operation implies. resolve-operation aliases HANDPACK_BLISTER onto the
- *  BLISTER operation, so the operation code alone yields
- *  BLISTER_COMPLETE — which ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER
- *  rejects. The station kind is the tiebreaker, which is why this
- *  function takes one. COMBINED aliases onto BLISTER too and is NOT
- *  listed: BLISTER_COMPLETE is exactly what it fires. */
+/** Station kinds whose completion event differs from what their operation
+ *  code alone implies. Migration 0074 closed the only case that used to
+ *  live here (HANDPACK_BLISTER -> BLISTER alias -> BLISTER_COMPLETE
+ *  override -> HANDPACK_BLISTER_COMPLETE): HANDPACK_BLISTER now has its
+ *  own operation code and maps directly in COMPLETE_EVENT_FOR_OPERATION.
+ *  COMBINED aliases onto BLISTER and fires BLISTER_COMPLETE — no
+ *  override needed there either.
+ *
+ *  The table is intentionally kept (empty rather than deleted) because
+ *  intentToEventType's stationKind parameter still has value: it lets a
+ *  future station kind override the event its operation would otherwise
+ *  imply without requiring a new operation type. Removing the parameter
+ *  now would be a more invasive refactor than the gain warrants. */
 const COMPLETE_EVENT_FOR_STATION_KIND: Readonly<
   Record<string, Readonly<Record<string, string>>>
-> = {
-  HANDPACK_BLISTER: { BLISTER: "HANDPACK_BLISTER_COMPLETE" },
-};
+> = {};
 
 export function intentToEventType(
   intent: AdvanceIntent,

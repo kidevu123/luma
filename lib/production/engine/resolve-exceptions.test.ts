@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   evaluateChecks,
   blockersFromChecks,
+  blockerFor,
+  blockerForWithDetail,
   type EngineFacts,
 } from "./resolve-exceptions";
 
@@ -76,6 +80,32 @@ describe("evaluateChecks", () => {
   it("still exposes the real reason to supervisors", () => {
     const blockers = blockersFromChecks(evaluateChecks(facts({ operationResolved: false })));
     expect(blockers[0]?.supervisorDetail).toContain("route");
+  });
+
+  // blockerForWithDetail — parameterized factory for dynamic-detail codes
+  describe("blockerForWithDetail", () => {
+    it("preserves operatorSentence and suggestedAction from the catalogue", () => {
+      const base = blockerFor("ADVANCE_REJECTED");
+      const b = blockerForWithDetail("ADVANCE_REJECTED", "custom detail");
+      expect(b.operatorSentence).toBe(base.operatorSentence);
+      expect(b.suggestedAction).toBe(base.suggestedAction);
+      expect(b.code).toBe("ADVANCE_REJECTED");
+    });
+
+    it("substitutes the supplied supervisorDetail", () => {
+      const b = blockerForWithDetail("ADVANCE_REJECTED", "downstream error: column mismatch");
+      expect(b.supervisorDetail).toBe("downstream error: column mismatch");
+    });
+
+    it("covers all four dynamic-detail codes without falling back to the generic unknown sentinel", () => {
+      const codes = ["ADVANCE_FAILED", "ADVANCE_REJECTED", "OPEN_ALLOCATION_ON_BAG", "PRODUCT_ASSIGN_REJECTED"];
+      for (const code of codes) {
+        const b = blockerForWithDetail(code, "test detail");
+        // Falls back to generic only for unknown codes — none of these should.
+        expect(b.supervisorDetail).toBe("test detail");
+        expect(b.operatorSentence).not.toContain("No blocker catalogue entry");
+      }
+    });
   });
 
   // The three inverted checks each pass when their fact is FALSE. Setting

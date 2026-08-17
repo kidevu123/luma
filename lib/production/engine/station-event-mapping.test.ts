@@ -40,62 +40,15 @@ import {
   EVENT_STAGE_PREREQ,
   STATION_PICKUP_FROM_STAGE,
 } from "@/lib/production/stage-progression";
-import type { RouteOperationView } from "@/lib/production/routes";
+import { SEEDED_ROUTES_BY_CODE as SEEDED_ROUTES } from "./__fixtures__/seeded-routes";
 
-const MIGRATION = join(process.cwd(), "drizzle", "0013_route_operation_compat.sql");
+// P6 Task 3 — the seeded routes fixture is now shared with
+// route-data.test.ts + the consumer tests (queue-transitions,
+// floor-event-relevance). See lib/production/engine/__fixtures__/
+// seeded-routes.ts. The migration-text guard below stays intact.
 
-function op(
-  sequence: number,
-  operationCode: string,
-  allowedStationKind: string | null,
-): RouteOperationView {
-  return {
-    routeCode: "FIXTURE",
-    routeName: "Fixture",
-    sequence,
-    operationCode,
-    operationName: operationCode,
-    stageKey: "FIXTURE_QUEUE",
-    nextStageKey: null,
-    reworkStageKey: null,
-    allowedStationKind,
-    allowedMachineKind: allowedStationKind,
-    requiresScan: true,
-    requiresCounter: true,
-    requiresTimer: false,
-    outputUnit: "cards",
-    orderIndependentGroup: null,
-  };
-}
-
-// Transcribed from drizzle/0013_route_operation_compat.sql:168-215.
-// Note the stage keys are NOT transcribed — op() stubs them — so any
-// assertion about the stage chain must read the migration text instead.
-const SEEDED_ROUTES: Readonly<Record<string, RouteOperationView[]>> = {
-  CARD_BLISTER: [
-    op(1, "RECEIVING", null),
-    op(2, "BLISTER", "BLISTER"),
-    op(3, "POST_BLISTER_STAGING", null),
-    op(4, "HEAT_SEAL", "SEALING"),
-    op(5, "POST_SEAL_STAGING", null),
-    op(6, "PACKAGING", "PACKAGING"),
-    op(7, "FINISHED_GOODS", null),
-  ],
-  BOTTLE: [
-    op(1, "RECEIVING", null),
-    op(2, "BOTTLE_FILL", "BOTTLE_HANDPACK"),
-    op(3, "STICKERING", "BOTTLE_STICKER"),
-    op(4, "INDUCTION_SEAL", "BOTTLE_CAP_SEAL"),
-    op(5, "PACKAGING", "PACKAGING"),
-    op(6, "FINISHED_GOODS", null),
-  ],
-  STICKER_ONLY: [
-    op(1, "RECEIVING", null),
-    op(2, "STICKERING", "BOTTLE_STICKER"),
-    op(3, "PACKAGING", "PACKAGING"),
-    op(4, "FINISHED_GOODS", null),
-  ],
-};
+const MIGRATION_0013 = join(process.cwd(), "drizzle", "0013_route_operation_compat.sql");
+const MIGRATION_0074 = join(process.cwd(), "drizzle", "0074_handpack_route_operation.sql");
 
 // Hand-typed from ALLOWED_EVENTS_BY_KIND in
 // lib/production/engine/record-stage-event.ts (moved verbatim from
@@ -109,12 +62,13 @@ const LEGACY_STATION_EVENT: ReadonlyArray<[string, string, string]> = [
   ["BOTTLE_HANDPACK", "BOTTLE", "BOTTLE_HANDPACK_COMPLETE"],
   ["BOTTLE_STICKER", "BOTTLE", "BOTTLE_STICKER_COMPLETE"],
   ["BOTTLE_CAP_SEAL", "BOTTLE", "BOTTLE_CAP_SEAL_COMPLETE"],
-  // Task 7: intentToEventType takes the STATION kind, so the two kinds
-  // that alias onto the BLISTER operation are no longer indistinguishable
-  // and can finally be pinned. HANDPACK_BLISTER fires its own event;
-  // COMBINED keeps the aliased one (ALLOWED_EVENTS_BY_KIND.COMBINED
-  // permits BLISTER_COMPLETE, ALLOWED_EVENTS_BY_KIND.HANDPACK_BLISTER
-  // does not).
+  // Migration 0074: HANDPACK_BLISTER now has its own real route_operations
+  // row (operation code HANDPACK_BLISTER, allowed_station_kind HANDPACK_BLISTER).
+  // pickOperationForStationKind resolves directly — no alias, no
+  // station-kind override. COMPLETE_EVENT_FOR_OPERATION['HANDPACK_BLISTER']
+  // = 'HANDPACK_BLISTER_COMPLETE' without going through BLISTER at all.
+  // COMBINED still aliases onto BLISTER; BLISTER_COMPLETE is exactly what
+  // ALLOWED_EVENTS_BY_KIND.COMBINED accepts.
   ["HANDPACK_BLISTER", "CARD_BLISTER", "HANDPACK_BLISTER_COMPLETE"],
   ["COMBINED", "CARD_BLISTER", "BLISTER_COMPLETE"],
 ];
@@ -155,12 +109,15 @@ describe("station kind to workflow event mapping", () => {
   });
 
   it("the transcribed fixture still names operations the migration seeds", () => {
-    const sql = readFileSync(MIGRATION, "utf8");
+    const sql0013 = readFileSync(MIGRATION_0013, "utf8");
+    const sql0074 = readFileSync(MIGRATION_0074, "utf8");
     // A guard, not a parser: if someone renames or drops a seeded
     // operation, this fails and forces the fixture to be re-checked by
     // hand. It does NOT notice a changed sequence or stage key.
+    // HANDPACK_BLISTER (seq 8) comes from migration 0074; all others from 0013.
     for (const ops of Object.values(SEEDED_ROUTES)) {
       for (const o of ops) {
+        const sql = o.operationCode === "HANDPACK_BLISTER" ? sql0074 : sql0013;
         expect(sql).toContain(`'${o.operationCode}'`);
       }
     }

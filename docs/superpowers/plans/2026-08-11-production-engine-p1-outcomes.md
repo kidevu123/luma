@@ -264,19 +264,16 @@ Branch `feat/production-engine-p4b`. The operator screen lands.
 
 **Tracked follow-ups (post-cutover, filed for P5 decision):**
 
-- **`damagedPackaging` always writes 0 through advanceBag.** The
-  operator screen collects an operator-counted damaged-loose-cards
-  number (mapped to `rippedCards` per the P4a decision) but has no
-  input for packaging-material damage — foil, cases, labels. The
-  advanceBag path hardcodes `damagedPackaging: 0`
-  (`lib/production/engine/advance.ts:170`) which flows into the
-  projector's `damageCount` and the Zoho receive payload's damage
-  fields. This is currently a missing-as-zero mistake the operator
-  cannot correct on-screen: a torn foil roll or crushed case gets
-  recorded as no damage at all. The deleted `rework` field's
-  replacement (whether damage lives on the operator gesture, on a
-  supervisor exception, or both) is a P5 decision — do not treat 0 as
-  ground truth on any packaging bag until then.
+- **`damagedPackaging` always writes 0 through advanceBag.** [CLOSED — P6
+  Task 5, 2026-08-17 user decision] The operator screen now collects a
+  `damagedPackaging` count (packaging-material damage: foil, cases, labels)
+  alongside the existing `damaged` count (loose-unit/card damage). Added to
+  `resolve-completion.ts`'s PACKAGING_OPERATIONS branch as
+  `{key:"damagedPackaging", label:"Damaged packaging", unit:"units", required:false}`;
+  extended in `types.ts` (`CompletionInput` key union + `AdvanceInput.inputs`);
+  mapped in `advance.ts`'s `buildRecordPackagingCompleteInput` replacing the
+  hardcoded 0 (absent → 0, counterPresses precedent). Screen renders it via the
+  same CompletionInput-driven loop; no special-casing.
 
 - **QA-hold rollback trap.** Any bag held via `QA_HOLD_STARTED` under
   1.34 sets `read_bag_state.is_on_hold = true`. Rolling back to 1.33
@@ -288,9 +285,9 @@ Branch `feat/production-engine-p4b`. The operator screen lands.
 
 **Deferred to P6 (from P4b):**
 
-- Data-driven routes: `queueAfterWorkAt` and `resolve-operation` sourced from `route_operations` (vs. hardcoded legacy table). Legacy table deletion and `read_queue_state` double-count fix.
-- Barrel curation: legacy action deletion (once no UI calls them).
-- Value-pinned duplication guards: `dup_guard_count` tests on high-risk writes.
+- Data-driven routes: `queueAfterWorkAt` and `resolve-operation` sourced from `route_operations` (vs. hardcoded legacy table). Legacy table deletion and `read_queue_state` double-count fix. CLOSED — P6 Tasks 2+3.
+- Barrel curation: legacy action deletion (once no UI calls them). CLOSED — P6 Task 4 (8 dead actions retired).
+- Value-pinned duplication guards: `dup_guard_count` tests on high-risk writes. CLOSED — P6 Task 6 (`FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS` and `FRESH_BAG_STATION_KINDS` source-literal parity tests added).
 
 ## Phase 5 outcomes
 
@@ -349,9 +346,38 @@ Version: `1.34.0` → `1.35.0`.
 
 **Deferred to P6 (from P5):**
 
-- Unlock throttle if tablets leave the LAN: per-station attempt counter with exponential back-off. Current mitigation: station scan-token boundary + LAN-only deployment + audit trail. PIN-set may also move to OWNER-only role if role tiers tighten.
-- Post-commit audit outside transaction: `supervisorClaimBagAction` writes the `floor.supervisor.manual_bag_claim` audit row after the claim transaction commits, matching the `releaseQaHold` precedent. This is a pre-existing design class — the audit is still reliable but not atomically coupled to the write. Refactor when the class is addressed broadly in P6.
-- Downtime-end flow: `DOWNTIME_ENDED` event type exists but nothing emits it. Downtime exceptions age off the rail after 4 hours rather than being resolved. Full flow (operator reports end, supervisor acks) is P6.
-- `damagedPackaging` rework-field decision (carried from P4b): the operator screen still hardcodes `damagedPackaging: 0`; the packaging-material damage input is P6 scope.
-- Data-driven routes, barrel curation, `read_queue_state` double-count fix (carried from P4b P6 list).
-- Value-pinned duplication guards (carried from P4b P6 list).
+- Unlock throttle if tablets leave the LAN: per-station attempt counter with exponential back-off. Current mitigation: station scan-token boundary + LAN-only deployment + audit trail. PIN-set may also move to OWNER-only role if role tiers tighten. OPEN — moved to post-overhaul backlog.
+- Post-commit audit outside transaction: `supervisorClaimBagAction` writes the `floor.supervisor.manual_bag_claim` audit row after the claim transaction commits, matching the `releaseQaHold` precedent. This is a pre-existing design class — the audit is still reliable but not atomically coupled to the write. OPEN — moved to post-overhaul backlog.
+- Downtime-end flow: `DOWNTIME_ENDED` event type exists but nothing emits it. Downtime exceptions age off the rail after 4 hours rather than being resolved. CLOSED — P6 Task 6; `raiseDowntimeEnded` + `resolveDowntimeAction` + `[ Resolved ]` button on admin Act Now rail.
+- `damagedPackaging` rework-field decision (carried from P4b): CLOSED — P6 Task 5 (2026-08-17 user decision). The operator screen now collects packaging-material damage via the `damagedPackaging` CompletionInput field.
+- Data-driven routes, barrel curation (carried from P4b P6 list). `read_queue_state` double-count: CLOSED — P6 Task 5; SEALING_QUEUE/POST_BLISTER_STAGING and PACKAGING_QUEUE/POST_SEAL_STAGING now use read_bag_queue.queue_stage_key for disambiguation.
+- Value-pinned duplication guards (carried from P4b P6 list). CLOSED — P6 Task 6.
+
+## Phase 6 outcomes
+
+Branch `worktree-production-engine-p6`. Version: `1.35.0` → `1.36.0`.
+
+**What shipped:**
+
+- **Migration 0074** (`drizzle/0074_handpack_route_operation.sql`): `HANDPACK_BLISTER` operation type row and route_operations row on CARD_BLISTER. `resolve-operation.ts` drops the HANDPACK_BLISTER alias from `STATION_KIND_ALIAS`; `COMPLETE_EVENT_FOR_OPERATION` maps it to `HANDPACK_BLISTER_COMPLETE`. Station-event-mapping pins extended to 0074.
+
+- **Data-driven route twins** (`lib/production/engine/route-data.ts`): `loadRouteGraph()` (process-lifetime cache); pure twins `queueAfterWorkAtFromGraph`, `queueRankFromGraph`, `queueKeysForStationKindFromGraph`. Parity pins against transcribed fixtures (0013+0071+0074 migration-text guards) prove twin === hardcoded for every (route, stationKind) in the enumerated matrix including bottle narrowing and sticker-only cases.
+
+- **Consumers switched; subsumed tables deleted** (P6 Task 3): `queue-transitions.ts` and `floor-event-relevance.ts` resolve from the graph. Deleted: `queueAfterWorkAt` route map, `QUEUE_RANK`, `queueKeysForStationKind` table. Survivors with why-comments: `EVENT_STAGE_PREREQ`, `STATION_PICKUP_FROM_STAGE`, `STATIONS_THAT_FINALIZE`, `bothBottleFinishingDone`.
+
+- **Legacy action retirement** (P6 Task 4): 8 dead actions removed (`fireStageEventAction`, `setOperatorAction`, `verifyVendorBarcodeAction`, `packagingCompleteAction`, `lookupCardByTokenAction`, `finalizeBagAction`, `releaseSealingHandoffAction`, `releaseBagAction`). Survivors listed with reasons.
+
+- **Damaged-packaging field + queue-state disambiguation** (P6 Task 5): `damagedPackaging` CompletionInput key added to PACKAGING_OPERATIONS branch; `buildRecordPackagingCompleteInput` maps it (absent → 0). `read_queue_state` SEALING_QUEUE/POST_BLISTER_STAGING and PACKAGING_QUEUE/POST_SEAL_STAGING use `read_bag_queue.queue_stage_key` for non-overlapping counts.
+
+- **Cleanup ledger closeout** (P6 Task 6): `blockerForWithDetail` parameterized factory in `resolve-exceptions.ts` (4 dynamic-detail codes — ADVANCE_FAILED, ADVANCE_REJECTED, OPEN_ALLOCATION_ON_BAG, PRODUCT_ASSIGN_REJECTED — moved from inline literals to catalogue-backed construction); value-pin tests for `FIRST_OP_COUNT_ACCOUNTABILITY_STATION_KINDS` and `FRESH_BAG_STATION_KINDS` extract set literals from source and assert equality; `raiseDowntimeEnded` engine function + `resolveDowntimeAction` admin server action + `[ Resolved ]` button on Act Now rail; DOWNTIME_ENDED added to non-progression pin; STAGE_DEFS structural pin added.
+
+**Post-overhaul backlog (honest opens):**
+
+- Unlock throttle off-LAN: no per-station attempt counter or exponential back-off yet. Current mitigation is station scan-token boundary + LAN-only deployment + audit trail.
+- Post-commit audit outside transaction: `supervisorClaimBagAction` and `releaseQaHold` write their audit rows after the transaction commits. Reliable but not atomically coupled to the write. Belongs to a broader refactor pass.
+- Camera-scanner DOM harness: the floor PWA has no automated browser test exercising the QR scanner input pathway; coverage relies on manual smoke checks.
+- Inactive-station self-recovery: the inactive-station page does not mount the SSE refresher, so re-activating a station requires a manual reload rather than self-recovering within 60s.
+
+## Overhaul complete — what six phases delivered
+
+The six-phase production engine overhaul (v1.31.0 through v1.36.0) replaced a legacy floor UI built around scattered server actions and a monolithic `page.tsx` with a clean, event-sourced architecture. The engine barrel (`lib/production/engine/`) is now the single entry point for all floor writes: `advanceBag` handles every normal workflow gesture (claim, product assignment, blister, sealing, packaging, partial close, QA hold, downtime) as a total function returning structured Blockers rather than throwing. Route knowledge moved from hardcoded tables to `route_operations` data, with exhaustive parity pins proving equivalence before the tables were deleted. The HANDPACK_BLISTER gap was closed with a real route operation row and its own event type. Eight dead legacy actions were retired with zero-caller proofs. The operator screen (P4b) replaced the panel-and-scanner-form floor UI with a single-screen workflow; supervisor PIN gating (P5) added proper authentication for sensitive floor flows. By v1.36.0 the spec's core requirements are met: single-entry event-sourced engine, full observability via route graph + SSE-driven real-time updates, queue disambiguation, and full event accountability. Batches as first-class domain and PO-to-finished-lot genealogy are pre-existing schema; P1–P6 shipped the observability, control-flow safety, and floor-UI unification to operationalize them. The post-overhaul backlog above captures the honest gaps that remain.

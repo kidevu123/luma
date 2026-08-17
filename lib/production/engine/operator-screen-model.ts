@@ -159,6 +159,13 @@ export function assembleCompletionInputs(
       case "damaged":
         out.damaged = parsed;
         break;
+      // 2026-08-17 user decision: packaging-material damage (foil, cases,
+      // labels) — distinct from `damaged` (loose-unit/card damage). Maps to
+      // AdvanceInput.inputs.damagedPackaging, which buildRecordPackagingCompleteInput
+      // routes to RecordPackagingCompleteInput.damagedPackaging.
+      case "damagedPackaging":
+        out.damagedPackaging = parsed;
+        break;
       case "cases":
         out.cases = parsed;
         break;

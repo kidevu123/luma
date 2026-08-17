@@ -6,13 +6,22 @@
 // floor board never lags the source of truth.
 //
 // Honest-data discipline:
-//  • Stages that the schema can't yet distinguish (e.g. SEALING_QUEUE
-//    vs POST_BLISTER_STAGING — both map to read_bag_state.stage =
-//    BLISTERED until a "claimed by sealing" event lands) get
-//    populated with the upstream-staging count. The duplication is
-//    documented; it's not invented data, it's the same bags shown
-//    from two stage perspectives. UIs that don't want to double-
-//    count simply pick one.
+//  • SEALING_QUEUE vs POST_BLISTER_STAGING disambiguation (P6 Task 5):
+//    read_bag_queue.queue_stage_key now carries the bag's true queue
+//    position. A BLISTERED bag whose read_bag_queue row has
+//    queue_stage_key = 'SEALING_QUEUE' has been claimed by a sealing
+//    station (overlap scan) and is genuinely in the sealing queue.
+//    A BLISTERED bag whose row has queue_stage_key = 'POST_BLISTER_STAGING'
+//    (or has no queue row at all, which is the brief window between
+//    BLISTER_COMPLETE and the projector commit) is still awaiting a
+//    sealer. SEALING_QUEUE and POST_BLISTER_STAGING no longer count the
+//    same bags from two perspectives; each counts its true population.
+//  • POST_SEAL_STAGING and PACKAGING_QUEUE: the same disambiguation
+//    pattern is available via queue_stage_key = 'POST_SEAL_STAGING' vs
+//    'PACKAGING_QUEUE' for SEALED bags, but PACKAGING_QUEUE bags progress
+//    rapidly (packaging is typically the last step) and the prior
+//    duplication was less operationally confusing. Implemented here
+//    for parity; same join pattern as the BLISTERED split.
 //  • Bottle-route stages remain empty when no bottle activity
 //    exists. We do not fake bottle queues.
 //
@@ -50,27 +59,53 @@ export function classifyQueueStatus(
 }
 
 /** Mapping from canonical stage keys to (read_bag_state.stage,
- *  optional product kind filter). Two CARD/BOTTLE forks of STARTED
- *  resolve via products.kind. */
+ *  optional filters). Two CARD/BOTTLE forks of STARTED resolve via
+ *  products.kind. Disambiguation stages use queueStageFilter to join
+ *  read_bag_queue. */
 interface StageDef {
   bagStages: ReadonlyArray<string>;
   productKind?: "CARD" | "BOTTLE" | "VARIETY";
-  /** When true, this stage uses the same data as another stage —
-   *  namely the upstream staging — until a finer event lands. The
-   *  projector still writes the row so the UI has all 9 keys
-   *  predictable; the field is informational. */
-  duplicateOf?: StageKey;
+  /** When set, the count is limited to bags whose read_bag_queue row
+   *  has queue_stage_key matching this value. Used to disambiguate
+   *  stages that share the same read_bag_state.stage (e.g. BLISTERED
+   *  for both POST_BLISTER_STAGING and SEALING_QUEUE). The complement
+   *  case (bags NOT in read_bag_queue or with a different stage key)
+   *  is expressed by setting excludeQueueStageKey. */
+  queueStageFilter?: string;
+  /** When set, the count excludes bags whose read_bag_queue row has
+   *  queue_stage_key matching this value. Paired with queueStageFilter
+   *  on the sibling stage to produce a non-overlapping split. */
+  excludeQueueStageKey?: string;
 }
 
 const STAGE_DEFS: Record<StageKey, StageDef> = {
   BLISTER_QUEUE: { bagStages: ["STARTED"], productKind: "CARD" },
-  POST_BLISTER_STAGING: { bagStages: ["BLISTERED"] },
+  // POST_BLISTER_STAGING: BLISTERED bags that are NOT yet claimed by a
+  // sealing station. read_bag_queue.queue_stage_key = 'SEALING_QUEUE'
+  // marks bags already picked up by a sealer (overlap scan). Bags with
+  // no queue row (very brief window between BLISTER_COMPLETE commit and
+  // projector update) also count here — LEFT JOIN + IS NULL handles both.
+  POST_BLISTER_STAGING: {
+    bagStages: ["BLISTERED"],
+    excludeQueueStageKey: "SEALING_QUEUE",
+  },
+  // SEALING_QUEUE: BLISTERED bags whose read_bag_queue row shows they
+  // have been claimed by a sealing station (queue_stage_key = 'SEALING_QUEUE').
+  // No longer a duplicate of POST_BLISTER_STAGING — the two sets are disjoint.
   SEALING_QUEUE: {
     bagStages: ["BLISTERED"],
-    duplicateOf: "POST_BLISTER_STAGING",
+    queueStageFilter: "SEALING_QUEUE",
   },
-  POST_SEAL_STAGING: { bagStages: ["SEALED"] },
-  PACKAGING_QUEUE: { bagStages: ["SEALED"], duplicateOf: "POST_SEAL_STAGING" },
+  // POST_SEAL_STAGING: SEALED bags not yet claimed by packaging.
+  POST_SEAL_STAGING: {
+    bagStages: ["SEALED"],
+    excludeQueueStageKey: "PACKAGING_QUEUE",
+  },
+  // PACKAGING_QUEUE: SEALED bags already claimed by a packaging station.
+  PACKAGING_QUEUE: {
+    bagStages: ["SEALED"],
+    queueStageFilter: "PACKAGING_QUEUE",
+  },
   BOTTLE_FILL_QUEUE: { bagStages: ["STARTED"], productKind: "BOTTLE" },
   BOTTLE_STICKER_QUEUE: { bagStages: ["BOTTLE_HANDPACK"] },
   BOTTLE_INDUCTION_QUEUE: { bagStages: ["BOTTLE_STICKER"] },
@@ -89,6 +124,23 @@ export async function refreshQueueState(tx: Tx): Promise<void> {
     const productFilter = def.productKind
       ? sql`AND p.kind = ${def.productKind}`
       : sql``;
+
+    // Disambiguation join: stages that share a read_bag_state.stage value
+    // (e.g. BLISTERED for both POST_BLISTER_STAGING and SEALING_QUEUE) use
+    // read_bag_queue.queue_stage_key to split the population.
+    //   queueStageFilter  → only bags IN read_bag_queue with that stage key
+    //   excludeQueueStageKey → bags NOT in read_bag_queue at that stage key
+    //     (i.e. bag is absent from queue OR has a different queue_stage_key)
+    // Stages with neither filter keep the existing read_bag_state-only path.
+    const queueJoin = (def.queueStageFilter ?? def.excludeQueueStageKey)
+      ? sql`LEFT JOIN read_bag_queue rbq ON rbq.workflow_bag_id = rbs.workflow_bag_id`
+      : sql``;
+    const queueFilter = def.queueStageFilter
+      ? sql`AND rbq.queue_stage_key = ${def.queueStageFilter}`
+      : def.excludeQueueStageKey
+        ? sql`AND (rbq.workflow_bag_id IS NULL OR rbq.queue_stage_key != ${def.excludeQueueStageKey})`
+        : sql``;
+
     // CTE: stage member rows + computed ages. We use percentile_cont
     // directly so the rollup includes p90.
     await tx.execute(sql`
@@ -96,9 +148,11 @@ export async function refreshQueueState(tx: Tx): Promise<void> {
         SELECT EXTRACT(EPOCH FROM (now() - rbs.last_event_at))::int AS age_sec
         FROM read_bag_state rbs
         LEFT JOIN products p ON p.id = rbs.product_id
+        ${queueJoin}
         WHERE rbs.is_finalized = false
           AND rbs.stage IN (${sql.raw(stages)})
           ${productFilter}
+          ${queueFilter}
       ),
       agg AS (
         SELECT

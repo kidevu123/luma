@@ -21,21 +21,16 @@ const repo = (p: string) =>
 //   - the operator-estimate-vs-system-remaining distinction it asserted
 //     in the scan form survives in partial-bags.ts, which the third test
 //     of that block already covered and which is KEPT below.
-// PACKAGING-COMPLETE-EXTRACT-1: packagingCompleteAction's body and the
-// deferred-QR helpers moved verbatim to
-// lib/production/engine/record-packaging-complete.ts (actions.ts is
-// "use server", so the shared implementation cannot be exported from it).
-// Stitched back in where the body used to sit so these scanners keep
-// covering the whole packaging close-out path unchanged.
-const actionsSrc = readFileSync(join(__dirname, "actions.ts"), "utf8").replace(
-  "// ── lookup card by scan token",
-  `${readFileSync(
-    join(
-      __dirname,
-      "../../../../lib/production/engine/record-packaging-complete.ts",
-    ),
-    "utf8",
-  )}\n// ── lookup card by scan token`,
+// P6 Task 4 — packagingCompleteAction retired (thin forwarder with zero
+// non-test callers post P4b). Deferred-QR / empty-vs-partial audit
+// scanners below now read the engine source (record-packaging-complete.ts)
+// DIRECTLY instead of splicing it back into actions.ts.
+const engineSrc = readFileSync(
+  join(
+    __dirname,
+    "../../../../lib/production/engine/record-packaging-complete.ts",
+  ),
+  "utf8",
 );
 const partialBagsSrc = repo("lib/production/partial-bags.ts");
 const qrListSrc = repo("app/(admin)/qr-cards/qr-cards-list.tsx");
@@ -58,16 +53,16 @@ describe("Admin needs-review signal on QR-cards list", () => {
   });
 });
 
-describe("Empty/release path writes a clear audit reason", () => {
+describe("Empty/release path writes a clear audit reason (engine)", () => {
   it("releasing an empty bottle bag audits the reason distinctly from keep-partial", () => {
-    expect(actionsSrc).toMatch(/floor\.bag_qr_released_empty/);
-    expect(actionsSrc).toMatch(/reason: "bag_confirmed_empty"/);
+    expect(engineSrc).toMatch(/floor\.bag_qr_released_empty/);
+    expect(engineSrc).toMatch(/reason: "bag_confirmed_empty"/);
     // Held path keeps its own audit.
-    expect(actionsSrc).toMatch(/floor\.bag_kept_partial/);
+    expect(engineSrc).toMatch(/floor\.bag_kept_partial/);
   });
 
   it("release still only happens when confirmed empty (no regression)", () => {
-    expect(actionsSrc).toMatch(/shouldReleaseQrAfterPackagingClose/);
-    expect(actionsSrc).toMatch(/status: "IDLE", assignedWorkflowBagId: null/);
+    expect(engineSrc).toMatch(/shouldReleaseQrAfterPackagingClose/);
+    expect(engineSrc).toMatch(/status: "IDLE", assignedWorkflowBagId: null/);
   });
 });

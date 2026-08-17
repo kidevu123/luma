@@ -37,7 +37,10 @@ export type StationedExceptionEventType =
   // eligibility's isOnHold check all stayed permanently tripped once
   // round 1 wired QA_HOLD_STARTED to read_bag_state.is_on_hold — worse
   // than a pause, which has Resume. See raise-qa-hold-release.ts.
-  | "QA_HOLD_RELEASED";
+  | "QA_HOLD_RELEASED"
+  // P6 Task 6(c) — the resolution half of DOWNTIME_STARTED. DOWNTIME_ENDED
+  // existed in the schema enum since Phase A; nothing emitted it until now.
+  | "DOWNTIME_ENDED";
 
 export type EmitStationedEventInput = {
   stationId: string;

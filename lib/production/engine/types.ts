@@ -26,8 +26,13 @@ export type CompletionInput = {
    *  cards-per-press and REFUSES a sealing segment without it
    *  (SEALING_COUNTER_PRESS_ERROR). It replaces `counter` at HEAT_SEAL
    *  on the station kinds that use the machine counter — see
-   *  resolve-completion.ts. */
-  key: "counter" | "counterPresses" | "damaged" | "cases" | "displays" | "loose";
+   *  resolve-completion.ts.
+   *
+   *  `damagedPackaging` is packaging-material damage (foil, cases, labels)
+   *  reported by the operator at packaging stations — distinct from
+   *  `damaged` which is loose-unit damage (ripped cards). See the
+   *  2026-08-17 user decision and resolve-completion.ts. */
+  key: "counter" | "counterPresses" | "damaged" | "damagedPackaging" | "cases" | "displays" | "loose";
   label: string;
   unit: string | null;
   required: boolean;
@@ -173,10 +178,14 @@ export type AdvanceInput = {
     counterPresses?: number;
     /** Loose units damaged during this operation — cards ripped, bottles
      *  cracked, etc. (2026-08-13 decision). At packaging this maps to
-     *  `rippedCards`, not `damagedPackaging`: packaging-MATERIAL damage
-     *  (foil, cases, labels) is a separate exception-flow concern, not an
-     *  operator count. */
+     *  `rippedCards`. */
     damaged?: number;
+    /** Packaging-material units damaged — foil, cases, labels — reported
+     *  by the operator at packaging stations (2026-08-17 user decision).
+     *  Distinct from `damaged` (loose-unit/card damage). Maps to
+     *  `damagedPackaging` in RecordPackagingCompleteInput, replacing the
+     *  hardcoded 0. Absent is equivalent to 0 (counterPresses precedent). */
+    damagedPackaging?: number;
     cases?: number;
     displays?: number;
     loose?: number;

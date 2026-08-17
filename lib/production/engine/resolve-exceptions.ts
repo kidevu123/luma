@@ -152,6 +152,40 @@ const NON_CHECKLIST_BLOCKERS: readonly Blocker[] = [
     supervisorDetail: "raiseProductionException received an empty detail string.",
     suggestedAction: "NONE",
   },
+  // ── Dynamic-detail blockers (advance.ts) ─────────────────────────────
+  // These four codes have FIXED operator sentences and action hints but
+  // RUNTIME supervisorDetail values (an error message from a DB helper or
+  // the catch block). They live in the catalogue for the static fields
+  // so advance.ts can call blockerForWithDetail(code, runtimeDetail)
+  // instead of repeating the operator sentence and suggestedAction inline.
+  // P1 deferred "ADVANCE_REJECTED / ADVANCE_FAILED are literals" — now
+  // resolved; P5 added OPEN_ALLOCATION_ON_BAG and PRODUCT_ASSIGN_REJECTED,
+  // giving four dynamic-detail codes (≥3 → factory built per plan).
+  {
+    code: "ADVANCE_FAILED",
+    operatorSentence: "Something went wrong recording this. Ask a supervisor.",
+    supervisorDetail: "(runtime error message)",
+    suggestedAction: "NOTIFY_SUPERVISOR",
+  },
+  {
+    code: "ADVANCE_REJECTED",
+    operatorSentence: "This step could not be recorded. Ask a supervisor.",
+    supervisorDetail: "(runtime rejection reason)",
+    suggestedAction: "NOTIFY_SUPERVISOR",
+  },
+  {
+    code: "OPEN_ALLOCATION_ON_BAG",
+    operatorSentence: "This bag is still open from a previous run. Ask a supervisor.",
+    supervisorDetail: "(runtime allocation block message)",
+    suggestedAction: "NOTIFY_SUPERVISOR",
+  },
+  {
+    code: "PRODUCT_ASSIGN_REJECTED",
+    operatorSentence:
+      "This product could not be saved on the bag. Ask a supervisor.",
+    supervisorDetail: "(runtime assignment rejection reason)",
+    suggestedAction: "NOTIFY_SUPERVISOR",
+  },
 ];
 
 const BLOCKER_CATALOGUE: ReadonlyMap<string, Blocker> = new Map([
@@ -183,6 +217,18 @@ export function blockerFor(code: string): Blocker {
       suggestedAction: "NOTIFY_SUPERVISOR",
     }
   );
+}
+
+/** Variant of blockerFor for codes whose operatorSentence and
+ *  suggestedAction are fixed (in the catalogue) but whose supervisorDetail
+ *  is only known at runtime (e.g. an error message from a DB helper).
+ *
+ *  Pulls the static fields from BLOCKER_CATALOGUE and substitutes the
+ *  caller-supplied detail. Falls back to the same generic Blocker as
+ *  blockerFor so an unknown code never throws. */
+export function blockerForWithDetail(code: string, supervisorDetail: string): Blocker {
+  const base = blockerFor(code);
+  return { ...base, supervisorDetail };
 }
 
 export function blockersFromChecks(checks: readonly CheckResult[]): Blocker[] {

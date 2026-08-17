@@ -47,6 +47,19 @@ export function resolveCompletionInputs(
       { key: "cases", label: "Cases", unit: "cases", required: true },
       { key: "displays", label: "Displays", unit: "displays", required: false },
       { key: "loose", label: "Loose units", unit: "units", required: false },
+      // 2026-08-17 user decision: packaging stations get a second compact
+      // damage input for packaging-material damage (foil, cases, labels) —
+      // distinct from the loose-unit `damaged` field below which counts
+      // ripped/cracked cards and bottles. Rendered via the same
+      // CompletionInput-driven loop as every other field; no special-casing
+      // in the screen. Absent → 0 in buildRecordPackagingCompleteInput,
+      // following the counterPresses precedent.
+      {
+        key: "damagedPackaging",
+        label: "Damaged packaging",
+        unit: "units",
+        required: false,
+      },
     );
   } else if (usesSealingCounter) {
     inputs.push({
