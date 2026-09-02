@@ -57,6 +57,7 @@ export type PoCloseoutRow = PoCloseoutRowVerdict & {
   startedAt: Date | null;
   finalizedAt: Date | null;
   autoIssueBlockedMessage: string | null;
+  productId: string | null;
 };
 
 export type PoCloseoutSummary = {
@@ -425,6 +426,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       startedAt: wf?.startedAt ?? null,
       finalizedAt: wf?.finalizedAt ?? null,
       autoIssueBlockedMessage: null,
+      productId: wf?.productId ?? null,
     });
   }
 

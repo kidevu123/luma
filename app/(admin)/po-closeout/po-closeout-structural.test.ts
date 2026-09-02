@@ -35,6 +35,11 @@ describe("PO closeout loader — read-only, reuses existing classifiers (no dupl
     expect(loaderSrc).toMatch(/mapLatestAutoCreateBlockedByWorkflowBag/);
     expect(repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx")).toMatch(/Auto-issue blocked:/);
   });
+  it("SIMPLIFY-B: product-setup rows deep-link to the product page, not bare /products", () => {
+    const rows = repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx");
+    expect(rows).toMatch(/\/products\/\$\{row\.productId\}/);
+    expect(rows).not.toMatch(/href: "\/products", label: "Open products"/);
+  });
 });
 
 describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped, no Zoho commit", () => {

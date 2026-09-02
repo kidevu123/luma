@@ -54,7 +54,13 @@ function rowLink(row: PoCloseoutRow): { href: string; label: string } | null {
     case "QUEUE_OR_RETRY_ZOHO":
       return { href: "/zoho-production-operations", label: "Zoho output" };
     case "FIX_PRODUCT_SETUP":
-      return { href: "/products", label: "Open products" };
+      // SIMPLIFY-B — /products/[id]?from=output-queue is the same deep-link
+      // the packaging-backlog row actions use (see backlog-row-actions.tsx);
+      // app/(admin)/products/[id]/page.tsx reads that exact param value to
+      // show the setup-readiness banner and a back link.
+      return row.productId
+        ? { href: `/products/${row.productId}?from=output-queue`, label: "Fix product setup" }
+        : { href: "/products", label: "Open products list" };
     default:
       return row.receiveId ? { href: `/inbound/${row.receiveId}`, label: "Open receive" } : null;
   }
