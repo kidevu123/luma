@@ -59,15 +59,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  let [user] = await db.select().from(users).where(sql`lower(${users.email}) = ${email}`);
+  // Subject-first lookup: the Authentik subject is the stable identity. An
+  // email-only lookup 500s with a users_authentik_unique violation when the
+  // IdP email changes for an already-provisioned account (the email misses,
+  // the JIT insert collides on the subject).
+  let [user] = await db.select().from(users).where(eq(users.authentikSubject, userinfo.sub));
+
+  if (!user) {
+    [user] = await db.select().from(users).where(sql`lower(${users.email}) = ${email}`);
+  }
 
   if (!user) {
     // JIT provision: first SSO login auto-creates the account with STAFF role.
-    // Admin assigns the correct role afterward in the office UI.
+    // Admin assigns the correct role afterward in the office UI. Conflict-safe:
+    // a concurrent callback for the same subject re-selects instead of 500ing.
     [user] = await db
       .insert(users)
       .values({ email, role: "STAFF", authentikSubject: userinfo.sub })
+      .onConflictDoNothing()
       .returning();
+    if (!user) {
+      [user] = await db.select().from(users).where(eq(users.authentikSubject, userinfo.sub));
+    }
   }
 
   if (!user || user.disabledAt) {

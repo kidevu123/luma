@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.37.1] — 2026-09-02
+
+- Fix: SSO callback 500 (`users_authentik_unique` violation) when the Authentik email changed for an already-provisioned account. The callback now resolves identity by Authentik subject first, falls back to email, and the JIT insert is conflict-safe (`onConflictDoNothing` + re-select by subject). Structural pins added for the lookup order.
+
 ## [1.37.0] — 2026-09-02
 
 - Simplify Phase A: the PO closeout page rebucketed around where the next step happens. Tabs are now Do here / On floor / Waiting on Zoho / Done (pure `deriveCloseoutBucket` in the verdict layer), with 0-tablet bags hidden behind a "show empty bags" toggle and the blocker stack collapsed to one recommended next action. Rows carry an inline Issue lot / Release lot button (reusing the existing finished-lot actions verbatim — no new mutation endpoints). Dead links became real: "Finalize on floor" deep-links to `/workflow-submissions?bag=<id>` (UUID-validated, filtered, row auto-expanded, count-honest status line), and lot issuance links open `/finished-lots/new?bagId=<workflowBagId>` preselected. `AutoRefreshOnFocus` is suppressed while a drawer, the guided overlay, or a focused form field is active, so background refresh no longer wipes in-progress work. Finished lots on hold release in one click ("Release lot", reason optional, transition table extracted to pure `lot-transitions.ts`; blank reason audits as null). Zero-bag POs collapse into a "nothing to close out" section on the closeout index.
