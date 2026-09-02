@@ -56,7 +56,7 @@ export default async function WorkflowSubmissionsPage({
   const from = typeof sp["from"] === "string" && sp["from"] !== "" ? sp["from"] : null;
   const to = typeof sp["to"] === "string" && sp["to"] !== "" ? sp["to"] : null;
   // SIMPLIFY-A — deep-link target for closeout's "Finalize on floor" links.
-  const bag = typeof sp["bag"] === "string" && /^[0-9a-f-]{36}$/i.test(sp["bag"]) ? sp["bag"] : null;
+  const bag = typeof sp["bag"] === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sp["bag"]) ? sp["bag"] : null;
 
   const conditions = [];
 
