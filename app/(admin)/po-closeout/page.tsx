@@ -55,6 +55,11 @@ export default async function PoCloseoutListPage({
       )
     : byTab;
 
+  // SIMPLIFY-A — a PO with no bags has nothing to close out; a full row costs a
+  // click just to learn that. Collapse them under the table.
+  const withBags = filtered.filter((p) => p.bagCount > 0);
+  const emptyPos = filtered.filter((p) => p.bagCount === 0);
+
   const tabCount = (key: TabKey) =>
     key === "all" ? pos.length : key === "active" ? activeCount : closedCount;
 
@@ -107,7 +112,7 @@ export default async function PoCloseoutListPage({
         </form>
       </div>
 
-      {filtered.length === 0 ? (
+      {withBags.length === 0 && emptyPos.length === 0 ? (
         <EmptyState
           icon={ClipboardCheck}
           title={
@@ -126,77 +131,95 @@ export default async function PoCloseoutListPage({
           }
         />
       ) : (
-        <DataTable>
-          <THead>
-            <TR>
-              <TH>PO #</TH>
-              <TH>Vendor</TH>
-              <TH>PO status</TH>
-              <TH>Closeout</TH>
-              <TH className="text-right">Receives</TH>
-              <TH className="text-right">Bags</TH>
-              <TH className="text-right">Done</TH>
-              <TH className="text-right">Open</TH>
-              <TH className="text-right">Zoho blockers</TH>
-              <TH>{" "}</TH>
-            </TR>
-          </THead>
-          <tbody>
-            {filtered.map((p) => (
-              <TR key={p.id}>
-                <TD className="font-mono text-xs font-semibold">{p.poNumber}</TD>
-                <TD className="text-sm">{p.vendorName ?? "—"}</TD>
-                <TD>
-                  <StatusPill kind="neutral">{p.status}</StatusPill>
-                </TD>
-                <TD>
-                  <div className="flex items-center gap-1.5">
-                    <StatusPill kind={p.bucket === "CLOSED" ? "ok" : "warn"}>
-                      {p.bucket === "CLOSED" ? "Closed" : "Active"}
-                    </StatusPill>
-                    {p.closedByZohoOverride ? (
-                      <span
-                        className="inline-flex items-center h-5 px-1.5 rounded border border-sky-300/50 bg-sky-50/80 text-[10px] font-medium text-sky-700"
-                        title="Closed because the PO is closed in Zoho; some Luma work was never completed. Open the closeout for details."
-                      >
-                        Zoho
-                      </span>
-                    ) : null}
-                  </div>
-                </TD>
-                <TD className="text-right tabular-nums text-xs">{p.receiveCount}</TD>
-                <TD className="text-right tabular-nums text-xs">{p.bagCount}</TD>
-                <TD className="text-right tabular-nums text-xs text-good-700">
-                  {p.doneBagCount}
-                </TD>
-                <TD
-                  className={cn(
-                    "text-right tabular-nums text-xs",
-                    p.openBagCount > 0 ? "font-semibold text-warn-700" : "text-text-muted",
-                  )}
-                >
-                  {p.openBagCount}
-                </TD>
-                <TD
-                  className={cn(
-                    "text-right tabular-nums text-xs",
-                    p.zohoBlockerCount > 0 ? "font-semibold text-crit-700" : "text-text-muted",
-                  )}
-                >
-                  {p.zohoBlockerCount}
-                </TD>
-                <TD className="text-right">
-                  <Link
-                    href={`/po-closeout/${p.id}`}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline"
-                  >
-                    Open closeout <ArrowRight className="h-3 w-3" />
-                  </Link>
-                </TD>
+        <>
+          <DataTable>
+            <THead>
+              <TR>
+                <TH>PO #</TH>
+                <TH>Vendor</TH>
+                <TH>PO status</TH>
+                <TH>Closeout</TH>
+                <TH className="text-right">Receives</TH>
+                <TH className="text-right">Bags</TH>
+                <TH className="text-right">Done</TH>
+                <TH className="text-right">Open</TH>
+                <TH className="text-right">Zoho blockers</TH>
+                <TH>{" "}</TH>
               </TR>
-            ))}
-          </tbody>
+            </THead>
+            <tbody>
+              {withBags.map((p) => (
+                <TR key={p.id}>
+                  <TD className="font-mono text-xs font-semibold">{p.poNumber}</TD>
+                  <TD className="text-sm">{p.vendorName ?? "—"}</TD>
+                  <TD>
+                    <StatusPill kind="neutral">{p.status}</StatusPill>
+                  </TD>
+                  <TD>
+                    <div className="flex items-center gap-1.5">
+                      <StatusPill kind={p.bucket === "CLOSED" ? "ok" : "warn"}>
+                        {p.bucket === "CLOSED" ? "Closed" : "Active"}
+                      </StatusPill>
+                      {p.closedByZohoOverride ? (
+                        <span
+                          className="inline-flex items-center h-5 px-1.5 rounded border border-sky-300/50 bg-sky-50/80 text-[10px] font-medium text-sky-700"
+                          title="Closed because the PO is closed in Zoho; some Luma work was never completed. Open the closeout for details."
+                        >
+                          Zoho
+                        </span>
+                      ) : null}
+                    </div>
+                  </TD>
+                  <TD className="text-right tabular-nums text-xs">{p.receiveCount}</TD>
+                  <TD className="text-right tabular-nums text-xs">{p.bagCount}</TD>
+                  <TD className="text-right tabular-nums text-xs text-good-700">
+                    {p.doneBagCount}
+                  </TD>
+                  <TD
+                    className={cn(
+                      "text-right tabular-nums text-xs",
+                      p.openBagCount > 0 ? "font-semibold text-warn-700" : "text-text-muted",
+                    )}
+                  >
+                    {p.openBagCount}
+                  </TD>
+                  <TD
+                    className={cn(
+                      "text-right tabular-nums text-xs",
+                      p.zohoBlockerCount > 0 ? "font-semibold text-crit-700" : "text-text-muted",
+                    )}
+                  >
+                    {p.zohoBlockerCount}
+                  </TD>
+                  <TD className="text-right">
+                    <Link
+                      href={`/po-closeout/${p.id}`}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline"
+                    >
+                      Open closeout <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
         </DataTable>
+        {emptyPos.length > 0 ? (
+          <details className="rounded-lg border border-border bg-surface-2/40 px-4 py-2 text-[12px] text-text-muted">
+            <summary className="cursor-pointer">
+              {emptyPos.length} PO{emptyPos.length === 1 ? " has" : "s have"} no bags — nothing to close out
+            </summary>
+            <ul className="mt-2 space-y-1">
+              {emptyPos.map((p) => (
+                <li key={p.id} className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-semibold">{p.poNumber}</span>
+                  <span>{p.vendorName ?? "—"}</span>
+                  <Link href={`/po-closeout/${p.id}`} className="text-xs text-brand-700 hover:underline">Open anyway</Link>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+        </>
       )}
     </div>
   );

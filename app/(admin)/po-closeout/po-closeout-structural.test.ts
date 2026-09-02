@@ -105,6 +105,11 @@ describe("PO closeout pages", () => {
   it("is registered in the admin nav under reconciliation & output", () => {
     expect(navSrc).toMatch(/href: "\/po-closeout", label: "Close out POs"/);
   });
+  it("SIMPLIFY-A: zero-bag POs are collapsed, not full rows", () => {
+    expect(listPageSrc).toMatch(/bagCount === 0/);
+    expect(listPageSrc).toMatch(/nothing to close out/i);
+    expect(listPageSrc).toMatch(/<details/);
+  });
 });
 
 describe("QUEUE-FIX-1: zoho-actions drawer — surfaces action refusals; disables queue for non-queueable ops", () => {
