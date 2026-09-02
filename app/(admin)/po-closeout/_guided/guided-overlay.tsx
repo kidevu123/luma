@@ -12,6 +12,7 @@ import Link from "next/link";
 import { X } from "lucide-react";
 import type { GuidedStep } from "@/lib/production/guided-closeout";
 import type { BagCloseoutRowFacts } from "@/lib/db/queries/bag-closeout-detail";
+import { useRefreshSuppression } from "@/lib/ui/refresh-suppression";
 import { BagDrawer } from "../_drawer/bag-drawer";
 import { SafeBatchStep } from "./safe-batch-step";
 
@@ -47,6 +48,7 @@ export function GuidedOverlay({
     topBlockers: Array<{ reason: string; count: number }>;
   } | null;
 }) {
+  useRefreshSuppression();
   const stepHref = (n: number) => `/po-closeout/${poId}?guided=1&step=${n}`;
   const exitHref = `/po-closeout/${poId}`;
   const isSafeBatchStep = hasSafeBatch && step === 0 && !finish;

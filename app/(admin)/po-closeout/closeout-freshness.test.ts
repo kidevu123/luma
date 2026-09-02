@@ -81,6 +81,14 @@ describe("open tabs cannot silently go stale", () => {
     expect(detailPageSrc).toMatch(/Data as of/);
     expect(loaderSrc).toMatch(/evaluatedAt: new Date\(\)/);
   });
+
+  it("auto-refresh is suppressed while a drawer/overlay is open or a form is focused", () => {
+    const src = repo("components/admin/auto-refresh-on-focus.tsx");
+    expect(src).toMatch(/isRefreshSuppressed\(\)/);
+    expect(src).toMatch(/HTMLInputElement/);
+    expect(repo("app/(admin)/po-closeout/_drawer/bag-drawer.tsx")).toMatch(/useRefreshSuppression\(\)/);
+    expect(repo("app/(admin)/po-closeout/_guided/guided-overlay.tsx")).toMatch(/useRefreshSuppression\(\)/);
+  });
 });
 
 describe("mutating actions revalidate the closeout paths", () => {
