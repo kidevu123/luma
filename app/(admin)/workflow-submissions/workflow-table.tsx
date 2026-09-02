@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useCallback } from "react";
+import { useActionState, useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { loadBagEventsAction } from "./load-events-action";
@@ -580,9 +580,11 @@ function MissingBlisterCloseoutRepairForm({
 function BagRow({
   bag,
   canAdminRepair,
+  autoExpand = false,
 }: {
   bag: WorkflowBagRow;
   canAdminRepair: boolean;
+  autoExpand?: boolean;
 }) {
   const [expand, setExpand] = useState<ExpandState>({ status: "idle" });
 
@@ -603,6 +605,14 @@ function BagRow({
       setExpand({ status: "error", message });
     }
   }, [expand.status, bag.id]);
+
+  const autoExpandedRef = useRef(false);
+  useEffect(() => {
+    if (autoExpand && !autoExpandedRef.current && expand.status === "idle") {
+      autoExpandedRef.current = true;
+      void toggle();
+    }
+  }, [autoExpand, expand.status, toggle]);
 
   const isOpen = expand.status === "loaded" || expand.status === "error";
 
@@ -770,9 +780,11 @@ function BagRow({
 export function WorkflowTable({
   bags,
   canAdminRepair = false,
+  autoExpandBagId = null,
 }: {
   bags: WorkflowBagRow[];
   canAdminRepair?: boolean;
+  autoExpandBagId?: string | null;
 }) {
   return (
     <DataTable>
@@ -797,6 +809,7 @@ export function WorkflowTable({
             key={bag.id}
             bag={bag}
             canAdminRepair={canAdminRepair}
+            autoExpand={bag.id === autoExpandBagId}
           />
         ))}
       </tbody>

@@ -3,6 +3,7 @@
 // product, or bag number, with stage, operator, counts, and inline
 // event history.
 
+import Link from "next/link";
 import { db } from "@/lib/db";
 import {
   workflowBags,
@@ -54,6 +55,8 @@ export default async function WorkflowSubmissionsPage({
   const finalized = typeof sp["finalized"] === "string" ? sp["finalized"] : "all";
   const from = typeof sp["from"] === "string" && sp["from"] !== "" ? sp["from"] : null;
   const to = typeof sp["to"] === "string" && sp["to"] !== "" ? sp["to"] : null;
+  // SIMPLIFY-A — deep-link target for closeout's "Finalize on floor" links.
+  const bag = typeof sp["bag"] === "string" && /^[0-9a-f-]{36}$/i.test(sp["bag"]) ? sp["bag"] : null;
 
   const conditions = [];
 
@@ -86,6 +89,10 @@ export default async function WorkflowSubmissionsPage({
 
   if (to !== null) {
     conditions.push(lte(workflowBags.startedAt, new Date(`${to}T23:59:59`)));
+  }
+
+  if (bag !== null) {
+    conditions.push(eq(inventoryBags.id, bag));
   }
 
   const rows = await db
@@ -323,6 +330,18 @@ export default async function WorkflowSubmissionsPage({
         bag{bags.length === 1 ? "" : "s"}
       </div>
 
+      {bag !== null && (
+        <div className="flex items-center gap-2 text-[11px] text-text-subtle">
+          <span>Showing 1 bag from PO closeout.</span>
+          <Link
+            href="/workflow-submissions"
+            className="inline-flex items-center h-5 px-2 rounded-full border border-border bg-surface-2 text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
+          >
+            Clear filter
+          </Link>
+        </div>
+      )}
+
       {bags.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
@@ -330,7 +349,11 @@ export default async function WorkflowSubmissionsPage({
           description="Adjust the search or date range above to broaden results."
         />
       ) : (
-        <WorkflowTable bags={bags} canAdminRepair={canAdminRepair} />
+        <WorkflowTable
+          bags={bags}
+          canAdminRepair={canAdminRepair}
+          autoExpandBagId={bag !== null && bags.length === 1 ? bags[0]?.id ?? null : null}
+        />
       )}
     </div>
   );
