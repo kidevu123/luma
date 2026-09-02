@@ -87,7 +87,7 @@ export function StatusActions({ lotId, status }: { lotId: string; status: string
                 reasonOpen.next === "RECALLED" ? "destructive" : "primary"
               }
               disabled={(!reason.trim() && !reasonOpen.optional) || pending !== null}
-              onClick={() => go(reasonOpen.next, reason.trim())}
+              onClick={() => go(reasonOpen.next, reason.trim() || undefined)}
             >
               Confirm
             </Button>
