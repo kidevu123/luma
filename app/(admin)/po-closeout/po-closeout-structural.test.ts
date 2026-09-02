@@ -67,11 +67,9 @@ describe("PO closeout pages", () => {
     expect(listPageSrc).toMatch(/listCloseoutPoIndexRollups/);
     expect(listPageSrc).toMatch(/Search PO number or vendor/);
   });
-  it("detail page is admin-gated, renders summary cards, filter tabs, checklist, links, batch buttons, plain-language copy", () => {
+  it("detail page is admin-gated, renders summary cards, checklist, links, batch buttons, plain-language copy", () => {
     expect(detailPageSrc).toMatch(/requireAdmin\(\)/);
     expect(detailPageSrc).toMatch(/loadPoCloseout\(poId\)/);
-    expect(detailPageSrc).toMatch(/Ready for action/);
-    expect(detailPageSrc).toMatch(/Needs review/);
     expect(detailPageSrc).toMatch(/PoBatchButtons/);
     expect(detailPageSrc).toMatch(/Finalized.{0,40}floor work is complete/);
     expect(detailPageSrc).toMatch(/Done.{0,60}no manual Luma action remains/);
@@ -87,6 +85,14 @@ describe("PO closeout pages", () => {
     expect(rowsSrc).toMatch(/\/zoho-production-operations/);
     // Avoid the "open allocation session" jargon in UI copy.
     expect(detailPageSrc).not.toMatch(/open allocation session/i);
+  });
+  it("detail page renders bucket tabs from the pure bucket classifier (no inline policy)", () => {
+    expect(detailPageSrc).toMatch(/deriveCloseoutBucket/);
+    expect(detailPageSrc).toMatch(/summarizeBuckets/);
+    expect(detailPageSrc).toMatch(/recommendCloseoutNextAction/);
+    expect(detailPageSrc).toMatch(/"do-here"/);
+    expect(detailPageSrc).toMatch(/Waiting on Zoho/);
+    expect(detailPageSrc).toMatch(/empty bag/i);
   });
   it("is registered in the admin nav under reconciliation & output", () => {
     expect(navSrc).toMatch(/href: "\/po-closeout", label: "Close out POs"/);
