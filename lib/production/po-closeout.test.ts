@@ -482,3 +482,59 @@ describe("classifyPoCloseoutIndexBucket with zohoTerminal", () => {
     ).toBe("CLOSED");
   });
 });
+
+import { deriveCloseoutBucket, summarizeBuckets, type CloseoutBucket } from "./po-closeout";
+
+describe("SIMPLIFY-A: deriveCloseoutBucket — action-oriented closeout buckets", () => {
+  const base = { status: "NEEDS_REVIEW" as const, action: "REVIEW_MANUALLY" as const, workflowBagId: "wf-1" };
+
+  it("DONE status is DONE regardless of action", () => {
+    expect(deriveCloseoutBucket({ ...base, status: "DONE", action: "NONE" }, 0)).toBe("DONE");
+    expect(deriveCloseoutBucket({ ...base, status: "DONE", action: "NONE" }, null)).toBe("DONE");
+  });
+
+  it("in-progress floor run (workflow exists) is ON_FLOOR even with 0 produced so far", () => {
+    expect(
+      deriveCloseoutBucket({ status: "NEEDS_REVIEW", action: "START_OR_FINALIZE_WORKFLOW", workflowBagId: "wf-1" }, 0),
+    ).toBe("ON_FLOOR");
+  });
+
+  it("never-started bag with no production is EMPTY (hidden by default)", () => {
+    expect(
+      deriveCloseoutBucket({ status: "NEEDS_REVIEW", action: "START_OR_FINALIZE_WORKFLOW", workflowBagId: null }, 0),
+    ).toBe("EMPTY");
+    expect(
+      deriveCloseoutBucket({ status: "NEEDS_REVIEW", action: "START_OR_FINALIZE_WORKFLOW", workflowBagId: null }, null),
+    ).toBe("EMPTY");
+  });
+
+  it("Zoho queue/retry work is WAITING_ZOHO whether ready, not-ready, or failed", () => {
+    expect(deriveCloseoutBucket({ status: "READY_FOR_ACTION", action: "QUEUE_OR_RETRY_ZOHO", workflowBagId: "wf-1" }, 100)).toBe("WAITING_ZOHO");
+    expect(deriveCloseoutBucket({ status: "NEEDS_REVIEW", action: "QUEUE_OR_RETRY_ZOHO", workflowBagId: "wf-1" }, 100)).toBe("WAITING_ZOHO");
+    expect(deriveCloseoutBucket({ status: "BLOCKED", action: "QUEUE_OR_RETRY_ZOHO", workflowBagId: "wf-1" }, 100)).toBe("WAITING_ZOHO");
+  });
+
+  it("everything else actionable on this page is DO_HERE", () => {
+    const doHereActions = [
+      "REPAIR_QR_RESERVATION",
+      "CORRECT_STARTING_BALANCE",
+      "RECORD_REMAINING_OR_CLOSE_PARTIAL",
+      "AUTO_ISSUE_FINISHED_LOT",
+      "ISSUE_FINISHED_LOT",
+      "AUTO_RELEASE_FINISHED_LOT",
+      "REVIEW_QC_HOLD",
+      "FIX_PRODUCT_SETUP",
+      "REVIEW_MANUALLY",
+    ] as const;
+    for (const action of doHereActions) {
+      expect(deriveCloseoutBucket({ status: "NEEDS_REVIEW", action, workflowBagId: "wf-1" }, 500)).toBe("DO_HERE");
+    }
+  });
+
+  it("summarizeBuckets counts every bucket, zero-filled", () => {
+    const buckets: CloseoutBucket[] = ["DO_HERE", "DO_HERE", "DONE", "EMPTY"];
+    expect(summarizeBuckets(buckets)).toEqual({
+      DO_HERE: 2, ON_FLOOR: 0, WAITING_ZOHO: 0, DONE: 1, EMPTY: 1,
+    });
+  });
+});

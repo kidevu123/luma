@@ -474,3 +474,35 @@ export function summarizeRowStatuses(rowStatuses: PoCloseoutRowStatus[]): {
     blocked: rowStatuses.filter((s) => s === "BLOCKED").length,
   };
 }
+
+// ── SIMPLIFY-A · action-oriented closeout buckets ───────────────────────────
+// Rebuckets the row verdict by WHERE the next step happens, so the closeout
+// page can answer "what needs a person HERE" without mixing floor state,
+// lot work, and Zoho into one review pile. Pure derivation over the verdict
+// the classifier already computed — adds no policy of its own.
+
+export type CloseoutBucket = "DO_HERE" | "ON_FLOOR" | "WAITING_ZOHO" | "DONE" | "EMPTY";
+
+export function deriveCloseoutBucket(
+  row: Pick<PoCloseoutRowVerdict, "status" | "action"> & { workflowBagId: string | null },
+  /** From the bag production summary; null when no summary exists. */
+  producedTablets: number | null,
+): CloseoutBucket {
+  if (row.status === "DONE") return "DONE";
+  if (row.action === "START_OR_FINALIZE_WORKFLOW") {
+    // An existing run must be finished on the floor; a never-started bag with
+    // zero production is empty noise on a closeout worklist.
+    if (row.workflowBagId != null) return "ON_FLOOR";
+    return (producedTablets ?? 0) > 0 ? "ON_FLOOR" : "EMPTY";
+  }
+  if (row.action === "QUEUE_OR_RETRY_ZOHO") return "WAITING_ZOHO";
+  return "DO_HERE";
+}
+
+export function summarizeBuckets(buckets: CloseoutBucket[]): Record<CloseoutBucket, number> {
+  const out: Record<CloseoutBucket, number> = {
+    DO_HERE: 0, ON_FLOOR: 0, WAITING_ZOHO: 0, DONE: 0, EMPTY: 0,
+  };
+  for (const b of buckets) out[b] += 1;
+  return out;
+}
