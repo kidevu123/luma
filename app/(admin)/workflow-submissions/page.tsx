@@ -332,7 +332,13 @@ export default async function WorkflowSubmissionsPage({
 
       {bag !== null && (
         <div className="flex items-center gap-2 text-[11px] text-text-subtle">
-          <span>Showing 1 bag from PO closeout.</span>
+          <span>
+            {bags.length === 0
+              ? "No workflow found for this bag yet — it may not have been started on the floor."
+              : bags.length === 1
+                ? "Showing 1 bag from PO closeout."
+                : `Showing ${bags.length} workflow runs for this bag from PO closeout.`}
+          </span>
           <Link
             href="/workflow-submissions"
             className="inline-flex items-center h-5 px-2 rounded-full border border-border bg-surface-2 text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
