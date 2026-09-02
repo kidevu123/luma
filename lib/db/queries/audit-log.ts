@@ -147,3 +147,51 @@ export async function listRecentAuditLogs(
     .orderBy(desc(auditLog.createdAt))
     .limit(limit);
 }
+
+// SIMPLIFY-B — latest audit row per target, pure half. The packaging engine
+// records WHY auto-issue was blocked only in audit_log
+// (finished_lot.auto_create_blocked); closeout surfaces the newest reason
+// per workflow bag instead of leaving operators guessing.
+export function pickLatestPerTarget<T extends { targetId: string | null; createdAt: Date }>(
+  rows: T[],
+): Map<string, T> {
+  const out = new Map<string, T>();
+  for (const row of rows) {
+    if (row.targetId == null) continue;
+    const prev = out.get(row.targetId);
+    if (!prev || row.createdAt > prev.createdAt) out.set(row.targetId, row);
+  }
+  return out;
+}
+
+export async function mapLatestAutoCreateBlockedByWorkflowBag(
+  workflowBagIds: string[],
+): Promise<Map<string, { reason: string; message: string }>> {
+  if (workflowBagIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      targetId: auditLog.targetId,
+      createdAt: auditLog.createdAt,
+      after: auditLog.after,
+    })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.targetType, "WorkflowBag"),
+        eq(auditLog.action, "finished_lot.auto_create_blocked"),
+        inArray(auditLog.targetId, workflowBagIds),
+      ),
+    )
+    .orderBy(desc(auditLog.createdAt))
+    .limit(500);
+  const latest = pickLatestPerTarget(rows);
+  const out = new Map<string, { reason: string; message: string }>();
+  for (const [id, row] of latest) {
+    const after = (row.after ?? {}) as { reason?: unknown; message?: unknown };
+    out.set(id, {
+      reason: typeof after.reason === "string" ? after.reason : "UNKNOWN",
+      message: typeof after.message === "string" ? after.message : "Auto-issue was blocked at packaging close-out.",
+    });
+  }
+  return out;
+}

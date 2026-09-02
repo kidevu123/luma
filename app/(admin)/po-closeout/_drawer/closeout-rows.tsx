@@ -143,6 +143,11 @@ export function CloseoutRows({
                   <TD>
                     <div className="text-xs font-medium text-text-strong">{row.actionLabel}</div>
                     <div className="text-[10px] text-text-muted">{row.reason}</div>
+                    {row.autoIssueBlockedMessage && row.autoIssueBlockedMessage !== row.reason ? (
+                      <div className="text-[10px] text-amber-700">
+                        Auto-issue blocked: {row.autoIssueBlockedMessage}
+                      </div>
+                    ) : null}
                     <RowActionButton row={row} />
                   </TD>
                   <TD>

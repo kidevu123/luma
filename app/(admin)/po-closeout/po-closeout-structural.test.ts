@@ -31,6 +31,10 @@ describe("PO closeout loader — read-only, reuses existing classifiers (no dupl
   it("fails closed per row (try/catch around heavy evaluators)", () => {
     expect(loaderSrc).toMatch(/catch\s*\{/);
   });
+  it("SIMPLIFY-B: loader surfaces the latest auto_create_blocked audit reason per bag", () => {
+    expect(loaderSrc).toMatch(/mapLatestAutoCreateBlockedByWorkflowBag/);
+    expect(repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx")).toMatch(/Auto-issue blocked:/);
+  });
 });
 
 describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped, no Zoho commit", () => {

@@ -22,6 +22,7 @@ import {
 } from "@/lib/db/schema";
 import { evaluateInventoryBagReadiness } from "@/lib/production/floor-readiness";
 import { canRepairQrReservation } from "@/lib/db/queries/bag-edits";
+import { mapLatestAutoCreateBlockedByWorkflowBag } from "@/lib/db/queries/audit-log";
 import { getProductionOutputBacklogRow } from "@/lib/db/queries/production-output-backlog";
 import { evaluateFinishedLotReleaseEligibility } from "@/lib/production/finished-lot-release-eligibility";
 import { computeOpenSessionRebaseEligibility } from "@/lib/production/open-session-rebase";
@@ -55,6 +56,7 @@ export type PoCloseoutRow = PoCloseoutRowVerdict & {
   zoho: PoCloseoutZohoStatus;
   startedAt: Date | null;
   finalizedAt: Date | null;
+  autoIssueBlockedMessage: string | null;
 };
 
 export type PoCloseoutSummary = {
@@ -422,7 +424,22 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       zoho: zohoStatus,
       startedAt: wf?.startedAt ?? null,
       finalizedAt: wf?.finalizedAt ?? null,
+      autoIssueBlockedMessage: null,
     });
+  }
+
+  // SIMPLIFY-B — batch-fetch the newest auto_create_blocked audit reason for
+  // just the bags that reached "finalized but no lot yet" (the only rows
+  // where auto-issue could have been attempted and blocked). One query for
+  // the whole PO, not one per row.
+  const blockedCandidates = rows
+    .filter((r) => r.workflowBagId && r.checklist.floorFinalizedOrExcluded && !r.finishedLotId)
+    .map((r) => r.workflowBagId!);
+  const autoIssueBlockedByBag = await mapLatestAutoCreateBlockedByWorkflowBag(blockedCandidates);
+  for (const r of rows) {
+    r.autoIssueBlockedMessage = r.workflowBagId
+      ? (autoIssueBlockedByBag.get(r.workflowBagId)?.message ?? null)
+      : null;
   }
 
   const statusCounts = summarizeRowStatuses(rows.map((r) => r.status));
