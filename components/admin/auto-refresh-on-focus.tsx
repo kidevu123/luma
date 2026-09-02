@@ -12,6 +12,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { isRefreshSuppressed } from "@/lib/ui/refresh-suppression";
 
 const MIN_REFRESH_GAP_MS = 15_000;
 
@@ -26,6 +27,11 @@ export function AutoRefreshOnFocus({
 
   React.useEffect(() => {
     const refresh = () => {
+      // Never refresh under an operator mid-task: an open drawer/overlay holds
+      // suppression, and a focused form control means someone is typing.
+      if (isRefreshSuppressed()) return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return;
       const now = Date.now();
       if (now - lastRefreshRef.current < MIN_REFRESH_GAP_MS) return;
       lastRefreshRef.current = now;

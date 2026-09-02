@@ -14,6 +14,7 @@ import { BagProductionSummaryInline } from "@/components/admin/bag-production-su
 import type { BagProductionSummary } from "@/lib/production/bag-production-summary";
 import type { PoCloseoutRow } from "@/lib/db/queries/po-closeout";
 import { BagDrawer } from "./bag-drawer";
+import { RowActionButton } from "./row-action-button";
 
 const ZOHO_LABEL: Record<string, string> = {
   COMMITTED: "Committed",
@@ -30,13 +31,21 @@ function rowLink(row: PoCloseoutRow): { href: string; label: string } | null {
     case "REPAIR_QR_RESERVATION":
       return row.receiveId ? { href: `/inbound/${row.receiveId}`, label: "Open receive" } : null;
     case "START_OR_FINALIZE_WORKFLOW":
-      return { href: "/workflow-submissions", label: "Open workflows" };
+      // SIMPLIFY-A — land on the exact bag in the workflows list, not an
+      // unfiltered list of every bag.
+      return { href: `/workflow-submissions?bag=${row.inventoryBagId}`, label: "Finalize on floor" };
     case "CORRECT_STARTING_BALANCE":
     case "RECORD_REMAINING_OR_CLOSE_PARTIAL":
       return { href: "/partial-bags", label: "Partial Bag Workbench" };
     case "AUTO_ISSUE_FINISHED_LOT":
     case "ISSUE_FINISHED_LOT":
-      return { href: "/packaging-output", label: "Production output" };
+      // SIMPLIFY-A — /finished-lots/new?bagId= preselects by workflowBags.id,
+      // not inventoryBags.id (verified against app/(admin)/finished-lots/new/
+      // issue-form.tsx:60-61, which matches initialBagId against
+      // finalizedBags[].id === workflowBags.id per page.tsx:34/107).
+      return row.workflowBagId
+        ? { href: `/finished-lots/new?bagId=${row.workflowBagId}`, label: "Open issue form" }
+        : { href: "/finished-lots/new", label: "Open issue form" };
     case "AUTO_RELEASE_FINISHED_LOT":
     case "REVIEW_QC_HOLD":
       return row.finishedLotId
@@ -45,7 +54,7 @@ function rowLink(row: PoCloseoutRow): { href: string; label: string } | null {
     case "QUEUE_OR_RETRY_ZOHO":
       return { href: "/zoho-production-operations", label: "Zoho output" };
     case "FIX_PRODUCT_SETUP":
-      return { href: "/workflow-submissions", label: "Review" };
+      return { href: "/products", label: "Open products" };
     default:
       return row.receiveId ? { href: `/inbound/${row.receiveId}`, label: "Open receive" } : null;
   }
@@ -134,6 +143,7 @@ export function CloseoutRows({
                   <TD>
                     <div className="text-xs font-medium text-text-strong">{row.actionLabel}</div>
                     <div className="text-[10px] text-text-muted">{row.reason}</div>
+                    <RowActionButton row={row} />
                   </TD>
                   <TD>
                     <div className="flex flex-col gap-0.5">

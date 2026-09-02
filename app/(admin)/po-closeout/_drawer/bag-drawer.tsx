@@ -12,6 +12,7 @@ import {
   type BagCloseoutDetailResult,
 } from "../actions";
 import type { BagCloseoutRowFacts } from "@/lib/db/queries/bag-closeout-detail";
+import { useRefreshSuppression } from "@/lib/ui/refresh-suppression";
 import { VerifyPanel } from "./verify-panel";
 import { ActionPanels } from "./action-panels";
 
@@ -28,6 +29,7 @@ export function BagDrawer({
   reason: string;
 }) {
   const router = useRouter();
+  useRefreshSuppression();
   const [result, setResult] = React.useState<BagCloseoutDetailResult | null>(null);
   const [loading, setLoading] = React.useState(false);
 

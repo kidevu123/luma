@@ -38,7 +38,7 @@ export function LotActions({
   return (
     <div className="rounded border border-border bg-surface px-3 py-2 space-y-1.5">
       <p className="text-[11px] font-semibold text-text-strong">
-        {mode === "ISSUE" ? "Issue finished lot" : mode === "RELEASE" ? "Release lot (QC)" : "QC hold review"}
+        {mode === "ISSUE" ? "Issue finished lot" : mode === "RELEASE" ? "Release lot (QC)" : "Release lot (on hold)"}
       </p>
       {error ? (
         <p className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[10.5px] text-red-800">{error}</p>

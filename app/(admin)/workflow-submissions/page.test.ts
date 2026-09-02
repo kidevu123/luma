@@ -133,7 +133,9 @@ describe("WORKFLOW-SUBMISSION-ADMIN-REPAIR-1 · missing blister close-out repair
   it("passes admin repair access to the client table only for OWNER/ADMIN roles", () => {
     expect(pageSrc).toMatch(/const user = await requireSession\(\)/);
     expect(pageSrc).toMatch(/user\.role === "OWNER" \|\| user\.role === "ADMIN"/);
-    expect(pageSrc).toMatch(/<WorkflowTable bags=\{bags\} canAdminRepair=\{canAdminRepair\} \/>/);
+    expect(pageSrc).toMatch(
+      /<WorkflowTable[\s\S]{0,40}bags=\{bags\}[\s\S]{0,40}canAdminRepair=\{canAdminRepair\}[\s\S]{0,160}\/>/,
+    );
   });
 
   it("renders an admin-only repair form for started bags with no submission events", () => {

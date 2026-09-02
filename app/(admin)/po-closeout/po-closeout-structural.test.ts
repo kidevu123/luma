@@ -67,11 +67,9 @@ describe("PO closeout pages", () => {
     expect(listPageSrc).toMatch(/listCloseoutPoIndexRollups/);
     expect(listPageSrc).toMatch(/Search PO number or vendor/);
   });
-  it("detail page is admin-gated, renders summary cards, filter tabs, checklist, links, batch buttons, plain-language copy", () => {
+  it("detail page is admin-gated, renders summary cards, checklist, links, batch buttons, plain-language copy", () => {
     expect(detailPageSrc).toMatch(/requireAdmin\(\)/);
     expect(detailPageSrc).toMatch(/loadPoCloseout\(poId\)/);
-    expect(detailPageSrc).toMatch(/Ready for action/);
-    expect(detailPageSrc).toMatch(/Needs review/);
     expect(detailPageSrc).toMatch(/PoBatchButtons/);
     expect(detailPageSrc).toMatch(/Finalized.{0,40}floor work is complete/);
     expect(detailPageSrc).toMatch(/Done.{0,60}no manual Luma action remains/);
@@ -88,8 +86,29 @@ describe("PO closeout pages", () => {
     // Avoid the "open allocation session" jargon in UI copy.
     expect(detailPageSrc).not.toMatch(/open allocation session/i);
   });
+  it("SIMPLIFY-A: inline row action reuses EXISTING finished-lot actions, no new mutation endpoints", () => {
+    const src = repo("app/(admin)/po-closeout/_drawer/row-action-button.tsx");
+    expect(src).toMatch(/from "@\/app\/\(admin\)\/finished-lots\/actions"/);
+    expect(src).toMatch(/repairAutoIssueFinishedLotAction/);
+    expect(src).toMatch(/setFinishedLotStatusAction/);
+    expect(src).not.toMatch(/"use server"/);
+    expect(repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx")).toMatch(/RowActionButton/);
+  });
+  it("detail page renders bucket tabs from the pure bucket classifier (no inline policy)", () => {
+    expect(detailPageSrc).toMatch(/deriveCloseoutBucket/);
+    expect(detailPageSrc).toMatch(/summarizeBuckets/);
+    expect(detailPageSrc).toMatch(/recommendCloseoutNextAction/);
+    expect(detailPageSrc).toMatch(/"do-here"/);
+    expect(detailPageSrc).toMatch(/Waiting on Zoho/);
+    expect(detailPageSrc).toMatch(/empty bag/i);
+  });
   it("is registered in the admin nav under reconciliation & output", () => {
     expect(navSrc).toMatch(/href: "\/po-closeout", label: "Close out POs"/);
+  });
+  it("SIMPLIFY-A: zero-bag POs are collapsed, not full rows", () => {
+    expect(listPageSrc).toMatch(/bagCount === 0/);
+    expect(listPageSrc).toMatch(/nothing to close out/i);
+    expect(listPageSrc).toMatch(/<details/);
   });
 });
 

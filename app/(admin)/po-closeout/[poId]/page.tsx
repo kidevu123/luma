@@ -23,6 +23,8 @@ import {
   type CloseoutSortKey,
   type CloseoutSortDir,
 } from "@/lib/production/closeout-row-sort";
+import { deriveCloseoutBucket, summarizeBuckets } from "@/lib/production/po-closeout";
+import { recommendCloseoutNextAction } from "@/lib/production/closeout-recommendation";
 
 export const dynamic = "force-dynamic";
 // CLOSEOUT-FRESHNESS-1 — operational page: never statically cached.
@@ -43,37 +45,26 @@ export async function generateMetadata({
   return { title: po ? `PO Closeout ${po.poNumber}` : "PO Closeout" };
 }
 
-const FILTERS = [
-  { key: "all", label: "All" },
-  { key: "ready", label: "Ready actions" },
-  { key: "review", label: "Needs review" },
-  { key: "blocked", label: "Blocked" },
-  { key: "done", label: "Done" },
+// SIMPLIFY-A — tabs are action-oriented buckets: who/where does the next step.
+const TABS = [
+  { key: "do-here", label: "Do here", bucket: "DO_HERE" },
+  { key: "on-floor", label: "On floor", bucket: "ON_FLOOR" },
+  { key: "zoho", label: "Waiting on Zoho", bucket: "WAITING_ZOHO" },
+  { key: "done", label: "Done", bucket: "DONE" },
+  { key: "all", label: "All", bucket: null },
 ] as const;
-
-type FilterKey = (typeof FILTERS)[number]["key"];
-
-function matchesFilter(row: PoCloseoutRow, filter: FilterKey): boolean {
-  switch (filter) {
-    case "ready": return row.status === "READY_FOR_ACTION";
-    case "review": return row.status === "NEEDS_REVIEW";
-    case "blocked": return row.status === "BLOCKED";
-    case "done": return row.status === "DONE";
-    default: return true;
-  }
-}
+type TabKey = (typeof TABS)[number]["key"];
 
 // BAG-PRODUCTION-SUMMARY-1 — read-only production-data filters. These
-// compose with the status filter above and never touch verdict logic.
+// compose with the bucket tabs above and never touch verdict logic.
+// SIMPLIFY-A — has-production / no-production / awaiting-lot / zoho-blocked
+// are now expressed by the bucket tabs; only the finer-grained production
+// refinements remain here.
 const SHOW_FILTERS = [
   { key: "any", label: "All production states" },
-  { key: "has-production", label: "Has production" },
-  { key: "no-production", label: "No production yet" },
   { key: "partial", label: "Partial / split" },
   { key: "multi-run", label: "Multiple runs" },
   { key: "over-consumed", label: "Over-consumed" },
-  { key: "awaiting-lot", label: "Awaiting lot" },
-  { key: "zoho-blocked", label: "Zoho blocked" },
 ] as const;
 type ShowKey = (typeof SHOW_FILTERS)[number]["key"];
 
@@ -84,20 +75,12 @@ function matchesShowFilter(
 ): boolean {
   if (show === "any") return true;
   switch (show) {
-    case "has-production":
-      return (summary?.producedTablets ?? 0) > 0 || summary?.flags.consumptionUnknown === true;
-    case "no-production":
-      return summary != null && summary.producedTablets === 0;
     case "partial":
       return summary?.flags.partialRemaining === true || summary?.flags.splitBag === true;
     case "multi-run":
       return summary?.flags.multipleWorkflows === true;
     case "over-consumed":
       return summary?.flags.overConsumed === true;
-    case "awaiting-lot":
-      return summary?.workflow?.finalized === true && summary.finishedLot == null;
-    case "zoho-blocked":
-      return row.zoho === "FAILED" || row.zoho === "NOT_READY" || summary?.zoho.status === "NEEDS_MAPPING";
     default:
       return true;
   }
@@ -115,12 +98,13 @@ export default async function PoCloseoutDetailPage({
   searchParams,
 }: {
   params: Promise<{ poId: string }>;
-  searchParams: Promise<{ filter?: string; show?: string; guided?: string; step?: string; sort?: string; dir?: string; tablet?: string }>;
+  searchParams: Promise<{ tab?: string; empty?: string; show?: string; guided?: string; step?: string; sort?: string; dir?: string; tablet?: string }>;
 }) {
   await requireAdmin();
   const { poId } = await params;
-  const { filter: rawFilter, show: rawShow, guided: rawGuided, step: rawStep, sort: rawSort, dir: rawDir, tablet: rawTablet } = await searchParams;
-  const filter = (FILTERS.find((f) => f.key === rawFilter)?.key ?? "all") as FilterKey;
+  const { tab: rawTab, empty: rawEmpty, show: rawShow, guided: rawGuided, step: rawStep, sort: rawSort, dir: rawDir, tablet: rawTablet } = await searchParams;
+  const tab = (TABS.find((t) => t.key === rawTab)?.key ?? "do-here") as TabKey;
+  const showEmpty = rawEmpty === "1";
   const show = (SHOW_FILTERS.find((f) => f.key === rawShow)?.key ?? "any") as ShowKey;
 
   const summary = await loadPoCloseout(poId);
@@ -130,26 +114,53 @@ export default async function PoCloseoutDetailPage({
   const productionByBag = await loadBagProductionSummaries({ poId });
 
   const c = summary.counts;
-  const shown = summary.rows.filter(
-    (r) =>
-      matchesFilter(r, filter) &&
-      matchesShowFilter(productionByBag.get(r.inventoryBagId), r, show),
+
+  // SIMPLIFY-A — bucket every row by WHERE the next step happens (pure
+  // derivation over the row verdict; no policy lives on this page).
+  const bucketByBag = new Map(
+    summary.rows.map((r) => [
+      r.inventoryBagId,
+      deriveCloseoutBucket(r, productionByBag.get(r.inventoryBagId)?.producedTablets ?? null),
+    ]),
+  );
+  const bucketCounts = summarizeBuckets([...bucketByBag.values()]);
+  const activeBucket = TABS.find((t) => t.key === tab)?.bucket ?? null;
+  const shown = summary.rows.filter((r) => {
+    const b = bucketByBag.get(r.inventoryBagId) ?? "DO_HERE";
+    if (b === "EMPTY" && !showEmpty && activeBucket !== null) return false;
+    if (activeBucket === null) return showEmpty || b !== "EMPTY";
+    return b === activeBucket || (activeBucket === "DO_HERE" && b === "EMPTY" && showEmpty);
+  }).filter((r) => matchesShowFilter(productionByBag.get(r.inventoryBagId), r, show));
+
+  // Only show the "Refine:" row when one of the remaining production flags
+  // actually applies to a bag on this PO — otherwise it's an empty control.
+  const hasRefinableFlags = [...productionByBag.values()].some(
+    (s) => s.flags.partialRemaining || s.flags.splitBag || s.flags.multipleWorkflows || s.flags.overConsumed,
   );
 
-  // Sort + tablet filter (applied after status/show filters).
+  // Sort + tablet filter (applied after bucket/show filters).
   const sortKey: CloseoutSortKey = (["receipt", "tablet", "started", "completed"] as const).find((k) => k === rawSort) ?? "receipt";
   const sortDir: CloseoutSortDir = rawDir === "desc" ? "desc" : "asc";
   const tablet = rawTablet != null && rawTablet.length > 0 ? rawTablet : null;
   const tablets = listDistinctTablets(summary.rows);
   const visible = sortCloseoutRows(filterRowsByTablet(shown, tablet), sortKey, sortDir);
 
-  // URL helper — preserves filter/show/sort/dir/tablet; guided links remain separate.
-  const qs = (over: Partial<Record<"filter" | "show" | "sort" | "dir" | "tablet", string>>) => {
-    const p = new URLSearchParams({ filter, show, sort: sortKey, dir: sortDir, ...(tablet ? { tablet } : {}), ...over });
+  // URL helper — preserves tab/show/sort/dir/tablet/empty; guided links remain separate.
+  const qs = (over: Partial<Record<"tab" | "empty" | "show" | "sort" | "dir" | "tablet", string>>) => {
+    const p = new URLSearchParams({
+      tab,
+      show,
+      sort: sortKey,
+      dir: sortDir,
+      ...(tablet ? { tablet } : {}),
+      ...(showEmpty ? { empty: "1" } : {}),
+      ...over,
+    });
     return `/po-closeout/${poId}?${p.toString()}`;
   };
   const issueReady = summary.rows.filter((r) => r.action === "AUTO_ISSUE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
   const releaseReady = summary.rows.filter((r) => r.action === "AUTO_RELEASE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
+  const recommendation = recommendCloseoutNextAction({ buckets: bucketCounts, issueReady, releaseReady });
 
   // GUIDED-CLOSEOUT-1 — ?guided=1&step=n renders the "Close this PO"
   // overlay. The queue derives from the live rows on THIS render, so every
@@ -251,12 +262,12 @@ export default async function PoCloseoutDetailPage({
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
         {[
+          { label: "Do here", value: bucketCounts.DO_HERE, tone: "text-brand-700" },
+          { label: "On floor", value: bucketCounts.ON_FLOOR, tone: "text-amber-700" },
+          { label: "Waiting on Zoho", value: bucketCounts.WAITING_ZOHO, tone: "text-sky-700" },
+          { label: "Done", value: bucketCounts.DONE, tone: "text-green-700" },
+          { label: "Empty", value: bucketCounts.EMPTY, tone: "text-text-subtle" },
           { label: "Bags", value: c.total, tone: "text-text-strong" },
-          { label: "Done", value: c.done, tone: "text-green-700" },
-          { label: "Ready for action", value: c.readyForAction, tone: "text-brand-700" },
-          { label: "Needs review", value: c.needsReview, tone: "text-amber-700" },
-          { label: "Blocked", value: c.blocked, tone: "text-red-700" },
-          { label: "Lots issued", value: c.lotsIssued, tone: "text-text-strong" },
         ].map((card) => (
           <div key={card.label} className="rounded-lg border border-border bg-surface px-3 py-2">
             <p className="text-[10px] uppercase tracking-wider text-text-subtle">{card.label}</p>
@@ -305,58 +316,72 @@ export default async function PoCloseoutDetailPage({
         </div>
       )}
 
-      {/* Top blockers */}
-      {summary.topBlockers.length > 0 && (
-        <div className="rounded-lg border border-amber-300/40 bg-amber-50/40 px-4 py-2">
-          <p className="text-[10px] uppercase tracking-wider text-amber-700 font-medium mb-1">Top open reasons</p>
-          <ul className="text-[11px] text-amber-900 space-y-0.5">
-            {summary.topBlockers.map((b) => (
-              <li key={b.reason}>{b.count}× {b.reason}</li>
-            ))}
-          </ul>
+      {/* Next-action recommendation */}
+      {recommendation ? (
+        <div className="rounded-lg border border-brand-300/40 bg-brand-50/40 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[12px] font-medium text-brand-900">Next: {recommendation.headline}</p>
+          {summary.topBlockers.length > 0 ? (
+            <details className="text-[11px] text-text-muted">
+              <summary className="cursor-pointer">All open reasons</summary>
+              <ul className="mt-1 space-y-0.5">
+                {summary.topBlockers.map((b) => (
+                  <li key={b.reason}>{b.count}× {b.reason}</li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
         </div>
-      )}
+      ) : null}
 
-      {/* Filter tabs */}
-      <div className="flex flex-wrap gap-1.5">
-        {FILTERS.map((f) => {
+      {/* Bucket tabs */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {TABS.map((t) => {
           const count =
-            f.key === "all" ? c.total :
-            f.key === "ready" ? c.readyForAction :
-            f.key === "review" ? c.needsReview :
-            f.key === "blocked" ? c.blocked : c.done;
-          const active = f.key === filter;
+            t.bucket === null
+              ? c.total - (showEmpty ? 0 : bucketCounts.EMPTY)
+              : t.bucket === "DO_HERE" && showEmpty
+                ? bucketCounts.DO_HERE + bucketCounts.EMPTY
+                : bucketCounts[t.bucket];
+          const active = t.key === tab;
           return (
             <Link
-              key={f.key}
-              href={qs({ filter: f.key })}
+              key={t.key}
+              href={qs({ tab: t.key })}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                 active ? "border-brand-500 bg-brand-50 text-brand-800" : "border-border text-text-muted hover:bg-surface-2"
               }`}
             >
-              {f.label} ({count})
+              {t.label} ({count})
             </Link>
           );
         })}
+        {bucketCounts.EMPTY > 0 ? (
+          <Link href={qs({ empty: showEmpty ? "" : "1" })} className="text-[11px] text-text-muted underline decoration-dotted">
+            {showEmpty ? "Hide" : "Show"} {bucketCounts.EMPTY} empty bag{bucketCounts.EMPTY === 1 ? "" : "s"} (no production)
+          </Link>
+        ) : null}
       </div>
 
       {/* Production-data filters (read-only view filters) */}
-      <div className="flex flex-wrap gap-1.5">
-        {SHOW_FILTERS.map((f) => {
-          const active = f.key === show;
-          return (
-            <Link
-              key={f.key}
-              href={qs({ show: f.key })}
-              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
-                active ? "border-brand-500 bg-brand-50 text-brand-800 font-medium" : "border-border text-text-muted hover:bg-surface-2"
-              }`}
-            >
-              {f.label}
-            </Link>
-          );
-        })}
-      </div>
+      {hasRefinableFlags ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-text-muted font-medium pr-1">Refine:</span>
+          {SHOW_FILTERS.map((f) => {
+            const active = f.key === show;
+            return (
+              <Link
+                key={f.key}
+                href={qs({ show: f.key })}
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
+                  active ? "border-brand-500 bg-brand-50 text-brand-800 font-medium" : "border-border text-text-muted hover:bg-surface-2"
+                }`}
+              >
+                {f.label}
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
 
       {/* Sort controls */}
       <div className="flex flex-wrap items-center gap-1.5">
