@@ -86,6 +86,14 @@ describe("PO closeout pages", () => {
     // Avoid the "open allocation session" jargon in UI copy.
     expect(detailPageSrc).not.toMatch(/open allocation session/i);
   });
+  it("SIMPLIFY-A: inline row action reuses EXISTING finished-lot actions, no new mutation endpoints", () => {
+    const src = repo("app/(admin)/po-closeout/_drawer/row-action-button.tsx");
+    expect(src).toMatch(/from "@\/app\/\(admin\)\/finished-lots\/actions"/);
+    expect(src).toMatch(/repairAutoIssueFinishedLotAction/);
+    expect(src).toMatch(/setFinishedLotStatusAction/);
+    expect(src).not.toMatch(/"use server"/);
+    expect(repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx")).toMatch(/RowActionButton/);
+  });
   it("detail page renders bucket tabs from the pure bucket classifier (no inline policy)", () => {
     expect(detailPageSrc).toMatch(/deriveCloseoutBucket/);
     expect(detailPageSrc).toMatch(/summarizeBuckets/);

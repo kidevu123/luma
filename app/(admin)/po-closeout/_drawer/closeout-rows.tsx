@@ -14,6 +14,7 @@ import { BagProductionSummaryInline } from "@/components/admin/bag-production-su
 import type { BagProductionSummary } from "@/lib/production/bag-production-summary";
 import type { PoCloseoutRow } from "@/lib/db/queries/po-closeout";
 import { BagDrawer } from "./bag-drawer";
+import { RowActionButton } from "./row-action-button";
 
 const ZOHO_LABEL: Record<string, string> = {
   COMMITTED: "Committed",
@@ -142,6 +143,7 @@ export function CloseoutRows({
                   <TD>
                     <div className="text-xs font-medium text-text-strong">{row.actionLabel}</div>
                     <div className="text-[10px] text-text-muted">{row.reason}</div>
+                    <RowActionButton row={row} />
                   </TD>
                   <TD>
                     <div className="flex flex-col gap-0.5">
