@@ -15,7 +15,7 @@ import { AutoRefreshOnFocus } from "@/components/admin/auto-refresh-on-focus";
 import { formatDateTimeEst } from "@/lib/ui/luma-display";
 import { CloseoutRows } from "../_drawer/closeout-rows";
 import { GuidedOverlay, type GuidedBagStep } from "../_guided/guided-overlay";
-import { deriveGuidedCloseoutQueue } from "@/lib/production/guided-closeout";
+import { deriveGuidedCloseoutQueue, resolveGuidedNav, type GuidedTarget } from "@/lib/production/guided-closeout";
 import {
   sortCloseoutRows,
   listDistinctTablets,
@@ -98,11 +98,13 @@ export default async function PoCloseoutDetailPage({
   searchParams,
 }: {
   params: Promise<{ poId: string }>;
-  searchParams: Promise<{ tab?: string; empty?: string; show?: string; guided?: string; step?: string; sort?: string; dir?: string; tablet?: string }>;
+  searchParams: Promise<{ tab?: string; empty?: string; show?: string; guided?: string; step?: string; bag?: string; sort?: string; dir?: string; tablet?: string }>;
 }) {
   await requireAdmin();
   const { poId } = await params;
-  const { tab: rawTab, empty: rawEmpty, show: rawShow, guided: rawGuided, step: rawStep, sort: rawSort, dir: rawDir, tablet: rawTablet } = await searchParams;
+  // SIMPLIFY-D — `step` is accepted but ignored (stale links from before
+  // steps were bag-addressed); `bag` carries the current target.
+  const { tab: rawTab, empty: rawEmpty, show: rawShow, guided: rawGuided, bag: rawBag, sort: rawSort, dir: rawDir, tablet: rawTablet } = await searchParams;
   const tab = (TABS.find((t) => t.key === rawTab)?.key ?? "do-here") as TabKey;
   const showEmpty = rawEmpty === "1";
   const show = (SHOW_FILTERS.find((f) => f.key === rawShow)?.key ?? "any") as ShowKey;
@@ -170,19 +172,23 @@ export default async function PoCloseoutDetailPage({
   const queueReady = summary.rows.filter((r) => r.zoho === "READY_TO_QUEUE" && r.zohoOpId != null).length;
   const recommendation = recommendCloseoutNextAction({ buckets: bucketCounts, issueReady, releaseReady });
 
-  // GUIDED-CLOSEOUT-1 — ?guided=1&step=n renders the "Close this PO"
-  // overlay. The queue derives from the live rows on THIS render, so every
-  // step advance (a plain navigation) recomputes it — never snapshotted.
+  // GUIDED-CLOSEOUT-1 / SIMPLIFY-D — ?guided=1[&bag=<inventoryBagId|batch|finish>]
+  // renders the "Close this PO" overlay. Steps are addressed by bag id (never
+  // by index), so the queue derives from the live rows on THIS render and a
+  // bag resolved out-of-band shortens the queue instead of desyncing it.
   const guided = rawGuided === "1";
-  const parsedStep = Number.parseInt(rawStep ?? "0", 10);
-  const guidedStep = Number.isFinite(parsedStep) && parsedStep >= 0 ? parsedStep : 0;
-  const guidedQueue = deriveGuidedCloseoutQueue(summary.rows).steps;
+  const { steps: guidedSteps, excluded: guidedExcluded } = deriveGuidedCloseoutQueue(summary.rows, bucketByBag);
   const hasSafeBatch = issueReady + releaseReady > 0;
-  const guidedTotalSteps = guidedQueue.length + (hasSafeBatch ? 1 : 0);
-  const bagIndex = guidedStep - (hasSafeBatch ? 1 : 0);
-  const currentGuidedStep = guided && bagIndex >= 0 && bagIndex < guidedQueue.length
-    ? guidedQueue[bagIndex]
-    : null;
+  const guidedTotalSteps = guidedSteps.length + (hasSafeBatch ? 1 : 0);
+  const requestedTarget: GuidedTarget | null =
+    rawBag === "batch" || rawBag === "finish" || (typeof rawBag === "string" && rawBag.length > 0)
+      ? (rawBag as GuidedTarget)
+      : null;
+  // Entry: bare ?guided=1 resolves to batch, else the first live bag, else finish.
+  const currentTarget: GuidedTarget =
+    requestedTarget ?? (hasSafeBatch ? "batch" : guidedSteps[0]?.inventoryBagId ?? "finish");
+  const nav = resolveGuidedNav(guidedSteps, currentTarget, hasSafeBatch);
+  const currentGuidedStep = nav.mode === "bag" && nav.index != null ? guidedSteps[nav.index] ?? null : null;
   const currentGuidedRow = currentGuidedStep
     ? summary.rows.find((r) => r.inventoryBagId === currentGuidedStep.inventoryBagId) ?? null
     : null;
@@ -202,7 +208,7 @@ export default async function PoCloseoutDetailPage({
         }
       : null;
   const guidedFinish =
-    guided && guidedStep >= guidedTotalSteps
+    guided && nav.mode === "finish"
       ? {
           done: c.done,
           readyForAction: c.readyForAction,
@@ -211,6 +217,16 @@ export default async function PoCloseoutDetailPage({
           topBlockers: summary.topBlockers,
         }
       : null;
+  const doneReceipt =
+    nav.mode === "bag-done"
+      ? summary.rows.find((r) => r.inventoryBagId === currentTarget)?.receiptNumber ?? null
+      : null;
+  const stepNumber =
+    nav.mode === "batch"
+      ? 1
+      : nav.mode === "bag" && nav.index != null
+        ? nav.index + 1 + (hasSafeBatch ? 1 : 0)
+        : guidedTotalSteps;
 
   return (
     <div className="space-y-5">
@@ -219,13 +235,17 @@ export default async function PoCloseoutDetailPage({
         <GuidedOverlay
           poId={poId}
           poNumber={summary.poNumber}
-          step={guidedStep}
+          mode={nav.mode}
+          stepNumber={stepNumber}
           totalSteps={guidedTotalSteps}
-          hasSafeBatch={hasSafeBatch}
+          excluded={guidedExcluded}
           issueReady={issueReady}
           releaseReady={releaseReady}
           bagStep={guidedBagStep}
+          doneReceipt={doneReceipt}
           finish={guidedFinish}
+          prevTarget={nav.prevTarget}
+          nextTarget={nav.nextTarget}
         />
       ) : null}
       <div>
@@ -239,7 +259,7 @@ export default async function PoCloseoutDetailPage({
             <div className="flex items-center gap-2">
               {guidedTotalSteps > 0 ? (
                 <Link
-                  href={`/po-closeout/${poId}?guided=1&step=0`}
+                  href={`/po-closeout/${poId}?guided=1`}
                   className="rounded bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-800"
                 >
                   Close this PO ({guidedTotalSteps} step{guidedTotalSteps === 1 ? "" : "s"})

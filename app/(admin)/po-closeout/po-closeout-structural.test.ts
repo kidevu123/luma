@@ -261,6 +261,21 @@ describe("GUIDED-CLOSEOUT-1: safe-batch step", () => {
     expect(src).toMatch(/router\.replace\(continueHref\)/);
     expect(src).not.toMatch(/router\.refresh\(\)/);
   });
+
+  it("SIMPLIFY-D: steps are bag-addressed with sentinels; entry resolves server-side", () => {
+    expect(detailPageSrc).toMatch(/resolveGuidedNav/);
+    expect(detailPageSrc).toMatch(/"batch"/);
+    expect(detailPageSrc).toMatch(/bag\?:/);
+    expect(detailPageSrc).not.toMatch(/guidedStep - \(hasSafeBatch/);
+  });
+  it("SIMPLIFY-D: wizard nav replaces history (back cannot resurrect the overlay) and reports exclusions", () => {
+    const overlay = repo("app/(admin)/po-closeout/_guided/guided-overlay.tsx");
+    expect(overlay).toMatch(/router\.replace/);
+    expect(overlay).toMatch(/not shown/);
+    expect(overlay).toMatch(/primaryOnly/);
+    expect(overlay).toMatch(/already handled|bag is done/i);
+    expect(overlay).not.toMatch(/Nothing to do on this step/);
+  });
 });
 
 describe("COMMIT-EVIDENCE-1: zoho readiness box shows committed timestamp + ref when op is COMMITTED", () => {
