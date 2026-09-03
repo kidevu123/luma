@@ -35,11 +35,13 @@ import {
   derivePoOverallStatus,
   summarizeRowStatuses,
   isZohoTerminalStatus,
+  summarizeMappingNeeds,
   type PoCloseoutRowInput,
   type PoCloseoutRowVerdict,
   type PoCloseoutZohoStatus,
   type PoCloseoutOverallStatus,
   type PoCloseoutIndexBucket,
+  type MappingNeedsSummary,
 } from "@/lib/production/po-closeout";
 
 export type PoCloseoutRow = PoCloseoutRowVerdict & {
@@ -59,6 +61,14 @@ export type PoCloseoutRow = PoCloseoutRowVerdict & {
   finalizedAt: Date | null;
   autoIssueBlockedMessage: string | null;
   productId: string | null;
+  /** SIMPLIFY-C — the Zoho production-output op backing this row's Zoho status,
+   *  if any. Lets the UI deep-link straight to the op instead of just showing
+   *  a status label. */
+  zohoOpId: string | null;
+  /** SIMPLIFY-C — true when the RAW op status is NEEDS_MAPPING (before
+   *  normalizeZohoStatus collapses it into NOT_READY). Feeds the PO-level
+   *  "N SKUs need Zoho mapping" rollup. */
+  zohoNeedsMapping: boolean;
 };
 
 export type PoCloseoutSummary = {
@@ -90,6 +100,9 @@ export type PoCloseoutSummary = {
   /** Count of finished lots that were never pushed to Zoho (only meaningful when closedInZoho). */
   outputsNeverPushed: number;
   topBlockers: Array<{ reason: string; count: number }>;
+  /** SIMPLIFY-C — distinct SKUs whose Zoho op needs a mapping fix, rolled up
+   *  so dozens of identical rows read as one fix, not dozens of reviews. */
+  zohoMapping: MappingNeedsSummary;
   rows: PoCloseoutRow[];
   /** CLOSEOUT-FRESHNESS-1 — when this snapshot was computed from the live
    *  DB. Rendered as "Data as of …" so admins can see a refresh reloaded. */
@@ -177,6 +190,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       closedInZoho,
       outputsNeverPushed: 0,
       topBlockers: [],
+      zohoMapping: { rows: 0, skus: [] },
       rows: [],
       evaluatedAt: new Date(),
     };
@@ -274,9 +288,11 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
   const zohoRows = lotIds.length
     ? await db
         .select({
+          id: zohoProductionOutputOps.id,
           finishedLotId: zohoProductionOutputOps.finishedLotId,
           status: zohoProductionOutputOps.status,
           committedAt: zohoProductionOutputOps.committedAt,
+          finishedSku: zohoProductionOutputOps.finishedSku,
         })
         .from(zohoProductionOutputOps)
         .where(and(inArray(zohoProductionOutputOps.finishedLotId, lotIds), isNull(zohoProductionOutputOps.voidedAt)))
@@ -290,7 +306,12 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
   for (const b of bagRows) {
     const wf = wfByInventory.get(b.inventoryBagId);
     const lot = wf ? lotByWorkflow.get(wf.id) : undefined;
-    const zohoStatus = normalizeZohoStatus(lot ? zohoByLot.get(lot.id) : undefined, zohoRequired);
+    const op = lot ? zohoByLot.get(lot.id) : undefined;
+    const zohoStatus = normalizeZohoStatus(op, zohoRequired);
+    // SIMPLIFY-C — the RAW op status, before normalizeZohoStatus collapses
+    // NEEDS_MAPPING into NOT_READY. The mapping rollup needs to distinguish
+    // "needs a SKU mapping fixed" from other NOT_READY reasons (DRAFT/PREVIEWED/HELD).
+    const zohoNeedsMapping = (op?.status ?? "").toUpperCase() === "NEEDS_MAPPING";
     const excludedFromOutput = wf ? (excludedByWorkflow.get(wf.id) ?? false) : false;
 
     // Floor-readiness codes (pure — reuse the classifier with loaded data).
@@ -443,6 +464,8 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       finalizedAt: wf?.finalizedAt ?? null,
       autoIssueBlockedMessage: null,
       productId: wf?.productId ?? null,
+      zohoOpId: op?.id ?? null,
+      zohoNeedsMapping,
     });
   }
 
@@ -492,6 +515,13 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       .map(([reason, count]) => ({ reason, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 6),
+    zohoMapping: summarizeMappingNeeds(
+      rows.map((r) => ({
+        productId: r.productId,
+        finishedSku: zohoByLot.get(r.finishedLotId ?? "")?.finishedSku ?? null,
+        zohoNeedsMapping: r.zohoNeedsMapping,
+      })),
+    ),
     rows,
     evaluatedAt: new Date(),
   };

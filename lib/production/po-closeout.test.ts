@@ -583,3 +583,28 @@ describe("SIMPLIFY-B: calculated-remaining availability upgrades the repair bran
     expect(r.action).toBe("CORRECT_STARTING_BALANCE");
   });
 });
+
+import { summarizeMappingNeeds } from "./po-closeout";
+
+describe("SIMPLIFY-C: summarizeMappingNeeds", () => {
+  it("rolls dozens of identical rows up to distinct SKUs with counts, sorted desc", () => {
+    const rows = [
+      ...Array.from({ length: 43 }, () => ({ productId: "p1", finishedSku: "SKU-A", zohoNeedsMapping: true })),
+      ...Array.from({ length: 2 }, () => ({ productId: "p2", finishedSku: "SKU-B", zohoNeedsMapping: true })),
+      { productId: "p3", finishedSku: "SKU-C", zohoNeedsMapping: false },
+    ];
+    const m = summarizeMappingNeeds(rows);
+    expect(m.rows).toBe(45);
+    expect(m.skus).toEqual([
+      { productId: "p1", sku: "SKU-A", count: 43 },
+      { productId: "p2", sku: "SKU-B", count: 2 },
+    ]);
+  });
+  it("unknown SKU falls back honestly and empty input yields zero", () => {
+    expect(summarizeMappingNeeds([{ productId: null, zohoNeedsMapping: true }])).toEqual({
+      rows: 1,
+      skus: [{ productId: null, sku: "(unknown SKU)", count: 1 }],
+    });
+    expect(summarizeMappingNeeds([])).toEqual({ rows: 0, skus: [] });
+  });
+});

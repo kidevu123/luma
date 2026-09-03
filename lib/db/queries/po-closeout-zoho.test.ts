@@ -49,6 +49,12 @@ describe("loader wiring + page copy", () => {
     expect(loaderSrc).toMatch(/normalizeZohoStatus\([^,]+,\s*zohoRequired\)/);
   });
 
+  it("SIMPLIFY-C: loader carries op id + needs-mapping and builds the SKU rollup", () => {
+    expect(loaderSrc).toMatch(/zohoOpId/);
+    expect(loaderSrc).toMatch(/NEEDS_MAPPING/);
+    expect(loaderSrc).toMatch(/summarizeMappingNeeds/);
+  });
+
   it("page copy distinguishes Ready to queue / Queued / Committed / Failed and never queues/commits Zoho", () => {
     expect(pageSrc).toMatch(/Ready to queue/);
     expect(pageSrc).toMatch(/Queued/);

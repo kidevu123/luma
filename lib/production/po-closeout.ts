@@ -519,3 +519,30 @@ export function summarizeBuckets(buckets: CloseoutBucket[]): Record<CloseoutBuck
   for (const b of buckets) out[b] += 1;
   return out;
 }
+
+// ── SIMPLIFY-C · mapping-needs rollup ───────────────────────────────────────
+// Dozens of closeout rows blocked on the same unmapped SKU are ONE product
+// mapping to fix, not dozens of reviews. Pure aggregation for the PO-level
+// "N SKUs need Zoho mapping" banner.
+
+export type MappingNeedsSummary = {
+  rows: number;
+  skus: Array<{ productId: string | null; sku: string; count: number }>;
+};
+
+export function summarizeMappingNeeds(
+  rows: Array<{ productId: string | null; finishedSku?: string | null; zohoNeedsMapping: boolean }>,
+): MappingNeedsSummary {
+  const byKey = new Map<string, { productId: string | null; sku: string; count: number }>();
+  let total = 0;
+  for (const r of rows) {
+    if (!r.zohoNeedsMapping) continue;
+    total += 1;
+    const sku = r.finishedSku ?? "(unknown SKU)";
+    const key = `${r.productId ?? ""}|${sku}`;
+    const prev = byKey.get(key);
+    if (prev) prev.count += 1;
+    else byKey.set(key, { productId: r.productId, sku, count: 1 });
+  }
+  return { rows: total, skus: [...byKey.values()].sort((a, b) => b.count - a.count) };
+}
