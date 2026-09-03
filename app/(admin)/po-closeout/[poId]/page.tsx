@@ -344,7 +344,7 @@ export default async function PoCloseoutDetailPage({
       {(tab === "zoho" || tab === "all") && summary.zohoMapping.skus.length > 0 ? (
         <div className="rounded-lg border border-sky-300/40 bg-sky-50/40 px-4 py-2.5">
           <p className="text-[12px] font-medium text-sky-900">
-            {summary.zohoMapping.skus.length} SKU{summary.zohoMapping.skus.length === 1 ? "" : "s"} need Zoho
+            {summary.zohoMapping.skus.length} SKU{summary.zohoMapping.skus.length === 1 ? "" : "s"} need{summary.zohoMapping.skus.length === 1 ? "s" : ""} Zoho
             mapping — fixing {summary.zohoMapping.skus.length === 1 ? "it" : "them"} unblocks {summary.zohoMapping.rows} bag
             {summary.zohoMapping.rows === 1 ? "" : "s"}.
           </p>

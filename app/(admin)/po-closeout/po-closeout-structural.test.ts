@@ -232,7 +232,7 @@ describe("DRAWER-FRESHNESS-1: panel keys track live row facts; finished-lot acti
 describe("SIMPLIFY-C: mapping rolls up to one PO banner; drawer never renders a disabled queue panel", () => {
   it("mapping rolls up to one PO banner; drawer never renders a disabled queue panel", () => {
     expect(detailPageSrc).toMatch(/zohoMapping\.skus/);
-    expect(detailPageSrc).toMatch(/need Zoho\s+mapping/);
+    expect(detailPageSrc).toMatch(/need.*Zoho\s+mapping/);
     const dispatcher = repo("lib/production/bag-closeout-actions.ts");
     expect(dispatcher).toMatch(/READY_TO_QUEUE/);
   });
