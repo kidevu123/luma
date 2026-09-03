@@ -39,12 +39,33 @@ const lotSchema = z.object({
     .optional(),
 });
 
+// SIMPLIFY-B — a lot issued with clean, consistent counts should not need a
+// separate release tap. Re-uses the exact eligibility evaluator + release
+// path the auto-release batch uses. Never fails the issue: release is a
+// best-effort follow-on, and anything not AUTO_RELEASE_READY stays PENDING_QC.
+async function maybeAutoReleaseOnIssue(finishedLotId: string, actor: Awaited<ReturnType<typeof requireLead>>) {
+  try {
+    const evaluation = await evaluateFinishedLotReleaseEligibility(finishedLotId);
+    if (evaluation.status === "AUTO_RELEASE_READY") {
+      await setFinishedLotStatus(
+        finishedLotId,
+        "RELEASED",
+        actor,
+        "Auto-released on issue — passed QC auto-release eligibility. Zoho output NOT committed by this step.",
+      );
+    }
+  } catch {
+    // Best-effort: the lot stays PENDING_QC and shows in the release backlog.
+  }
+}
+
 export async function createFinishedLotAction(payload: unknown) {
   const actor = await requireLead();
   const parsed = lotSchema.safeParse(payload);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   try {
     const { lot } = await createFinishedLot(compact(parsed.data), actor);
+    await maybeAutoReleaseOnIssue(lot.id, actor);
     revalidatePath("/finished-lots");
     revalidatePath("/po-closeout");
     revalidatePath("/floor-board");
@@ -102,6 +123,7 @@ export async function issueFinishedLotWithAllocationAndRedirect(payload: unknown
     );
     if (!result.ok) return { error: result.error };
     finishedLotId = result.finishedLotId;
+    await maybeAutoReleaseOnIssue(finishedLotId, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Issue lot failed." };
   }
