@@ -254,6 +254,15 @@ describe("SIMPLIFY-C: PO-level Queue-all-ready for Zoho output", () => {
   });
 });
 
+describe("GUIDED-CLOSEOUT-1: safe-batch step", () => {
+  it("SIMPLIFY-D: batch results persist until Continue (no refresh-under-you)", () => {
+    const src = repo("app/(admin)/po-closeout/_guided/safe-batch-step.tsx");
+    expect(src).toMatch(/continueHref/);
+    expect(src).toMatch(/router\.replace\(continueHref\)/);
+    expect(src).not.toMatch(/router\.refresh\(\)/);
+  });
+});
+
 describe("COMMIT-EVIDENCE-1: zoho readiness box shows committed timestamp + ref when op is COMMITTED", () => {
   // Operator request: after auto-commit, the drawer must display proof of
   // commit (timestamp + Zoho reference) instead of just the status label.

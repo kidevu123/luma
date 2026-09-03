@@ -115,7 +115,12 @@ export function GuidedOverlay({
               </p>
             </div>
           ) : isSafeBatchStep ? (
-            <SafeBatchStep poId={poId} issueReady={issueReady} releaseReady={releaseReady} />
+            <SafeBatchStep
+              poId={poId}
+              issueReady={issueReady}
+              releaseReady={releaseReady}
+              continueHref={`/po-closeout/${poId}?guided=1`}
+            />
           ) : bagStep ? (
             <div className="space-y-2">
               <p className="text-sm font-medium text-text-strong">
