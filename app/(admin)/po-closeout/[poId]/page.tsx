@@ -167,6 +167,7 @@ export default async function PoCloseoutDetailPage({
   const calcReady = summary.rows.filter(
     (r) => r.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL" && r.status === "READY_FOR_ACTION",
   ).length;
+  const queueReady = summary.rows.filter((r) => r.zoho === "READY_TO_QUEUE" && r.zohoOpId != null).length;
   const recommendation = recommendCloseoutNextAction({ buckets: bucketCounts, issueReady, releaseReady });
 
   // GUIDED-CLOSEOUT-1 — ?guided=1&step=n renders the "Close this PO"
@@ -316,10 +317,10 @@ export default async function PoCloseoutDetailPage({
       </div>
 
       {/* Bulk safe actions */}
-      {(issueReady > 0 || releaseReady > 0 || calcReady > 0) && (
+      {(issueReady > 0 || releaseReady > 0 || calcReady > 0 || queueReady > 0) && (
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
           <p className="text-[11px] text-text-muted mb-2">Safe PO-scoped actions (each re-checks eligibility per row; nothing is committed to Zoho):</p>
-          <PoBatchButtons poId={poId} issueReady={issueReady} releaseReady={releaseReady} calcReady={calcReady} />
+          <PoBatchButtons poId={poId} issueReady={issueReady} releaseReady={releaseReady} calcReady={calcReady} queueReady={queueReady} />
         </div>
       )}
 

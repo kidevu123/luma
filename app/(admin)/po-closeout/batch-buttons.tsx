@@ -2,11 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { PackagePlus, ShieldCheck, Calculator } from "lucide-react";
+import { PackagePlus, ShieldCheck, Calculator, Send } from "lucide-react";
 import {
   autoIssueSafeLotsForPoAction,
   autoReleaseSafeLotsForPoAction,
   useCalculatedRemainingForPoAction,
+  queueZohoReadyForPoAction,
 } from "./actions";
 
 type Result = { affected: number; skipped: number; capped: boolean; skippedReasons: string[] } | null;
@@ -39,15 +40,18 @@ export function PoBatchButtons({
   issueReady,
   releaseReady,
   calcReady,
+  queueReady,
 }: {
   poId: string;
   issueReady: number;
   releaseReady: number;
   calcReady: number;
+  queueReady: number;
 }) {
   const issue = useBatch(autoIssueSafeLotsForPoAction);
   const release = useBatch(autoReleaseSafeLotsForPoAction);
   const calc = useBatch(useCalculatedRemainingForPoAction);
+  const queue = useBatch(queueZohoReadyForPoAction);
 
   return (
     <div className="flex flex-col gap-2">
@@ -96,6 +100,22 @@ export function PoBatchButtons({
             {calc.pending ? "Applying…" : `Use calculated remaining (${calcReady})`}
           </button>
         ) : null}
+        {queueReady > 0 ? (
+          <button
+            type="button"
+            disabled={queue.pending}
+            onClick={() =>
+              queue.run(
+                poId,
+                `Queue ${queueReady} Zoho output op${queueReady === 1 ? "" : "s"}? The worker commits them via the integration service; nothing is pushed immediately.`,
+              )
+            }
+            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-600/50 bg-violet-50 px-3 py-1.5 text-[12px] font-semibold text-violet-800 hover:bg-violet-100 transition-colors disabled:opacity-50"
+          >
+            <Send className="h-3.5 w-3.5" aria-hidden />
+            {queue.pending ? "Queueing…" : `Queue all ready for Zoho (${queueReady})`}
+          </button>
+        ) : null}
       </div>
       {(issue.result || issue.error) && (
         <p className="text-[11px] text-text-muted">
@@ -123,6 +143,16 @@ export function PoBatchButtons({
             <>
               <span className="font-medium text-sky-700">Applied {calc.result!.affected}</span>
               {calc.result!.skipped > 0 ? ` · skipped ${calc.result!.skipped}` : ""}
+            </>
+          )}
+        </p>
+      )}
+      {(queue.result || queue.error) && (
+        <p className="text-[11px] text-text-muted">
+          {queue.error ? <span className="text-red-700">{queue.error}</span> : (
+            <>
+              <span className="font-medium text-violet-700">Queued {queue.result!.affected}</span>
+              {queue.result!.skipped > 0 ? ` · skipped ${queue.result!.skipped}` : ""}
             </>
           )}
         </p>

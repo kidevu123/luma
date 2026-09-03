@@ -40,6 +40,7 @@ import {
   computeSystemDerivedResolutionForBag,
   resolveAllocationFromProductionOutput,
 } from "@/lib/production/system-derived-allocation-resolution";
+import { queueConsolidatedProductionOutputOp } from "@/lib/db/queries/zoho-production-output-consolidated";
 
 const PO_BATCH_CAP = 100;
 
@@ -247,6 +248,66 @@ export async function useCalculatedRemainingForPoAction(poId: string): Promise<P
     };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "PO calculated-remaining failed." };
+  }
+}
+
+/** Queue every READY_TO_QUEUE Zoho output op on this PO. The per-op service
+ *  re-checks status (READY|FAILED) inside its own update — a row that
+ *  changed since the scan is skipped, never forced. Queueing only marks the
+ *  op for the worker; committing to Zoho stays with the cron/worker via the
+ *  integration gateway. */
+export async function queueZohoReadyForPoAction(poId: string): Promise<PoBatchResult> {
+  const actor = await requireAdmin();
+  try {
+    const summary = await loadPoCloseout(poId);
+    if (!summary) return { ok: false, error: "PO not found." };
+    const targets = summary.rows
+      .filter((r) => r.zoho === "READY_TO_QUEUE" && r.zohoOpId != null)
+      .slice(0, PO_BATCH_CAP);
+
+    const queued: string[] = [];
+    const skipped: string[] = [];
+    for (const r of targets) {
+      const result = await queueConsolidatedProductionOutputOp(r.zohoOpId!, actor);
+      if (result.ok) queued.push(r.finishedLotNumber ?? r.zohoOpId!);
+      else skipped.push(result.error);
+    }
+
+    await writeAudit({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action: "zoho_production_output_op.queue_batch",
+      targetType: "PoCloseout",
+      targetId: poId,
+      after: {
+        source: "PO_QUEUE_ALL_READY",
+        scope: "PO",
+        po_id: poId,
+        po_number: summary.poNumber,
+        ready_at_scan: targets.length,
+        queued: queued.length,
+        skipped: skipped.length,
+        queued_lot_numbers: queued,
+        skipped_reasons: skipped,
+        zoho_output_committed: false,
+        note: "Queued for the worker only; commits happen via the Zoho integration gateway cron.",
+      },
+    });
+
+    if (queued.length > 0) {
+      revalidatePath(`/po-closeout/${poId}`);
+      revalidatePath("/po-closeout");
+      revalidatePath("/zoho-production-operations");
+    }
+    return {
+      ok: true,
+      affected: queued.length,
+      skipped: skipped.length,
+      capped: summary.rows.filter((r) => r.zoho === "READY_TO_QUEUE").length > PO_BATCH_CAP,
+      skippedReasons: skipped,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "PO queue-all failed." };
   }
 }
 
