@@ -390,7 +390,10 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
     case "NOT_APPLICABLE":
       return done("Released — Zoho output not required (Zoho output is disabled)");
     case "FAILED":
-      return verdict("BLOCKED", "Failed Zoho output op — retry", "QUEUE_OR_RETRY_ZOHO", "Retry in Zoho operations");
+      // SIMPLIFY-C — a failed Zoho push is retryable Zoho-side work, not a
+      // floor block. BLOCKED is reserved for work stuck on missing data/setup;
+      // painting the PO header red for a Zoho retry misled operators.
+      return verdict("NEEDS_REVIEW", "Failed Zoho output op — retry", "QUEUE_OR_RETRY_ZOHO", "Retry in Zoho operations");
     case "READY_TO_QUEUE":
       return verdict("READY_FOR_ACTION", "Released — Zoho output not queued yet", "QUEUE_OR_RETRY_ZOHO", "Queue in Zoho operations");
     case "NOT_READY":
@@ -515,4 +518,31 @@ export function summarizeBuckets(buckets: CloseoutBucket[]): Record<CloseoutBuck
   };
   for (const b of buckets) out[b] += 1;
   return out;
+}
+
+// ── SIMPLIFY-C · mapping-needs rollup ───────────────────────────────────────
+// Dozens of closeout rows blocked on the same unmapped SKU are ONE product
+// mapping to fix, not dozens of reviews. Pure aggregation for the PO-level
+// "N SKUs need Zoho mapping" banner.
+
+export type MappingNeedsSummary = {
+  rows: number;
+  skus: Array<{ productId: string | null; sku: string; count: number }>;
+};
+
+export function summarizeMappingNeeds(
+  rows: Array<{ productId: string | null; finishedSku?: string | null; zohoNeedsMapping: boolean }>,
+): MappingNeedsSummary {
+  const byKey = new Map<string, { productId: string | null; sku: string; count: number }>();
+  let total = 0;
+  for (const r of rows) {
+    if (!r.zohoNeedsMapping) continue;
+    total += 1;
+    const sku = r.finishedSku ?? "(unknown SKU)";
+    const key = `${r.productId ?? ""}|${sku}`;
+    const prev = byKey.get(key);
+    if (prev) prev.count += 1;
+    else byKey.set(key, { productId: r.productId, sku, count: 1 });
+  }
+  return { rows: total, skus: [...byKey.values()].sort((a, b) => b.count - a.count) };
 }

@@ -58,7 +58,11 @@ export function deriveApplicableBagActions(input: {
       if (input.allocationOpen) actions.push("RESOLVE_PARTIAL");
       break;
     case "QUEUE_OR_RETRY_ZOHO":
-      actions.push(input.zoho === "FAILED" ? "ZOHO_RETRY" : "ZOHO_QUEUE");
+      // SIMPLIFY-C — a disabled queue button on a mapping-blocked op is noise;
+      // mapping is fixed once at the product/PO level. Panels render only when
+      // the op is actually actionable here.
+      if (input.zoho === "FAILED") actions.push("ZOHO_RETRY");
+      else if (input.zoho === "READY_TO_QUEUE") actions.push("ZOHO_QUEUE");
       break;
     default:
       // Unknown / NONE / REVIEW_MANUALLY / FIX_PRODUCT_SETUP /

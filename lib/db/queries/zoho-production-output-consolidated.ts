@@ -1,6 +1,6 @@
 // ZOHO-PRODUCTION-OUTPUT-CONSOLIDATED-DB — persist + process consolidated ops.
 
-import { and, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { writeAudit } from "@/lib/db/audit";
 import type { CurrentUser } from "@/lib/auth";
@@ -95,8 +95,11 @@ import {
 } from "@/lib/zoho/luma-operation-snapshot";
 import {
   finishedLots,
+  inventoryBags,
   products,
   readBagState,
+  receives,
+  smallBoxes,
   workflowBags,
   zohoAssemblyOps,
   zohoProductionOutputOps,
@@ -856,6 +859,34 @@ export async function listConsolidatedProductionOutputOps(limit = 50) {
     .select()
     .from(zohoProductionOutputOps)
     .where(eq(zohoProductionOutputOps.payloadKind, "consolidated"))
+    .orderBy(desc(zohoProductionOutputOps.updatedAt))
+    .limit(limit);
+}
+
+/** SIMPLIFY-C — ops for one PO, resolved via the PO's finished lots (the
+ *  receives chain). NEEDS_MAPPING ops have zohoPurchaseorderId = null, so
+ *  filtering on the Zoho PO id would hide exactly the ops an admin comes
+ *  here to fix; the lot chain covers them. READ-ONLY. */
+export async function listConsolidatedProductionOutputOpsForPo(poId: string, limit = 100) {
+  const lotRows = await db
+    .select({ finishedLotId: finishedLots.id })
+    .from(receives)
+    .innerJoin(smallBoxes, eq(smallBoxes.receiveId, receives.id))
+    .innerJoin(inventoryBags, eq(inventoryBags.smallBoxId, smallBoxes.id))
+    .innerJoin(workflowBags, eq(workflowBags.inventoryBagId, inventoryBags.id))
+    .innerJoin(finishedLots, eq(finishedLots.workflowBagId, workflowBags.id))
+    .where(eq(receives.poId, poId));
+  const lotIds = [...new Set(lotRows.map((r) => r.finishedLotId))];
+  if (lotIds.length === 0) return [];
+  return db
+    .select()
+    .from(zohoProductionOutputOps)
+    .where(
+      and(
+        eq(zohoProductionOutputOps.payloadKind, "consolidated"),
+        inArray(zohoProductionOutputOps.finishedLotId, lotIds),
+      ),
+    )
     .orderBy(desc(zohoProductionOutputOps.updatedAt))
     .limit(limit);
 }

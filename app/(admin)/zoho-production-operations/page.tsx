@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/auth-guards";
 import { PageHeader } from "@/components/ui/page-header";
-import { listConsolidatedProductionOutputOps } from "@/lib/db/queries/zoho-production-output-consolidated";
+import {
+  listConsolidatedProductionOutputOps,
+  listConsolidatedProductionOutputOpsForPo,
+} from "@/lib/db/queries/zoho-production-output-consolidated";
 import {
   isProductionOutputCommitEnabled,
   isProductionOutputPersistEnabled,
@@ -28,6 +31,11 @@ import { ProductionOutputStagingButtons, RetryPreviewButton } from "./staging-bu
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Zoho Production Output" };
+
+// SIMPLIFY-C — strict UUID guard for the ?po=/?op= deep-link params (same
+// pattern as app/(admin)/workflow-submissions/page.tsx). Malformed values
+// are treated as absent rather than passed through to the query layer.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function StatusChip({ status, uiStatus }: { status: string; uiStatus: string }) {
   const tone =
@@ -68,13 +76,23 @@ function GateChip({ label, on }: { label: string; on: boolean }) {
   );
 }
 
-export default async function ZohoProductionOperationsPage() {
+export default async function ZohoProductionOperationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requireSession();
   const gates = resolveProductionOutputGateConfig();
   const persistOn = isProductionOutputPersistEnabled();
   const previewOn = isProductionOutputPreviewEnabled();
   const commitOn = isProductionOutputCommitEnabled();
-  const ops = await listConsolidatedProductionOutputOps(100);
+  const sp = await searchParams;
+  const po = typeof sp["po"] === "string" && UUID_RE.test(sp["po"]) ? sp["po"] : null;
+  const opFilter = typeof sp["op"] === "string" && UUID_RE.test(sp["op"]) ? sp["op"] : null;
+  let ops = po
+    ? await listConsolidatedProductionOutputOpsForPo(po)
+    : await listConsolidatedProductionOutputOps(100);
+  if (opFilter !== null) ops = ops.filter((o) => o.id === opFilter);
 
   return (
     <div className="space-y-5">
@@ -105,6 +123,20 @@ export default async function ZohoProductionOperationsPage() {
           </p>
         ) : null}
       </div>
+
+      {po !== null ? (
+        <div className="flex items-center gap-3 text-[12px] text-text-muted">
+          <span>
+            Showing {ops.length} operation{ops.length === 1 ? "" : "s"} for this PO.
+          </span>
+          <Link href={`/po-closeout/${po}`} className="font-medium text-brand-700 hover:underline">
+            Back to closeout
+          </Link>
+          <Link href="/zoho-production-operations" className="hover:underline">
+            Clear filter
+          </Link>
+        </div>
+      ) : null}
 
       <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <div className="overflow-x-auto">

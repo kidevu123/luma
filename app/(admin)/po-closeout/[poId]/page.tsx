@@ -167,6 +167,7 @@ export default async function PoCloseoutDetailPage({
   const calcReady = summary.rows.filter(
     (r) => r.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL" && r.status === "READY_FOR_ACTION",
   ).length;
+  const queueReady = summary.rows.filter((r) => r.zoho === "READY_TO_QUEUE" && r.zohoOpId != null).length;
   const recommendation = recommendCloseoutNextAction({ buckets: bucketCounts, issueReady, releaseReady });
 
   // GUIDED-CLOSEOUT-1 — ?guided=1&step=n renders the "Close this PO"
@@ -316,10 +317,10 @@ export default async function PoCloseoutDetailPage({
       </div>
 
       {/* Bulk safe actions */}
-      {(issueReady > 0 || releaseReady > 0 || calcReady > 0) && (
+      {(issueReady > 0 || releaseReady > 0 || calcReady > 0 || queueReady > 0) && (
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
           <p className="text-[11px] text-text-muted mb-2">Safe PO-scoped actions (each re-checks eligibility per row; nothing is committed to Zoho):</p>
-          <PoBatchButtons poId={poId} issueReady={issueReady} releaseReady={releaseReady} calcReady={calcReady} />
+          <PoBatchButtons poId={poId} issueReady={issueReady} releaseReady={releaseReady} calcReady={calcReady} queueReady={queueReady} />
         </div>
       )}
 
@@ -337,6 +338,32 @@ export default async function PoCloseoutDetailPage({
               </ul>
             </details>
           ) : null}
+        </div>
+      ) : null}
+
+      {(tab === "zoho" || tab === "all") && summary.zohoMapping.skus.length > 0 ? (
+        <div className="rounded-lg border border-sky-300/40 bg-sky-50/40 px-4 py-2.5">
+          <p className="text-[12px] font-medium text-sky-900">
+            {summary.zohoMapping.skus.length} SKU{summary.zohoMapping.skus.length === 1 ? "" : "s"} need{summary.zohoMapping.skus.length === 1 ? "s" : ""} Zoho
+            mapping — fixing {summary.zohoMapping.skus.length === 1 ? "it" : "them"} unblocks {summary.zohoMapping.rows} bag
+            {summary.zohoMapping.rows === 1 ? "" : "s"}.
+          </p>
+          <ul className="mt-1 space-y-0.5 text-[11px] text-sky-900">
+            {summary.zohoMapping.skus.map((s) => (
+              <li key={`${s.productId ?? ""}|${s.sku}`} className="flex items-center gap-2">
+                <span className="font-mono">{s.sku}</span>
+                <span className="text-sky-700">({s.count} bag{s.count === 1 ? "" : "s"})</span>
+                {s.productId ? (
+                  <Link href={`/products/${s.productId}?from=output-queue`} className="font-medium underline">
+                    Fix mapping
+                  </Link>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <Link href={`/zoho-production-operations?po=${poId}`} className="mt-1 inline-block text-[11px] font-medium text-sky-800 underline">
+            Open this PO's Zoho operations
+          </Link>
         </div>
       ) : null}
 

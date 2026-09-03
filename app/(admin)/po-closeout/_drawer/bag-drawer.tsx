@@ -95,6 +95,7 @@ export function BagDrawer({
             detail={result.detail}
             row={row}
             inventoryBagId={inventoryBagId}
+            poId={poId}
             onDone={() => void refetch()}
           />
         </>

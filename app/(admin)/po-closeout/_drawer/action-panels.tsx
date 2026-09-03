@@ -18,11 +18,13 @@ export function ActionPanels({
   detail,
   row,
   inventoryBagId,
+  poId,
   onDone,
 }: {
   detail: BagCloseoutDetail;
   row: BagCloseoutRowFacts;
   inventoryBagId: string;
+  poId: string;
   onDone: () => void;
 }) {
   // Derive applicable action keys from the CURRENT server-rendered row facts
@@ -73,6 +75,7 @@ export function ActionPanels({
             mode={keys.includes("ZOHO_RETRY") ? "RETRY" : "QUEUE"}
             op={detail.zohoReadiness.op}
             setup={detail.zohoReadiness.setup}
+            poId={poId}
             onDone={onDone}
           />
         ) : null}
