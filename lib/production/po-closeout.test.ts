@@ -53,10 +53,20 @@ describe("classifyPoCloseoutRow — journey", () => {
     expect(classifyPoCloseoutRow({ ...doneRow, zoho: "NOT_APPLICABLE" }).status).toBe("DONE");
   });
 
-  it("released + FAILED Zoho op = BLOCKED with retry action", () => {
+  it("SIMPLIFY-C: released + FAILED Zoho op = NEEDS_REVIEW retry — Zoho retry is not a floor block", () => {
     const r = classifyPoCloseoutRow({ ...doneRow, zoho: "FAILED" });
-    expect(r.status).toBe("BLOCKED");
+    expect(r.status).toBe("NEEDS_REVIEW");
+    expect(r.status).not.toBe("BLOCKED");
     expect(r.action).toBe("QUEUE_OR_RETRY_ZOHO");
+    expect(r.reason).toMatch(/retry/i);
+  });
+
+  it("SIMPLIFY-C: a PO whose only open work is a failed Zoho op is not BLOCKED overall", () => {
+    const statuses = [
+      classifyPoCloseoutRow(doneRow).status,
+      classifyPoCloseoutRow({ ...doneRow, zoho: "FAILED" }).status,
+    ];
+    expect(derivePoOverallStatus(statuses)).toBe("NEEDS_REVIEW");
   });
 
   it("released + Zoho ready-to-queue = READY_FOR_ACTION (NOT done — admin must queue)", () => {
@@ -263,7 +273,7 @@ describe("PO rollup", () => {
     const committed = classifyPoCloseoutRow(doneRow).status;
     expect(derivePoOverallStatus([committed, readyToQueue])).toBe("ACTION_READY");
     const failed = classifyPoCloseoutRow({ ...doneRow, zoho: "FAILED" }).status;
-    expect(derivePoOverallStatus([committed, failed])).toBe("BLOCKED");
+    expect(derivePoOverallStatus([committed, failed])).toBe("NEEDS_REVIEW");
     // All committed/queued → DONE.
     const queued = classifyPoCloseoutRow({ ...doneRow, zoho: "QUEUED" }).status;
     expect(derivePoOverallStatus([committed, queued])).toBe("DONE");

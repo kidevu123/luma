@@ -74,7 +74,7 @@ describe("deriveApplicableBagActions — verdict mapping", () => {
       ["ZOHO_QUEUE"],
     );
     expectActions(
-      { rowAction: "QUEUE_OR_RETRY_ZOHO", zoho: "FAILED", rowStatus: "BLOCKED", hasFinishedLot: true, lotStatus: "RELEASED" },
+      { rowAction: "QUEUE_OR_RETRY_ZOHO", zoho: "FAILED", rowStatus: "NEEDS_REVIEW", hasFinishedLot: true, lotStatus: "RELEASED" },
       ["ZOHO_RETRY"],
     );
   });

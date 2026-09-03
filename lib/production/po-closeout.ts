@@ -390,7 +390,10 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
     case "NOT_APPLICABLE":
       return done("Released — Zoho output not required (Zoho output is disabled)");
     case "FAILED":
-      return verdict("BLOCKED", "Failed Zoho output op — retry", "QUEUE_OR_RETRY_ZOHO", "Retry in Zoho operations");
+      // SIMPLIFY-C — a failed Zoho push is retryable Zoho-side work, not a
+      // floor block. BLOCKED is reserved for work stuck on missing data/setup;
+      // painting the PO header red for a Zoho retry misled operators.
+      return verdict("NEEDS_REVIEW", "Failed Zoho output op — retry", "QUEUE_OR_RETRY_ZOHO", "Retry in Zoho operations");
     case "READY_TO_QUEUE":
       return verdict("READY_FOR_ACTION", "Released — Zoho output not queued yet", "QUEUE_OR_RETRY_ZOHO", "Queue in Zoho operations");
     case "NOT_READY":
