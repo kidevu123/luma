@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.38.0] — 2026-09-03
+
+- Simplify Phase B: closeout automation. Rows whose auto-issue was blocked at packaging close-out now show the recorded reason (latest `finished_lot.auto_create_blocked` audit, batched per PO) with product-setup deep links to the product page. PO bulk issue covers repair-issue-ready bags (`ISSUE_FINISHED_LOT` + READY), so "issue all finalized lots" is one click. Manually issued lots auto-release when they pass the existing QC auto-release eligibility (best-effort follow-on; anything else stays PENDING_QC). New PO-level bulk "Use calculated remaining" (probe + per-bag transactional re-check, one PO-scoped audit `raw_bag_allocation.system_derived_batch`); the closeout classifier upgrades consistent balance reviews to one-click "Use calculated remaining" rows with an inline button. Preset QC-reason chips prefilled with the system's own numbers on the four reason inputs (release-from-hold, status panel, over-consumption notes, manual recount). Allocation repair accepts a derived starting balance of 0 (the 6337-46 blocker) and validation errors are field-labeled via `formatZodError`; login validation messages humanized.
+
+Smoke (staging): a blocked bag shows "Auto-issue blocked: …" only while BLOCKED/NEEDS_REVIEW; fixing product setup then bulk-issuing releases it; issuing a clean lot from the form lands RELEASED without a second tap; bulk calculated-remaining applies only derivable bags and skips the rest with reasons; repair-issue with 0 starting balance and packaging counts submits; validation errors name the field.
+
 ## [1.37.1] — 2026-09-02
 
 - Fix: SSO callback 500 (`users_authentik_unique` violation) when the Authentik email changed for an already-provisioned account. The callback now resolves identity by Authentik subject first, falls back to email, and the JIT insert is conflict-safe (`onConflictDoNothing` + re-select by subject). Structural pins added for the lookup order.
