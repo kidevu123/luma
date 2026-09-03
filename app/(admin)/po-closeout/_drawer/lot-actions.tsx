@@ -10,6 +10,7 @@ import {
   repairAutoIssueFinishedLotAction,
   setFinishedLotStatusAction,
 } from "@/app/(admin)/finished-lots/actions";
+import { ReasonPresets } from "@/components/admin/reason-presets";
 
 export function LotActions({
   mode,
@@ -69,12 +70,23 @@ export function LotActions({
               : "Lot is on hold — release it after review, or keep it held."}
           </p>
           {mode === "HOLD_REVIEW" ? (
-            <input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Reason (recorded in audit)…"
-              className="w-full rounded border border-border bg-white px-2 py-1 text-[11px]"
-            />
+            <>
+              <ReasonPresets
+                presets={[
+                  "Reviewed and cleared for release",
+                  "Overpack accepted after recount",
+                  "Waste/damage accounted for",
+                  "Hold resolved with supervisor",
+                ]}
+                onPick={setReason}
+              />
+              <input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Reason (recorded in audit)…"
+                className="w-full rounded border border-border bg-white px-2 py-1 text-[11px]"
+              />
+            </>
           ) : null}
           <div className="flex items-center gap-2">
             <button

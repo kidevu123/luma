@@ -8,6 +8,7 @@ import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { ReasonPresets } from "@/components/admin/reason-presets";
 import { createFinishedLotAndRedirect, issueFinishedLotWithAllocationAndRedirect } from "../actions";
 import {
   computeEndingBalanceFromConsumption,
@@ -485,6 +486,16 @@ export function IssueLotForm({
             ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
+              {(overConsumptionQty ?? 0) > 0 || negativeEndingBalance ? (
+                <ReasonPresets
+                  presets={[
+                    `Recount: consumed ${(consumedQty ?? 0).toLocaleString()} vs starting ${(effectiveStartingBalance ?? 0).toLocaleString()} — system numbers used`,
+                    `Overpack: output exceeded intake by ${(overConsumptionQty ?? 0).toLocaleString()} tablets`,
+                    "Waste/damage during run accounted for in counts",
+                  ]}
+                  onPick={(t) => setNotes((prev) => (prev ? `${prev}\n${t}` : t))}
+                />
+              ) : null}
               <Textarea
                 id="notes"
                 rows={2}
