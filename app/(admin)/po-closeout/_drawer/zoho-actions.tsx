@@ -18,11 +18,13 @@ export function ZohoActions({
   mode,
   op,
   setup,
+  poId,
   onDone,
 }: {
   mode: "QUEUE" | "RETRY";
   op: { id: string; status: string } | null;
   setup: ProductSetupReadiness | null;
+  poId: string;
   onDone: () => void;
 }) {
   const [pending, setPending] = React.useState(false);
@@ -113,7 +115,7 @@ export function ZohoActions({
         </>
       )}
       <Link
-        href="/zoho-production-operations"
+        href={`/zoho-production-operations?po=${poId}`}
         className="inline-block text-[10.5px] font-medium text-brand-700 hover:underline"
       >
         Open Zoho operations

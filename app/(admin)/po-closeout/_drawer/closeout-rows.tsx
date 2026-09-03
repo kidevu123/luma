@@ -26,7 +26,7 @@ const ZOHO_LABEL: Record<string, string> = {
   UNCLEAR: "Unclear",
 };
 
-function rowLink(row: PoCloseoutRow): { href: string; label: string } | null {
+function rowLink(row: PoCloseoutRow, poId: string): { href: string; label: string } | null {
   switch (row.action) {
     case "REPAIR_QR_RESERVATION":
       return row.receiveId ? { href: `/inbound/${row.receiveId}`, label: "Open receive" } : null;
@@ -52,7 +52,7 @@ function rowLink(row: PoCloseoutRow): { href: string; label: string } | null {
         ? { href: `/finished-lots/${row.finishedLotId}`, label: "Open lot" }
         : { href: "/finished-lots", label: "Finished lots" };
     case "QUEUE_OR_RETRY_ZOHO":
-      return { href: "/zoho-production-operations", label: "Zoho output" };
+      return { href: `/zoho-production-operations?po=${poId}`, label: "Zoho output" };
     case "FIX_PRODUCT_SETUP":
       // SIMPLIFY-B — /products/[id]?from=output-queue is the same deep-link
       // the packaging-backlog row actions use (see backlog-row-actions.tsx);
@@ -110,7 +110,7 @@ export function CloseoutRows({
           </TR>
         ) : (
           rows.map((row) => {
-            const link = rowLink(row);
+            const link = rowLink(row, poId);
             const isOpen = openBagId === row.inventoryBagId;
             return (
               <React.Fragment key={row.inventoryBagId}>
