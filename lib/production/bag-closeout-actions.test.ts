@@ -142,6 +142,27 @@ describe("deriveApplicableBagActions — ISSUE_FINISHED_LOT and partial gate", (
   });
 });
 
+describe("SIMPLIFY-C: Zoho panels only when actionable", () => {
+  const base = {
+    rowStatus: "NEEDS_REVIEW",
+    rowAction: "QUEUE_OR_RETRY_ZOHO",
+    hasWorkflow: true,
+    hasFinishedLot: true,
+    lotStatus: "RELEASED",
+    allocationOpen: false,
+  };
+  it("NOT_READY renders no Zoho panel (mapping is fixed at product/PO level)", () => {
+    expect(deriveApplicableBagActions({ ...base, zoho: "NOT_READY" })).not.toContain("ZOHO_QUEUE");
+    expect(deriveApplicableBagActions({ ...base, zoho: "NOT_READY" })).not.toContain("ZOHO_RETRY");
+  });
+  it("READY_TO_QUEUE still queues; FAILED still retries", () => {
+    expect(
+      deriveApplicableBagActions({ ...base, rowStatus: "READY_FOR_ACTION", zoho: "READY_TO_QUEUE" }),
+    ).toContain("ZOHO_QUEUE");
+    expect(deriveApplicableBagActions({ ...base, zoho: "FAILED" })).toContain("ZOHO_RETRY");
+  });
+});
+
 describe("deriveApplicableBagActions — fail closed", () => {
   it("DONE rows render no actions at all", () => {
     expect(

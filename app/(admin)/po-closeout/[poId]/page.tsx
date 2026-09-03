@@ -340,6 +340,32 @@ export default async function PoCloseoutDetailPage({
         </div>
       ) : null}
 
+      {(tab === "zoho" || tab === "all") && summary.zohoMapping.skus.length > 0 ? (
+        <div className="rounded-lg border border-sky-300/40 bg-sky-50/40 px-4 py-2.5">
+          <p className="text-[12px] font-medium text-sky-900">
+            {summary.zohoMapping.skus.length} SKU{summary.zohoMapping.skus.length === 1 ? "" : "s"} need Zoho
+            mapping — fixing {summary.zohoMapping.skus.length === 1 ? "it" : "them"} unblocks {summary.zohoMapping.rows} bag
+            {summary.zohoMapping.rows === 1 ? "" : "s"}.
+          </p>
+          <ul className="mt-1 space-y-0.5 text-[11px] text-sky-900">
+            {summary.zohoMapping.skus.map((s) => (
+              <li key={`${s.productId ?? ""}|${s.sku}`} className="flex items-center gap-2">
+                <span className="font-mono">{s.sku}</span>
+                <span className="text-sky-700">({s.count} bag{s.count === 1 ? "" : "s"})</span>
+                {s.productId ? (
+                  <Link href={`/products/${s.productId}?from=output-queue`} className="font-medium underline">
+                    Fix mapping
+                  </Link>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <Link href={`/zoho-production-operations?po=${poId}`} className="mt-1 inline-block text-[11px] font-medium text-sky-800 underline">
+            Open this PO's Zoho operations
+          </Link>
+        </div>
+      ) : null}
+
       {/* Bucket tabs */}
       <div className="flex flex-wrap items-center gap-1.5">
         {TABS.map((t) => {
