@@ -22,9 +22,11 @@ import {
 } from "@/lib/db/schema";
 import { evaluateInventoryBagReadiness } from "@/lib/production/floor-readiness";
 import { canRepairQrReservation } from "@/lib/db/queries/bag-edits";
+import { mapLatestAutoCreateBlockedByWorkflowBag } from "@/lib/db/queries/audit-log";
 import { getProductionOutputBacklogRow } from "@/lib/db/queries/production-output-backlog";
 import { evaluateFinishedLotReleaseEligibility } from "@/lib/production/finished-lot-release-eligibility";
 import { computeOpenSessionRebaseEligibility } from "@/lib/production/open-session-rebase";
+import { computeSystemDerivedResolutionForBag } from "@/lib/production/system-derived-allocation-resolution";
 import { assertAutoLotRepairAllowed } from "@/lib/production/auto-lot-backlog-eligibility";
 import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
 import {
@@ -55,6 +57,8 @@ export type PoCloseoutRow = PoCloseoutRowVerdict & {
   zoho: PoCloseoutZohoStatus;
   startedAt: Date | null;
   finalizedAt: Date | null;
+  autoIssueBlockedMessage: string | null;
+  productId: string | null;
 };
 
 export type PoCloseoutSummary = {
@@ -359,6 +363,20 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       }
     }
 
+    // SIMPLIFY-B — probe calculated-remaining availability only for rows that
+    // would otherwise land in the repair-branch NEEDS_REVIEW fallback: an
+    // active REPAIR_ALLOCATION evaluation, not the no-session case (which has
+    // its own issue-lot path), and no rebase already available. DB probe, so
+    // scoped tightly — not run for every row.
+    let calculatedRemainingAvailable = false;
+    if (autoIssue?.action === "REPAIR_ALLOCATION" && autoIssue.code !== "MISSING_ALLOCATION_SESSION" && !rebaseAvailable) {
+      try {
+        calculatedRemainingAvailable = (await computeSystemDerivedResolutionForBag(b.inventoryBagId)).available;
+      } catch {
+        calculatedRemainingAvailable = false; // fail closed → row stays NEEDS_REVIEW
+      }
+    }
+
     let releaseStatus: PoCloseoutRowInput["releaseStatus"] = null;
     let releaseMessage: string | null = null;
     if (lot && lotStatus === "PENDING_QC") {
@@ -395,6 +413,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       qrIdleUnsafe: !!qrIdleUnsafe,
       autoIssue,
       rebaseAvailable,
+      calculatedRemainingAvailable,
       releaseStatus,
       releaseMessage,
       zoho: zohoStatus,
@@ -422,7 +441,23 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       zoho: zohoStatus,
       startedAt: wf?.startedAt ?? null,
       finalizedAt: wf?.finalizedAt ?? null,
+      autoIssueBlockedMessage: null,
+      productId: wf?.productId ?? null,
     });
+  }
+
+  // SIMPLIFY-B — batch-fetch the newest auto_create_blocked audit reason for
+  // just the bags that reached "finalized but no lot yet" (the only rows
+  // where auto-issue could have been attempted and blocked). One query for
+  // the whole PO, not one per row.
+  const blockedCandidates = rows
+    .filter((r) => r.workflowBagId && r.checklist.floorFinalizedOrExcluded && !r.finishedLotId)
+    .map((r) => r.workflowBagId!);
+  const autoIssueBlockedByBag = await mapLatestAutoCreateBlockedByWorkflowBag(blockedCandidates);
+  for (const r of rows) {
+    r.autoIssueBlockedMessage = r.workflowBagId
+      ? (autoIssueBlockedByBag.get(r.workflowBagId)?.message ?? null)
+      : null;
   }
 
   const statusCounts = summarizeRowStatuses(rows.map((r) => r.status));

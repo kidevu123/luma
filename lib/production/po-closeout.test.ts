@@ -538,3 +538,38 @@ describe("SIMPLIFY-A: deriveCloseoutBucket — action-oriented closeout buckets"
     });
   });
 });
+
+describe("SIMPLIFY-B: calculated-remaining availability upgrades the repair branch", () => {
+  const repairRow: PoCloseoutRowInput = {
+    ...doneRow,
+    hasFinishedLot: false,
+    finishedLotId: null,
+    lotStatus: null,
+    autoIssue: {
+      autoIssuable: false,
+      action: "REPAIR_ALLOCATION",
+      code: "NEGATIVE_ENDING_BALANCE",
+      repairIssueReady: false,
+      label: "Needs allocation repair",
+      nextStep: "Review starting balance / consumption",
+    },
+    rebaseAvailable: false,
+  };
+
+  it("available → READY_FOR_ACTION with Use calculated remaining", () => {
+    const r = classifyPoCloseoutRow({ ...repairRow, calculatedRemainingAvailable: true });
+    expect(r.status).toBe("READY_FOR_ACTION");
+    expect(r.action).toBe("RECORD_REMAINING_OR_CLOSE_PARTIAL");
+    expect(r.actionLabel).toBe("Use calculated remaining");
+  });
+
+  it("not available (or omitted) → unchanged NEEDS_REVIEW", () => {
+    expect(classifyPoCloseoutRow({ ...repairRow, calculatedRemainingAvailable: false }).status).toBe("NEEDS_REVIEW");
+    expect(classifyPoCloseoutRow(repairRow).status).toBe("NEEDS_REVIEW");
+  });
+
+  it("rebase still wins over calculated remaining", () => {
+    const r = classifyPoCloseoutRow({ ...repairRow, rebaseAvailable: true, calculatedRemainingAvailable: true });
+    expect(r.action).toBe("CORRECT_STARTING_BALANCE");
+  });
+});

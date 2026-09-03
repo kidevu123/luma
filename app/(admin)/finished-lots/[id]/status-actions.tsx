@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ReasonPresets } from "@/components/admin/reason-presets";
 import { setFinishedLotStatusAction } from "../actions";
 import { ALLOWED, type LotStatus } from "./lot-transitions";
 
@@ -63,6 +64,15 @@ export function StatusActions({ lotId, status }: { lotId: string; status: string
       {reasonOpen && (
         <div className="rounded-md border border-border/70 bg-surface-2/50 p-2.5 space-y-2">
           <p className="text-xs font-medium">{reasonOpen.label} — reason</p>
+          <ReasonPresets
+            presets={[
+              "Reviewed and cleared for release",
+              "Overpack accepted after recount",
+              "Waste/damage accounted for",
+              "QA sample retained",
+            ]}
+            onPick={setReason}
+          />
           <Input
             placeholder={reasonOpen.optional ? "Optional" : "Required"}
             value={reason}

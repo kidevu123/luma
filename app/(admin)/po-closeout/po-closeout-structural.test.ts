@@ -31,6 +31,15 @@ describe("PO closeout loader — read-only, reuses existing classifiers (no dupl
   it("fails closed per row (try/catch around heavy evaluators)", () => {
     expect(loaderSrc).toMatch(/catch\s*\{/);
   });
+  it("SIMPLIFY-B: loader surfaces the latest auto_create_blocked audit reason per bag", () => {
+    expect(loaderSrc).toMatch(/mapLatestAutoCreateBlockedByWorkflowBag/);
+    expect(repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx")).toMatch(/Auto-issue blocked:/);
+  });
+  it("SIMPLIFY-B: product-setup rows deep-link to the product page, not bare /products", () => {
+    const rows = repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx");
+    expect(rows).toMatch(/\/products\/\$\{row\.productId\}/);
+    expect(rows).not.toMatch(/href: "\/products", label: "Open products"/);
+  });
 });
 
 describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped, no Zoho commit", () => {
@@ -40,6 +49,10 @@ describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped
     expect(actionsSrc).toMatch(/loadPoCloseout\(poId\)/);
     expect(actionsSrc).toMatch(/action === "AUTO_ISSUE_FINISHED_LOT"/);
     expect(actionsSrc).toMatch(/repairAutoIssueFinishedLotForWorkflowBag\(/);
+  });
+  it("SIMPLIFY-B: PO bulk issue covers repair-issue-ready rows too", () => {
+    expect(actionsSrc).toMatch(/AUTO_ISSUE_FINISHED_LOT" \|\| r\.action === "ISSUE_FINISHED_LOT/);
+    expect(detailPageSrc).toMatch(/r\.action === "ISSUE_FINISHED_LOT"/);
   });
   it("auto-release is lead-gated, filters to this PO, re-checks eligibility, reuses setFinishedLotStatus", () => {
     expect(actionsSrc).toMatch(/export async function autoReleaseSafeLotsForPoAction/);
@@ -56,6 +69,13 @@ describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped
   it("caps the batch and reports skipped reasons", () => {
     expect(actionsSrc).toMatch(/PO_BATCH_CAP = 100/);
     expect(actionsSrc).toMatch(/skippedReasons/);
+  });
+  it("SIMPLIFY-B: PO bulk calculated-remaining reuses the per-bag service and audits PO-scoped", () => {
+    expect(actionsSrc).toMatch(/export async function useCalculatedRemainingForPoAction/);
+    expect(actionsSrc).toMatch(/computeSystemDerivedResolutionForBag/);
+    expect(actionsSrc).toMatch(/resolveAllocationFromProductionOutput/);
+    expect(actionsSrc).toMatch(/raw_bag_allocation\.system_derived_batch/);
+    expect(repo("app/(admin)/po-closeout/batch-buttons.tsx")).toMatch(/calcReady/);
   });
 });
 
@@ -93,6 +113,7 @@ describe("PO closeout pages", () => {
     expect(src).toMatch(/setFinishedLotStatusAction/);
     expect(src).not.toMatch(/"use server"/);
     expect(repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx")).toMatch(/RowActionButton/);
+    expect(repo("app/(admin)/po-closeout/_drawer/row-action-button.tsx")).toMatch(/useCalculatedRemainingAction/);
   });
   it("detail page renders bucket tabs from the pure bucket classifier (no inline policy)", () => {
     expect(detailPageSrc).toMatch(/deriveCloseoutBucket/);

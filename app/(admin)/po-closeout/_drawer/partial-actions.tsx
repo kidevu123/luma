@@ -12,6 +12,7 @@ import {
   markPartialBagDepletedAction,
   useCalculatedRemainingAction,
 } from "@/app/(admin)/partial-bags/actions";
+import { ReasonPresets } from "@/components/admin/reason-presets";
 
 type Tab = "CALCULATED" | "MANUAL" | "DEPLETED";
 
@@ -25,6 +26,7 @@ export function PartialActions({
   const [tab, setTab] = React.useState<Tab>("CALCULATED");
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [manualReason, setManualReason] = React.useState("");
 
   const submit = async (fn: () => Promise<{ ok: boolean } & { error?: string }>) => {
     setPending(true);
@@ -116,8 +118,19 @@ export function PartialActions({
             placeholder="Counted remaining (tablets)"
             className="w-full rounded border border-border bg-white px-2 py-1 text-[11px] tabular-nums"
           />
+          <ReasonPresets
+            presets={[
+              "Physical recount performed",
+              "Weigh-back conversion",
+              "Spillage/waste during run",
+              "Counted with supervisor",
+            ]}
+            onPick={setManualReason}
+          />
           <input
             name="reason"
+            value={manualReason}
+            onChange={(e) => setManualReason(e.target.value)}
             required
             minLength={10}
             placeholder="Reason (min 10 chars, audited)…"

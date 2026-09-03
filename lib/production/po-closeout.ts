@@ -104,6 +104,8 @@ export type PoCloseoutRowInput = {
     | null;
   /** computeOpenSessionRebaseEligibility(...).available — a safe starting-balance correction. */
   rebaseAvailable: boolean;
+  /** computeSystemDerivedResolutionForBag(...).available — remaining is purely derivable from production output. */
+  calculatedRemainingAvailable?: boolean;
   /** classifyFinishedLotReleaseEligibility verdict, only when lot is PENDING_QC. */
   releaseStatus: "AUTO_RELEASE_READY" | "NEEDS_QC_REVIEW" | "BLOCKED" | "ALREADY_RELEASED" | "NOT_FOUND" | null;
   releaseMessage: string | null;
@@ -322,6 +324,14 @@ export function classifyPoCloseoutRow(input: PoCloseoutRowInput): PoCloseoutRowV
       }
       if (input.rebaseAvailable) {
         return verdict("READY_FOR_ACTION", "Split/partial bag: starting balance can be corrected", "CORRECT_STARTING_BALANCE", "Correct starting balance");
+      }
+      if (input.calculatedRemainingAvailable) {
+        return verdict(
+          "READY_FOR_ACTION",
+          "Remaining is derivable from production output — no operator input needed",
+          "RECORD_REMAINING_OR_CLOSE_PARTIAL",
+          "Use calculated remaining",
+        );
       }
       return verdict("NEEDS_REVIEW", ai.nextStep || "Split/partial bag needs a remaining balance", "RECORD_REMAINING_OR_CLOSE_PARTIAL", "Record remaining / close partial");
     }

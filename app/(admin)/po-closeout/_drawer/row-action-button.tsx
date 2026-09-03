@@ -11,6 +11,7 @@ import {
   repairAutoIssueFinishedLotAction,
   setFinishedLotStatusAction,
 } from "@/app/(admin)/finished-lots/actions";
+import { useCalculatedRemainingAction } from "@/app/(admin)/partial-bags/actions";
 import type { PoCloseoutRow } from "@/lib/db/queries/po-closeout";
 
 export function RowActionButton({ row }: { row: PoCloseoutRow }) {
@@ -39,6 +40,17 @@ export function RowActionButton({ row }: { row: PoCloseoutRow }) {
     button = {
       label: "Release lot",
       onClick: () => void run(() => setFinishedLotStatusAction({ id: finishedLotId, status: "RELEASED" })),
+    };
+  } else if (row.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL" && row.status === "READY_FOR_ACTION") {
+    const inventoryBagId = row.inventoryBagId;
+    button = {
+      label: "Use calculated remaining",
+      onClick: () =>
+        void run(() => {
+          const fd = new FormData();
+          fd.set("inventoryBagId", inventoryBagId);
+          return useCalculatedRemainingAction(fd);
+        }),
     };
   }
 

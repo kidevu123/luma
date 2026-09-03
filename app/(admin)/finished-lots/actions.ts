@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireLead, requireAdmin } from "@/lib/auth-guards";
+import { formatZodError } from "@/lib/validation/format-zod-error";
 import {
   createFinishedLot,
   repairAutoIssueFinishedLotForWorkflowBag,
@@ -39,12 +40,49 @@ const lotSchema = z.object({
     .optional(),
 });
 
+const LOT_FIELD_LABELS: Record<string, string> = {
+  productId: "Product",
+  workflowBagId: "Source bag",
+  finishedLotNumber: "Lot number",
+  producedOn: "Produced on",
+  expiryDate: "Expiry date",
+  unitsProduced: "Units produced",
+  displaysProduced: "Displays produced",
+  casesProduced: "Cases produced",
+  consumedQty: "Tablets consumed",
+  endingBalanceQty: "Ending balance",
+  repairStartingBalanceQty: "Starting balance",
+  status: "Status",
+  reason: "Reason",
+};
+
+// SIMPLIFY-B — a lot issued with clean, consistent counts should not need a
+// separate release tap. Re-uses the exact eligibility evaluator + release
+// path the auto-release batch uses. Never fails the issue: release is a
+// best-effort follow-on, and anything not AUTO_RELEASE_READY stays PENDING_QC.
+async function maybeAutoReleaseOnIssue(finishedLotId: string, actor: Awaited<ReturnType<typeof requireLead>>) {
+  try {
+    const evaluation = await evaluateFinishedLotReleaseEligibility(finishedLotId);
+    if (evaluation.status === "AUTO_RELEASE_READY") {
+      await setFinishedLotStatus(
+        finishedLotId,
+        "RELEASED",
+        actor,
+        "Auto-released on issue — passed QC auto-release eligibility. Zoho output NOT committed by this step.",
+      );
+    }
+  } catch {
+    // Best-effort: the lot stays PENDING_QC and shows in the release backlog.
+  }
+}
+
 export async function createFinishedLotAction(payload: unknown) {
   const actor = await requireLead();
   const parsed = lotSchema.safeParse(payload);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  if (!parsed.success) return { error: formatZodError(parsed.error, LOT_FIELD_LABELS) };
   try {
     const { lot } = await createFinishedLot(compact(parsed.data), actor);
+    await maybeAutoReleaseOnIssue(lot.id, actor);
     revalidatePath("/finished-lots");
     revalidatePath("/po-closeout");
     revalidatePath("/floor-board");
@@ -68,7 +106,7 @@ const coordinatedLotSchema = lotSchema.extend({
   endingBalanceQty: z.coerce.number().int(),
   repairMissingAllocation: z.boolean().optional(),
   repairNotes: z.string().max(2000).optional().nullable(),
-  repairStartingBalanceQty: z.coerce.number().int().positive().optional().nullable(),
+  repairStartingBalanceQty: z.coerce.number().int().nonnegative().optional().nullable(),
 });
 
 /** LEAD: create finished lot + close allocation in one transaction. */
@@ -76,7 +114,7 @@ export async function issueFinishedLotWithAllocationAndRedirect(payload: unknown
   const actor = await requireLead();
   const parsed = coordinatedLotSchema.safeParse(payload);
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    return { error: formatZodError(parsed.error, LOT_FIELD_LABELS) };
   }
   const d = parsed.data;
   let finishedLotId: string;
@@ -102,6 +140,7 @@ export async function issueFinishedLotWithAllocationAndRedirect(payload: unknown
     );
     if (!result.ok) return { error: result.error };
     finishedLotId = result.finishedLotId;
+    await maybeAutoReleaseOnIssue(finishedLotId, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Issue lot failed." };
   }
@@ -313,7 +352,7 @@ export async function autoReleaseAllSafeLotsAction(): Promise<AutoReleaseBatchRe
 export async function setFinishedLotStatusAction(payload: unknown) {
   const actor = await requireAdmin();
   const parsed = statusSchema.safeParse(payload);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  if (!parsed.success) return { error: formatZodError(parsed.error, LOT_FIELD_LABELS) };
   try {
     await setFinishedLotStatus(
       parsed.data.id,
