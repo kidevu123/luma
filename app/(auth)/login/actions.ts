@@ -7,8 +7,8 @@ import { signIn } from "@/lib/auth";
 const schema = z.object({
   // Accept anything with an "@" — Zod's `.email()` rejects single-
   // segment hosts like "admin@luma" which seeded users were using.
-  email: z.string().min(3).max(254).regex(/^.+@.+$/, "Email must contain @"),
-  password: z.string().min(1).max(200),
+  email: z.string().min(3, "Enter your email").max(254, "Email is too long").regex(/^.+@.+$/, "Email must contain @"),
+  password: z.string().min(1, "Enter your password").max(200, "Password is too long"),
 });
 
 export async function loginAction(
