@@ -70,6 +70,13 @@ describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped
     expect(actionsSrc).toMatch(/PO_BATCH_CAP = 100/);
     expect(actionsSrc).toMatch(/skippedReasons/);
   });
+  it("SIMPLIFY-B: PO bulk calculated-remaining reuses the per-bag service and audits PO-scoped", () => {
+    expect(actionsSrc).toMatch(/export async function useCalculatedRemainingForPoAction/);
+    expect(actionsSrc).toMatch(/computeSystemDerivedResolutionForBag/);
+    expect(actionsSrc).toMatch(/resolveAllocationFromProductionOutput/);
+    expect(actionsSrc).toMatch(/raw_bag_allocation\.system_derived_batch/);
+    expect(repo("app/(admin)/po-closeout/batch-buttons.tsx")).toMatch(/calcReady/);
+  });
 });
 
 describe("PO closeout pages", () => {

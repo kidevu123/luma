@@ -2,8 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { PackagePlus, ShieldCheck } from "lucide-react";
-import { autoIssueSafeLotsForPoAction, autoReleaseSafeLotsForPoAction } from "./actions";
+import { PackagePlus, ShieldCheck, Calculator } from "lucide-react";
+import {
+  autoIssueSafeLotsForPoAction,
+  autoReleaseSafeLotsForPoAction,
+  useCalculatedRemainingForPoAction,
+} from "./actions";
 
 type Result = { affected: number; skipped: number; capped: boolean; skippedReasons: string[] } | null;
 
@@ -34,13 +38,16 @@ export function PoBatchButtons({
   poId,
   issueReady,
   releaseReady,
+  calcReady,
 }: {
   poId: string;
   issueReady: number;
   releaseReady: number;
+  calcReady: number;
 }) {
   const issue = useBatch(autoIssueSafeLotsForPoAction);
   const release = useBatch(autoReleaseSafeLotsForPoAction);
+  const calc = useBatch(useCalculatedRemainingForPoAction);
 
   return (
     <div className="flex flex-col gap-2">
@@ -73,6 +80,22 @@ export function PoBatchButtons({
           <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
           {release.pending ? "Releasing…" : `Auto-release safe lots (${releaseReady})`}
         </button>
+        {calcReady > 0 ? (
+          <button
+            type="button"
+            disabled={calc.pending}
+            onClick={() =>
+              calc.run(
+                poId,
+                `Apply the system-calculated remaining to ${calcReady} bag${calcReady === 1 ? "" : "s"}? Derived from production output; no operator input.`,
+              )
+            }
+            className="inline-flex items-center gap-1.5 rounded-lg border border-sky-600/50 bg-sky-50 px-3 py-1.5 text-[12px] font-semibold text-sky-800 hover:bg-sky-100 transition-colors disabled:opacity-50"
+          >
+            <Calculator className="h-3.5 w-3.5" aria-hidden />
+            {calc.pending ? "Applying…" : `Use calculated remaining (${calcReady})`}
+          </button>
+        ) : null}
       </div>
       {(issue.result || issue.error) && (
         <p className="text-[11px] text-text-muted">
@@ -90,6 +113,16 @@ export function PoBatchButtons({
             <>
               <span className="font-medium text-green-700">Released {release.result!.affected}</span>
               {release.result!.skipped > 0 ? ` · skipped ${release.result!.skipped}` : ""}
+            </>
+          )}
+        </p>
+      )}
+      {(calc.result || calc.error) && (
+        <p className="text-[11px] text-text-muted">
+          {calc.error ? <span className="text-red-700">{calc.error}</span> : (
+            <>
+              <span className="font-medium text-sky-700">Applied {calc.result!.affected}</span>
+              {calc.result!.skipped > 0 ? ` · skipped ${calc.result!.skipped}` : ""}
             </>
           )}
         </p>

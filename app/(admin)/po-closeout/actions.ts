@@ -36,6 +36,10 @@ import {
   setFinishedLotStatus,
 } from "@/lib/db/queries/finished-lots";
 import { evaluateFinishedLotReleaseEligibility } from "@/lib/production/finished-lot-release-eligibility";
+import {
+  computeSystemDerivedResolutionForBag,
+  resolveAllocationFromProductionOutput,
+} from "@/lib/production/system-derived-allocation-resolution";
 
 const PO_BATCH_CAP = 100;
 
@@ -175,6 +179,74 @@ export async function autoReleaseSafeLotsForPoAction(poId: string): Promise<PoBa
     };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "PO auto-release failed." };
+  }
+}
+
+/** Apply the system-calculated remaining to every bag on this PO where it is
+ *  purely derivable (action RECORD_REMAINING_OR_CLOSE_PARTIAL). Probes each
+ *  candidate read-only first; the per-bag service re-checks inside its own
+ *  transaction. */
+export async function useCalculatedRemainingForPoAction(poId: string): Promise<PoBatchResult> {
+  const actor = await requireLead();
+  try {
+    const summary = await loadPoCloseout(poId);
+    if (!summary) return { ok: false, error: "PO not found." };
+    const candidates = summary.rows
+      .filter((r) => r.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL")
+      .slice(0, PO_BATCH_CAP);
+
+    const applied: string[] = [];
+    const skipped: string[] = [];
+    for (const r of candidates) {
+      const probe = await computeSystemDerivedResolutionForBag(r.inventoryBagId);
+      if (!probe.available) {
+        skipped.push(probe.message);
+        continue;
+      }
+      const result = await resolveAllocationFromProductionOutput({
+        inventoryBagId: r.inventoryBagId,
+        actor,
+        note: "Applied via PO Closeout bulk calculated-remaining.",
+      });
+      if (result.ok) applied.push(r.receiptNumber ?? r.inventoryBagId);
+      else skipped.push(result.error);
+    }
+
+    await writeAudit({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action: "raw_bag_allocation.system_derived_batch",
+      targetType: "PoCloseout",
+      targetId: poId,
+      after: {
+        source: "SYSTEM_DERIVED_FROM_PRODUCTION_OUTPUT",
+        scope: "PO",
+        po_id: poId,
+        po_number: summary.poNumber,
+        ready_at_scan: candidates.length,
+        applied: applied.length,
+        skipped: skipped.length,
+        applied_bags: applied,
+        skipped_reasons: skipped,
+        zoho_output_committed: false,
+        note: "PO-scoped calculated-remaining only; derived numbers, no operator input.",
+      },
+    });
+
+    if (applied.length > 0) {
+      revalidatePath(`/po-closeout/${poId}`);
+      revalidatePath("/po-closeout");
+      revalidatePath("/partial-bags");
+    }
+    return {
+      ok: true,
+      affected: applied.length,
+      skipped: skipped.length,
+      capped: summary.rows.filter((r) => r.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL").length > PO_BATCH_CAP,
+      skippedReasons: skipped,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "PO calculated-remaining failed." };
   }
 }
 
