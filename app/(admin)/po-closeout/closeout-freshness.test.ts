@@ -184,7 +184,11 @@ describe("bag drawer UI (CLOSEOUT-DRAWER-1)", () => {
   });
 
   it("fail closed: no applicable actions renders no action panels", () => {
-    expect(panelsSrc).toMatch(/if \(keys\.length === 0\) return null;/);
+    // SIMPLIFY-D — Task 2 introduced effectiveKeys (keys, or the single
+    // primary key when primaryOnly); the fail-closed guard now reads that
+    // variable. effectiveKeys === keys when primaryOnly is false, so the
+    // guarantee this test pins is unchanged.
+    expect(panelsSrc).toMatch(/if \(effectiveKeys\.length === 0\) return null;/);
   });
 
   it("panels import EXISTING server actions only — no new mutation endpoints in _drawer/", () => {
