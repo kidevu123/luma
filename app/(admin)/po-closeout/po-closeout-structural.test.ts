@@ -216,6 +216,12 @@ describe("DRAWER-FRESHNESS-1: panel keys track live row facts; finished-lot acti
     expect(drawerSrc).toMatch(/prevRowKeyRef|row\.action[\s\S]{0,400}refetch/);
   });
 
+  it("SIMPLIFY-D: guided steps render one primary panel, never the buffet", () => {
+    expect(panelsSrc).toMatch(/primaryOnly/);
+    expect(panelsSrc).toMatch(/derivePrimaryBagAction/);
+    expect(drawerSrc).toMatch(/primaryOnly/);
+  });
+
   it("repairAutoIssueFinishedLotAction revalidates the dynamic closeout detail path", () => {
     expect(finishedLotActionsSrc).toMatch(
       /repairAutoIssueFinishedLotAction[\s\S]{0,600}revalidatePath\("\/po-closeout\/\[poId\]", "page"\)/,

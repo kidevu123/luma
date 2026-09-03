@@ -7,7 +7,10 @@
 
 import type { BagCloseoutDetail } from "@/lib/db/queries/bag-closeout-detail";
 import type { BagCloseoutRowFacts } from "@/lib/db/queries/bag-closeout-detail";
-import { deriveApplicableBagActions } from "@/lib/production/bag-closeout-actions";
+import {
+  deriveApplicableBagActions,
+  derivePrimaryBagAction,
+} from "@/lib/production/bag-closeout-actions";
 import { QrActions } from "./qr-actions";
 import { LotActions } from "./lot-actions";
 import { PartialActions } from "./partial-actions";
@@ -20,12 +23,16 @@ export function ActionPanels({
   inventoryBagId,
   poId,
   onDone,
+  primaryOnly,
 }: {
   detail: BagCloseoutDetail;
   row: BagCloseoutRowFacts;
   inventoryBagId: string;
   poId: string;
   onDone: () => void;
+  /** SIMPLIFY-D — the guided wizard shows ONE action per step, not the
+   *  buffet. Default false keeps the list-view drawer byte-identical. */
+  primaryOnly?: boolean;
 }) {
   // Derive applicable action keys from the CURRENT server-rendered row facts
   // on every render so that panels update immediately after an action
@@ -40,7 +47,13 @@ export function ActionPanels({
     lotStatus: row.lotStatus,
     allocationOpen: detail.summary?.allocation?.isOpen ?? false,
   });
-  if (keys.length === 0) return null;
+  const effectiveKeys = primaryOnly
+    ? (() => {
+        const primary = derivePrimaryBagAction(keys);
+        return primary ? [primary] : [];
+      })()
+    : keys;
+  if (effectiveKeys.length === 0) return null;
 
   return (
     <div className="space-y-2">
@@ -48,17 +61,17 @@ export function ActionPanels({
         Actions
       </p>
       <div className="grid gap-2 lg:grid-cols-2">
-        {keys.includes("REPAIR_QR") && row.receiveId ? (
+        {effectiveKeys.includes("REPAIR_QR") && row.receiveId ? (
           <QrActions receiveId={row.receiveId} inventoryBagId={inventoryBagId} onDone={onDone} />
         ) : null}
-        {(keys.includes("ISSUE_LOT") ||
-          keys.includes("RELEASE_LOT") ||
-          keys.includes("REVIEW_HOLD")) ? (
+        {(effectiveKeys.includes("ISSUE_LOT") ||
+          effectiveKeys.includes("RELEASE_LOT") ||
+          effectiveKeys.includes("REVIEW_HOLD")) ? (
           <LotActions
             mode={
-              keys.includes("ISSUE_LOT")
+              effectiveKeys.includes("ISSUE_LOT")
                 ? "ISSUE"
-                : keys.includes("RELEASE_LOT")
+                : effectiveKeys.includes("RELEASE_LOT")
                   ? "RELEASE"
                   : "HOLD_REVIEW"
             }
@@ -67,19 +80,19 @@ export function ActionPanels({
             onDone={onDone}
           />
         ) : null}
-        {keys.includes("RESOLVE_PARTIAL") ? (
+        {effectiveKeys.includes("RESOLVE_PARTIAL") ? (
           <PartialActions inventoryBagId={inventoryBagId} onDone={onDone} />
         ) : null}
-        {(keys.includes("ZOHO_QUEUE") || keys.includes("ZOHO_RETRY")) ? (
+        {(effectiveKeys.includes("ZOHO_QUEUE") || effectiveKeys.includes("ZOHO_RETRY")) ? (
           <ZohoActions
-            mode={keys.includes("ZOHO_RETRY") ? "RETRY" : "QUEUE"}
+            mode={effectiveKeys.includes("ZOHO_RETRY") ? "RETRY" : "QUEUE"}
             op={detail.zohoReadiness.op}
             setup={detail.zohoReadiness.setup}
             poId={poId}
             onDone={onDone}
           />
         ) : null}
-        {keys.includes("CORRECTION_WIZARD") && row.workflowBagId ? (
+        {effectiveKeys.includes("CORRECTION_WIZARD") && row.workflowBagId ? (
           <CorrectionLauncher
             workflowBagId={row.workflowBagId}
             bagFinalized={detail.summary?.workflow?.finalized ?? false}

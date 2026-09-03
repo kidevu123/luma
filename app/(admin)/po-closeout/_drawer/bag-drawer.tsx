@@ -21,12 +21,16 @@ export function BagDrawer({
   poId,
   row,
   reason,
+  primaryOnly,
 }: {
   inventoryBagId: string;
   poId: string;
   row: BagCloseoutRowFacts;
   /** The row verdict's reason — shown as headline context. */
   reason: string;
+  /** SIMPLIFY-D — passed through to ActionPanels; default false keeps the
+   *  list-view drawer byte-identical. */
+  primaryOnly?: boolean;
 }) {
   const router = useRouter();
   useRefreshSuppression();
@@ -97,6 +101,7 @@ export function BagDrawer({
             inventoryBagId={inventoryBagId}
             poId={poId}
             onDone={() => void refetch()}
+            primaryOnly={primaryOnly ?? false}
           />
         </>
       ) : null}
