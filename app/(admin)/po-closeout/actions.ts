@@ -51,7 +51,12 @@ export async function autoIssueSafeLotsForPoAction(poId: string): Promise<PoBatc
     const summary = await loadPoCloseout(poId);
     if (!summary) return { ok: false, error: "PO not found." };
     const targets = summary.rows
-      .filter((r) => r.status === "READY_FOR_ACTION" && r.action === "AUTO_ISSUE_FINISHED_LOT" && r.workflowBagId)
+      .filter(
+        (r) =>
+          r.status === "READY_FOR_ACTION" &&
+          (r.action === "AUTO_ISSUE_FINISHED_LOT" || r.action === "ISSUE_FINISHED_LOT") &&
+          r.workflowBagId,
+      )
       .slice(0, PO_BATCH_CAP);
 
     const issued: string[] = [];
@@ -93,7 +98,11 @@ export async function autoIssueSafeLotsForPoAction(poId: string): Promise<PoBatc
       ok: true,
       affected: issued.length,
       skipped: skipped.length,
-      capped: summary.rows.filter((r) => r.action === "AUTO_ISSUE_FINISHED_LOT").length > PO_BATCH_CAP,
+      capped: summary.rows.filter(
+        (r) =>
+          r.status === "READY_FOR_ACTION" &&
+          (r.action === "AUTO_ISSUE_FINISHED_LOT" || r.action === "ISSUE_FINISHED_LOT"),
+      ).length > PO_BATCH_CAP,
       skippedReasons: skipped,
     };
   } catch (err) {

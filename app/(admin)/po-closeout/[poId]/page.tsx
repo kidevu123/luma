@@ -158,7 +158,11 @@ export default async function PoCloseoutDetailPage({
     });
     return `/po-closeout/${poId}?${p.toString()}`;
   };
-  const issueReady = summary.rows.filter((r) => r.action === "AUTO_ISSUE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
+  const issueReady = summary.rows.filter(
+    (r) =>
+      r.status === "READY_FOR_ACTION" &&
+      (r.action === "AUTO_ISSUE_FINISHED_LOT" || r.action === "ISSUE_FINISHED_LOT"),
+  ).length;
   const releaseReady = summary.rows.filter((r) => r.action === "AUTO_RELEASE_FINISHED_LOT" && r.status === "READY_FOR_ACTION").length;
   const recommendation = recommendCloseoutNextAction({ buckets: bucketCounts, issueReady, releaseReady });
 
