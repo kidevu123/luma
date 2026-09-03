@@ -255,7 +255,8 @@ export async function useCalculatedRemainingForPoAction(poId: string): Promise<P
  *  re-checks status (READY|FAILED) inside its own update — a row that
  *  changed since the scan is skipped, never forced. Queueing only marks the
  *  op for the worker; committing to Zoho stays with the cron/worker via the
- *  integration gateway. */
+ *  integration gateway. Admin-gated (not the lead gate its sibling batch
+ *  actions use) to match the per-op queue action's own OWNER|ADMIN rule. */
 export async function queueZohoReadyForPoAction(poId: string): Promise<PoBatchResult> {
   const actor = await requireAdmin();
   try {
@@ -303,7 +304,12 @@ export async function queueZohoReadyForPoAction(poId: string): Promise<PoBatchRe
       ok: true,
       affected: queued.length,
       skipped: skipped.length,
-      capped: summary.rows.filter((r) => r.zoho === "READY_TO_QUEUE").length > PO_BATCH_CAP,
+      // Same predicate as `targets` above — READY_TO_QUEUE also covers rows
+      // with a missing-but-required op (no zohoOpId), which are never
+      // queueable and must not inflate the capped signal.
+      capped:
+        summary.rows.filter((r) => r.zoho === "READY_TO_QUEUE" && r.zohoOpId != null).length >
+        PO_BATCH_CAP,
       skippedReasons: skipped,
     };
   } catch (err) {
