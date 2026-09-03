@@ -48,7 +48,7 @@ export type PoBatchResult =
   | { ok: false; error: string };
 
 /** Auto-issue every finished lot that the closeout evaluator marks READY for
- *  this PO (action AUTO_ISSUE_FINISHED_LOT). Reuses repairAutoIssueFinishedLotForWorkflowBag. */
+ *  this PO (action AUTO_ISSUE_FINISHED_LOT or ISSUE_FINISHED_LOT). Reuses repairAutoIssueFinishedLotForWorkflowBag. */
 export async function autoIssueSafeLotsForPoAction(poId: string): Promise<PoBatchResult> {
   const actor = await requireLead();
   try {
@@ -192,7 +192,7 @@ export async function useCalculatedRemainingForPoAction(poId: string): Promise<P
     const summary = await loadPoCloseout(poId);
     if (!summary) return { ok: false, error: "PO not found." };
     const candidates = summary.rows
-      .filter((r) => r.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL")
+      .filter((r) => r.status === "READY_FOR_ACTION" && r.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL")
       .slice(0, PO_BATCH_CAP);
 
     const applied: string[] = [];
@@ -242,7 +242,7 @@ export async function useCalculatedRemainingForPoAction(poId: string): Promise<P
       ok: true,
       affected: applied.length,
       skipped: skipped.length,
-      capped: summary.rows.filter((r) => r.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL").length > PO_BATCH_CAP,
+      capped: summary.rows.filter((r) => r.status === "READY_FOR_ACTION" && r.action === "RECORD_REMAINING_OR_CLOSE_PARTIAL").length > PO_BATCH_CAP,
       skippedReasons: skipped,
     };
   } catch (err) {

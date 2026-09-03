@@ -52,7 +52,7 @@ describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped
   });
   it("SIMPLIFY-B: PO bulk issue covers repair-issue-ready rows too", () => {
     expect(actionsSrc).toMatch(/AUTO_ISSUE_FINISHED_LOT" \|\| r\.action === "ISSUE_FINISHED_LOT/);
-    expect(detailPageSrc).toMatch(/ISSUE_FINISHED_LOT/);
+    expect(detailPageSrc).toMatch(/r\.action === "ISSUE_FINISHED_LOT"/);
   });
   it("auto-release is lead-gated, filters to this PO, re-checks eligibility, reuses setFinishedLotStatus", () => {
     expect(actionsSrc).toMatch(/export async function autoReleaseSafeLotsForPoAction/);
