@@ -176,7 +176,7 @@ export default async function PoCloseoutDetailPage({
   const guided = rawGuided === "1";
   const parsedStep = Number.parseInt(rawStep ?? "0", 10);
   const guidedStep = Number.isFinite(parsedStep) && parsedStep >= 0 ? parsedStep : 0;
-  const guidedQueue = deriveGuidedCloseoutQueue(summary.rows);
+  const guidedQueue = deriveGuidedCloseoutQueue(summary.rows).steps;
   const hasSafeBatch = issueReady + releaseReady > 0;
   const guidedTotalSteps = guidedQueue.length + (hasSafeBatch ? 1 : 0);
   const bagIndex = guidedStep - (hasSafeBatch ? 1 : 0);

@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveApplicableBagActions,
+  derivePrimaryBagAction,
   type BagDrawerActionKey,
 } from "./bag-closeout-actions";
 
@@ -194,5 +195,13 @@ describe("deriveApplicableBagActions — fail closed", () => {
         rowAction: "AUTO_ISSUE_FINISHED_LOT",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("SIMPLIFY-D: derivePrimaryBagAction", () => {
+  it("first non-correction key wins; correction alone yields null", () => {
+    expect(derivePrimaryBagAction(["ISSUE_LOT", "CORRECTION_WIZARD"])).toBe("ISSUE_LOT");
+    expect(derivePrimaryBagAction(["CORRECTION_WIZARD"])).toBeNull();
+    expect(derivePrimaryBagAction([])).toBeNull();
   });
 });
