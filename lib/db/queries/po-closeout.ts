@@ -26,6 +26,7 @@ import { mapLatestAutoCreateBlockedByWorkflowBag } from "@/lib/db/queries/audit-
 import { getProductionOutputBacklogRow } from "@/lib/db/queries/production-output-backlog";
 import { evaluateFinishedLotReleaseEligibility } from "@/lib/production/finished-lot-release-eligibility";
 import { computeOpenSessionRebaseEligibility } from "@/lib/production/open-session-rebase";
+import { computeSystemDerivedResolutionForBag } from "@/lib/production/system-derived-allocation-resolution";
 import { assertAutoLotRepairAllowed } from "@/lib/production/auto-lot-backlog-eligibility";
 import { isProductionOutputPersistEnabled } from "@/lib/zoho/production-output-config";
 import {
@@ -362,6 +363,20 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       }
     }
 
+    // SIMPLIFY-B — probe calculated-remaining availability only for rows that
+    // would otherwise land in the repair-branch NEEDS_REVIEW fallback: an
+    // active REPAIR_ALLOCATION evaluation, not the no-session case (which has
+    // its own issue-lot path), and no rebase already available. DB probe, so
+    // scoped tightly — not run for every row.
+    let calculatedRemainingAvailable = false;
+    if (autoIssue?.action === "REPAIR_ALLOCATION" && autoIssue.code !== "MISSING_ALLOCATION_SESSION" && !rebaseAvailable) {
+      try {
+        calculatedRemainingAvailable = (await computeSystemDerivedResolutionForBag(b.inventoryBagId)).available;
+      } catch {
+        calculatedRemainingAvailable = false; // fail closed → row stays NEEDS_REVIEW
+      }
+    }
+
     let releaseStatus: PoCloseoutRowInput["releaseStatus"] = null;
     let releaseMessage: string | null = null;
     if (lot && lotStatus === "PENDING_QC") {
@@ -398,6 +413,7 @@ export async function loadPoCloseout(poId: string): Promise<PoCloseoutSummary | 
       qrIdleUnsafe: !!qrIdleUnsafe,
       autoIssue,
       rebaseAvailable,
+      calculatedRemainingAvailable,
       releaseStatus,
       releaseMessage,
       zoho: zohoStatus,

@@ -113,6 +113,7 @@ describe("PO closeout pages", () => {
     expect(src).toMatch(/setFinishedLotStatusAction/);
     expect(src).not.toMatch(/"use server"/);
     expect(repo("app/(admin)/po-closeout/_drawer/closeout-rows.tsx")).toMatch(/RowActionButton/);
+    expect(repo("app/(admin)/po-closeout/_drawer/row-action-button.tsx")).toMatch(/useCalculatedRemainingAction/);
   });
   it("detail page renders bucket tabs from the pure bucket classifier (no inline policy)", () => {
     expect(detailPageSrc).toMatch(/deriveCloseoutBucket/);
