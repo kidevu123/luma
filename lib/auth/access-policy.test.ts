@@ -34,9 +34,12 @@ const RECON_OUTPUT_PAGES = [
 describe("ACCESS-POLICY-1 · production role strings", () => {
   it("role checks use the exact uppercase production enum values", () => {
     const guardsSrc = repo("lib/auth-guards.ts");
-    expect(guardsSrc).toMatch(/requireRole\("OWNER", "ADMIN"\)/);
-    expect(guardsSrc).toMatch(/requireRole\("OWNER", "ADMIN", "MANAGER", "LEAD"\)/);
-    expect(guardsSrc).toMatch(/requireRole\("OWNER"\)/);
+    // SSO-NEXT-1 — requireRole moved from variadic to array-first so guards
+    // can also accept an optional { next } destination; the role literals
+    // themselves are unchanged and still pinned exactly.
+    expect(guardsSrc).toMatch(/requireRole\(\["OWNER", "ADMIN"\]/);
+    expect(guardsSrc).toMatch(/requireRole\(\["OWNER", "ADMIN", "MANAGER", "LEAD"\]/);
+    expect(guardsSrc).toMatch(/requireRole\(\["OWNER"\]/);
     // No lowercase role literals anywhere in the guard module.
     expect(guardsSrc).not.toMatch(/"admin"|"owner"|"manager"|"lead"|"staff"/);
   });
@@ -50,14 +53,19 @@ describe("ACCESS-POLICY-1 · admin can reach every Reconciliation & Output page"
       expect(roleMeetsNavMin("ADMIN", item!.minRole)).toBe(true);
       expect(roleMeetsNavMin("OWNER", item!.minRole)).toBe(true);
       // Route guard admits ADMIN: requireAdmin = OWNER|ADMIN;
-      // requireSession = any signed-in role.
-      expect(repo(page)).toMatch(new RegExp(`await ${guard}\\(\\)`));
+      // requireSession = any signed-in role. Tolerates the SSO-NEXT-1
+      // optional `{ next: "..." }` destination argument (including a
+      // template literal like `` `/po-closeout/${poId}` ``, which nests its
+      // own `}` — hence bounding on the statement's `;` rather than trying
+      // to brace-match), but still pins the exact guard function name — a
+      // switch to a WEAKER guard still fails.
+      expect(repo(page)).toMatch(new RegExp(`await ${guard}\\([^;]*\\)`));
     });
   }
 
   it("PO Closeout detail page also admits ADMIN", () => {
     expect(repo("app/(admin)/po-closeout/[poId]/page.tsx")).toMatch(
-      /await requireAdmin\(\)/,
+      /await requireAdmin\([^;]*\)/,
     );
   });
 });
@@ -91,7 +99,7 @@ describe("ACCESS-POLICY-1 · lower roles do not gain admin access", () => {
   it("requireAdmin does not admit MANAGER or LEAD", () => {
     const guardsSrc = repo("lib/auth-guards.ts");
     expect(guardsSrc).toMatch(
-      /export async function requireAdmin[\s\S]{0,80}requireRole\("OWNER", "ADMIN"\)/,
+      /export async function requireAdmin[\s\S]{0,80}requireRole\(\["OWNER", "ADMIN"\]/,
     );
   });
 });
