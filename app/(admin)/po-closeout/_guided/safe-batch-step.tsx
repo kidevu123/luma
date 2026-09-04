@@ -53,18 +53,22 @@ export function SafeBatchStep({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-text-strong">
-        Apply all safe actions:{" "}
-        {issueReady > 0 ? `issue ${issueReady} finished lot${issueReady === 1 ? "" : "s"}` : null}
-        {issueReady > 0 && releaseReady > 0 ? " and " : null}
-        {releaseReady > 0 ? `release ${releaseReady} lot${releaseReady === 1 ? "" : "s"}` : null}
-        {" "}— nothing touches Zoho.
-      </p>
-      <p className="text-xs text-text-muted">
-        Each row is re-checked inside its own transaction before anything is
-        created — rows that changed since this screen loaded are skipped with
-        their reason, never forced.
-      </p>
+      {!results ? (
+        <>
+          <p className="text-sm text-text-strong">
+            Apply all safe actions:{" "}
+            {issueReady > 0 ? `issue ${issueReady} finished lot${issueReady === 1 ? "" : "s"}` : null}
+            {issueReady > 0 && releaseReady > 0 ? " and " : null}
+            {releaseReady > 0 ? `release ${releaseReady} lot${releaseReady === 1 ? "" : "s"}` : null}
+            {" "}— nothing touches Zoho.
+          </p>
+          <p className="text-xs text-text-muted">
+            Each row is re-checked inside its own transaction before anything is
+            created — rows that changed since this screen loaded are skipped with
+            their reason, never forced.
+          </p>
+        </>
+      ) : null}
       {results ? (
         <div className="space-y-2">
           {results.map(({ label, result }) => (

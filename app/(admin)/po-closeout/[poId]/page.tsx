@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, ArrowUp, ArrowDown } from "lucide-react";
 import { requireAdmin } from "@/lib/auth-guards";
 import { eq } from "drizzle-orm";
@@ -187,6 +187,15 @@ export default async function PoCloseoutDetailPage({
   // Entry: bare ?guided=1 resolves to batch, else the first live bag, else finish.
   const currentTarget: GuidedTarget =
     requestedTarget ?? (hasSafeBatch ? "batch" : guidedSteps[0]?.inventoryBagId ?? "finish");
+  // SIMPLIFY-D — a bare ?guided=1 must not stay bare: it re-resolves its
+  // target on every render, so a server action that revalidates this page
+  // (e.g. safe-batch) can flip `hasSafeBatch` and re-enter at the wrong
+  // step, unmounting whatever guided step was showing results. Redirect
+  // once to pin the resolved target into the URL — from then on the nav is
+  // driven by `bag=...`, which is immune to revalidation-time count flips.
+  if (guided && requestedTarget === null) {
+    redirect(`/po-closeout/${poId}?guided=1&bag=${currentTarget}`);
+  }
   const nav = resolveGuidedNav(guidedSteps, currentTarget, hasSafeBatch);
   const currentGuidedStep = nav.mode === "bag" && nav.index != null ? guidedSteps[nav.index] ?? null : null;
   const currentGuidedRow = currentGuidedStep

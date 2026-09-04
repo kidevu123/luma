@@ -73,7 +73,7 @@ export function GuidedOverlay({
       : mode === "batch"
         ? `Step ${stepNumber} of ${totalSteps}: apply all safe actions`
         : mode === "bag-done"
-          ? `Step ${stepNumber} of ${totalSteps}: already handled`
+          ? "Already handled"
           : `Step ${stepNumber} of ${totalSteps}: ${bagStep?.actionLabel ?? "review"}`;
 
   const hasExclusions = excluded.onFloor + excluded.empty > 0;

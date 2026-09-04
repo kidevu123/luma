@@ -268,6 +268,9 @@ describe("GUIDED-CLOSEOUT-1: safe-batch step", () => {
     expect(detailPageSrc).toMatch(/bag\?:/);
     expect(detailPageSrc).not.toMatch(/guidedStep - \(hasSafeBatch/);
   });
+  it("SIMPLIFY-D: bare guided entry redirects to a pinned bag target (revalidation cannot flip the mode)", () => {
+    expect(detailPageSrc).toMatch(/requestedTarget === null[\s\S]{0,200}redirect\(/);
+  });
   it("SIMPLIFY-D: wizard nav replaces history (back cannot resurrect the overlay) and reports exclusions", () => {
     const overlay = repo("app/(admin)/po-closeout/_guided/guided-overlay.tsx");
     expect(overlay).toMatch(/router\.replace/);
