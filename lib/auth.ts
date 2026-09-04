@@ -150,19 +150,43 @@ export type CurrentUser = {
 // Per-request cache so a single request that calls currentUser() many
 // times only does one users.id lookup. Keyed by user id so sign-out
 // during a request can't return a stale row.
-type CachedLookup = { employeeId: string | null };
-const requestCache: Map<string, CachedLookup> = new Map();
+type CachedLookup = {
+  employeeId: string | null;
+  role: SessionPayload["role"];
+  disabledAt: Date | null;
+};
+// A cached value of `null` means "the DB was unavailable or the row is
+// gone" — see the fail-open comment in lookupSessionFields. It is still
+// cached so a request that calls currentUser() many times doesn't retry
+// a failing query on every call.
+const requestCache: Map<string, CachedLookup | null> = new Map();
 
-async function lookupEmployeeId(userId: string): Promise<string | null> {
-  const cached = requestCache.get(userId);
-  if (cached) return cached.employeeId;
-  const [row] = await db
-    .select({ employeeId: users.employeeId })
-    .from(users)
-    .where(eq(users.id, userId));
-  const employeeId = row?.employeeId ?? null;
-  requestCache.set(userId, { employeeId });
-  return employeeId;
+// AUTH-REVOKE-1 — extends the original employeeId-only lookup to also
+// carry role and disabledAt, so currentUser() can revoke a disabled
+// account and prefer the DB role over the (up to 12h stale) cookie
+// payload, without adding a second query.
+//
+// Fail-open by design: if the query throws (DB blip) or the row is
+// gone (race with a hard delete) this returns null, and currentUser()
+// falls back to building the user from the signed cookie payload
+// exactly as it did before this check existed. A transient DB error
+// must never log the whole floor out — only an actual disabledAt on a
+// row we successfully read does that.
+async function lookupSessionFields(userId: string): Promise<CachedLookup | null> {
+  if (requestCache.has(userId)) return requestCache.get(userId) ?? null;
+  try {
+    const [row] = await db
+      .select({ employeeId: users.employeeId, role: users.role, disabledAt: users.disabledAt })
+      .from(users)
+      .where(eq(users.id, userId));
+    const result: CachedLookup | null = row
+      ? { employeeId: row.employeeId ?? null, role: row.role, disabledAt: row.disabledAt }
+      : null;
+    requestCache.set(userId, result);
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 export async function currentUser(): Promise<CurrentUser | null> {
@@ -171,12 +195,18 @@ export async function currentUser(): Promise<CurrentUser | null> {
   if (!token) return null;
   const payload = await verifyToken(token);
   if (!payload) return null;
-  const employeeId = await lookupEmployeeId(payload.uid);
+  const fields = await lookupSessionFields(payload.uid);
+  // AUTH-REVOKE-1 — only a row we actually read can revoke the session.
+  // `fields === null` is the fail-open path (DB error or row missing),
+  // not a disable signal, so it must NOT return null here.
+  if (fields?.disabledAt) return null;
   return {
     id: payload.uid,
     email: payload.email,
-    role: payload.role,
-    employeeId,
+    // Prefer the freshly-read DB role so a demotion takes effect on the
+    // next request instead of waiting out the cookie's 12h lifetime.
+    role: fields?.role ?? payload.role,
+    employeeId: fields?.employeeId ?? null,
   };
 }
 

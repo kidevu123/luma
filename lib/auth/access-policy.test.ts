@@ -54,18 +54,18 @@ describe("ACCESS-POLICY-1 · admin can reach every Reconciliation & Output page"
       expect(roleMeetsNavMin("OWNER", item!.minRole)).toBe(true);
       // Route guard admits ADMIN: requireAdmin = OWNER|ADMIN;
       // requireSession = any signed-in role. Tolerates the SSO-NEXT-1
-      // optional `{ next: "..." }` destination argument (including a
-      // template literal like `` `/po-closeout/${poId}` ``, which nests its
-      // own `}` — hence bounding on the statement's `;` rather than trying
-      // to brace-match), but still pins the exact guard function name — a
-      // switch to a WEAKER guard still fails.
-      expect(repo(page)).toMatch(new RegExp(`await ${guard}\\([^;]*\\)`));
+      // optional `{ next: "..." }` destination argument and an optional
+      // `const x = ` binding, but anchors to the START of the statement
+      // (^\s* with the multiline flag) so a commented-out call sitting
+      // above a real, weaker guard can't satisfy the pattern — only an
+      // actual `await <guard>(` still fails a switch to a WEAKER guard.
+      expect(repo(page)).toMatch(new RegExp(`^\\s*(const \\w+ = )?await ${guard}\\(`, "m"));
     });
   }
 
   it("PO Closeout detail page also admits ADMIN", () => {
     expect(repo("app/(admin)/po-closeout/[poId]/page.tsx")).toMatch(
-      /await requireAdmin\([^;]*\)/,
+      /^\s*(const \w+ = )?await requireAdmin\(/m,
     );
   });
 });
@@ -105,12 +105,19 @@ describe("ACCESS-POLICY-1 · lower roles do not gain admin access", () => {
 });
 
 describe("ACCESS-POLICY-1 · stale-session semantics are known and documented", () => {
-  it("session role comes from the signed cookie (role changes need re-login)", () => {
+  // AUTH-REVOKE-1 — closed the staleness window: currentUser() now re-reads
+  // role + disabledAt per request and prefers the DB role over the (up to
+  // 12h stale) cookie payload, with a fail-open fallback to the cookie role
+  // on DB error. See lib/auth/session-revocation.test.ts for the behavioral
+  // pins on the disabled-account and fail-open paths.
+  it("session prefers the freshly-read DB role, falling back to the cookie role only when the row is unavailable", () => {
     const authSrc = repo("lib/auth.ts");
-    expect(authSrc).toMatch(/role: payload\.role/);
-    // 12h max age bounds how long a stale role can persist (floor tablets must
-    // survive a full shift plus handover; a role change doesn't take effect
-    // until the session cookie expires and the user re-authenticates).
+    expect(authSrc).toMatch(/role: fields\?\.role \?\? payload\.role/);
+    expect(authSrc).toMatch(/if \(fields\?\.disabledAt\) return null;/);
+    // 12h max age still bounds the outer cookie lifetime (floor tablets must
+    // survive a full shift plus handover); the inner per-request DB check
+    // above is what keeps role/disabled state from going stale within that
+    // window.
     expect(authSrc).toMatch(/COOKIE_MAX_AGE = 60 \* 60 \* 12/);
   });
 });

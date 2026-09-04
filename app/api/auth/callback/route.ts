@@ -97,7 +97,9 @@ export async function GET(request: NextRequest) {
   }
 
   const { name, value, options } = await createSessionCookie({ id: user.id, role: user.role, email: user.email });
-  const response = NextResponse.redirect(new URL(nextUrl || "/dashboard", appBase));
+  // safeNextPath() always returns a non-empty fallback ("/dashboard" by
+  // default), never "", so there's no dead-value case to cover here.
+  const response = NextResponse.redirect(new URL(nextUrl, appBase));
   response.cookies.delete("oidc_state");
   response.cookies.set(name, value, options);
   return response;

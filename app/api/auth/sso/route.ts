@@ -27,6 +27,9 @@ export async function GET(request: Request) {
   response.cookies.set("oidc_state", `${state}:${next}`, {
     httpOnly: true,
     sameSite: "lax",
+    // Mirrors the session cookie's expression exactly — this cookie is the
+    // CSRF defense for the OIDC flow, so it needs the same secure gating.
+    secure: process.env.NODE_ENV === "production" && (process.env.APP_URL ?? "").startsWith("https"),
     maxAge: 300,
     path: "/",
   });

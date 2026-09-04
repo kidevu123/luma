@@ -73,6 +73,9 @@ describe("safeNextPath — the accepted values are genuinely same-origin", () =>
   it("every rejected value would NOT have (proving the guard earns its keep)", () => {
     const base = "https://luma.example";
     for (const attack of ["//evil.example/x", "/\\evil.example", "https://evil.example"]) {
+      // The raw attack string, unwrapped, resolves off-origin...
+      expect(new URL(attack, base).origin).not.toBe(base);
+      // ...which is exactly what safeNextPath neutralizes.
       expect(new URL(safeNextPath(attack), base).origin).toBe(base);
     }
   });

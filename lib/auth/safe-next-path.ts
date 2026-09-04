@@ -9,7 +9,11 @@
 const MAX_LENGTH = 512;
 
 export function safeNextPath(
-  raw: string | null | undefined,
+  // Next.js hands an array when a query param repeats (?next=a&next=b);
+  // the `typeof raw !== "string"` guard below already rejects that shape
+  // and falls back, so callers can pass a raw searchParams value straight
+  // through without narrowing it first.
+  raw: string | string[] | null | undefined,
   fallback = "/dashboard",
 ): string {
   if (typeof raw !== "string") return fallback;

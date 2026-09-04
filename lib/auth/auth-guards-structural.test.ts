@@ -46,7 +46,9 @@ describe("deep-linkable operational pages annotate their own path", () => {
   });
   it("po-closeout detail page passes the PO-specific path to requireAdmin", () => {
     const page = repo("app/(admin)/po-closeout/[poId]/page.tsx");
-    expect(page).toMatch(/requireAdmin\(\s*\{\s*next:\s*`\/po-closeout\/\$\{poId\}`\s*\}\s*\)/);
+    // encodeURIComponent(poId) — a raw poId could carry characters that
+    // aren't valid unescaped in a path segment.
+    expect(page).toMatch(/requireAdmin\(\s*\{\s*next:\s*`\/po-closeout\/\$\{encodeURIComponent\(poId\)\}`\s*\}\s*\)/);
   });
   it("workflow-submissions page passes its own path to requireSession", () => {
     const page = repo("app/(admin)/workflow-submissions/page.tsx");

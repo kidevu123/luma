@@ -14,6 +14,15 @@ export function LoginForm({
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
   const [showPassword, setShowPassword] = React.useState(!oidcEnabled);
+  const emailInputRef = React.useRef<HTMLInputElement>(null);
+  const PASSWORD_FORM_ID = "login-password-form";
+
+  // The password form only mounts once showPassword flips true, so the
+  // email input isn't in the DOM yet at click time — focus it in an effect
+  // keyed on showPassword instead of inline in the onClick handler.
+  React.useEffect(() => {
+    if (showPassword) emailInputRef.current?.focus();
+  }, [showPassword]);
 
   return (
     <div className="space-y-4">
@@ -22,13 +31,15 @@ export function LoginForm({
           href={`/api/auth/sso?next=${encodeURIComponent(next)}`}
           className="flex items-center justify-center gap-2 w-full h-10 rounded-md bg-brand-700 text-white text-sm font-medium hover:bg-brand-800 transition-colors"
         >
-          Sign in with SSO
+          Sign in
         </a>
       )}
       {oidcEnabled && !showPassword && (
         <button
           type="button"
           onClick={() => setShowPassword(true)}
+          aria-expanded={showPassword}
+          aria-controls={PASSWORD_FORM_ID}
           className="w-full text-center text-[11px] text-text-subtle underline decoration-dotted hover:text-text-muted"
         >
           Sign in with password instead
@@ -43,6 +54,7 @@ export function LoginForm({
       )}
       {showPassword && (
         <form
+          id={PASSWORD_FORM_ID}
           action={async (form) => {
             setPending(true);
             setError(null);
@@ -61,6 +73,7 @@ export function LoginForm({
               id="email"
               name="email"
               type="email"
+              ref={emailInputRef}
               autoComplete="email"
               required
               autoFocus={!oidcEnabled}

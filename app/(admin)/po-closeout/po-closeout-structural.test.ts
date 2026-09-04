@@ -82,20 +82,22 @@ describe("PO-scoped batch actions — reuse existing per-row services, PO-scoped
 describe("PO closeout pages", () => {
   it("list page is admin-gated with a PO search/picker", () => {
     // SSO-NEXT-1 — tolerates the optional { next: "..." } login-return
-    // destination, but still pins requireAdmin by name (a weaker guard
-    // still fails this).
-    expect(listPageSrc).toMatch(/requireAdmin\([^;]*\)/);
+    // destination and an optional `const x = ` binding, but anchors to the
+    // START of the statement (^\s* with the multiline flag) so a
+    // commented-out call sitting above a real, weaker guard can't satisfy
+    // this — still pins requireAdmin by name (a weaker guard still fails
+    // this).
+    expect(listPageSrc).toMatch(/^\s*(const \w+ = )?await requireAdmin\(/m);
     // BAG-PRODUCTION-SUMMARY-1: the index now uses the Active/Closed rollup
     // loader instead of the plain PO options list.
     expect(listPageSrc).toMatch(/listCloseoutPoIndexRollups/);
     expect(listPageSrc).toMatch(/Search PO number or vendor/);
   });
   it("detail page is admin-gated, renders summary cards, checklist, links, batch buttons, plain-language copy", () => {
-    // SSO-NEXT-1 — same tolerance as the list-page assertion above (the
-    // detail page's next is a template literal with its own nested `}`,
-    // e.g. `` `/po-closeout/${poId}` ``, so this bounds on `;` rather than
-    // trying to brace-match).
-    expect(detailPageSrc).toMatch(/requireAdmin\([^;]*\)/);
+    // SSO-NEXT-1 — same tolerance as the list-page assertion above, anchored
+    // the same way to the start of the statement so a commented-out call
+    // above a real, weaker guard can't satisfy this.
+    expect(detailPageSrc).toMatch(/^\s*(const \w+ = )?await requireAdmin\(/m);
     expect(detailPageSrc).toMatch(/loadPoCloseout\(poId\)/);
     expect(detailPageSrc).toMatch(/PoBatchButtons/);
     expect(detailPageSrc).toMatch(/Finalized.{0,40}floor work is complete/);

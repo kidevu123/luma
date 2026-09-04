@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  // Next hands an array when the query param repeats (?next=a&next=b);
+  // safeNextPath's `typeof raw !== "string"` guard already treats that
+  // safely as "reject and fall back."
+  searchParams: Promise<{ next?: string | string[] }>;
 }) {
   const { next: rawNext } = await searchParams;
   const next = safeNextPath(rawNext);
