@@ -5,6 +5,8 @@
 // disappear as work completes (never snapshotted). Fail closed: unknown
 // actions land in REVIEW at the end — never dropped.
 
+import type { CloseoutBucket } from "./po-closeout";
+
 export type GuidedPhase =
   | "QR"
   | "FLOOR"
@@ -70,9 +72,24 @@ export function deriveGuidedCloseoutQueue(
     reason: string;
     actionLabel: string;
   }>,
-): GuidedStep[] {
-  return rows
-    .filter((r) => r.status !== "DONE")
+  buckets?: Map<string, CloseoutBucket>,
+): { steps: GuidedStep[]; excluded: { onFloor: number; empty: number } } {
+  let onFloor = 0;
+  let empty = 0;
+  const actionable = rows.filter((r) => {
+    if (r.status === "DONE") return false;
+    const bucket = buckets?.get(r.inventoryBagId);
+    if (bucket === "ON_FLOOR") {
+      onFloor += 1;
+      return false;
+    }
+    if (bucket === "EMPTY") {
+      empty += 1;
+      return false;
+    }
+    return true; // no bucket info: fail open — a bag is never silently dropped
+  });
+  const steps = actionable
     .map((r) => {
       const phase = phaseForAction(r.action);
       return {
@@ -91,4 +108,34 @@ export function deriveGuidedCloseoutQueue(
       if (rank !== 0) return rank;
       return (a.receiptNumber ?? "").localeCompare(b.receiptNumber ?? "");
     });
+  return { steps, excluded: { onFloor, empty } };
+}
+
+// ── SIMPLIFY-D · bag-addressed navigation ───────────────────────────────────
+// Steps are addressed by inventoryBagId (never by index) so a bag resolved
+// out-of-band shortens the queue instead of silently skipping a neighbor.
+// "batch" and "finish" are sentinels; a bag id not in the live queue is
+// "bag-done" — the operator sees it completed and continues at the head.
+
+export type GuidedTarget = "batch" | "finish" | (string & {});
+
+export function resolveGuidedNav(
+  steps: GuidedStep[],
+  current: GuidedTarget,
+  hasSafeBatch: boolean,
+): {
+  mode: "batch" | "finish" | "bag" | "bag-done";
+  index: number | null;
+  prevTarget: GuidedTarget | null;
+  nextTarget: GuidedTarget;
+} {
+  const first: GuidedTarget = steps[0]?.inventoryBagId ?? "finish";
+  if (current === "batch") return { mode: "batch", index: null, prevTarget: null, nextTarget: first };
+  if (current === "finish") return { mode: "finish", index: null, prevTarget: null, nextTarget: "finish" };
+  const index = steps.findIndex((s) => s.inventoryBagId === current);
+  if (index === -1) return { mode: "bag-done", index: null, prevTarget: null, nextTarget: first };
+  const prevTarget: GuidedTarget | null =
+    index > 0 ? steps[index - 1]!.inventoryBagId : hasSafeBatch ? "batch" : null;
+  const nextTarget: GuidedTarget = steps[index + 1]?.inventoryBagId ?? "finish";
+  return { mode: "bag", index, prevTarget, nextTarget };
 }

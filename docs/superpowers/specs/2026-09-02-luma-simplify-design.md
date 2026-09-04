@@ -224,8 +224,10 @@ exercised dry-run only.
 
 ### Address by bag, not by index
 
-URL becomes `?guided=1&bag=<workflowBagId>` (safe-batch step uses
-sentinel `bag=batch`). Next/prev computed from the bag's position in
+URL becomes `?guided=1&bag=<inventoryBagId>` (safe-batch step uses
+sentinel `bag=batch`; amended from workflowBagId at implementation —
+rows and the queue are keyed by inventory bag, which exists before any
+workflow). Next/prev computed from the bag's position in
 the current queue, so out-of-band resolution shortens the queue
 instead of skipping a neighbor. A bag no longer in the queue renders
 "this bag is done" + Next — never a blank panel.

@@ -184,7 +184,11 @@ describe("bag drawer UI (CLOSEOUT-DRAWER-1)", () => {
   });
 
   it("fail closed: no applicable actions renders no action panels", () => {
-    expect(panelsSrc).toMatch(/if \(keys\.length === 0\) return null;/);
+    // SIMPLIFY-D — Task 2 introduced effectiveKeys (keys, or the single
+    // primary key when primaryOnly); the fail-closed guard now reads that
+    // variable. effectiveKeys === keys when primaryOnly is false, so the
+    // guarantee this test pins is unchanged.
+    expect(panelsSrc).toMatch(/if \(effectiveKeys\.length === 0\) return null;/);
   });
 
   it("panels import EXISTING server actions only — no new mutation endpoints in _drawer/", () => {
@@ -234,22 +238,23 @@ describe("guided closeout mode (GUIDED-CLOSEOUT-1)", () => {
   const overlaySrc = repo("app/(admin)/po-closeout/_guided/guided-overlay.tsx");
   const batchSrc = repo("app/(admin)/po-closeout/_guided/safe-batch-step.tsx");
 
-  it("page parses ?guided/step and derives the queue from live rows", () => {
+  it("page parses ?guided/bag and derives the queue (with buckets) from live rows", () => {
     expect(pageSrc).toMatch(/rawGuided === "1"/);
-    expect(pageSrc).toMatch(/deriveGuidedCloseoutQueue\(summary\.rows\)/);
+    expect(pageSrc).toMatch(/deriveGuidedCloseoutQueue\(summary\.rows, bucketByBag\)/);
     expect(pageSrc).toMatch(/<GuidedOverlay/);
     expect(pageSrc).toMatch(/Close this PO/);
   });
 
-  it("overlay navigates via plain step links (fresh server render = live recompute)", () => {
-    expect(overlaySrc).toMatch(/\?guided=1&step=\$\{n\}/);
+  it("overlay navigates via router.replace (fresh live recompute, no resurrectable history entry)", () => {
+    expect(overlaySrc).toMatch(/\?guided=1&bag=\$\{t\}/);
+    expect(overlaySrc).toMatch(/router\.replace/);
     expect(overlaySrc).toMatch(/Queue recomputes from live data at every step/);
     expect(overlaySrc).not.toMatch(/"use server"/);
   });
 
-  it("bag steps reuse the Phase-1 drawer; floor-only steps say skip for now", () => {
+  it("bag steps reuse the Phase-1 drawer in single-action mode; floor bags are excluded from the queue", () => {
     expect(overlaySrc).toMatch(/<BagDrawer/);
-    expect(overlaySrc).toMatch(/Needs the floor — skip for now/);
+    expect(overlaySrc).toMatch(/primaryOnly/);
   });
 
   it("safe batch wraps the two EXISTING PO batch actions behind one confirm and never touches Zoho", () => {

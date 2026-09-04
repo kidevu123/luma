@@ -90,3 +90,9 @@ export function deriveApplicableBagActions(input: {
 
   return actions;
 }
+
+// SIMPLIFY-D — the guided wizard shows ONE action per step, not the buffet.
+// The correction wizard is a supervisor escape hatch, never the primary step.
+export function derivePrimaryBagAction(keys: BagDrawerActionKey[]): BagDrawerActionKey | null {
+  return keys.find((k) => k !== "CORRECTION_WIZARD") ?? null;
+}

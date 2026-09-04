@@ -16,10 +16,14 @@ export function SafeBatchStep({
   poId,
   issueReady,
   releaseReady,
+  continueHref,
 }: {
   poId: string;
   issueReady: number;
   releaseReady: number;
+  /** SIMPLIFY-D — results persist until the operator explicitly continues;
+   *  the entry resolver decides what's next from live data. */
+  continueHref: string;
 }) {
   const router = useRouter();
   const [confirmed, setConfirmed] = React.useState(false);
@@ -45,23 +49,26 @@ export function SafeBatchStep({
     }
     setResults(out);
     setPending(false);
-    router.refresh();
   };
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-text-strong">
-        Apply all safe actions:{" "}
-        {issueReady > 0 ? `issue ${issueReady} finished lot${issueReady === 1 ? "" : "s"}` : null}
-        {issueReady > 0 && releaseReady > 0 ? " and " : null}
-        {releaseReady > 0 ? `release ${releaseReady} lot${releaseReady === 1 ? "" : "s"}` : null}
-        {" "}— nothing touches Zoho.
-      </p>
-      <p className="text-xs text-text-muted">
-        Each row is re-checked inside its own transaction before anything is
-        created — rows that changed since this screen loaded are skipped with
-        their reason, never forced.
-      </p>
+      {!results ? (
+        <>
+          <p className="text-sm text-text-strong">
+            Apply all safe actions:{" "}
+            {issueReady > 0 ? `issue ${issueReady} finished lot${issueReady === 1 ? "" : "s"}` : null}
+            {issueReady > 0 && releaseReady > 0 ? " and " : null}
+            {releaseReady > 0 ? `release ${releaseReady} lot${releaseReady === 1 ? "" : "s"}` : null}
+            {" "}— nothing touches Zoho.
+          </p>
+          <p className="text-xs text-text-muted">
+            Each row is re-checked inside its own transaction before anything is
+            created — rows that changed since this screen loaded are skipped with
+            their reason, never forced.
+          </p>
+        </>
+      ) : null}
       {results ? (
         <div className="space-y-2">
           {results.map(({ label, result }) => (
@@ -86,8 +93,15 @@ export function SafeBatchStep({
               )}
             </div>
           ))}
+          <button
+            type="button"
+            onClick={() => router.replace(continueHref)}
+            className="rounded bg-brand-700 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Continue
+          </button>
           <p className="text-xs text-text-muted">
-            Continue to the next step — the queue recomputes from live data.
+            The queue recomputes from live data when you continue.
           </p>
         </div>
       ) : (

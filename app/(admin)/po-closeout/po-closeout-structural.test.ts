@@ -216,6 +216,12 @@ describe("DRAWER-FRESHNESS-1: panel keys track live row facts; finished-lot acti
     expect(drawerSrc).toMatch(/prevRowKeyRef|row\.action[\s\S]{0,400}refetch/);
   });
 
+  it("SIMPLIFY-D: guided steps render one primary panel, never the buffet", () => {
+    expect(panelsSrc).toMatch(/primaryOnly/);
+    expect(panelsSrc).toMatch(/derivePrimaryBagAction/);
+    expect(drawerSrc).toMatch(/primaryOnly/);
+  });
+
   it("repairAutoIssueFinishedLotAction revalidates the dynamic closeout detail path", () => {
     expect(finishedLotActionsSrc).toMatch(
       /repairAutoIssueFinishedLotAction[\s\S]{0,600}revalidatePath\("\/po-closeout\/\[poId\]", "page"\)/,
@@ -245,6 +251,33 @@ describe("SIMPLIFY-C: PO-level Queue-all-ready for Zoho output", () => {
     expect(actionsSrc).toMatch(/zoho_production_output_op\.queue_batch/);
     expect(actionsSrc).toMatch(/queueZohoReadyForPoAction[\s\S]{0,300}requireAdmin\(\)/);
     expect(repo("app/(admin)/po-closeout/batch-buttons.tsx")).toMatch(/queueReady/);
+  });
+});
+
+describe("GUIDED-CLOSEOUT-1: safe-batch step", () => {
+  it("SIMPLIFY-D: batch results persist until Continue (no refresh-under-you)", () => {
+    const src = repo("app/(admin)/po-closeout/_guided/safe-batch-step.tsx");
+    expect(src).toMatch(/continueHref/);
+    expect(src).toMatch(/router\.replace\(continueHref\)/);
+    expect(src).not.toMatch(/router\.refresh\(\)/);
+  });
+
+  it("SIMPLIFY-D: steps are bag-addressed with sentinels; entry resolves server-side", () => {
+    expect(detailPageSrc).toMatch(/resolveGuidedNav/);
+    expect(detailPageSrc).toMatch(/"batch"/);
+    expect(detailPageSrc).toMatch(/bag\?:/);
+    expect(detailPageSrc).not.toMatch(/guidedStep - \(hasSafeBatch/);
+  });
+  it("SIMPLIFY-D: bare guided entry redirects to a pinned bag target (revalidation cannot flip the mode)", () => {
+    expect(detailPageSrc).toMatch(/requestedTarget === null[\s\S]{0,200}redirect\(/);
+  });
+  it("SIMPLIFY-D: wizard nav replaces history (back cannot resurrect the overlay) and reports exclusions", () => {
+    const overlay = repo("app/(admin)/po-closeout/_guided/guided-overlay.tsx");
+    expect(overlay).toMatch(/router\.replace/);
+    expect(overlay).toMatch(/not shown/);
+    expect(overlay).toMatch(/primaryOnly/);
+    expect(overlay).toMatch(/already handled|bag is done/i);
+    expect(overlay).not.toMatch(/Nothing to do on this step/);
   });
 });
 
