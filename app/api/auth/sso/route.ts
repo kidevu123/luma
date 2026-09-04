@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import * as crypto from "crypto";
+import { safeNextPath } from "@/lib/auth/safe-next-path";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = safeNextPath(searchParams.get("next"));
 
   const issuer = process.env.AUTHENTIK_ISSUER!;
   const clientId = process.env.AUTHENTIK_CLIENT_ID!;
