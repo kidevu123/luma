@@ -10,7 +10,10 @@ import { users } from "@/lib/db/schema";
 import argon2 from "argon2";
 
 const COOKIE_NAME = "luma.session";
-const COOKIE_MAX_AGE = 60 * 60 * 8; // 8h
+// FLOOR-SESSION-1 — 12h: a floor tablet must not log out mid-shift.
+// Devices are physically controlled and single-tenant; the cookie stays
+// httpOnly + sameSite=lax + secure in production.
+const COOKIE_MAX_AGE = 60 * 60 * 12; // 12h
 
 type SessionPayload = {
   uid: string;
