@@ -45,7 +45,7 @@ export default async function WorkflowSubmissionsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const user = await requireSession();
+  const user = await requireSession({ next: "/workflow-submissions" });
   const canAdminRepair = user.role === "OWNER" || user.role === "ADMIN";
 
   const sp = await searchParams;

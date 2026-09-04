@@ -31,7 +31,7 @@ export default async function PoCloseoutListPage({
 }: {
   searchParams: Promise<{ q?: string; tab?: string }>;
 }) {
-  await requireAdmin();
+  await requireAdmin({ next: "/po-closeout" });
   const { q, tab } = await searchParams;
   const activeTab: TabKey =
     tab === "closed" || tab === "all" ? (tab as TabKey) : "active";

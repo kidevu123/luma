@@ -81,7 +81,7 @@ export default async function ZohoProductionOperationsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireSession();
+  await requireSession({ next: "/zoho-production-operations" });
   const gates = resolveProductionOutputGateConfig();
   const persistOn = isProductionOutputPersistEnabled();
   const previewOn = isProductionOutputPreviewEnabled();

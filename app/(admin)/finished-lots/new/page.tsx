@@ -21,7 +21,7 @@ export default async function NewFinishedLotPage({
 }: {
   searchParams?: Promise<{ bagId?: string | string[] }>;
 }) {
-  await requireLead();
+  await requireLead({ next: "/finished-lots/new" });
   const params = await searchParams;
   const requestedBagId = Array.isArray(params?.bagId)
     ? params?.bagId[0]

@@ -100,8 +100,8 @@ export default async function PoCloseoutDetailPage({
   params: Promise<{ poId: string }>;
   searchParams: Promise<{ tab?: string; empty?: string; show?: string; guided?: string; step?: string; bag?: string; sort?: string; dir?: string; tablet?: string }>;
 }) {
-  await requireAdmin();
   const { poId } = await params;
+  await requireAdmin({ next: `/po-closeout/${poId}` });
   // SIMPLIFY-D — `step` is accepted but ignored (stale links from before
   // steps were bag-addressed); `bag` carries the current target.
   const { tab: rawTab, empty: rawEmpty, show: rawShow, guided: rawGuided, bag: rawBag, sort: rawSort, dir: rawDir, tablet: rawTablet } = await searchParams;
