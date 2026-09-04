@@ -34,9 +34,12 @@ const RECON_OUTPUT_PAGES = [
 describe("ACCESS-POLICY-1 · production role strings", () => {
   it("role checks use the exact uppercase production enum values", () => {
     const guardsSrc = repo("lib/auth-guards.ts");
-    expect(guardsSrc).toMatch(/requireRole\("OWNER", "ADMIN"\)/);
-    expect(guardsSrc).toMatch(/requireRole\("OWNER", "ADMIN", "MANAGER", "LEAD"\)/);
-    expect(guardsSrc).toMatch(/requireRole\("OWNER"\)/);
+    // SSO-NEXT-1 — requireRole moved from variadic to array-first so guards
+    // can also accept an optional { next } destination; the role literals
+    // themselves are unchanged and still pinned exactly.
+    expect(guardsSrc).toMatch(/requireRole\(\["OWNER", "ADMIN"\]/);
+    expect(guardsSrc).toMatch(/requireRole\(\["OWNER", "ADMIN", "MANAGER", "LEAD"\]/);
+    expect(guardsSrc).toMatch(/requireRole\(\["OWNER"\]/);
     // No lowercase role literals anywhere in the guard module.
     expect(guardsSrc).not.toMatch(/"admin"|"owner"|"manager"|"lead"|"staff"/);
   });
@@ -50,14 +53,19 @@ describe("ACCESS-POLICY-1 · admin can reach every Reconciliation & Output page"
       expect(roleMeetsNavMin("ADMIN", item!.minRole)).toBe(true);
       expect(roleMeetsNavMin("OWNER", item!.minRole)).toBe(true);
       // Route guard admits ADMIN: requireAdmin = OWNER|ADMIN;
-      // requireSession = any signed-in role.
-      expect(repo(page)).toMatch(new RegExp(`await ${guard}\\(\\)`));
+      // requireSession = any signed-in role. Tolerates the SSO-NEXT-1
+      // optional `{ next: "..." }` destination argument and an optional
+      // `const x = ` binding, but anchors to the START of the statement
+      // (^\s* with the multiline flag) so a commented-out call sitting
+      // above a real, weaker guard can't satisfy the pattern — only an
+      // actual `await <guard>(` still fails a switch to a WEAKER guard.
+      expect(repo(page)).toMatch(new RegExp(`^\\s*(const \\w+ = )?await ${guard}\\(`, "m"));
     });
   }
 
   it("PO Closeout detail page also admits ADMIN", () => {
     expect(repo("app/(admin)/po-closeout/[poId]/page.tsx")).toMatch(
-      /await requireAdmin\(\)/,
+      /^\s*(const \w+ = )?await requireAdmin\(/m,
     );
   });
 });
@@ -91,7 +99,7 @@ describe("ACCESS-POLICY-1 · lower roles do not gain admin access", () => {
   it("requireAdmin does not admit MANAGER or LEAD", () => {
     const guardsSrc = repo("lib/auth-guards.ts");
     expect(guardsSrc).toMatch(
-      /export async function requireAdmin[\s\S]{0,80}requireRole\("OWNER", "ADMIN"\)/,
+      /export async function requireAdmin[\s\S]{0,80}requireRole\(\["OWNER", "ADMIN"\]/,
     );
   });
 });
@@ -100,7 +108,9 @@ describe("ACCESS-POLICY-1 · stale-session semantics are known and documented", 
   it("session role comes from the signed cookie (role changes need re-login)", () => {
     const authSrc = repo("lib/auth.ts");
     expect(authSrc).toMatch(/role: payload\.role/);
-    // 8h max age bounds how long a stale role can persist.
-    expect(authSrc).toMatch(/COOKIE_MAX_AGE = 60 \* 60 \* 8/);
+    // 12h max age bounds how long a stale role can persist (floor tablets must
+    // survive a full shift plus handover; a role change doesn't take effect
+    // until the session cookie expires and the user re-authenticates).
+    expect(authSrc).toMatch(/COOKIE_MAX_AGE = 60 \* 60 \* 12/);
   });
 });

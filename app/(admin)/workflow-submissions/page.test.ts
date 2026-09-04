@@ -131,7 +131,9 @@ describe("WORKFLOW-RECEIPT-DISPLAY-P1 · receipt lineage display", () => {
 
 describe("WORKFLOW-SUBMISSION-ADMIN-REPAIR-1 · missing blister close-out repair", () => {
   it("passes admin repair access to the client table only for OWNER/ADMIN roles", () => {
-    expect(pageSrc).toMatch(/const user = await requireSession\(\)/);
+    // SSO-NEXT-1 — tolerates the optional { next: "..." } login-return
+    // destination, but still pins requireSession by name.
+    expect(pageSrc).toMatch(/const user = await requireSession\([^;]*\)/);
     expect(pageSrc).toMatch(/user\.role === "OWNER" \|\| user\.role === "ADMIN"/);
     expect(pageSrc).toMatch(
       /<WorkflowTable[\s\S]{0,40}bags=\{bags\}[\s\S]{0,40}canAdminRepair=\{canAdminRepair\}[\s\S]{0,160}\/>/,

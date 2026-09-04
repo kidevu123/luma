@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import * as crypto from "crypto";
+import { safeNextPath } from "@/lib/auth/safe-next-path";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = safeNextPath(searchParams.get("next"));
 
   const issuer = process.env.AUTHENTIK_ISSUER!;
   const clientId = process.env.AUTHENTIK_CLIENT_ID!;
@@ -26,6 +27,9 @@ export async function GET(request: Request) {
   response.cookies.set("oidc_state", `${state}:${next}`, {
     httpOnly: true,
     sameSite: "lax",
+    // Mirrors the session cookie's expression exactly — this cookie is the
+    // CSRF defense for the OIDC flow, so it needs the same secure gating.
+    secure: process.env.NODE_ENV === "production" && (process.env.APP_URL ?? "").startsWith("https"),
     maxAge: 300,
     path: "/",
   });

@@ -35,3 +35,27 @@ describe("OIDC callback identity resolution", () => {
     expect(src).toMatch(/!user\.authentikSubject/);
   });
 });
+
+const ssoSrc = readFileSync(
+  join(process.cwd(), "app/api/auth/sso/route.ts"),
+  "utf8",
+);
+
+describe("SSO-NEXT-1: next is validated at both ends", () => {
+  it("the SSO start validates before stashing next in the state cookie", () => {
+    expect(ssoSrc).toMatch(/const next = safeNextPath\(/);
+    // Ensure the validated next is actually used in the cookie.
+    const assignment = ssoSrc.indexOf("const next = safeNextPath(");
+    const cookieWrite = ssoSrc.indexOf("oidc_state");
+    expect(assignment).toBeGreaterThan(-1);
+    expect(cookieWrite).toBeGreaterThan(assignment);
+  });
+  it("the callback re-validates before redirecting (no open redirect)", () => {
+    expect(src).toMatch(/const nextUrl = safeNextPath\(/);
+    // Ensure validation happens before the final redirect.
+    const assignment = src.indexOf("const nextUrl = safeNextPath(");
+    const redirectCall = src.indexOf("NextResponse.redirect(new URL(");
+    expect(assignment).toBeGreaterThan(-1);
+    expect(assignment).toBeLessThan(redirectCall);
+  });
+});

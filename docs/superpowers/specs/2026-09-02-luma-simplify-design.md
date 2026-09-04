@@ -272,7 +272,15 @@ resolution mid-wizard.
 
 ### Honor `next=` end-to-end
 
-- `lib/auth-guards.ts` redirects to `/login?next=<current path>`.
+- `next=` is opt-in, not universal: `lib/auth-guards.ts` guards
+  (`requireSession` / `requireRole` / `requireAdmin` / …) accept an
+  optional `{ next }`, and only the deep-linkable operational pages
+  pass their own current path; callers that don't (most of them —
+  dashboards, actions, API routes) get a plain `/login`, which lands
+  on `/dashboard`. A `middleware.ts` reading the request path was
+  rejected: it forces Next.js to compile an Edge bundle, which pulls
+  `instrumentation.ts` (OpenTelemetry / `@grpc/grpc-js`, needing Node
+  builtins) into that Edge compile and breaks `next build`.
 - Login page threads `next` into the SSO href
   (`/api/auth/sso?next=…`) and into `loginAction`, which redirects
   there instead of hardcoded `/dashboard`.

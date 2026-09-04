@@ -10,7 +10,10 @@ import { users } from "@/lib/db/schema";
 import argon2 from "argon2";
 
 const COOKIE_NAME = "luma.session";
-const COOKIE_MAX_AGE = 60 * 60 * 8; // 8h
+// FLOOR-SESSION-1 — 12h: a floor tablet must not log out mid-shift.
+// Devices are physically controlled and single-tenant; the cookie stays
+// httpOnly + sameSite=lax + secure in production.
+const COOKIE_MAX_AGE = 60 * 60 * 12; // 12h
 
 type SessionPayload = {
   uid: string;
@@ -147,6 +150,14 @@ export type CurrentUser = {
 // Per-request cache so a single request that calls currentUser() many
 // times only does one users.id lookup. Keyed by user id so sign-out
 // during a request can't return a stale row.
+//
+// KNOWN GAP: role and disabledAt come from the signed cookie, so a
+// demotion or a disable does not take effect until the session expires
+// (12h). Closing this means re-reading users.role/disabledAt per
+// request — which requires replacing the process-lifetime requestCache
+// Map below with React's cache() (per-render), NOT simply widening this
+// select: the Map is never cleared, so cached values would defeat
+// revocation and could lock out a re-enabled user.
 type CachedLookup = { employeeId: string | null };
 const requestCache: Map<string, CachedLookup> = new Map();
 

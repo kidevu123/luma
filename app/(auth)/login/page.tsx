@@ -4,12 +4,22 @@
 import { redirect } from "next/navigation";
 import { User as UserIcon } from "lucide-react";
 import { currentUser } from "@/lib/auth";
+import { safeNextPath } from "@/lib/auth/safe-next-path";
 import { LoginForm } from "./login-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
-  if (await currentUser()) redirect("/dashboard");
+export default async function LoginPage({
+  searchParams,
+}: {
+  // Next hands an array when the query param repeats (?next=a&next=b);
+  // safeNextPath's `typeof raw !== "string"` guard already treats that
+  // safely as "reject and fall back."
+  searchParams: Promise<{ next?: string | string[] }>;
+}) {
+  const { next: rawNext } = await searchParams;
+  const next = safeNextPath(rawNext);
+  if (await currentUser()) redirect(next);
   return (
     <div className="min-h-dvh flex items-center justify-center p-6 bg-page">
       <div className="max-w-md w-full">
@@ -33,7 +43,7 @@ export default async function LoginPage() {
               Enter your credentials to access the system.
             </p>
           </div>
-          <LoginForm oidcEnabled={Boolean(process.env.AUTHENTIK_CLIENT_ID)} />
+          <LoginForm oidcEnabled={Boolean(process.env.AUTHENTIK_CLIENT_ID)} next={next} />
           <p className="pt-1 text-center text-[11px] text-text-subtle">
             Need help? Contact your system administrator.
           </p>
