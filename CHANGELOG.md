@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.40.0] — 2026-09-04
+
+- Simplify Phase D: the guided "Close this PO" wizard is fixed, not killed. Steps are addressed by bag (`?guided=1&bag=<inventoryBagId>`, sentinels `batch`/`finish`; bare entry redirects to a pinned target) via pure `resolveGuidedNav` — resolving a bag out-of-band shortens the queue instead of silently skipping a neighbor, and a bag that left the queue renders "already handled" with Continue (the blank "Nothing to do on this step" branch is gone). The queue pre-filters ON_FLOOR and EMPTY buckets with an exclusion note ("N bags on floor, M empty — not shown"). Safe-batch results persist until an explicit Continue (no post-run refresh; entry-URL pinning keeps revalidation from flipping the step). Bag steps render one primary action panel (`primaryOnly` drawer mode; correction wizard stays a drawer-only escape hatch). All wizard navigation uses `router.replace` — browser back can never resurrect the overlay.
+
+Smoke (staging): open the wizard on a PO with floor + empty bags — count matches actionable bags with the exclusion note; run the safe batch — results stay until Continue; resolve a bag from another tab mid-wizard — its step shows "already handled"; press back after Exit — no overlay; a stale ?step= URL enters cleanly.
+
 ## [1.39.0] — 2026-09-03
 
 - Simplify Phase C: Zoho gating. Failed Zoho output ops reclassify as retryable review work — the PO closeout header no longer goes red for Zoho-only issues ("Blocked" means floor-blocked, full stop). Rows blocked on Zoho mapping stop rendering disabled queue buttons; instead the Waiting-on-Zoho tab shows one "N SKUs need Zoho mapping" banner (distinct-SKU rollup with per-SKU product links — one mapping fix unblocks dozens of bags). `/zoho-production-operations` accepts strict-UUID `?po=`/`?op=` deep-links, resolved via the PO's finished-lot chain (so mapping-blocked ops with no Zoho PO id still appear) with "Back to closeout" and "Clear filter". New PO-level "Queue all ready for Zoho" bulk action (per-op re-validation in the service, one PO-scoped audit `zoho_production_output_op.queue_batch`, admin-gated to match the per-op rule; queueing marks ops for the worker — commits stay with the gateway cron). Drawer Zoho panels render only when actionable (queue for READY_TO_QUEUE, retry for FAILED).
