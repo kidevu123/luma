@@ -100,7 +100,9 @@ describe("ACCESS-POLICY-1 · stale-session semantics are known and documented", 
   it("session role comes from the signed cookie (role changes need re-login)", () => {
     const authSrc = repo("lib/auth.ts");
     expect(authSrc).toMatch(/role: payload\.role/);
-    // 8h max age bounds how long a stale role can persist.
-    expect(authSrc).toMatch(/COOKIE_MAX_AGE = 60 \* 60 \* 8/);
+    // 12h max age bounds how long a stale role can persist (floor tablets must
+    // survive a full shift plus handover; a role change doesn't take effect
+    // until the session cookie expires and the user re-authenticates).
+    expect(authSrc).toMatch(/COOKIE_MAX_AGE = 60 \* 60 \* 12/);
   });
 });
